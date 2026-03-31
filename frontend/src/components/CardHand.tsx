@@ -7,6 +7,7 @@ interface CardHandProps {
   selectedIndex: number | null;
   onSelect: (index: number) => void;
   onDragPlay: (cardIndex: number, screenX: number, screenY: number) => void;
+  onCardDetail: (card: Card) => void;
   disabled: boolean;
 }
 
@@ -29,7 +30,6 @@ const ARCHETYPE_EMOJI: Record<string, string> = {
   neutral: '⬜',
 };
 
-// Minimum distance (px) to consider a pointer movement a drag vs a tap
 const DRAG_THRESHOLD = 12;
 
 function ActionReturnBadge({ value }: { value: number }) {
@@ -50,8 +50,9 @@ function ActionReturnBadge({ value }: { value: number }) {
   );
 }
 
-export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, disabled }: CardHandProps) {
+export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, onCardDetail, disabled }: CardHandProps) {
   const animated = useAnimated();
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number; index: number } | null>(null);
@@ -60,7 +61,6 @@ export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, d
   const handlePointerDown = useCallback((e: ReactPointerEvent, index: number) => {
     if (disabled) return;
     e.preventDefault();
-    // Capture pointer for drag tracking
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     dragStartRef.current = { x: e.clientX, y: e.clientY, index };
     isDraggingRef.current = false;
@@ -84,18 +84,21 @@ export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, d
     const index = dragStartRef.current.index;
 
     if (isDraggingRef.current) {
-      // Drag release — emit drag play at release coordinates
       onDragPlay(index, e.clientX, e.clientY);
     } else {
-      // Tap/click — select the card
-      onSelect(index);
+      // Tap/click: if already selected, open detail; otherwise select
+      if (selectedIndex === index) {
+        onCardDetail(cards[index]);
+      } else {
+        onSelect(index);
+      }
     }
 
     dragStartRef.current = null;
     isDraggingRef.current = false;
     setDraggingIndex(null);
     setDragPos(null);
-  }, [onSelect, onDragPlay]);
+  }, [onSelect, onDragPlay, onCardDetail, selectedIndex, cards]);
 
   if (cards.length === 0) {
     return <div style={{ color: '#666', fontStyle: 'italic' }}>No cards in hand</div>;
@@ -103,31 +106,44 @@ export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, d
 
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', touchAction: 'none' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', touchAction: 'none', alignItems: 'flex-end' }}>
         {cards.map((card, i) => {
           const isBeingDragged = draggingIndex === i;
+          const isHovered = hoveredIndex === i && !isBeingDragged;
+          const isSelected = selectedIndex === i;
+
           return (
             <div
               key={`${card.id}-${i}`}
               onPointerDown={(e) => handlePointerDown(e, i)}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
+              onPointerEnter={() => setHoveredIndex(i)}
+              onPointerLeave={() => setHoveredIndex(null)}
               role="button"
               tabIndex={disabled ? -1 : 0}
               style={{
-                width: 140,
-                padding: 8,
-                background: i === selectedIndex ? '#3a3a6e' : '#2a2a3e',
-                border: `2px solid ${i === selectedIndex ? '#fff' : TYPE_COLORS[card.card_type] || '#555'}`,
+                width: isHovered ? 170 : 140,
+                padding: isHovered ? 10 : 8,
+                background: isSelected ? '#3a3a6e' : isHovered ? '#30304e' : '#2a2a3e',
+                border: `2px solid ${isSelected ? '#fff' : isHovered ? '#aaa' : TYPE_COLORS[card.card_type] || '#555'}`,
                 borderRadius: 8,
                 color: '#fff',
                 cursor: disabled ? 'not-allowed' : 'grab',
                 textAlign: 'left' as const,
                 opacity: disabled ? 0.5 : isBeingDragged ? 0.4 : 1,
-                transition: animated ? 'transform 0.15s, opacity 0.15s' : 'none',
-                transform: i === selectedIndex && !isBeingDragged ? 'translateY(-4px)' : 'none',
+                transition: animated ? 'all 0.15s ease-out' : 'none',
+                transform: isSelected && !isBeingDragged
+                  ? 'translateY(-8px)'
+                  : isHovered
+                    ? 'translateY(-12px) scale(1.05)'
+                    : 'none',
+                transformOrigin: 'bottom center',
                 userSelect: 'none' as const,
                 WebkitUserSelect: 'none' as const,
+                zIndex: isHovered ? 10 : isSelected ? 5 : 1,
+                position: 'relative' as const,
+                boxShadow: isHovered ? '0 8px 20px rgba(0,0,0,0.4)' : 'none',
               }}
             >
               <div style={{ fontSize: 20, textAlign: 'center', marginBottom: 4 }}>
@@ -145,9 +161,22 @@ export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, d
                 {card.defense_bonus > 0 && ` · +${card.defense_bonus} def`}
                 {card.forced_discard > 0 && ` · -${card.forced_discard} cards`}
               </div>
+              {/* Show full description on hover, truncated otherwise */}
               {card.description && (
-                <div style={{ fontSize: 10, color: '#888', marginTop: 4 }}>
-                  {card.description.slice(0, 60)}
+                <div style={{
+                  fontSize: isHovered ? 11 : 10,
+                  color: isHovered ? '#bbb' : '#888',
+                  marginTop: 4,
+                  lineHeight: 1.4,
+                }}>
+                  {isHovered ? card.description : card.description.slice(0, 60)}
+                  {!isHovered && card.description.length > 60 && '...'}
+                </div>
+              )}
+              {/* Hint when selected */}
+              {isSelected && !isHovered && (
+                <div style={{ fontSize: 9, color: '#4a9eff', marginTop: 4 }}>
+                  Click again for details
                 </div>
               )}
             </div>
