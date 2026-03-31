@@ -6,7 +6,7 @@ import random
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from .cards import (
     ACTION_HARD_CAP,
@@ -49,7 +49,7 @@ class PlannedAction:
     target_r: Optional[int] = None
     target_player_id: Optional[str] = None  # for forced discards
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "card": self.card.to_dict(),
             "target_q": self.target_q,
@@ -73,7 +73,7 @@ class Player:
     archetype_market: list[Card] = field(default_factory=list)
     archetype_deck: list[Card] = field(default_factory=list)  # remaining buyable cards
     upgrade_credits: int = 0
-    passive: Optional[dict] = None
+    passive: Optional[dict[str, Any]] = None
     forced_discard_next_turn: int = 0
     has_submitted_plan: bool = False
 
@@ -85,7 +85,7 @@ class Player:
     def action_slots(self) -> int:
         return ARCHETYPE_SLOTS[self.archetype]
 
-    def to_dict(self, hide_hand: bool = False) -> dict:
+    def to_dict(self, hide_hand: bool = False) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -110,7 +110,7 @@ class NeutralMarket:
     """Shared neutral market with fixed copy counts."""
     stacks: dict[str, list[Card]] = field(default_factory=dict)
 
-    def get_available(self) -> list[dict]:
+    def get_available(self) -> list[dict[str, Any]]:
         result = []
         for card_id, copies in self.stacks.items():
             if copies:
@@ -143,10 +143,10 @@ class GameState:
     card_registry: dict[str, Card] = field(default_factory=dict)
     log: list[str] = field(default_factory=list)
 
-    def _log(self, msg: str):
+    def _log(self, msg: str) -> None:
         self.log.append(msg)
 
-    def to_dict(self, for_player_id: Optional[str] = None) -> dict:
+    def to_dict(self, for_player_id: Optional[str] = None) -> dict[str, Any]:
         return {
             "id": self.id,
             "grid": self.grid.to_dict() if self.grid else None,
@@ -166,7 +166,7 @@ class GameState:
 
 def create_game(
     grid_size: GridSize,
-    player_configs: list[dict],
+    player_configs: list[dict[str, Any]],
     card_registry: dict[str, Card],
     seed: Optional[int] = None,
 ) -> GameState:
@@ -225,7 +225,7 @@ def create_game(
     return game
 
 
-def _setup_neutral_market(game: GameState, card_registry: dict[str, Card]):
+def _setup_neutral_market(game: GameState, card_registry: dict[str, Card]) -> None:
     """Set up the shared neutral market stacks."""
     neutral_cards = [
         c for c in card_registry.values()
@@ -255,7 +255,7 @@ def execute_start_of_turn(game: GameState) -> GameState:
             game._log(f"{player.name} pays {UPKEEP_COST} upkeep ({player.resources} remaining)")
 
         # Score VP for hexes held since last turn
-        if game.current_round > 1:
+        if game.current_round > 1 and game.grid is not None:
             vp_scored = 0
             for tile in game.grid.tiles.values():
                 if (tile.owner == pid and tile.is_vp
@@ -326,7 +326,9 @@ def play_card(game: GameState, player_id: str, card_index: int,
 
     # Validate target for claim cards
     if card.card_type == CardType.CLAIM and target_q is not None:
-        tile = game.grid.get_tile(target_q, target_r)
+        assert game.grid is not None
+        _target_r = target_r if target_r is not None else 0
+        tile = game.grid.get_tile(target_q, _target_r)
         if not tile:
             return False, "Invalid target tile"
         if tile.is_blocked:
@@ -336,7 +338,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         if card.adjacency_required:
             player_tiles = game.grid.get_player_tiles(player_id)
             if not any(
-                (target_q, target_r) in [(n.q, n.r) for n in game.grid.get_adjacent(pt.q, pt.r)]
+                (target_q, _target_r) in [(n.q, n.r) for n in game.grid.get_adjacent(pt.q, pt.r)]
                 for pt in player_tiles
             ):
                 return False, "Must claim a tile adjacent to one you own"
@@ -402,6 +404,8 @@ def execute_reveal(game: GameState) -> GameState:
     """Phase 3: Reveal & Resolve — flip all cards and resolve claims."""
     game.current_phase = Phase.REVEAL
     game._log("=== Reveal & Resolve ===")
+
+    assert game.grid is not None
 
     # Collect all claims by tile
     claims_by_tile: dict[str, list[tuple[str, PlannedAction]]] = {}
@@ -470,7 +474,8 @@ def execute_reveal(game: GameState) -> GameState:
 
         # Defense bonus applied to target tile
         if card.card_type == CardType.DEFENSE and action.target_q is not None:
-            tile = game.grid.get_tile(action.target_q, action.target_r)
+            _action_target_r = action.target_r if action.target_r is not None else 0
+            tile = game.grid.get_tile(action.target_q, _action_target_r)
             if tile and tile.owner == pid:
                 tile.defense_power += card.effective_defense_bonus
                 game._log(f"{player.name} fortifies tile {action.target_q},{action.target_r} (+{card.effective_defense_bonus} defense)")

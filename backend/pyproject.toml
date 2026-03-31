@@ -1,0 +1,41 @@
+[project]
+name = "hexdraft-backend"
+version = "0.1.0"
+description = "HexDraft game server"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.12",
+    "uvicorn[standard]>=0.34.0",
+    "sqlalchemy[asyncio]>=2.0.40",
+    "asyncpg>=0.30.0",
+    "alembic>=1.15.2",
+    "pydantic>=2.11.1",
+    "python-dotenv>=1.1.0",
+    "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.5",
+    "httpx>=0.28.1",
+    "mypy>=1.15.0",
+    "types-PyYAML>=6.0.12",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["tests/"]
+
+[[tool.mypy.overrides]]
+module = "yaml"
+ignore_missing_imports = true

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -61,7 +61,7 @@ def _parse_card_file(filepath: Path, archetype: Archetype) -> list[Card]:
     return cards
 
 
-def _entry_to_card(entry: dict, archetype: Archetype) -> Optional[Card]:
+def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card]:
     """Convert a YAML dict entry to a Card object."""
     card_id = entry.get("id")
     name = entry.get("name")
@@ -149,7 +149,7 @@ def _entry_to_card(entry: dict, archetype: Archetype) -> Optional[Card]:
     return card
 
 
-def _safe_int(value) -> int:
+def _safe_int(value: Any) -> int:
     if value is None:
         return 0
     try:
@@ -158,7 +158,7 @@ def _safe_int(value) -> int:
         return 0
 
 
-def _safe_optional_int(value) -> Optional[int]:
+def _safe_optional_int(value: Any) -> Optional[int]:
     if value is None:
         return None
     try:
@@ -167,7 +167,7 @@ def _safe_optional_int(value) -> Optional[int]:
         return None
 
 
-def load_objectives() -> list[dict]:
+def load_objectives() -> list[dict[str, Any]]:
     """Load objectives from data file."""
     filepath = DATA_DIR / "objectives.md"
     if not filepath.exists():
@@ -196,7 +196,7 @@ def load_objectives() -> list[dict]:
     return objectives
 
 
-def load_passives() -> list[dict]:
+def load_passives() -> list[dict[str, Any]]:
     """Load passive abilities from data file."""
     filepath = DATA_DIR / "passives.md"
     if not filepath.exists():
