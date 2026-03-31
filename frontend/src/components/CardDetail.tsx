@@ -1,4 +1,6 @@
 import type { Card } from '../types/game';
+import Tooltip from './Tooltip';
+import { renderWithKeywords, KEYWORDS } from './Keywords';
 
 const TYPE_COLORS: Record<string, string> = {
   claim: '#4a9eff',
@@ -25,6 +27,9 @@ interface CardDetailProps {
 }
 
 export default function CardDetail({ card, onClose }: CardDetailProps) {
+  const typeKey = card.card_type.charAt(0).toUpperCase() + card.card_type.slice(1);
+  const typeTooltip = KEYWORDS[typeKey] || '';
+
   return (
     <div
       onClick={onClose}
@@ -67,18 +72,21 @@ export default function CardDetail({ card, onClose }: CardDetailProps) {
             {card.name}
             {card.is_upgraded && <span style={{ color: '#ffd700' }}> +</span>}
           </div>
-          <div style={{
-            display: 'inline-block',
-            marginTop: 4,
-            padding: '2px 10px',
-            borderRadius: 12,
-            background: TYPE_COLORS[card.card_type] || '#555',
-            color: '#000',
-            fontSize: 12,
-            fontWeight: 'bold',
-          }}>
-            {card.card_type.toUpperCase()}
-          </div>
+          <Tooltip content={typeTooltip}>
+            <div style={{
+              display: 'inline-block',
+              marginTop: 4,
+              padding: '2px 10px',
+              borderRadius: 12,
+              background: TYPE_COLORS[card.card_type] || '#555',
+              color: '#000',
+              fontSize: 12,
+              fontWeight: 'bold',
+              cursor: 'help',
+            }}>
+              {card.card_type.toUpperCase()}
+            </div>
+          </Tooltip>
         </div>
 
         {/* Stats */}
@@ -89,25 +97,31 @@ export default function CardDetail({ card, onClose }: CardDetailProps) {
           marginBottom: 16,
         }}>
           {card.power > 0 && (
-            <Stat label="Power" value={String(card.power)} icon="⚔️" />
+            <StatWithTooltip label="Power" value={String(card.power)} icon="⚔️"
+              tooltip={KEYWORDS['Power']} />
           )}
           {card.resource_gain > 0 && (
-            <Stat label="Resources" value={`+${card.resource_gain}`} icon="💰" />
+            <StatWithTooltip label="Resources" value={`+${card.resource_gain}`} icon="💰"
+              tooltip={KEYWORDS['Resources']} />
           )}
           {card.draw_cards > 0 && (
-            <Stat label="Draw" value={`+${card.draw_cards}`} icon="🃏" />
+            <StatWithTooltip label="Draw" value={`+${card.draw_cards}`} icon="🃏"
+              tooltip={KEYWORDS['Draw']} />
           )}
           {card.defense_bonus > 0 && (
-            <Stat label="Defense" value={`+${card.defense_bonus}`} icon="🛡️" />
+            <StatWithTooltip label="Defense" value={`+${card.defense_bonus}`} icon="🛡️"
+              tooltip={KEYWORDS['Defense']} />
           )}
           {card.forced_discard > 0 && (
-            <Stat label="Discard" value={`-${card.forced_discard}`} icon="🗑️" />
+            <StatWithTooltip label="Discard" value={`-${card.forced_discard}`} icon="🗑️"
+              tooltip={KEYWORDS['Discard']} />
           )}
           {card.action_return > 0 && (
-            <Stat
+            <StatWithTooltip
               label="Action"
               value={card.action_return === 1 ? 'Returns 1 (↺)' : 'Returns 2 (↑)'}
               icon="⚡"
+              tooltip={KEYWORDS['Action']}
             />
           )}
           {card.buy_cost !== null && (
@@ -115,7 +129,7 @@ export default function CardDetail({ card, onClose }: CardDetailProps) {
           )}
         </div>
 
-        {/* Description */}
+        {/* Description with keyword tooltips */}
         {card.description && (
           <div style={{
             background: '#151530',
@@ -126,17 +140,33 @@ export default function CardDetail({ card, onClose }: CardDetailProps) {
             color: '#ccc',
             marginBottom: 16,
           }}>
-            {card.description}
+            {renderWithKeywords(card.description)}
           </div>
         )}
 
         {/* Flags */}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
-          {card.trash_on_use && <Flag text="Trashed after use" color="#ff6666" />}
-          {card.stacking_exception && <Flag text="Stacking allowed" color="#66ff66" />}
-          {!card.adjacency_required && <Flag text="No adjacency needed" color="#66aaff" />}
+          {card.trash_on_use && (
+            <Tooltip content={KEYWORDS['Trash']}>
+              <Flag text="Trashed after use" color="#ff6666" />
+            </Tooltip>
+          )}
+          {card.stacking_exception && (
+            <Tooltip content={KEYWORDS['Stacking']}>
+              <Flag text="Stacking allowed" color="#66ff66" />
+            </Tooltip>
+          )}
+          {!card.adjacency_required && (
+            <Tooltip content={KEYWORDS['Adjacent']}>
+              <Flag text="No adjacency needed" color="#66aaff" />
+            </Tooltip>
+          )}
           {card.starter && <Flag text="Starter card" color="#888" />}
-          {card.is_upgraded && <Flag text="Upgraded" color="#ffd700" />}
+          {card.is_upgraded && (
+            <Tooltip content={KEYWORDS['Upgrade']}>
+              <Flag text="Upgraded" color="#ffd700" />
+            </Tooltip>
+          )}
         </div>
 
         {/* Close hint */}
@@ -163,6 +193,26 @@ function Stat({ label, value, icon }: { label: string; value: string; icon: stri
   );
 }
 
+function StatWithTooltip({ label, value, icon, tooltip }: {
+  label: string; value: string; icon: string; tooltip: string;
+}) {
+  return (
+    <Tooltip content={tooltip}>
+      <div style={{
+        background: '#151530',
+        borderRadius: 6,
+        padding: '6px 10px',
+        textAlign: 'center',
+        cursor: 'help',
+      }}>
+        <div style={{ fontSize: 16 }}>{icon}</div>
+        <div style={{ fontSize: 14, fontWeight: 'bold' }}>{value}</div>
+        <div style={{ fontSize: 10, color: '#888', borderBottom: '1px dotted #666' }}>{label}</div>
+      </div>
+    </Tooltip>
+  );
+}
+
 function Flag({ text, color }: { text: string; color: string }) {
   return (
     <span style={{
@@ -171,6 +221,7 @@ function Flag({ text, color }: { text: string; color: string }) {
       borderRadius: 10,
       border: `1px solid ${color}`,
       color,
+      cursor: 'help',
     }}>
       {text}
     </span>
