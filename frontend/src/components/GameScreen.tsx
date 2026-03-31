@@ -6,6 +6,7 @@ import CardHand from './CardHand';
 import CardDetail from './CardDetail';
 import MarketPanel from './MarketPanel';
 import GameLog from './GameLog';
+import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import { useAnimated } from './SettingsContext';
 import * as api from '../api/client';
@@ -40,6 +41,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [selectedTile, setSelectedTile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
+  const [showFullLog, setShowFullLog] = useState(false);
   const gridContainerRef = useRef<HTMLDivElement>(null);
 
   const activePlayerId = gameState.player_order[activePlayerIndex];
@@ -252,6 +254,23 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           <GameLog entries={gameState.log} />
         </div>
 
+        <button
+          onClick={() => setShowFullLog(true)}
+          style={{
+            width: '100%',
+            padding: '6px 0',
+            margin: '8px 0',
+            background: '#2a2a3e',
+            border: '1px solid #444',
+            borderRadius: 4,
+            color: '#aaa',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          Full Game Log
+        </button>
+
         <SettingsPanel />
       </div>
 
@@ -386,6 +405,15 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       {/* Card detail modal */}
       {detailCard && (
         <CardDetail card={detailCard} onClose={() => setDetailCard(null)} />
+      )}
+
+      {/* Full game log modal */}
+      {showFullLog && (
+        <FullGameLog
+          gameId={gameState.id}
+          playerId={activePlayerId}
+          onClose={() => setShowFullLog(false)}
+        />
       )}
     </div>
   );

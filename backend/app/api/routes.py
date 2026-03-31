@@ -209,6 +209,21 @@ async def end_turn_route(game_id: str) -> dict[str, Any]:
     return {"state": game.to_dict()}
 
 
+@router.get("/games/{game_id}/log")
+async def get_game_log(game_id: str, player_id: Optional[str] = None) -> dict[str, Any]:
+    """Get the full game log, filtered by player visibility."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    if player_id:
+        entries = game.get_log_for_player(player_id)
+    else:
+        entries = game.get_full_log()
+
+    return {"game_id": game_id, "entries": entries}
+
+
 @router.get("/cards")
 async def list_cards() -> dict[str, Any]:
     """List all available cards (for debugging/reference)."""
