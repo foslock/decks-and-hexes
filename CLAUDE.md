@@ -1,0 +1,164 @@
+# HexDraft – Claude Code Project Brief
+
+## What This Is
+HexDraft is a 2–6 player simultaneous deck-building territory control game. This repository contains the full game rules, card data, and will house the digital prototype implementation.
+
+## Repository Structure
+```
+/rules/          # Core game rules (machine-readable markdown)
+/data/           # Editable game data — cards, objectives, passives
+/src/            # Game implementation (to be built)
+```
+
+## Rules Files (read these first)
+- `rules/01_overview.md` — Summary, archetypes, grid sizes, win condition
+- `rules/02_setup.md` — Step-by-step setup sequence
+- `rules/03_turn_structure.md` — All five phases with precise rules
+- `rules/04_objectives_and_vp.md` — Scoring, reveal timing, selection logic
+- `rules/05_card_anatomy_and_timing.md` — Card types, timing rules, resource rules
+
+## Data Files (game content — balance will change frequently)
+- `data/cards_vanguard.md` — 14 Vanguard archetype cards + upgrades
+- `data/cards_swarm.md` — 14 Swarm archetype cards + upgrades
+- `data/cards_fortress.md` — 14 Fortress archetype cards + upgrades
+- `data/cards_neutral.md` — Starter cards (Advance, Gather) + 12 market cards
+- `data/objectives.md` — 28 objectives (Vanguard, Swarm, Fortress, Wildcard pools)
+- `data/passives.md` — 37 passive abilities
+
+---
+
+## Key Design Rules (critical to get right in implementation)
+
+### Turn Structure (5 phases, all simultaneous)
+1. **Start of Turn** — Pay upkeep (skip round 1), score VP hexes held since last turn, check win (20 VP), draw hand, reveal archetype market (3 random cards from player's archetype deck)
+2. **Plan Phase** — Players simultaneously place cards face-down on target tiles. Immediate effects (↺ ↑ action returns, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining. Max 6 actions per turn.
+3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
+4. **Buy Phase** — Spend resources. Re-roll (2 resources, once per turn) or Retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards, or upgrade credits (5 resources).
+5. **End of Turn** — Discard hand. Check objective reveal threshold. Rotate first player token clockwise.
+
+### Action Slot System
+- Every card costs exactly 1 action to play
+- Vanguard: 4 slots, Swarm: 4 slots, Fortress: 3 slots
+- Cards marked ↺ return 1 action (net 0), ↑ return 2 actions (net +1)
+- Hard cap: 6 total actions per turn regardless of chaining
+- Immediate effects (↺ ↑, card draws) resolve during Plan Phase as cards are played
+
+### Claiming Tiles
+- All board interaction uses unified Claim cards — neutral tiles have implicit defense 0
+- Claims must target tiles adjacent to one the player already owns, unless card says otherwise
+- One Claim per tile per round — except stacking exception cards (Coordinated Push, Dog Pile, Overwhelming Force)
+- Ties go to current owner (defender wins)
+- Blocked terrain cannot be claimed without Pathfinder passive
+
+### Resources
+- Persistent between turns
+- Upkeep: lose 1 per turn (NOT on turn 1)
+- Spent only during Buy Phase
+- No cap unless Hoarder passive (caps at 8)
+
+### VP Scoring
+- VP hex tiles score at START of turn for tiles held since previous turn (not the turn claimed)
+- Win condition checked immediately after VP scoring in Phase 1
+- Objectives award 2 VP on completion (first to complete wins it)
+- Land Grant card awards 1 VP immediately when played
+
+### Markets
+- **Archetype market:** 3 random cards drawn from player's private archetype deck each turn. Private per player. Re-roll (2 res) or Retain one card (1 res) during Buy Phase.
+- **Neutral market:** Shared stacks with fixed copy counts. When exhausted, gone for the game.
+- **Upgrade credits:** Tokens, 5 resources each. Spent at start of Phase 1 to upgrade one card in hand. Max one upgrade per turn. Permanent.
+
+### Forced Discards
+- Always apply to targeted opponent's NEXT turn (they draw fewer cards)
+- Active player must name target opponent when card is played
+- Never from current hand
+
+### Starting Decks (2 × hand size — cycles once before first purchase appears)
+| Archetype | Archetype Cards | Advance | Gather | Total | Hand Size |
+|---|---|---|---|---|---|
+| Vanguard | 2× Blitz | 4 | 2 | 8 | 4 |
+| Swarm | 2× Scout, 1× Swarm Tactics | 5 | 2 | 10 | 5 |
+| Fortress | 1× Garrison, 1× Fortify | 2 | 2 | 6 | 3 |
+
+### Advance & Gather (starter cards — NOT purchasable from market)
+- **Advance:** Claim: Power 1 on any adjacent tile
+- **Gather:** Gain 2 resources
+
+### Objectives
+- Revealed at end of round 3 (Small), 4 (Medium), or 5 (Large)
+- 3 objectives revealed: weighted toward archetypes in play
+- First player (human or CPU) to meet condition claims it for 2 VP
+- CPU players actively pursue objectives
+
+### Passives
+- n+2 drawn randomly per game (n = active players)
+- Drafted in reverse Round 1 turn order
+- Each player picks 1, remainder discarded
+
+### Grid Sizes
+| Size | Tiles | VP Hexes | Blocked Terrain | Players |
+|---|---|---|---|---|
+| Small | 37 | 8 | 3–4 | 2–3 |
+| Medium | 61 | 13 | 5–7 | 3–4 |
+| Large | 91 | 20 | 8–10 | 4–6 |
+
+- VP hexes distributed evenly (not center-clustered)
+- Blocked terrain placed randomly at setup
+- Starting corner clusters: 2 tiles each
+- CPU players: optional, added by host only
+
+### First Player
+- Randomly determined for Round 1
+- Rotates clockwise each round
+- Passive draft uses reverse Round 1 order to offset Round 1 first-player advantage
+
+---
+
+## Implementation Priority (suggested order)
+
+### Phase 1 — Core Playable Prototype
+1. Hex grid generation (3 sizes, random blocked terrain, VP hex placement)
+2. Player setup (archetype selection, passive draft, starting decks)
+3. Turn loop with all 5 phases
+4. Card playing with action slot tracking and immediate effect chaining
+5. Claim resolution (power comparison, adjacency checking, tie-breaking)
+6. Resource system (upkeep, carry-over, buy phase spending)
+7. VP scoring and win condition
+8. Archetype market (3-card draw, re-roll, retain)
+9. Neutral market (shared stacks, exhaustion)
+
+### Phase 2 — Full Feature Set
+10. Upgrade credit system
+11. Objective reveal and tracking
+12. All card effects implemented
+13. CPU player behavior (expansion, purchasing, objective pursuit)
+14. Passive ability system
+
+### Phase 3 — Polish
+15. UI for simultaneous plan phase
+16. Animations and visual feedback
+17. Game state persistence
+18. Multiplayer networking (if desired)
+
+---
+
+## Data Format Notes
+Card data files use YAML-style fields within markdown. Key fields:
+- `action_return: 0/1/2` — 0=standard, 1=net-neutral(↺), 2=net-positive(↑)
+- `timing: immediate/on_resolution/next_turn`
+- `stacking_exception: true` — allows second Claim on same tile
+- `starter: true` — starting deck card, not in market
+- `buy_cost: null` — not purchasable
+- `trash_on_use: true` — remove from game after playing
+
+---
+
+## Frequently Changing Values (expect these to shift during playtesting)
+- VP target: **20**
+- Upkeep cost: **1 resource per turn**
+- Re-roll cost: **2 resources**
+- Retain cost: **1 resource**
+- Upgrade credit cost: **5 resources**
+- Starting resources: **3**
+- Action slot hard cap: **6**
+- Objective VP reward: **2**
+- Objective reveal rounds: **3 / 4 / 5** (Small / Medium / Large)
