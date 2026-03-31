@@ -8,6 +8,7 @@ interface MarketPanelProps {
   onBuyNeutral: (cardId: string) => void;
   onBuyUpgrade: () => void;
   onReroll: () => void;
+  onCardDetail: (card: Card) => void;
   disabled: boolean;
 }
 
@@ -19,6 +20,7 @@ export default function MarketPanel({
   onBuyNeutral,
   onBuyUpgrade,
   onReroll,
+  onCardDetail,
   disabled,
 }: MarketPanelProps) {
   return (
@@ -52,6 +54,7 @@ export default function MarketPanel({
               remaining={null}
               canAfford={card.buy_cost !== null && playerResources >= card.buy_cost}
               onBuy={() => onBuyArchetype(card.id)}
+              onDetail={() => onCardDetail(card)}
               disabled={disabled}
             />
           ))}
@@ -90,6 +93,7 @@ export default function MarketPanel({
               remaining={stack.remaining}
               canAfford={stack.card.buy_cost !== null && playerResources >= stack.card.buy_cost}
               onBuy={() => onBuyNeutral(stack.card.id)}
+              onDetail={() => onCardDetail(stack.card)}
               disabled={disabled}
             />
           ))}
@@ -104,18 +108,18 @@ function MarketCard({
   remaining,
   canAfford,
   onBuy,
+  onDetail,
   disabled,
 }: {
   card: Card;
   remaining: number | null;
   canAfford: boolean;
   onBuy: () => void;
+  onDetail: () => void;
   disabled: boolean;
 }) {
   return (
-    <button
-      onClick={onBuy}
-      disabled={disabled || !canAfford}
+    <div
       style={{
         width: 130,
         padding: 6,
@@ -123,18 +127,39 @@ function MarketCard({
         border: `1px solid ${canAfford && !disabled ? '#4a9eff' : '#333'}`,
         borderRadius: 6,
         color: '#fff',
-        cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
-        textAlign: 'left',
         opacity: disabled || !canAfford ? 0.5 : 1,
       }}
     >
-      <div style={{ fontWeight: 'bold', fontSize: 12 }}>{card.name}</div>
-      <div style={{ fontSize: 11, color: '#aaa' }}>
-        {card.buy_cost !== null ? `💰 ${card.buy_cost}` : 'Free'}
-        {card.power > 0 && ` · Pow ${card.power}`}
-        {card.resource_gain > 0 && ` · +${card.resource_gain}`}
-        {remaining !== null && ` · ×${remaining}`}
+      <div
+        onClick={onDetail}
+        style={{ cursor: 'pointer', marginBottom: 4 }}
+        title="Click to view card details"
+      >
+        <div style={{ fontWeight: 'bold', fontSize: 12 }}>{card.name}</div>
+        <div style={{ fontSize: 11, color: '#aaa' }}>
+          {card.buy_cost !== null ? `💰 ${card.buy_cost}` : 'Free'}
+          {card.power > 0 && ` · Pow ${card.power}`}
+          {card.resource_gain > 0 && ` · +${card.resource_gain}`}
+          {remaining !== null && ` · ×${remaining}`}
+        </div>
       </div>
-    </button>
+      <button
+        onClick={onBuy}
+        disabled={disabled || !canAfford}
+        style={{
+          width: '100%',
+          padding: '3px 0',
+          background: canAfford && !disabled ? '#4a9eff' : '#333',
+          border: 'none',
+          borderRadius: 4,
+          color: '#fff',
+          fontSize: 11,
+          fontWeight: 'bold',
+          cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
+        }}
+      >
+        Buy
+      </button>
+    </div>
   );
 }

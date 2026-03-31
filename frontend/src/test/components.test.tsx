@@ -62,7 +62,7 @@ describe('CardHand', () => {
   ];
 
   it('renders all cards', () => {
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
     expect(screen.getByText('Advance')).toBeInTheDocument();
     expect(screen.getByText('Gather')).toBeInTheDocument();
     expect(screen.getByText('Blitz')).toBeInTheDocument();
@@ -70,18 +70,18 @@ describe('CardHand', () => {
 
   it('calls onSelect when card clicked', async () => {
     const onSelect = vi.fn();
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={onSelect} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={onSelect} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
     await userEvent.click(screen.getByText('Advance'));
     expect(onSelect).toHaveBeenCalledWith(0);
   });
 
   it('shows empty message when no cards', () => {
-    render(<WithSettings><CardHand cards={[]} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand cards={[]} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
     expect(screen.getByText(/No cards in hand/)).toBeInTheDocument();
   });
 
   it('shows reduced opacity when disabled', () => {
-    const { container } = render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={true} /></WithSettings>);
+    const { container } = render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={true} /></WithSettings>);
     const cardElements = container.querySelectorAll('[role="button"]');
     expect(cardElements.length).toBe(3);
     cardElements.forEach((el) => {
@@ -90,13 +90,13 @@ describe('CardHand', () => {
   });
 
   it('shows card type and power', () => {
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
     expect(screen.getByText(/CLAIM · Power 1/)).toBeInTheDocument();
     expect(screen.getByText(/CLAIM · Power 4/)).toBeInTheDocument();
   });
 
   it('shows resource gain for engine cards', () => {
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
     expect(screen.getByText(/\+2 res/)).toBeInTheDocument();
   });
 });
@@ -121,6 +121,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
+        onCardDetail={() => {}}
         disabled={false}
       />
     );
@@ -129,7 +130,7 @@ describe('MarketPanel', () => {
     expect(screen.getByText('Land Grant')).toBeInTheDocument();
   });
 
-  it('calls onBuyArchetype when archetype card clicked', async () => {
+  it('calls onBuyArchetype when Buy button clicked', async () => {
     const onBuy = vi.fn();
     render(
       <MarketPanel
@@ -140,11 +141,34 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
+        onCardDetail={() => {}}
         disabled={false}
       />
     );
-    await userEvent.click(screen.getByText('Strike Team'));
+    // Each market card has a Buy button
+    const buyButtons = screen.getAllByText('Buy');
+    // Click the Buy for Strike Team (second archetype card)
+    await userEvent.click(buyButtons[1]);
     expect(onBuy).toHaveBeenCalledWith('arch_2');
+  });
+
+  it('calls onCardDetail when card name clicked in market', async () => {
+    const onDetail = vi.fn();
+    render(
+      <MarketPanel
+        archetypeMarket={archetypeMarket}
+        neutralMarket={neutralMarket}
+        playerResources={10}
+        onBuyArchetype={() => {}}
+        onBuyNeutral={() => {}}
+        onBuyUpgrade={() => {}}
+        onReroll={() => {}}
+        onCardDetail={onDetail}
+        disabled={false}
+      />
+    );
+    await userEvent.click(screen.getByText('Overrun'));
+    expect(onDetail).toHaveBeenCalledWith(expect.objectContaining({ id: 'arch_1', name: 'Overrun' }));
   });
 
   it('calls onReroll when reroll button clicked', async () => {
@@ -158,6 +182,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={onReroll}
+        onCardDetail={() => {}}
         disabled={false}
       />
     );
@@ -175,6 +200,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
+        onCardDetail={() => {}}
         disabled={false}
       />
     );
@@ -192,6 +218,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
+        onCardDetail={() => {}}
         disabled={false}
       />
     );

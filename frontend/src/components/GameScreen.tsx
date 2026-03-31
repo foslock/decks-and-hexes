@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback, useRef } from 'react';
-import type { GameState } from '../types/game';
+import type { GameState, Card } from '../types/game';
 import HexGrid from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand from './CardHand';
+import CardDetail from './CardDetail';
 import MarketPanel from './MarketPanel';
 import GameLog from './GameLog';
 import SettingsPanel from './SettingsPanel';
@@ -38,6 +39,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [selectedTile, setSelectedTile] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [detailCard, setDetailCard] = useState<Card | null>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
 
   const activePlayerId = gameState.player_order[activePlayerIndex];
@@ -321,6 +323,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 selectedIndex={selectedCardIndex}
                 onSelect={setSelectedCardIndex}
                 onDragPlay={handleDragPlay}
+                onCardDetail={setDetailCard}
                 disabled={activePlayer.has_submitted_plan}
               />
             </div>
@@ -356,6 +359,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 onBuyNeutral={handleBuyNeutral}
                 onBuyUpgrade={handleBuyUpgrade}
                 onReroll={handleReroll}
+                onCardDetail={setDetailCard}
                 disabled={false}
               />
             </div>
@@ -378,6 +382,11 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           )}
         </div>
       </div>
+
+      {/* Card detail modal */}
+      {detailCard && (
+        <CardDetail card={detailCard} onClose={() => setDetailCard(null)} />
+      )}
     </div>
   );
 }
