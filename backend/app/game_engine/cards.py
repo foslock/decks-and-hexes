@@ -5,7 +5,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class CardType(str, Enum):
@@ -105,7 +105,7 @@ class Card:
             return self.upgraded_defense_bonus
         return self.defense_bonus
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
@@ -133,7 +133,7 @@ class Deck:
     cards: list[Card] = field(default_factory=list)
     discard: list[Card] = field(default_factory=list)
 
-    def shuffle(self, rng: Optional[random.Random] = None):
+    def shuffle(self, rng: Optional[random.Random] = None) -> None:
         r = rng or random.Random()
         r.shuffle(self.cards)
 
@@ -150,10 +150,10 @@ class Deck:
                 drawn.append(self.cards.pop(0))
         return drawn
 
-    def add_to_discard(self, cards: list[Card]):
+    def add_to_discard(self, cards: list[Card]) -> None:
         self.discard.extend(cards)
 
-    def add_to_top(self, card: Card):
+    def add_to_top(self, card: Card) -> None:
         self.cards.insert(0, card)
 
     @property

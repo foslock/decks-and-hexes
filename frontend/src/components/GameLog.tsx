@@ -8,7 +8,9 @@ export default function GameLog({ entries }: GameLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (bottomRef.current && typeof bottomRef.current.scrollIntoView === 'function') {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [entries.length]);
 
   return (

@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 
 class GridSize(str, Enum):
@@ -19,7 +19,7 @@ class GridSize(str, Enum):
 
 
 # radius = number of rings around center (0-indexed)
-GRID_CONFIG = {
+GRID_CONFIG: dict[GridSize, dict[str, Any]] = {
     GridSize.SMALL: {"radius": 3, "tiles": 37, "vp_hexes": 8, "blocked": (3, 4), "players": (2, 3)},
     GridSize.MEDIUM: {"radius": 4, "tiles": 61, "vp_hexes": 13, "blocked": (5, 7), "players": (3, 4)},
     GridSize.LARGE: {"radius": 5, "tiles": 91, "vp_hexes": 20, "blocked": (8, 10), "players": (4, 6)},
@@ -75,7 +75,7 @@ class HexGrid:
     def get_player_tiles(self, player_id: str) -> list[HexTile]:
         return [t for t in self.tiles.values() if t.owner == player_id]
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "size": self.size.value,
             "tiles": {k: _tile_to_dict(v) for k, v in self.tiles.items()},
@@ -83,7 +83,7 @@ class HexGrid:
         }
 
 
-def _tile_to_dict(tile: HexTile) -> dict:
+def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
     return {
         "q": tile.q,
         "r": tile.r,

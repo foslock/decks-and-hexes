@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import pickle
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -33,7 +33,7 @@ _games: dict[str, GameState] = {}
 _card_registry = None
 
 
-def _get_card_registry():
+def _get_card_registry() -> dict[str, Any]:
     global _card_registry
     if _card_registry is None:
         _card_registry = load_all_cards()
@@ -45,7 +45,7 @@ def _get_card_registry():
 
 class CreateGameRequest(BaseModel):
     grid_size: str = "small"
-    players: list[dict]
+    players: list[dict[str, Any]]
     seed: Optional[int] = None
 
 
@@ -83,7 +83,7 @@ class EndTurnRequest(BaseModel):
 
 
 @router.post("/games")
-async def create_new_game(req: CreateGameRequest):
+async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
     """Create a new game."""
     try:
         grid_size = GridSize(req.grid_size)
@@ -113,7 +113,7 @@ async def create_new_game(req: CreateGameRequest):
 
 
 @router.get("/games/{game_id}")
-async def get_game(game_id: str, player_id: Optional[str] = None):
+async def get_game(game_id: str, player_id: Optional[str] = None) -> dict[str, Any]:
     """Get current game state."""
     game = _games.get(game_id)
     if not game:
@@ -122,7 +122,7 @@ async def get_game(game_id: str, player_id: Optional[str] = None):
 
 
 @router.post("/games/{game_id}/play")
-async def play_card_route(game_id: str, req: PlayCardRequest):
+async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     """Play a card during Plan phase."""
     game = _games.get(game_id)
     if not game:
@@ -139,7 +139,7 @@ async def play_card_route(game_id: str, req: PlayCardRequest):
 
 
 @router.post("/games/{game_id}/submit-plan")
-async def submit_plan_route(game_id: str, req: SubmitPlanRequest):
+async def submit_plan_route(game_id: str, req: SubmitPlanRequest) -> dict[str, Any]:
     """Submit plan for a player."""
     game = _games.get(game_id)
     if not game:
@@ -153,7 +153,7 @@ async def submit_plan_route(game_id: str, req: SubmitPlanRequest):
 
 
 @router.post("/games/{game_id}/buy")
-async def buy_card_route(game_id: str, req: BuyCardRequest):
+async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
     """Buy a card during Buy phase."""
     game = _games.get(game_id)
     if not game:
@@ -167,7 +167,7 @@ async def buy_card_route(game_id: str, req: BuyCardRequest):
 
 
 @router.post("/games/{game_id}/reroll")
-async def reroll_route(game_id: str, req: RerollRequest):
+async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
     """Re-roll archetype market."""
     game = _games.get(game_id)
     if not game:
@@ -181,7 +181,7 @@ async def reroll_route(game_id: str, req: RerollRequest):
 
 
 @router.post("/games/{game_id}/end-buy")
-async def end_buy_route(game_id: str, req: EndBuyRequest):
+async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     """End buy phase for a player."""
     game = _games.get(game_id)
     if not game:
@@ -195,7 +195,7 @@ async def end_buy_route(game_id: str, req: EndBuyRequest):
 
 
 @router.post("/games/{game_id}/end-turn")
-async def end_turn_route(game_id: str):
+async def end_turn_route(game_id: str) -> dict[str, Any]:
     """End the current turn and advance to next round."""
     game = _games.get(game_id)
     if not game:
@@ -210,7 +210,7 @@ async def end_turn_route(game_id: str):
 
 
 @router.get("/cards")
-async def list_cards():
+async def list_cards() -> dict[str, Any]:
     """List all available cards (for debugging/reference)."""
     registry = _get_card_registry()
     return {cid: c.to_dict() for cid, c in registry.items()}

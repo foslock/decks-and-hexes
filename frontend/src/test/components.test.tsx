@@ -1,0 +1,268 @@
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
+import { SettingsProvider } from '../components/SettingsContext';
+import PlayerHud from '../components/PlayerHud';
+import CardHand from '../components/CardHand';
+import MarketPanel from '../components/MarketPanel';
+import GameLog from '../components/GameLog';
+import SetupScreen from '../components/SetupScreen';
+import { makePlayer, makeCard, makeGameState } from './fixtures';
+
+function WithSettings({ children }: { children: ReactNode }) {
+  return <SettingsProvider>{children}</SettingsProvider>;
+}
+
+describe('PlayerHud', () => {
+  it('renders player name and archetype', () => {
+    const player = makePlayer({ name: 'Alice', archetype: 'vanguard' });
+    render(<PlayerHud player={player} isActive={true} isCurrent={true} />);
+    expect(screen.getByText(/Alice/)).toBeInTheDocument();
+  });
+
+  it('shows VP count', () => {
+    const player = makePlayer({ vp: 5 });
+    render(<PlayerHud player={player} isActive={true} isCurrent={false} />);
+    expect(screen.getByText(/5/)).toBeInTheDocument();
+  });
+
+  it('shows resources', () => {
+    const player = makePlayer({ resources: 7 });
+    render(<PlayerHud player={player} isActive={true} isCurrent={false} />);
+    expect(screen.getByText(/7/)).toBeInTheDocument();
+  });
+
+  it('shows submitted plan indicator', () => {
+    const player = makePlayer({ has_submitted_plan: true, planned_action_count: 3 });
+    render(<PlayerHud player={player} isActive={true} isCurrent={true} />);
+    expect(screen.getByText(/Plan submitted/)).toBeInTheDocument();
+    expect(screen.getByText(/3 actions/)).toBeInTheDocument();
+  });
+
+  it('shows upgrade credits when present', () => {
+    const player = makePlayer({ upgrade_credits: 2 });
+    render(<PlayerHud player={player} isActive={true} isCurrent={false} />);
+    expect(screen.getByText(/2/)).toBeInTheDocument();
+  });
+
+  it('reduces opacity when not active', () => {
+    const player = makePlayer();
+    const { container } = render(<PlayerHud player={player} isActive={false} isCurrent={false} />);
+    const div = container.firstChild as HTMLElement;
+    expect(div.style.opacity).toBe('0.7');
+  });
+});
+
+describe('CardHand', () => {
+  const cards = [
+    makeCard({ id: 'c0', name: 'Advance', card_type: 'claim', power: 1 }),
+    makeCard({ id: 'c1', name: 'Gather', card_type: 'engine', resource_gain: 2, power: 0 }),
+    makeCard({ id: 'c2', name: 'Blitz', card_type: 'claim', power: 4, action_return: 0 }),
+  ];
+
+  it('renders all cards', () => {
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    expect(screen.getByText('Advance')).toBeInTheDocument();
+    expect(screen.getByText('Gather')).toBeInTheDocument();
+    expect(screen.getByText('Blitz')).toBeInTheDocument();
+  });
+
+  it('calls onSelect when card clicked', async () => {
+    const onSelect = vi.fn();
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={onSelect} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    await userEvent.click(screen.getByText('Advance'));
+    expect(onSelect).toHaveBeenCalledWith(0);
+  });
+
+  it('shows empty message when no cards', () => {
+    render(<WithSettings><CardHand cards={[]} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    expect(screen.getByText(/No cards in hand/)).toBeInTheDocument();
+  });
+
+  it('shows reduced opacity when disabled', () => {
+    const { container } = render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={true} /></WithSettings>);
+    const cardElements = container.querySelectorAll('[role="button"]');
+    expect(cardElements.length).toBe(3);
+    cardElements.forEach((el) => {
+      expect((el as HTMLElement).style.opacity).toBe('0.5');
+    });
+  });
+
+  it('shows card type and power', () => {
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    expect(screen.getByText(/CLAIM · Power 1/)).toBeInTheDocument();
+    expect(screen.getByText(/CLAIM · Power 4/)).toBeInTheDocument();
+  });
+
+  it('shows resource gain for engine cards', () => {
+    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} /></WithSettings>);
+    expect(screen.getByText(/\+2 res/)).toBeInTheDocument();
+  });
+});
+
+describe('MarketPanel', () => {
+  const archetypeMarket = [
+    makeCard({ id: 'arch_1', name: 'Overrun', buy_cost: 5, power: 5 }),
+    makeCard({ id: 'arch_2', name: 'Strike Team', buy_cost: 3, power: 3 }),
+  ];
+  const neutralMarket = [
+    { card: makeCard({ id: 'n1', name: 'Mercenary', buy_cost: 3, power: 3 }), remaining: 5 },
+    { card: makeCard({ id: 'n2', name: 'Land Grant', buy_cost: 2, card_type: 'engine' }), remaining: 3 },
+  ];
+
+  it('renders archetype and neutral markets', () => {
+    render(
+      <MarketPanel
+        archetypeMarket={archetypeMarket}
+        neutralMarket={neutralMarket}
+        playerResources={5}
+        onBuyArchetype={() => {}}
+        onBuyNeutral={() => {}}
+        onBuyUpgrade={() => {}}
+        onReroll={() => {}}
+        disabled={false}
+      />
+    );
+    expect(screen.getByText('Overrun')).toBeInTheDocument();
+    expect(screen.getByText('Mercenary')).toBeInTheDocument();
+    expect(screen.getByText('Land Grant')).toBeInTheDocument();
+  });
+
+  it('calls onBuyArchetype when archetype card clicked', async () => {
+    const onBuy = vi.fn();
+    render(
+      <MarketPanel
+        archetypeMarket={archetypeMarket}
+        neutralMarket={neutralMarket}
+        playerResources={10}
+        onBuyArchetype={onBuy}
+        onBuyNeutral={() => {}}
+        onBuyUpgrade={() => {}}
+        onReroll={() => {}}
+        disabled={false}
+      />
+    );
+    await userEvent.click(screen.getByText('Strike Team'));
+    expect(onBuy).toHaveBeenCalledWith('arch_2');
+  });
+
+  it('calls onReroll when reroll button clicked', async () => {
+    const onReroll = vi.fn();
+    render(
+      <MarketPanel
+        archetypeMarket={archetypeMarket}
+        neutralMarket={neutralMarket}
+        playerResources={5}
+        onBuyArchetype={() => {}}
+        onBuyNeutral={() => {}}
+        onBuyUpgrade={() => {}}
+        onReroll={onReroll}
+        disabled={false}
+      />
+    );
+    await userEvent.click(screen.getByText(/Re-roll/));
+    expect(onReroll).toHaveBeenCalled();
+  });
+
+  it('disables reroll when insufficient resources', () => {
+    render(
+      <MarketPanel
+        archetypeMarket={archetypeMarket}
+        neutralMarket={neutralMarket}
+        playerResources={1}
+        onBuyArchetype={() => {}}
+        onBuyNeutral={() => {}}
+        onBuyUpgrade={() => {}}
+        onReroll={() => {}}
+        disabled={false}
+      />
+    );
+    const rerollBtn = screen.getByText(/Re-roll/);
+    expect(rerollBtn).toBeDisabled();
+  });
+
+  it('disables buy upgrade when insufficient resources', () => {
+    render(
+      <MarketPanel
+        archetypeMarket={[]}
+        neutralMarket={[]}
+        playerResources={3}
+        onBuyArchetype={() => {}}
+        onBuyNeutral={() => {}}
+        onBuyUpgrade={() => {}}
+        onReroll={() => {}}
+        disabled={false}
+      />
+    );
+    const upgradeBtn = screen.getByText(/Buy Upgrade/);
+    expect(upgradeBtn).toBeDisabled();
+  });
+});
+
+describe('GameLog', () => {
+  it('renders log entries', () => {
+    const entries = ['Game started', '=== Round 1 ===', 'Alice plays Advance'];
+    render(<GameLog entries={entries} />);
+    expect(screen.getByText('Game started')).toBeInTheDocument();
+    expect(screen.getByText('Alice plays Advance')).toBeInTheDocument();
+  });
+
+  it('renders phase headers in bold', () => {
+    render(<GameLog entries={['=== Round 1 ===']} />);
+    const el = screen.getByText('=== Round 1 ===');
+    expect(el.tagName).toBe('STRONG');
+  });
+});
+
+describe('SetupScreen', () => {
+  it('renders setup form', () => {
+    render(<SetupScreen onStart={() => {}} />);
+    expect(screen.getByText('HexDraft')).toBeInTheDocument();
+    expect(screen.getByText('Start Game')).toBeInTheDocument();
+  });
+
+  it('shows grid size options', () => {
+    render(<SetupScreen onStart={() => {}} />);
+    expect(screen.getByText(/Small/)).toBeInTheDocument();
+    expect(screen.getByText(/Medium/)).toBeInTheDocument();
+    expect(screen.getByText(/Large/)).toBeInTheDocument();
+  });
+
+  it('calls onStart with config', async () => {
+    const onStart = vi.fn();
+    render(<SetupScreen onStart={onStart} />);
+    await userEvent.click(screen.getByText('Start Game'));
+    expect(onStart).toHaveBeenCalledWith(expect.objectContaining({
+      gridSize: 'small',
+      players: expect.arrayContaining([
+        expect.objectContaining({ archetype: 'vanguard' }),
+        expect.objectContaining({ archetype: 'swarm' }),
+      ]),
+    }));
+  });
+
+  it('allows changing player count', async () => {
+    render(<SetupScreen onStart={() => {}} />);
+    // Click the "3" button to add a player
+    const threeBtn = screen.getByText('3');
+    await userEvent.click(threeBtn);
+    // Should now have 3 player name inputs
+    const inputs = screen.getAllByRole('textbox');
+    expect(inputs).toHaveLength(3);
+  });
+
+  it('allows changing player name', async () => {
+    const onStart = vi.fn();
+    render(<SetupScreen onStart={onStart} />);
+    const inputs = screen.getAllByRole('textbox');
+    await userEvent.clear(inputs[0]);
+    await userEvent.type(inputs[0], 'Gandalf');
+    await userEvent.click(screen.getByText('Start Game'));
+    expect(onStart).toHaveBeenCalledWith(expect.objectContaining({
+      players: expect.arrayContaining([
+        expect.objectContaining({ name: 'Gandalf' }),
+      ]),
+    }));
+  });
+});

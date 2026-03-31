@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { GameState } from './types/game';
+import { SettingsProvider } from './components/SettingsContext';
 import SetupScreen from './components/SetupScreen';
 import GameScreen from './components/GameScreen';
 import * as api from './api/client';
@@ -18,26 +19,28 @@ export default function App() {
       setError(null);
       const result = await api.createGame(config.gridSize, config.players);
       setGameState(result.state);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
   };
 
-  if (!gameState) {
-    return (
-      <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh' }}>
-        <SetupScreen onStart={handleStart} />
-        {loading && (
-          <div style={{ textAlign: 'center', color: '#aaa' }}>Creating game...</div>
-        )}
-        {error && (
-          <div style={{ textAlign: 'center', color: '#ff4a4a', padding: 12 }}>{error}</div>
-        )}
-      </div>
-    );
-  }
-
-  return <GameScreen gameState={gameState} onStateUpdate={setGameState} />;
+  return (
+    <SettingsProvider>
+      {!gameState ? (
+        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh' }}>
+          <SetupScreen onStart={handleStart} />
+          {loading && (
+            <div style={{ textAlign: 'center', color: '#aaa' }}>Creating game...</div>
+          )}
+          {error && (
+            <div style={{ textAlign: 'center', color: '#ff4a4a', padding: 12 }}>{error}</div>
+          )}
+        </div>
+      ) : (
+        <GameScreen gameState={gameState} onStateUpdate={setGameState} />
+      )}
+    </SettingsProvider>
+  );
 }
