@@ -121,6 +121,21 @@ describe('API client', () => {
     });
   });
 
+  describe('getGameLog', () => {
+    it('fetches game log', async () => {
+      mockJsonResponse({ game_id: 'abc', entries: [{ message: 'test', round: 1, phase: 'plan', actor: null }] });
+      const result = await api.getGameLog('abc');
+      expect(result.entries).toHaveLength(1);
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/abc/log', expect.anything());
+    });
+
+    it('includes player_id filter', async () => {
+      mockJsonResponse({ game_id: 'abc', entries: [] });
+      await api.getGameLog('abc', 'p0');
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/abc/log?player_id=p0', expect.anything());
+    });
+  });
+
   describe('error handling', () => {
     it('throws on non-ok response', async () => {
       mockJsonResponse({ detail: 'Not found' }, 404);

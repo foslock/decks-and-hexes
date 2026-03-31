@@ -129,6 +129,25 @@ class NeutralMarket:
 
 
 @dataclass
+class LogEntry:
+    """A single game log entry with visibility rules."""
+    message: str
+    round: int
+    phase: str
+    # Which players can see this entry. Empty list = visible to all.
+    visible_to: list[str] = field(default_factory=list)
+    actor: Optional[str] = None  # player who caused this action
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "message": self.message,
+            "round": self.round,
+            "phase": self.phase,
+            "actor": self.actor,
+        }
+
+
+@dataclass
 class GameState:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     grid: Optional[HexGrid] = None
@@ -142,9 +161,30 @@ class GameState:
     rng: random.Random = field(default_factory=random.Random)
     card_registry: dict[str, Card] = field(default_factory=dict)
     log: list[str] = field(default_factory=list)
+    game_log: list[LogEntry] = field(default_factory=list)
 
-    def _log(self, msg: str) -> None:
+    def _log(self, msg: str, visible_to: Optional[list[str]] = None,
+             actor: Optional[str] = None) -> None:
         self.log.append(msg)
+        self.game_log.append(LogEntry(
+            message=msg,
+            round=self.current_round,
+            phase=self.current_phase.value,
+            visible_to=visible_to or [],
+            actor=actor,
+        ))
+
+    def get_log_for_player(self, player_id: str) -> list[dict[str, Any]]:
+        """Return log entries visible to a specific player."""
+        return [
+            entry.to_dict()
+            for entry in self.game_log
+            if not entry.visible_to or player_id in entry.visible_to
+        ]
+
+    def get_full_log(self) -> list[dict[str, Any]]:
+        """Return all log entries (for spectators or hot-seat)."""
+        return [entry.to_dict() for entry in self.game_log]
 
     def to_dict(self, for_player_id: Optional[str] = None) -> dict[str, Any]:
         return {
@@ -160,7 +200,7 @@ class GameState:
             "first_player_index": self.first_player_index,
             "neutral_market": self.neutral_market.get_available(),
             "winner": self.winner,
-            "log": self.log[-20:],  # last 20 log entries
+            "log": self.log[-20:],  # last 20 for backward compat
         }
 
 
@@ -373,15 +413,18 @@ def play_card(game: GameState, player_id: str, card_index: int,
     # Immediate resource gain
     if card.timing == Timing.IMMEDIATE and card.effective_resource_gain > 0:
         player.resources += card.effective_resource_gain
-        game._log(f"{player.name} gains {card.effective_resource_gain} resources from {card.name}")
+        game._log(f"{player.name} gains {card.effective_resource_gain} resources from {card.name}",
+                  visible_to=[player_id], actor=player_id)
 
     # Immediate card draw
     if card.timing == Timing.IMMEDIATE and card.effective_draw_cards > 0:
         drawn = player.deck.draw(card.effective_draw_cards, game.rng)
         player.hand.extend(drawn)
-        game._log(f"{player.name} draws {len(drawn)} cards from {card.name}")
+        game._log(f"{player.name} draws {len(drawn)} cards from {card.name}",
+                  visible_to=[player_id], actor=player_id)
 
-    game._log(f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})")
+    game._log(f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})",
+              visible_to=[player_id], actor=player_id)
     return True, f"Played {card.name}"
 
 
@@ -391,7 +434,8 @@ def submit_plan(game: GameState, player_id: str) -> tuple[bool, str]:
     if not player:
         return False, "Player not found"
     player.has_submitted_plan = True
-    game._log(f"{player.name} submits plan ({len(player.planned_actions)} actions)")
+    game._log(f"{player.name} submits plan ({len(player.planned_actions)} actions)",
+              actor=player_id)
 
     # Check if all players have submitted
     if all(p.has_submitted_plan for p in game.players.values()):

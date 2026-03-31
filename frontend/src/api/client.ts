@@ -90,3 +90,18 @@ export async function endTurn(
     body: JSON.stringify({}),
   });
 }
+
+export interface LogEntry {
+  message: string;
+  round: number;
+  phase: string;
+  actor: string | null;
+}
+
+export async function getGameLog(
+  gameId: string,
+  playerId?: string,
+): Promise<{ game_id: string; entries: LogEntry[] }> {
+  const params = playerId ? `?player_id=${playerId}` : '';
+  return request(`/games/${gameId}/log${params}`);
+}

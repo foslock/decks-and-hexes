@@ -248,13 +248,96 @@ class TestBuyAndEndTurn:
         assert resp.status_code == 200
 
 
+class TestGameLog:
+    def _create_game(self, client: TestClient) -> str:
+        resp = client.post("/api/games", json={
+            "grid_size": "small",
+            "players": [
+                {"id": "p0", "name": "Alice", "archetype": "vanguard"},
+                {"id": "p1", "name": "Bob", "archetype": "swarm"},
+            ],
+            "seed": 42,
+        })
+        return resp.json()["game_id"]
+
+    def test_get_full_log(self, client: TestClient) -> None:
+        game_id = self._create_game(client)
+        resp = client.get(f"/api/games/{game_id}/log")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["game_id"] == game_id
+        assert len(data["entries"]) > 0
+
+    def test_log_entries_have_structure(self, client: TestClient) -> None:
+        game_id = self._create_game(client)
+        resp = client.get(f"/api/games/{game_id}/log")
+        entry = resp.json()["entries"][0]
+        assert "message" in entry
+        assert "round" in entry
+        assert "phase" in entry
+
+    def test_player_filtered_log(self, client: TestClient) -> None:
+        game_id = self._create_game(client)
+        # Play a card as p0 (creates private log entries)
+        state = client.get(f"/api/games/{game_id}?player_id=p0").json()
+        hand = state["players"]["p0"]["hand"]
+        claim = next(c for c in hand if c["card_type"] == "claim")
+        idx = hand.index(claim)
+        tiles = state["grid"]["tiles"]
+        owned = [t for t in tiles.values() if t["owner"] == "p0"]
+        directions = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
+        target = None
+        for ot in owned:
+            for dq, dr in directions:
+                nk = f"{ot['q'] + dq},{ot['r'] + dr}"
+                if nk in tiles and not tiles[nk]["is_blocked"] and tiles[nk]["owner"] is None:
+                    target = tiles[nk]
+                    break
+            if target:
+                break
+        assert target is not None
+        client.post(f"/api/games/{game_id}/play", json={
+            "player_id": "p0",
+            "card_index": idx,
+            "target_q": target["q"],
+            "target_r": target["r"],
+        })
+
+        # p0's log should contain the play action
+        p0_log = client.get(f"/api/games/{game_id}/log?player_id=p0").json()
+        p0_messages = [e["message"] for e in p0_log["entries"]]
+        assert any("plays" in m for m in p0_messages)
+
+        # p1's log should NOT contain p0's plan phase actions
+        p1_log = client.get(f"/api/games/{game_id}/log?player_id=p1").json()
+        p1_messages = [e["message"] for e in p1_log["entries"]]
+        p0_play_msgs = [m for m in p1_messages if "plays" in m and "Alice" in m]
+        assert len(p0_play_msgs) == 0
+
+    def test_log_not_found(self, client: TestClient) -> None:
+        resp = client.get("/api/games/nonexistent/log")
+        assert resp.status_code == 404
+
+    def test_log_persists_across_rounds(self, client: TestClient) -> None:
+        game_id = self._create_game(client)
+        # Play through a round
+        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
+        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        client.post(f"/api/games/{game_id}/end-turn")
+
+        resp = client.get(f"/api/games/{game_id}/log")
+        entries = resp.json()["entries"]
+        rounds = {e["round"] for e in entries}
+        assert 1 in rounds
+        assert 2 in rounds
+
+
 class TestCardsEndpoint:
     def test_list_cards(self, client: TestClient) -> None:
         resp = client.get("/api/cards")
         assert resp.status_code == 200
         cards = resp.json()
         assert len(cards) > 0
-        # Verify structure
         first_card = next(iter(cards.values()))
         assert "name" in first_card
         assert "card_type" in first_card
