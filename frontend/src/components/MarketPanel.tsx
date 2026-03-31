@@ -1,4 +1,5 @@
 import type { Card, MarketStack } from '../types/game';
+import { IrreversibleButton } from './Tooltip';
 
 interface MarketPanelProps {
   archetypeMarket: Card[];
@@ -29,9 +30,10 @@ export default function MarketPanel({
       <div>
         <h4 style={{ margin: '0 0 6px', color: '#aaa' }}>
           Archetype Market
-          <button
+          <IrreversibleButton
             onClick={onReroll}
             disabled={disabled || playerResources < 2}
+            tooltip="Re-rolling replaces your market cards and spends 2 resources."
             style={{
               marginLeft: 8,
               fontSize: 11,
@@ -44,7 +46,7 @@ export default function MarketPanel({
             }}
           >
             Re-roll (2💰)
-          </button>
+          </IrreversibleButton>
         </h4>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {archetypeMarket.map((card) => (
@@ -68,9 +70,10 @@ export default function MarketPanel({
       <div>
         <h4 style={{ margin: '0 0 6px', color: '#aaa' }}>
           Neutral Market
-          <button
+          <IrreversibleButton
             onClick={onBuyUpgrade}
             disabled={disabled || playerResources < 5}
+            tooltip="Buying an upgrade credit spends 5 resources."
             style={{
               marginLeft: 8,
               fontSize: 11,
@@ -83,7 +86,7 @@ export default function MarketPanel({
             }}
           >
             Buy Upgrade (5💰)
-          </button>
+          </IrreversibleButton>
         </h4>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {neutralMarket.map((stack) => (
@@ -143,9 +146,10 @@ function MarketCard({
           {remaining !== null && ` · ×${remaining}`}
         </div>
       </div>
-      <button
+      <IrreversibleButton
         onClick={onBuy}
         disabled={disabled || !canAfford}
+        tooltip={`Purchasing ${card.name} spends ${card.buy_cost} resources and adds it to your discard pile.`}
         style={{
           width: '100%',
           padding: '3px 0',
@@ -159,7 +163,7 @@ function MarketCard({
         }}
       >
         Buy
-      </button>
+      </IrreversibleButton>
     </div>
   );
 }

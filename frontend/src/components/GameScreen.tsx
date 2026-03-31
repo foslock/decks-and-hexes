@@ -9,6 +9,7 @@ import GameLog from './GameLog';
 import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import { useAnimated } from './SettingsContext';
+import { IrreversibleButton } from './Tooltip';
 import * as api from '../api/client';
 
 // Hex geometry constants (must match HexGrid.tsx)
@@ -306,8 +307,9 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   {activePlayer.name}'s turn — drag a card onto the board, or select + click
                 </span>
                 {selectedCard?.card_type === 'engine' && (
-                  <button
+                  <IrreversibleButton
                     onClick={handlePlayEngine}
+                    tooltip="Playing a card uses an action and cannot be undone."
                     style={{
                       padding: '4px 12px',
                       background: '#4a9eff',
@@ -319,10 +321,11 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                     }}
                   >
                     Play {selectedCard.name}
-                  </button>
+                  </IrreversibleButton>
                 )}
-                <button
+                <IrreversibleButton
                   onClick={handleSubmitPlan}
+                  tooltip="Submitting locks your plan for this round. You cannot change it after."
                   style={{
                     marginLeft: 'auto',
                     padding: '6px 16px',
@@ -335,7 +338,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   }}
                 >
                   Submit Plan ✓
-                </button>
+                </IrreversibleButton>
               </div>
               <CardHand
                 cards={activePlayer.hand}
@@ -354,8 +357,9 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 <span style={{ fontSize: 13, color: '#aaa' }}>
                   {activePlayer.name}'s Buy Phase — 💰 {activePlayer.resources} resources
                 </span>
-                <button
+                <IrreversibleButton
                   onClick={handleEndTurn}
+                  tooltip="Ending the turn advances to the next round. Any unspent resources carry over."
                   style={{
                     marginLeft: 'auto',
                     padding: '6px 16px',
@@ -368,7 +372,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   }}
                 >
                   End Turn →
-                </button>
+                </IrreversibleButton>
               </div>
               <MarketPanel
                 archetypeMarket={activePlayer.archetype_market}

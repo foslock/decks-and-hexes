@@ -1,6 +1,7 @@
 import { useRef, useCallback, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import type { Card } from '../types/game';
 import { useAnimated } from './SettingsContext';
+import { renderWithKeywords } from './Keywords';
 
 interface CardHandProps {
   cards: Card[];
@@ -161,7 +162,7 @@ export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, o
                 {card.defense_bonus > 0 && ` · +${card.defense_bonus} def`}
                 {card.forced_discard > 0 && ` · -${card.forced_discard} cards`}
               </div>
-              {/* Show full description on hover, truncated otherwise */}
+              {/* Show full description on hover (with keyword tooltips), truncated otherwise */}
               {card.description && (
                 <div style={{
                   fontSize: isHovered ? 11 : 10,
@@ -169,8 +170,13 @@ export default function CardHand({ cards, selectedIndex, onSelect, onDragPlay, o
                   marginTop: 4,
                   lineHeight: 1.4,
                 }}>
-                  {isHovered ? card.description : card.description.slice(0, 60)}
-                  {!isHovered && card.description.length > 60 && '...'}
+                  {isHovered
+                    ? renderWithKeywords(card.description)
+                    : <>
+                        {card.description.slice(0, 60)}
+                        {card.description.length > 60 && '...'}
+                      </>
+                  }
                 </div>
               )}
               {/* Hint when selected */}
