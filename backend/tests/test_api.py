@@ -130,26 +130,31 @@ class TestPlayCard:
         game_id = self._create_game(client)
         state = client.get(f"/api/games/{game_id}?player_id=p0").json()
 
-        # Find a claim card and adjacent tile
+        # Find a claim card and a compatible adjacent empty tile (defense <= card power)
         hand = state["players"]["p0"]["hand"]
-        claim_card = next(c for c in hand if c["card_type"] == "claim")
-        claim_idx = hand.index(claim_card)
-
-        # Find player's owned tiles and an adjacent empty tile
         tiles = state["grid"]["tiles"]
         owned = [t for t in tiles.values() if t["owner"] == "p0"]
-        target = None
         directions = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
-        for ot in owned:
-            for dq, dr in directions:
-                nk = f"{ot['q'] + dq},{ot['r'] + dr}"
-                if nk in tiles and not tiles[nk]["is_blocked"] and tiles[nk]["owner"] is None:
-                    target = tiles[nk]
+        claim_idx = None
+        target = None
+        for card in hand:
+            if card["card_type"] != "claim":
+                continue
+            for ot in owned:
+                for dq, dr in directions:
+                    nk = f"{ot['q'] + dq},{ot['r'] + dr}"
+                    if (nk in tiles and not tiles[nk]["is_blocked"]
+                            and tiles[nk]["owner"] is None
+                            and tiles[nk]["defense_power"] <= card["power"]):
+                        claim_idx = hand.index(card)
+                        target = tiles[nk]
+                        break
+                if target:
                     break
             if target:
                 break
 
-        assert target is not None
+        assert target is not None and claim_idx is not None
         resp = client.post(f"/api/games/{game_id}/play", json={
             "player_id": "p0",
             "card_index": claim_idx,
@@ -281,21 +286,28 @@ class TestGameLog:
         # Play a card as p0 (creates private log entries)
         state = client.get(f"/api/games/{game_id}?player_id=p0").json()
         hand = state["players"]["p0"]["hand"]
-        claim = next(c for c in hand if c["card_type"] == "claim")
-        idx = hand.index(claim)
         tiles = state["grid"]["tiles"]
         owned = [t for t in tiles.values() if t["owner"] == "p0"]
         directions = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]
+        idx = None
         target = None
-        for ot in owned:
-            for dq, dr in directions:
-                nk = f"{ot['q'] + dq},{ot['r'] + dr}"
-                if nk in tiles and not tiles[nk]["is_blocked"] and tiles[nk]["owner"] is None:
-                    target = tiles[nk]
+        for card in hand:
+            if card["card_type"] != "claim":
+                continue
+            for ot in owned:
+                for dq, dr in directions:
+                    nk = f"{ot['q'] + dq},{ot['r'] + dr}"
+                    if (nk in tiles and not tiles[nk]["is_blocked"]
+                            and tiles[nk]["owner"] is None
+                            and tiles[nk]["defense_power"] <= card["power"]):
+                        idx = hand.index(card)
+                        target = tiles[nk]
+                        break
+                if target:
                     break
             if target:
                 break
-        assert target is not None
+        assert target is not None and idx is not None
         client.post(f"/api/games/{game_id}/play", json={
             "player_id": "p0",
             "card_index": idx,
