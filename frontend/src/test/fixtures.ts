@@ -18,6 +18,7 @@ export function makeCard(overrides: Partial<Card> = {}): Card {
     draw_cards: 0,
     defense_bonus: 0,
     adjacency_required: true,
+    unoccupied_only: false,
     description: 'Test card',
     starter: false,
     ...overrides,
@@ -47,6 +48,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     passive: null,
     deck_size: 4,
     planned_action_count: 0,
+    planned_actions: [],
     has_submitted_plan: false,
     ...overrides,
   };

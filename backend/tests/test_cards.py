@@ -129,15 +129,15 @@ class TestDeck:
 class TestStartingDecks:
     def test_vanguard_starting_deck(self, card_registry: dict[str, Card]) -> None:
         deck = build_starting_deck(Archetype.VANGUARD, card_registry)
-        assert deck.total_cards == 8  # 2 Blitz + 4 Advance + 2 Gather
+        assert deck.total_cards == 8  # 2 Blitz + 4 Explore + 2 Gather
 
     def test_swarm_starting_deck(self, card_registry: dict[str, Card]) -> None:
         deck = build_starting_deck(Archetype.SWARM, card_registry)
-        assert deck.total_cards == 10  # 2 Scout + 1 Swarm Tactics + 5 Advance + 2 Gather
+        assert deck.total_cards == 10  # 2 Scout + 1 Swarm Tactics + 5 Explore + 2 Gather
 
     def test_fortress_starting_deck(self, card_registry: dict[str, Card]) -> None:
         deck = build_starting_deck(Archetype.FORTRESS, card_registry)
-        assert deck.total_cards == 6  # 1 Garrison + 1 Fortify + 2 Advance + 2 Gather
+        assert deck.total_cards == 6  # 1 Garrison + 1 Fortify + 2 Explore + 2 Gather
 
     def test_starting_deck_has_correct_hand_size_ratio(self, card_registry: dict[str, Card]) -> None:
         """Starting decks should be 2x hand size."""
