@@ -18,8 +18,9 @@ cards:
     buy_cost: 1
     action_return: 0
     power: 1
-    effect: "Claim: Power 1 on any adjacent neutral tile."
-    effect_upgraded: "Claim: Power 2 on any adjacent neutral tile."
+    unoccupied_only: true
+    effect: "Claim: Power 1 on any adjacent unoccupied tile."
+    effect_upgraded: "Claim: Power 2 on any adjacent unoccupied tile."
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false

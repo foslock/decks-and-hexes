@@ -52,6 +52,9 @@ export interface Player {
   upgrade_credits: number;
   passive: Record<string, string> | null;
   deck_size: number;
+  discard_count: number;
+  discard: Card[];
+  deck_cards: Card[];
   planned_action_count: number;
   planned_actions: PlannedAction[];
   has_submitted_plan: boolean;

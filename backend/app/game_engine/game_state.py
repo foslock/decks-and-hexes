@@ -99,7 +99,10 @@ class Player:
             "archetype_market": [c.to_dict() for c in self.archetype_market],
             "upgrade_credits": self.upgrade_credits,
             "passive": self.passive,
-            "deck_size": self.deck.total_cards + len(self.hand) + len(self.planned_actions),
+            "deck_size": len(self.deck.cards),
+            "discard_count": len(self.deck.discard),
+            "discard": [c.to_dict() for c in self.deck.discard],
+            "deck_cards": [c.to_dict() for c in self.deck.cards],
             "planned_action_count": len(self.planned_actions),
             "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
             "has_submitted_plan": self.has_submitted_plan,
@@ -302,7 +305,7 @@ def execute_start_of_turn(game: GameState) -> GameState:
                 if (tile.owner == pid and tile.is_vp
                         and tile.held_since_turn is not None
                         and tile.held_since_turn < game.current_round):
-                    vp_scored += 1
+                    vp_scored += tile.vp_value
             if vp_scored > 0:
                 player.vp += vp_scored
                 game._log(f"{player.name} scores {vp_scored} VP from held tiles (total: {player.vp})")

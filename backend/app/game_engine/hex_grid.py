@@ -20,9 +20,9 @@ class GridSize(str, Enum):
 
 # radius = number of rings around center (0-indexed)
 GRID_CONFIG: dict[GridSize, dict[str, Any]] = {
-    GridSize.SMALL: {"radius": 3, "tiles": 37, "vp_hexes": 8, "blocked": (3, 4), "players": (2, 3)},
-    GridSize.MEDIUM: {"radius": 4, "tiles": 61, "vp_hexes": 13, "blocked": (5, 7), "players": (3, 4)},
-    GridSize.LARGE: {"radius": 5, "tiles": 91, "vp_hexes": 20, "blocked": (8, 10), "players": (4, 6)},
+    GridSize.SMALL: {"radius": 3, "tiles": 37, "vp_hexes": 4, "blocked": (3, 4), "players": (2, 3)},
+    GridSize.MEDIUM: {"radius": 4, "tiles": 61, "vp_hexes": 6, "blocked": (5, 7), "players": (3, 4)},
+    GridSize.LARGE: {"radius": 5, "tiles": 91, "vp_hexes": 10, "blocked": (8, 10), "players": (4, 6)},
 }
 
 
@@ -32,6 +32,7 @@ class HexTile:
     r: int
     is_blocked: bool = False
     is_vp: bool = False
+    vp_value: int = 1  # 1 = standard VP tile, 2 = premium VP tile
     owner: Optional[str] = None  # player_id
     defense_power: int = 0
     base_defense: int = 0  # intrinsic defense set at generation; defense resets to this on capture
@@ -90,6 +91,7 @@ def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
         "r": tile.r,
         "is_blocked": tile.is_blocked,
         "is_vp": tile.is_vp,
+        "vp_value": tile.vp_value,
         "owner": tile.owner,
         "defense_power": tile.defense_power,
         "base_defense": tile.base_defense,
@@ -136,10 +138,21 @@ def generate_hex_grid(size: GridSize, num_players: int, rng: Optional[random.Ran
     for tile in blocked_tiles:
         tile.is_blocked = True
 
+    # Tiles adjacent to any starting cluster tile (VP cannot spawn next to spawn points)
+    starting_adjacent: set[str] = set()
+    directions = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
+    for cluster in starting_clusters:
+        for q, r in cluster:
+            for dq, dr in directions:
+                nk = f"{q + dq},{r + dr}"
+                if nk not in reserved and nk in grid.tiles:
+                    starting_adjacent.add(nk)
+
     # Place VP hexes - distributed evenly and balanced across player starting positions
     remaining = [
         t for t in grid.tiles.values()
-        if not t.is_blocked and t.key not in reserved and t.key != "0,0"
+        if not t.is_blocked and t.key not in reserved
+        and t.key not in starting_adjacent and t.key != "0,0"
     ]
     num_vp = config["vp_hexes"]
     vp_tiles = _distribute_vp_hexes(remaining, num_vp, radius, rng,
@@ -147,22 +160,31 @@ def generate_hex_grid(size: GridSize, num_players: int, rng: Optional[random.Ran
     for tile in vp_tiles:
         tile.is_vp = True
 
-    # Set intrinsic tile defense based on proximity to VP hexes
-    VP_DEFENSE = 2
-    VP_ADJACENT_DEFENSE = 1
+    # Assign VP values: closest 1/3 (to center) become premium (vp_value=2), rest are standard (vp_value=1).
+    # Sort by axial distance from (0, 0) ascending — tiebreak by key for stability.
+    num_premium = max(1, round(num_vp / 3))
+    sorted_vp = sorted(vp_tiles, key=lambda t: (max(abs(t.q), abs(t.r), abs(t.s)), t.key))
+    for i, tile in enumerate(sorted_vp):
+        tile.vp_value = 2 if i < num_premium else 1
+
+    # Set intrinsic tile defense:
+    #   Premium VP (vp_value=2): defense 2; their non-VP neighbors: defense 1
+    #   Standard VP (vp_value=1): defense 1; their neighbors: no extra defense (0)
+    premium_keys = {t.key for t in sorted_vp[:num_premium]}
     for tile in grid.tiles.values():
         if tile.is_blocked:
             continue
         if tile.is_vp:
-            tile.base_defense = VP_DEFENSE
-            tile.defense_power = VP_DEFENSE
+            defense = 2 if tile.vp_value == 2 else 1
+            tile.base_defense = defense
+            tile.defense_power = defense
         elif any(
-            grid.tiles.get(f"{nq},{nr}") is not None
-            and grid.tiles[f"{nq},{nr}"].is_vp
+            f"{nq},{nr}" in premium_keys
             for nq, nr in tile.neighbors()
         ):
-            tile.base_defense = VP_ADJACENT_DEFENSE
-            tile.defense_power = VP_ADJACENT_DEFENSE
+            # Adjacent to a premium VP tile: defense 1
+            tile.base_defense = 1
+            tile.defense_power = 1
 
     return grid
 

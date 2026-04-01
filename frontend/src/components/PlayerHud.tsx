@@ -47,7 +47,8 @@ export default function PlayerHud({ player, isActive, isCurrent }: PlayerHudProp
         <span title="Victory Points">🏆 {player.vp}</span>
         <span title="Resources">💰 {player.resources}</span>
         <span title="Cards in hand">🃏 {player.hand_count}</span>
-        <span title="Deck size">📚 {player.deck_size}</span>
+        <span title="Cards in draw pile">🎴 {player.deck_size}</span>
+        <span title="Cards in discard">🗑️ {player.discard_count}</span>
         <span title="Actions">⚡ {player.actions_used}/{player.actions_available}</span>
         {player.upgrade_credits > 0 && (
           <span title="Upgrade credits">⬆️ {player.upgrade_credits}</span>

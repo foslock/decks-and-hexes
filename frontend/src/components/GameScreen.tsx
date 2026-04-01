@@ -1,10 +1,10 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { GameState, Card } from '../types/game';
-import HexGrid, { type GridTransform } from './HexGrid';
+import HexGrid, { type GridTransform, type PlannedActionIcon } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand from './CardHand';
 import CardDetail from './CardDetail';
-import MarketPanel from './MarketPanel';
+import ShopOverlay from './ShopOverlay';
 import GameLog from './GameLog';
 import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
@@ -45,6 +45,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [showFullLog, setShowFullLog] = useState(false);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridTransformRef = useRef<GridTransform | null>(null);
+  const tileClickedRef = useRef(false);
 
   // Auto-dismiss error toast after 4 seconds
   useEffect(() => {
@@ -149,6 +150,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   }, [activePlayer, gameState.grid, playCardAtTile, playCardNoTarget]);
 
   const handleTileClick = useCallback(async (q: number, r: number) => {
+    tileClickedRef.current = true;
     if (phase !== 'plan' || !activePlayer || selectedCardIndex === null) {
       return;
     }
@@ -266,22 +268,43 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
   const selectedCard = selectedCardIndex !== null ? activePlayer?.hand[selectedCardIndex] : null;
 
-  // Filter adjacent tiles to only those a given claim card can actually capture
+  // Filter tiles to only those a given claim card can actually be played on
   const getValidClaimTiles = useCallback((card: Card | null | undefined): Set<string> => {
     if (!card || card.card_type !== 'claim') return adjacentTiles;
     const valid = new Set<string>();
     const tiles = gameState.grid?.tiles;
     if (!tiles) return valid;
-    for (const key of adjacentTiles) {
+
+    // Tiles where the player already has a non-stacking claim this turn
+    const alreadyClaimed = new Set<string>();
+    if (!card.stacking_exception && activePlayer?.planned_actions) {
+      for (const action of activePlayer.planned_actions) {
+        if (action.card.card_type === 'claim' && action.target_q != null) {
+          alreadyClaimed.add(`${action.target_q},${action.target_r}`);
+        }
+      }
+    }
+
+    // Cards without adjacency requirement can target any tile on the board
+    const candidates: Iterable<string> = card.adjacency_required
+      ? adjacentTiles
+      : Object.keys(tiles);
+
+    for (const key of candidates) {
       const tile = tiles[key];
-      // Exclude neutral tiles with base_defense higher than card power
-      if (tile && !tile.owner && tile.base_defense > card.power) continue;
-      // Exclude owned tiles for unoccupied_only cards (e.g. Explore)
-      if (tile && tile.owner && card.unoccupied_only) continue;
+      if (!tile || tile.is_blocked) continue;
+      // Skip own tiles (can't claim what you own)
+      if (tile.owner === activePlayerId) continue;
+      // Exclude neutral tiles too weak to capture
+      if (!tile.owner && tile.base_defense > card.power) continue;
+      // Exclude occupied tiles for unoccupied_only cards
+      if (tile.owner && card.unoccupied_only) continue;
+      // Exclude tiles already claimed this turn (no stacking)
+      if (alreadyClaimed.has(key)) continue;
       valid.add(key);
     }
     return valid;
-  }, [adjacentTiles, gameState.grid?.tiles]);
+  }, [adjacentTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId]);
 
   const playerInfo = useMemo(() => {
     const info: Record<string, { name: string; archetype: string }> = {};
@@ -294,16 +317,24 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   // Build planned action icons map for the active player
   const plannedActions = useMemo(() => {
     if (!activePlayer?.planned_actions) return undefined;
-    const map = new Map<string, { type: string; power: number }>();
+    const map = new Map<string, PlannedActionIcon>();
     for (const action of activePlayer.planned_actions) {
       if (action.target_q != null && action.target_r != null) {
         const key = `${action.target_q},${action.target_r}`;
         const type = action.card.card_type;
         const power = type === 'defense' ? action.card.defense_bonus : action.card.power;
-        map.set(key, { type, power });
+        map.set(key, { type, power, name: action.card.name, card: action.card });
       }
     }
     return map.size > 0 ? map : undefined;
+  }, [activePlayer?.planned_actions]);
+
+  // Cards currently placed on the board during plan phase (shown as "In Play" in deck viewer)
+  const inPlayCards = useMemo(() => {
+    if (!activePlayer?.planned_actions) return [];
+    return activePlayer.planned_actions
+      .filter(a => a.target_q != null)
+      .map(a => a.card);
   }, [activePlayer?.planned_actions]);
 
   return (
@@ -363,8 +394,15 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       </div>
 
       {/* Center: hex grid + overlays */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div ref={gridContainerRef} style={{ flex: 1, position: 'relative' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+        <div
+          ref={gridContainerRef}
+          style={{ flex: 1, position: 'relative' }}
+          onClick={() => {
+            if (tileClickedRef.current) { tileClickedRef.current = false; return; }
+            setSelectedCardIndex(null);
+          }}
+        >
           {gameState.grid && (
             <HexGrid
               tiles={gameState.grid.tiles}
@@ -383,6 +421,21 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               transformRef={gridTransformRef}
               activePlayerId={phase === 'plan' ? activePlayerId : undefined}
               plannedActions={phase === 'plan' ? plannedActions : undefined}
+            />
+          )}
+
+          {/* Shop overlay — floats over the board during buy phase */}
+          {phase === 'buy' && activePlayer && (
+            <ShopOverlay
+              archetypeMarket={activePlayer.archetype_market}
+              neutralMarket={gameState.neutral_market}
+              playerResources={activePlayer.resources}
+              playerArchetype={activePlayer.archetype}
+              onBuyArchetype={handleBuyArchetype}
+              onBuyNeutral={handleBuyNeutral}
+              onBuyUpgrade={handleBuyUpgrade}
+              onReroll={handleReroll}
+              disabled={false}
             />
           )}
 
@@ -484,56 +537,25 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           </div>
         </div>
 
-        {/* Bottom panel: hand / market */}
-        <div style={{ padding: '8px 12px', borderTop: '1px solid #333', maxHeight: '30vh', overflowY: 'auto' }}>
-          {phase === 'plan' && activePlayer && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <CardHand
-                cards={activePlayer.hand}
-                selectedIndex={selectedCardIndex}
-                onSelect={setSelectedCardIndex}
-                onDragPlay={handleDragPlay}
-                onCardDetail={setDetailCard}
-                onDragStart={setDraggingCardIndex}
-                onDragEnd={() => setDraggingCardIndex(null)}
-                disabled={activePlayer.has_submitted_plan}
-              />
-            </div>
-          )}
-
-          {phase === 'buy' && activePlayer && (
-            <div>
-              <div style={{ fontSize: 12, color: '#666', marginBottom: 6, textAlign: 'center' }}>
-                {activePlayer.name}'s Buy Phase — 💰 {activePlayer.resources} resources
-              </div>
-              <MarketPanel
-                archetypeMarket={activePlayer.archetype_market}
-                neutralMarket={gameState.neutral_market}
-                playerResources={activePlayer.resources}
-                onBuyArchetype={handleBuyArchetype}
-                onBuyNeutral={handleBuyNeutral}
-                onBuyUpgrade={handleBuyUpgrade}
-                onReroll={handleReroll}
-                onCardDetail={setDetailCard}
-                disabled={false}
-              />
-            </div>
-          )}
-
-          {phase === 'reveal' && (
-            <div style={{ color: '#aaa', fontSize: 14, textAlign: 'center' }}>
-              Resolving claims and effects...
-            </div>
-          )}
-
-          {phase === 'game_over' && (
-            <div style={{ textAlign: 'center', padding: 20 }}>
-              <h2>Game Over!</h2>
-              {gameState.winner && (
-                <p>{gameState.players[gameState.winner]?.name} wins with{' '}
-                  {gameState.players[gameState.winner]?.vp} VP!</p>
-              )}
-            </div>
+        {/* Bottom panel: always shows hand with deck/discard icons */}
+        <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'hidden' }}>
+          {activePlayer && (
+            <CardHand
+              playerId={activePlayerId}
+              cards={activePlayer.hand}
+              selectedIndex={selectedCardIndex}
+              onSelect={setSelectedCardIndex}
+              onDragPlay={handleDragPlay}
+              onCardDetail={setDetailCard}
+              onDragStart={setDraggingCardIndex}
+              onDragEnd={() => setDraggingCardIndex(null)}
+              disabled={phase !== 'plan' || activePlayer.has_submitted_plan}
+              deckSize={activePlayer.deck_size}
+              discardCount={activePlayer.discard_count}
+              discardCards={activePlayer.discard}
+              deckCards={activePlayer.deck_cards}
+              inPlayCards={inPlayCards}
+            />
           )}
         </div>
       </div>

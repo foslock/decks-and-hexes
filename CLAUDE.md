@@ -97,9 +97,9 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 ### Grid Sizes
 | Size | Tiles | VP Hexes | Blocked Terrain | Players |
 |---|---|---|---|---|
-| Small | 37 | 8 | 3–4 | 2–3 |
-| Medium | 61 | 13 | 5–7 | 3–4 |
-| Large | 91 | 20 | 8–10 | 4–6 |
+| Small | 37 | 4 | 3–4 | 2–3 |
+| Medium | 61 | 6 | 5–7 | 3–4 |
+| Large | 91 | 10 | 8–10 | 4–6 |
 
 - VP hexes distributed evenly (not center-clustered)
 - Blocked terrain placed randomly at setup
