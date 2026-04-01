@@ -20,16 +20,17 @@ class TestCardLoading:
         assert Archetype.FORTRESS in archetypes
 
     def test_starter_cards_exist(self, card_registry: dict[str, Card]) -> None:
-        assert "neutral_advance" in card_registry
+        assert "neutral_explore" in card_registry
         assert "neutral_gather" in card_registry
 
     def test_advance_properties(self, card_registry: dict[str, Card]) -> None:
-        advance = card_registry["neutral_advance"]
-        assert advance.name == "Advance"
-        assert advance.card_type == CardType.CLAIM
-        assert advance.power == 1
-        assert advance.starter is True
-        assert advance.buy_cost is None
+        explore = card_registry["neutral_explore"]
+        assert explore.name == "Explore"
+        assert explore.card_type == CardType.CLAIM
+        assert explore.power == 0
+        assert explore.unoccupied_only is True
+        assert explore.starter is True
+        assert explore.buy_cost is None
 
     def test_gather_properties(self, card_registry: dict[str, Card]) -> None:
         gather = card_registry["neutral_gather"]

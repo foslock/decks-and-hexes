@@ -327,11 +327,16 @@ class TestRevealPhase:
                 adj.owner = "p0"
                 break
 
-        # Set defense on target = Advance power (1)
-        target.defense_power = 1
-
         p0 = game.players["p0"]
-        claim_idx = next(i for i, c in enumerate(p0.hand) if c.card_type == CardType.CLAIM and c.power == 1)
+        # Find any claim card that can target an owned (occupied) tile
+        claim_entry = next(
+            (i, c) for i, c in enumerate(p0.hand)
+            if c.card_type == CardType.CLAIM and not c.unoccupied_only
+        )
+        claim_idx, claim_card = claim_entry
+
+        # Set defense equal to attacker power so it's a tie → defender wins
+        target.defense_power = claim_card.effective_power
         play_card(game, "p0", claim_idx, target.q, target.r)
 
         submit_plan(game, "p0")

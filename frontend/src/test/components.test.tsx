@@ -89,15 +89,15 @@ describe('CardHand', () => {
     });
   });
 
-  it('shows card type and power', () => {
+  it('shows power in stats line', () => {
     render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
-    expect(screen.getByText(/CLAIM · Power 1/)).toBeInTheDocument();
-    expect(screen.getByText(/CLAIM · Power 4/)).toBeInTheDocument();
+    expect(screen.getByText('Power 1')).toBeInTheDocument();
+    expect(screen.getByText('Power 4')).toBeInTheDocument();
   });
 
   it('shows resource gain for engine cards', () => {
     render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
-    expect(screen.getByText(/\+2 res/)).toBeInTheDocument();
+    expect(screen.getByText(/\+2 Resources/)).toBeInTheDocument();
   });
 });
 
