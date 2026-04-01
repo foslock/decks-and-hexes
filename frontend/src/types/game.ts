@@ -5,6 +5,7 @@ export interface HexTile {
   is_vp: boolean;
   owner: string | null;
   defense_power: number;
+  base_defense: number;
   held_since_turn: number | null;
 }
 
@@ -25,8 +26,16 @@ export interface Card {
   draw_cards: number;
   defense_bonus: number;
   adjacency_required: boolean;
+  unoccupied_only: boolean;
   description: string;
   starter: boolean;
+}
+
+export interface PlannedAction {
+  card: Card;
+  target_q: number | null;
+  target_r: number | null;
+  target_player_id: string | null;
 }
 
 export interface Player {
@@ -44,6 +53,7 @@ export interface Player {
   passive: Record<string, string> | null;
   deck_size: number;
   planned_action_count: number;
+  planned_actions: PlannedAction[];
   has_submitted_plan: boolean;
 }
 

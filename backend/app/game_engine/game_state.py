@@ -99,8 +99,9 @@ class Player:
             "archetype_market": [c.to_dict() for c in self.archetype_market],
             "upgrade_credits": self.upgrade_credits,
             "passive": self.passive,
-            "deck_size": self.deck.total_cards,
+            "deck_size": self.deck.total_cards + len(self.hand) + len(self.planned_actions),
             "planned_action_count": len(self.planned_actions),
+            "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
             "has_submitted_plan": self.has_submitted_plan,
         }
 
@@ -383,6 +384,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
             ):
                 return False, "Must claim a tile adjacent to one you own"
 
+        # Prevent unoccupied_only cards from targeting owned tiles
+        if card.unoccupied_only and tile.owner is not None:
+            return False, f"{card.name} can only target unoccupied tiles"
+
+        # Prevent claiming neutral tiles with defense higher than card power
+        if not tile.owner and tile.defense_power > card.effective_power:
+            return False, f"Card power ({card.effective_power}) too low to overcome tile defense ({tile.defense_power})"
+
         # Check stacking (only one claim per tile unless exception)
         existing_claims = [
             a for a in player.planned_actions
@@ -476,19 +485,28 @@ def execute_reveal(game: GameState) -> GameState:
         for pid, action in claims:
             power_by_player[pid] = power_by_player.get(pid, 0) + action.card.effective_power
 
-        # Add existing defense
+        # Add existing defense (owned tile: credited to owner; unowned tile with intrinsic
+        # defense: modeled as a neutral blocker that real players must beat)
         current_defense = tile.defense_power
         if tile.owner:
             power_by_player.setdefault(tile.owner, 0)
             power_by_player[tile.owner] += current_defense
+        elif current_defense > 0:
+            power_by_player["_neutral"] = current_defense
 
-        # Find winner
+        # Find winner — filter out the neutral pseudo-player first
         max_power = max(power_by_player.values())
         contenders = [pid for pid, pwr in power_by_player.items() if pwr == max_power]
+        real_contenders = [pid for pid in contenders if pid != "_neutral"]
 
-        if len(contenders) == 1:
-            winner_id = contenders[0]
-        elif tile.owner in contenders:
+        if not real_contenders:
+            # All attackers were beaten by intrinsic tile defense
+            game._log(f"Tile {tile_key}: intrinsic defense held (def {current_defense})")
+            continue
+
+        if len(real_contenders) == 1:
+            winner_id = real_contenders[0]
+        elif tile.owner in real_contenders:
             winner_id = tile.owner  # defender wins ties
         else:
             # Tie between attackers — nobody wins
@@ -499,7 +517,7 @@ def execute_reveal(game: GameState) -> GameState:
             old_owner = tile.owner
             tile.owner = winner_id
             tile.held_since_turn = game.current_round
-            tile.defense_power = 0
+            tile.defense_power = tile.base_defense  # reset to intrinsic defense, not 0
             game._log(f"{game.players[winner_id].name} claims tile {tile_key} (power {max_power})")
         else:
             game._log(f"{tile.owner and game.players[tile.owner].name} defends tile {tile_key}")

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import type { HexTile } from '../types/game';
 
@@ -22,14 +22,33 @@ const TILE_COLORS = {
   blocked: 0x1a1a1a,
   vp: 0x4a3a2a,
   hover: 0x3a3a5e,
-  selected: 0x5a5a8e,
 };
+
+interface PlayerInfo {
+  name: string;
+  archetype: string;
+}
+
+export interface GridTransform {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+interface PlannedActionIcon {
+  type: string;  // 'claim' or 'defense'
+  power: number;
+}
 
 interface HexGridProps {
   tiles: Record<string, HexTile>;
-  selectedTile: string | null;
   onTileClick: (q: number, r: number) => void;
   highlightTiles?: Set<string>;
+  playerInfo?: Record<string, PlayerInfo>;
+  transformRef?: React.MutableRefObject<GridTransform | null>;
+  borderTiles?: Set<string>;
+  activePlayerId?: string;
+  plannedActions?: Map<string, PlannedActionIcon>;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -48,29 +67,121 @@ function drawHexagon(g: Graphics, x: number, y: number, size: number) {
   g.poly(points, true);
 }
 
-export default function HexGrid({ tiles, selectedTile, onTileClick, highlightTiles }: HexGridProps) {
+function hexVertex(cx: number, cy: number, index: number, size: number): { x: number; y: number } {
+  const angle = (Math.PI / 180) * (60 * index);
+  return {
+    x: cx + size * Math.cos(angle),
+    y: cy + size * Math.sin(angle),
+  };
+}
+
+// Flat-top hex: 6 neighbor directions with corresponding edge vertex pairs
+// Direction [dq, dr] → edge is between vertex vA and vB
+const DIRECTIONS_WITH_EDGES: [number, number, number, number][] = [
+  [1, 0, 0, 1],    // right neighbor → edge 0-1
+  [0, 1, 1, 2],    // bottom-right → edge 1-2
+  [-1, 1, 2, 3],   // bottom-left → edge 2-3
+  [-1, 0, 3, 4],   // left → edge 3-4
+  [0, -1, 4, 5],   // top-left → edge 4-5
+  [1, -1, 5, 0],   // top-right → edge 5-0
+];
+
+// Only 3 canonical directions for deduplication (avoid drawing shared edges twice)
+const CANONICAL_DIRECTIONS: [number, number, number, number][] = [
+  [1, 0, 0, 1],    // right
+  [1, -1, 5, 0],   // top-right
+  [0, -1, 4, 5],   // top-left
+];
+
+const ARCHETYPE_LABELS: Record<string, string> = {
+  vanguard: 'Vanguard',
+  swarm: 'Swarm',
+  fortress: 'Fortress',
+};
+
+export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
-  const selectedRef = useRef(selectedTile);
   const highlightRef = useRef(highlightTiles);
   const onClickRef = useRef(onTileClick);
+  const playerInfoRef = useRef(playerInfo);
+  const transformRefLocal = useRef(transformRef);
+  const borderTilesRef = useRef(borderTiles);
+  const activePlayerIdRef = useRef(activePlayerId);
+  const plannedActionsRef = useRef(plannedActions);
   const hexContainerRef = useRef<Container | null>(null);
+  const hoveredTileRef = useRef<string | null>(null);
+  const tileGraphicsRef = useRef<Map<string, { g: Graphics; baseColor: number; isBlocked: boolean; baseAlpha: number }>>(new Map());
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text: string } | null>(null);
 
   tilesRef.current = tiles;
-  selectedRef.current = selectedTile;
   highlightRef.current = highlightTiles;
   onClickRef.current = onTileClick;
+  playerInfoRef.current = playerInfo;
+  transformRefLocal.current = transformRef;
+  borderTilesRef.current = borderTiles;
+  activePlayerIdRef.current = activePlayerId;
+  plannedActionsRef.current = plannedActions;
+
+  // Compute bounding box of all tiles in unscaled pixel space, then fit to canvas.
+  const fitGrid = useCallback(() => {
+    const app = appRef.current;
+    const hexContainer = hexContainerRef.current;
+    if (!app || !hexContainer) return;
+
+    const tileList = Object.values(tilesRef.current);
+    if (tileList.length === 0) return;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const tile of tileList) {
+      const { x, y } = axialToPixel(tile.q, tile.r);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+
+    // Add one hex radius of margin around the grid bounds
+    const margin = HEX_SIZE;
+    const gridW = (maxX - minX) + HEX_SIZE * 2 + margin * 2;
+    const gridH = (maxY - minY) + HEX_HEIGHT + margin * 2;
+
+    const PADDING = 16; // px of screen padding on each side
+    const scale = Math.min(
+      (app.screen.width - PADDING * 2) / gridW,
+      (app.screen.height - PADDING * 2) / gridH,
+    );
+
+    hexContainer.scale.set(scale);
+
+    // Center based on actual bounding box midpoint
+    const midX = (minX + maxX) / 2;
+    const midY = (minY + maxY) / 2;
+    const offsetX = app.screen.width / 2 - midX * scale;
+    const offsetY = app.screen.height / 2 - midY * scale;
+    hexContainer.position.set(offsetX, offsetY);
+
+    // Expose transform so callers can invert screen→hex coordinates
+    if (transformRefLocal.current) {
+      transformRefLocal.current.current = { scale, offsetX, offsetY };
+    }
+  }, []);
 
   const renderTiles = useCallback(() => {
     const hexContainer = hexContainerRef.current;
     if (!hexContainer) return;
 
     hexContainer.removeChildren();
+    tileGraphicsRef.current.clear();
 
     const tiles = tilesRef.current;
-    const selected = selectedRef.current;
     const highlights = highlightRef.current;
+    const borders = borderTilesRef.current;
+    const activePlayer = activePlayerIdRef.current;
+    const planned = plannedActionsRef.current;
+
+    const hexSize = HEX_SIZE - 1; // drawn hex size (1px inset)
 
     for (const [key, tile] of Object.entries(tiles)) {
       const { x, y } = axialToPixel(tile.q, tile.r);
@@ -87,21 +198,49 @@ export default function HexGrid({ tiles, selectedTile, onTileClick, highlightTil
         fillColor = TILE_COLORS.vp;
       }
 
-      if (key === selected) {
-        fillColor = TILE_COLORS.selected;
+      // Highlight: glow ring + thicker stroke + brighter fill
+      const isHighlighted = highlights?.has(key) ?? false;
+
+      if (isHighlighted) {
+        // Draw glow ring behind the hex
+        g.fill({ color: 0xffff00, alpha: 0.25 });
+        drawHexagon(g, x, y, HEX_SIZE + 4);
+        g.fill();
       }
 
-      // Draw hex
-      let strokeColor = 0x555577;
-      if (highlights?.has(key)) {
-        strokeColor = 0xffff00;
-      }
+      // Draw hex fill (no full-polygon stroke — edges drawn selectively below)
+      const strokeWidth = isHighlighted ? 3 : 2;
+      const strokeColor = isHighlighted ? 0xffff00 : 0x555577;
+      const fillAlpha = tile.is_blocked ? 0.3 : (isHighlighted ? 0.95 : 0.8);
 
-      g.setStrokeStyle({ width: 2, color: strokeColor });
-      g.fill({ color: fillColor, alpha: tile.is_blocked ? 0.3 : 0.8 });
-      drawHexagon(g, x, y, HEX_SIZE - 1);
+      // Use full HEX_SIZE for owned tiles so adjacent same-owner hexes overlap (no gap)
+      const hasInternalEdge = tile.owner && DIRECTIONS_WITH_EDGES.some(([dq, dr]) => {
+        const nk = `${tile.q + dq},${tile.r + dr}`;
+        return tiles[nk]?.owner === tile.owner;
+      });
+      const fillSize = hasInternalEdge ? HEX_SIZE : hexSize;
+      g.fill({ color: fillColor, alpha: fillAlpha });
+      drawHexagon(g, x, y, fillSize);
       g.fill();
+
+      // Draw edges selectively: skip edges between tiles owned by the same player
+      g.setStrokeStyle({ width: strokeWidth, color: strokeColor });
+      for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+        const nq = tile.q + dq;
+        const nr = tile.r + dr;
+        const neighborKey = `${nq},${nr}`;
+        const neighbor = tiles[neighborKey];
+        // Skip edge if both tiles are owned by the same player
+        if (tile.owner && neighbor && neighbor.owner === tile.owner) continue;
+        const a = hexVertex(x, y, vA, hexSize);
+        const b = hexVertex(x, y, vB, hexSize);
+        g.moveTo(a.x, a.y);
+        g.lineTo(b.x, b.y);
+      }
       g.stroke();
+
+      // Store for hover highlight updates
+      tileGraphicsRef.current.set(key, { g, baseColor: fillColor, isBlocked: tile.is_blocked, baseAlpha: fillAlpha });
 
       // VP indicator
       if (tile.is_vp && !tile.is_blocked) {
@@ -114,27 +253,46 @@ export default function HexGrid({ tiles, selectedTile, onTileClick, highlightTil
         hexContainer.addChild(star);
       }
 
-      // Defense power indicator
-      if (tile.defense_power > 0) {
+      // Defense power indicator — always shown on border tiles, otherwise only when > 0
+      const inBorder = borders?.has(key);
+      if (tile.defense_power > 0 || inBorder) {
+        const defColor = inBorder && tile.defense_power === 0 ? 0x888888 : 0xffffff;
         const def = new Text({
-          text: `🛡${tile.defense_power}`,
-          style: new TextStyle({ fontSize: 10, fill: 0xffffff }),
+          text: `${tile.defense_power}`,
+          style: new TextStyle({ fontSize: 14, fill: defColor, fontWeight: 'bold' }),
         });
         def.anchor.set(0.5);
         def.position.set(x, y + 8);
         hexContainer.addChild(def);
       }
 
-      // Coordinate label (small)
-      const label = new Text({
-        text: `${tile.q},${tile.r}`,
-        style: new TextStyle({ fontSize: 8, fill: 0x888888 }),
-      });
-      label.anchor.set(0.5);
-      label.position.set(x, y + (tile.is_vp ? 4 : 0));
-      hexContainer.addChild(label);
+      // Mountain emoji on blocked tiles
+      if (tile.is_blocked) {
+        const mountain = new Text({
+          text: '⛰️',
+          style: new TextStyle({ fontSize: 22, fill: 0x888888 }),
+        });
+        mountain.anchor.set(0.5);
+        mountain.position.set(x, y);
+        hexContainer.addChild(mountain);
+      }
 
-      // Click handler
+      // Planned action icon
+      if (planned?.has(key)) {
+        const action = planned.get(key)!;
+        const emoji = action.type === 'claim' ? '⚔️' : '🛡';
+        const label = `${emoji}${action.power}`;
+        const actionText = new Text({
+          text: label,
+          style: new TextStyle({ fontSize: 12, fill: 0xffffff }),
+        });
+        actionText.anchor.set(0.5);
+        // Position: center if no VP star/defense, else offset
+        actionText.position.set(x, y);
+        hexContainer.addChild(actionText);
+      }
+
+      // Click handler + hover tooltip
       g.eventMode = 'static';
       g.cursor = tile.is_blocked ? 'not-allowed' : 'pointer';
       g.hitArea = { contains: (px: number, py: number) => {
@@ -147,10 +305,107 @@ export default function HexGrid({ tiles, selectedTile, onTileClick, highlightTil
           onClickRef.current(tile.q, tile.r);
         }
       });
+      g.on('pointerover', (e) => {
+        // Hover highlight: make tile fully opaque
+        if (!tile.is_blocked) {
+          const prev = hoveredTileRef.current;
+          if (prev && prev !== key) {
+            const prevEntry = tileGraphicsRef.current.get(prev);
+            if (prevEntry) {
+              prevEntry.g.tint = 0xffffff;
+              prevEntry.g.alpha = prevEntry.baseAlpha;
+            }
+          }
+          hoveredTileRef.current = key;
+          g.tint = 0xddddff;
+          g.alpha = 1.0;
+        }
+        // Ownership tooltip
+        if (tile.owner && playerInfoRef.current?.[tile.owner]) {
+          const info = playerInfoRef.current[tile.owner];
+          const label = ARCHETYPE_LABELS[info.archetype] || info.archetype;
+          setTooltip({
+            x: e.global.x,
+            y: e.global.y,
+            text: `${info.name} (${label})`,
+          });
+        }
+      });
+      g.on('pointermove', (e) => {
+        if (tile.owner && playerInfoRef.current?.[tile.owner]) {
+          setTooltip((prev) => prev ? { ...prev, x: e.global.x, y: e.global.y } : null);
+        }
+      });
+      g.on('pointerout', () => {
+        if (!tile.is_blocked) {
+          g.tint = 0xffffff;
+          const entry = tileGraphicsRef.current.get(key);
+          if (entry) g.alpha = entry.baseAlpha;
+          hoveredTileRef.current = null;
+        }
+        setTooltip(null);
+      });
 
       hexContainer.addChild(g);
     }
-  }, []);
+
+    // --- Territory outline for active player ---
+    if (activePlayer) {
+      const outlineG = new Graphics();
+      outlineG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.8 });
+
+      for (const [key, tile] of Object.entries(tiles)) {
+        if (tile.owner !== activePlayer) continue;
+        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+
+        for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+          const nq = tile.q + dq;
+          const nr = tile.r + dr;
+          const neighborKey = `${nq},${nr}`;
+          const neighbor = tiles[neighborKey];
+
+          // Draw edge if neighbor doesn't exist or is not owned by the same player
+          if (!neighbor || neighbor.owner !== activePlayer) {
+            const a = hexVertex(cx, cy, vA, hexSize);
+            const b = hexVertex(cx, cy, vB, hexSize);
+            outlineG.moveTo(a.x, a.y);
+            outlineG.lineTo(b.x, b.y);
+          }
+        }
+      }
+      outlineG.stroke();
+      hexContainer.addChild(outlineG);
+    }
+
+    // --- Walls between different players' territories ---
+    const wallG = new Graphics();
+    wallG.setStrokeStyle({ width: 5, color: 0xcccccc, alpha: 0.85 });
+
+    for (const [key, tile] of Object.entries(tiles)) {
+      if (!tile.owner) continue;
+      const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+
+      for (const [dq, dr, vA, vB] of CANONICAL_DIRECTIONS) {
+        const nq = tile.q + dq;
+        const nr = tile.r + dr;
+        const neighborKey = `${nq},${nr}`;
+        const neighbor = tiles[neighborKey];
+
+        if (!neighbor || !neighbor.owner) continue;
+        if (neighbor.owner === tile.owner) continue;
+
+        // Different owners — draw wall
+        const a = hexVertex(cx, cy, vA, hexSize);
+        const b = hexVertex(cx, cy, vB, hexSize);
+        wallG.moveTo(a.x, a.y);
+        wallG.lineTo(b.x, b.y);
+      }
+    }
+    wallG.stroke();
+    hexContainer.addChild(wallG);
+
+    fitGrid();
+  }, [fitGrid]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -171,18 +426,16 @@ export default function HexGrid({ tiles, selectedTile, onTileClick, highlightTil
       hexContainerRef.current = hexContainer;
       app.stage.addChild(hexContainer);
 
-      // Center the grid
-      hexContainer.position.set(
-        app.screen.width / 2,
-        app.screen.height / 2,
-      );
-
       renderTiles();
+
+      // Re-fit whenever the canvas is resized
+      app.renderer.on('resize', fitGrid);
     });
 
     return () => {
       destroyed = true;
       if (appRef.current) {
+        appRef.current.renderer.off('resize', fitGrid);
         appRef.current.destroy(true);
         appRef.current = null;
       }
@@ -192,12 +445,32 @@ export default function HexGrid({ tiles, selectedTile, onTileClick, highlightTil
   // Re-render tiles when data changes
   useEffect(() => {
     renderTiles();
-  }, [tiles, selectedTile, highlightTiles, renderTiles]);
+  }, [tiles, highlightTiles, activePlayerId, plannedActions, renderTiles]);
 
   return (
-    <div
-      ref={containerRef}
-      style={{ width: '100%', height: '100%', minHeight: 500 }}
-    />
+    <div style={{ width: '100%', height: '100%', minHeight: 500, position: 'relative' }}>
+      <div
+        ref={containerRef}
+        style={{ width: '100%', height: '100%' }}
+      />
+      {tooltip && (
+        <div style={{
+          position: 'absolute',
+          left: tooltip.x + 12,
+          top: tooltip.y - 28,
+          background: '#222',
+          color: '#fff',
+          padding: '4px 8px',
+          borderRadius: 4,
+          fontSize: 12,
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          zIndex: 10,
+          border: '1px solid #555',
+        }}>
+          {tooltip.text}
+        </div>
+      )}
+    </div>
   );
 }

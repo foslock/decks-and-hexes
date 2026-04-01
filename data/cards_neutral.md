@@ -16,19 +16,20 @@ cards:
 
   # ── STARTER CARDS (not purchasable) ──────────────────────────────────────
 
-  - id: neutral_advance
-    name: Advance
-    name_upgraded: Advance+
+  - id: neutral_explore
+    name: Explore
+    name_upgraded: Explore+
     type: Claim
     buy_cost: null
     copies: null
     starter: true
     action_return: 0
-    power: 1
-    effect: "Claim: Power 1 on any adjacent tile."
-    effect_upgraded: "Claim: Power 2 on any adjacent tile."
+    power: 0
+    unoccupied_only: true
+    effect: "Claim: Power 0 on any adjacent unoccupied tile. Claims unopposed neutral territory."
+    effect_upgraded: "Claim: Power 1 on any adjacent tile."
     trash_on_use: false
-    note: "The baseline board action. Every archetype starts with copies of this card."
+    note: "The baseline scouting action. Claims uncontested neutral tiles; loses any contested claim. Every archetype starts with copies of this card."
 
   - id: neutral_gather
     name: Gather

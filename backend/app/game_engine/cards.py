@@ -63,6 +63,7 @@ class Card:
     draw_cards: int = 0
     defense_bonus: int = 0
     adjacency_required: bool = True
+    unoccupied_only: bool = False
     description: str = ""
     upgrade_description: str = ""
     # Neutral market copy count
@@ -123,6 +124,7 @@ class Card:
             "draw_cards": self.effective_draw_cards,
             "defense_bonus": self.effective_defense_bonus,
             "adjacency_required": self.adjacency_required,
+            "unoccupied_only": self.unoccupied_only,
             "description": self.description,
             "starter": self.starter,
         }
@@ -166,11 +168,11 @@ def build_starting_deck(archetype: Archetype, card_registry: dict[str, Card]) ->
     cards = []
 
     if archetype == Archetype.VANGUARD:
-        # 2× Blitz, 4× Advance, 2× Gather = 8 cards
+        # 2× Blitz, 4× Explore, 2× Gather = 8 cards
         blitz = card_registry.get("vanguard_blitz")
         if blitz:
             cards.extend([_copy_card(blitz, f"start_{i}") for i in range(2)])
-        advance = card_registry.get("neutral_advance")
+        advance = card_registry.get("neutral_explore")
         if advance:
             cards.extend([_copy_card(advance, f"start_adv_{i}") for i in range(4)])
         gather = card_registry.get("neutral_gather")
@@ -178,14 +180,14 @@ def build_starting_deck(archetype: Archetype, card_registry: dict[str, Card]) ->
             cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(2)])
 
     elif archetype == Archetype.SWARM:
-        # 2× Scout, 1× Swarm Tactics, 5× Advance, 2× Gather = 10 cards
+        # 2× Scout, 1× Swarm Tactics, 5× Explore, 2× Gather = 10 cards
         scout = card_registry.get("swarm_scout")
         if scout:
             cards.extend([_copy_card(scout, f"start_{i}") for i in range(2)])
         tactics = card_registry.get("swarm_swarm_tactics")
         if tactics:
             cards.append(_copy_card(tactics, "start_tac"))
-        advance = card_registry.get("neutral_advance")
+        advance = card_registry.get("neutral_explore")
         if advance:
             cards.extend([_copy_card(advance, f"start_adv_{i}") for i in range(5)])
         gather = card_registry.get("neutral_gather")
@@ -193,14 +195,14 @@ def build_starting_deck(archetype: Archetype, card_registry: dict[str, Card]) ->
             cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(2)])
 
     elif archetype == Archetype.FORTRESS:
-        # 1× Garrison, 1× Fortify, 2× Advance, 2× Gather = 6 cards
+        # 1× Garrison, 1× Fortify, 2× Explore, 2× Gather = 6 cards
         garrison = card_registry.get("fortress_garrison")
         if garrison:
             cards.append(_copy_card(garrison, "start_gar"))
         fortify = card_registry.get("fortress_fortify")
         if fortify:
             cards.append(_copy_card(fortify, "start_fort"))
-        advance = card_registry.get("neutral_advance")
+        advance = card_registry.get("neutral_explore")
         if advance:
             cards.extend([_copy_card(advance, f"start_adv_{i}") for i in range(2)])
         gather = card_registry.get("neutral_gather")
