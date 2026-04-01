@@ -49,6 +49,9 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: ignore_defense
+        timing: on_resolution
 
   - id: fortress_iron_wall
     name: Iron Wall
@@ -62,6 +65,10 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: tile_immunity
+        duration: 1
+        timing: immediate
 
   - id: fortress_garrison
     name: Garrison
@@ -75,6 +82,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: power_modifier
+        value: 2
+        timing: on_resolution
+        condition: if_defending_owned
 
   - id: fortress_slow_advance
     name: Slow Advance
@@ -88,6 +100,10 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: auto_claim_if_neutral
+        timing: on_resolution
+        condition: if_target_neutral
 
   - id: fortress_supply_line
     name: Supply Line
@@ -101,6 +117,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: cost_reduction
+        value: 2
+        timing: immediate
+        metadata: {scope: "any_one_card"}
 
   - id: fortress_entrench
     name: Entrench
@@ -128,6 +149,11 @@ cards:
     secondary_effect: "If the defender successfully holds the tile, that defending player draws 1 fewer card at the start of their next turn."
     secondary_timing: on_resolution
     stacking_exception: false
+    effects:
+      - type: on_defend_forced_discard
+        value: 1
+        timing: on_resolution
+        condition: if_defender_holds
 
   - id: fortress_stronghold
     name: Stronghold
@@ -141,6 +167,10 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: tile_immunity
+        duration: 2
+        timing: immediate
 
   - id: fortress_overwhelming_force
     name: Overwhelming Force
@@ -154,6 +184,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: true
+    effects:
+      - type: resource_refund_if_neutral
+        value: 1
+        timing: on_resolution
+        condition: if_target_neutral
 
   - id: fortress_consolidate
     name: Consolidate
@@ -167,6 +202,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: trash_gain_buy_cost
+        value: 1
+        timing: immediate
+        requires_choice: true
 
   - id: fortress_tactical_reserve
     name: Tactical Reserve
@@ -180,6 +220,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: cost_reduction
+        value: 0
+        timing: immediate
+        metadata: {scope: "next_defense", remaining: 1}
 
   - id: fortress_iron_discipline
     name: Iron Discipline

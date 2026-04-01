@@ -5,7 +5,10 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from .effects import Effect
 
 
 class CardType(str, Enum):
@@ -66,6 +69,8 @@ class Card:
     unoccupied_only: bool = False
     description: str = ""
     upgrade_description: str = ""
+    # Structured effects list (parsed from YAML)
+    effects: list[Any] = field(default_factory=list)  # list[Effect]
     # Neutral market copy count
     copies: Optional[int] = None
     # Upgraded stats (applied when is_upgraded=True)
@@ -127,6 +132,7 @@ class Card:
             "unoccupied_only": self.unoccupied_only,
             "description": self.description,
             "starter": self.starter,
+            "effects": [e.to_dict() for e in self.effects if hasattr(e, 'to_dict')],
         }
 
 

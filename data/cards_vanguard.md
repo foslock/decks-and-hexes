@@ -23,6 +23,11 @@ cards:
     secondary_effect: "If successful, draw 1 card next turn."
     secondary_timing: on_resolution
     stacking_exception: false
+    effects:
+      - type: draw_next_turn
+        value: 1
+        timing: on_resolution
+        condition: if_successful
 
   - id: vanguard_overrun
     name: Overrun
@@ -49,6 +54,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: power_modifier
+        value: 2
+        timing: on_resolution
+        condition: if_played_claim_this_turn
 
   - id: vanguard_rapid_assault
     name: Rapid Assault
@@ -62,6 +72,11 @@ cards:
     secondary_effect: "If successful, opponent must spend 1 resource to contest this tile next round."
     secondary_timing: on_resolution
     stacking_exception: false
+    effects:
+      - type: contest_cost
+        value: 1
+        timing: on_resolution
+        condition: if_successful
 
   - id: vanguard_spearhead
     name: Spearhead
@@ -75,6 +90,9 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: immediate_resolve
+        timing: immediate
 
   - id: vanguard_coordinated_push
     name: Coordinated Push
@@ -114,6 +132,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: self_discard
+        value: 1
+        timing: immediate
+        requires_choice: true
 
   - id: vanguard_forward_march
     name: Forward March
@@ -127,6 +150,11 @@ cards:
     secondary_effect: "If successful, draw 1 card next turn."
     secondary_timing: on_resolution
     stacking_exception: false
+    effects:
+      - type: draw_next_turn
+        value: 1
+        timing: on_resolution
+        condition: if_successful
 
   - id: vanguard_war_cache
     name: War Cache
@@ -140,6 +168,10 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: draw_next_turn
+        value: 1
+        timing: immediate
 
   - id: vanguard_breakthrough
     name: Breakthrough
@@ -153,6 +185,11 @@ cards:
     secondary_effect: "If successful, also claim one adjacent neutral tile automatically."
     secondary_timing: on_resolution
     stacking_exception: false
+    effects:
+      - type: auto_claim_adjacent_neutral
+        value: 1
+        timing: on_resolution
+        condition: if_successful
 
   - id: vanguard_flanking_strike
     name: Flanking Strike
@@ -179,6 +216,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: grant_actions
+        value: 1
+        timing: immediate
+        target: chosen_player
 
   - id: vanguard_elite_vanguard
     name: Elite Vanguard
@@ -192,3 +234,8 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: dynamic_buy_cost
+        condition: vp_hexes_controlled
+        value: -1
+        metadata: {per_unit: true}

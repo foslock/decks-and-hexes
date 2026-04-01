@@ -50,6 +50,13 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: power_modifier
+        value: 1
+        timing: on_resolution
+        condition: if_adjacent_owned_gte
+        condition_threshold: 1
+        metadata: {per_tile: true}
 
   - id: swarm_swarm_tactics
     name: Swarm Tactics
@@ -76,6 +83,10 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: dynamic_buy_cost
+        condition: tiles_more_than_defender
+        value: -1
 
   - id: swarm_proliferate
     name: Proliferate
@@ -115,6 +126,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: conditional_action_return
+        value: 1
+        timing: on_resolution
+        condition: if_played_same_name
 
   - id: swarm_dog_pile
     name: Dog Pile
@@ -128,6 +144,10 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: true
+    effects:
+      - type: stacking_power_bonus
+        value: 1
+        timing: on_resolution
 
   - id: swarm_thin_the_herd
     name: Thin the Herd
@@ -141,6 +161,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: self_trash
+        value: 1
+        timing: immediate
+        requires_choice: true
 
   - id: swarm_numbers_game
     name: Numbers Game
@@ -154,6 +179,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: power_modifier
+        value: 0
+        timing: on_resolution
+        condition: cards_in_hand
 
   - id: swarm_frenzy
     name: Frenzy
@@ -167,6 +197,11 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: self_discard
+        value: 1
+        timing: immediate
+        requires_choice: true
 
   - id: swarm_scavenge
     name: Scavenge
@@ -193,3 +228,6 @@ cards:
     secondary_effect: null
     secondary_timing: null
     stacking_exception: false
+    effects:
+      - type: buy_restriction
+        timing: immediate

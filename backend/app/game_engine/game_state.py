@@ -20,6 +20,12 @@ from .cards import (
     build_starting_deck,
     _copy_card,
 )
+from .effects import EffectType, TurnModifiers
+from .effect_resolver import (
+    calculate_effective_power,
+    resolve_immediate_effects,
+    resolve_on_resolution_effects,
+)
 from .hex_grid import GridSize, HexGrid, generate_hex_grid
 
 
@@ -76,6 +82,7 @@ class Player:
     passive: Optional[dict[str, Any]] = None
     forced_discard_next_turn: int = 0
     has_submitted_plan: bool = False
+    turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
 
     @property
     def hand_size(self) -> int:
@@ -317,12 +324,18 @@ def execute_start_of_turn(game: GameState) -> GameState:
             game._log(f"{player.name} wins with {player.vp} VP!")
             return game
 
-        # Draw hand (minus forced discards from last turn)
-        draw_count = max(0, player.hand_size - player.forced_discard_next_turn)
+        # Draw hand (minus forced discards, plus extra draws from effects)
+        extra_draws = player.turn_modifiers.extra_draws_next_turn
+        draw_count = max(0, player.hand_size - player.forced_discard_next_turn + extra_draws)
         if player.forced_discard_next_turn > 0:
             game._log(f"{player.name} draws {draw_count} (reduced by {player.forced_discard_next_turn} forced discard)")
+        if extra_draws > 0:
+            game._log(f"{player.name} draws {extra_draws} extra card(s) from effects")
         player.forced_discard_next_turn = 0
         player.hand = player.deck.draw(draw_count, game.rng)
+
+        # Reset turn modifiers (decrement multi-round effects)
+        player.turn_modifiers.reset_for_new_turn()
 
         # Reset action tracking
         player.actions_used = 0
@@ -343,7 +356,11 @@ def execute_start_of_turn(game: GameState) -> GameState:
 
 def play_card(game: GameState, player_id: str, card_index: int,
               target_q: Optional[int] = None, target_r: Optional[int] = None,
-              target_player_id: Optional[str] = None) -> tuple[bool, str]:
+              target_player_id: Optional[str] = None,
+              discard_card_indices: Optional[list[int]] = None,
+              trash_card_indices: Optional[list[int]] = None,
+              extra_targets: Optional[list[tuple[int, int]]] = None,
+              ) -> tuple[bool, str]:
     """Play a card from hand during Plan phase. Returns (success, message)."""
     if game.current_phase != Phase.PLAN:
         return False, "Not in Plan phase"
@@ -435,6 +452,15 @@ def play_card(game: GameState, player_id: str, card_index: int,
         game._log(f"{player.name} draws {len(drawn)} cards from {card.name}",
                   visible_to=[player_id], actor=player_id)
 
+    # Resolve structured effects (from effects list on card)
+    if card.effects:
+        resolve_immediate_effects(
+            game, player, card, action,
+            discard_card_indices=discard_card_indices,
+            trash_card_indices=trash_card_indices,
+            extra_targets=[tuple(t) for t in (extra_targets or [])],
+        )
+
     game._log(f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})",
               visible_to=[player_id], actor=player_id)
     return True, f"Played {card.name}"
@@ -477,20 +503,49 @@ def execute_reveal(game: GameState) -> GameState:
             else:
                 other_actions.append((pid, action))
 
+    # Check for tile immunity — remove immune tiles from claims
+    for pid in game.player_order:
+        player = game.players[pid]
+        for tile_key, rounds in player.turn_modifiers.immune_tiles.items():
+            if tile_key in claims_by_tile:
+                # Remove claims from OTHER players on immune tiles
+                claims_by_tile[tile_key] = [
+                    (cpid, action) for cpid, action in claims_by_tile[tile_key]
+                    if cpid == pid  # only owner's claims survive
+                ]
+                game._log(f"Tile {tile_key} is immune to claims this round")
+
+    # Check for ignore_defense — collect affected tiles
+    ignore_defense_tiles: set[str] = set()
+    for pid in game.player_order:
+        ignore_defense_tiles.update(game.players[pid].turn_modifiers.ignore_defense_tiles)
+
+    # Track claim results for on_resolution effects
+    claim_results: dict[str, dict[str, bool]] = {}  # tile_key -> {pid -> succeeded}
+
     # Resolve claims: highest power wins, ties to defender
     for tile_key, claims in claims_by_tile.items():
         tile = game.grid.tiles.get(tile_key)
         if not tile:
             continue
 
-        # Calculate total power per player for this tile
+        if not claims:
+            continue
+
+        # Calculate total power per player for this tile using effect resolver
         power_by_player: dict[str, int] = {}
         for pid, action in claims:
-            power_by_player[pid] = power_by_player.get(pid, 0) + action.card.effective_power
+            player = game.players[pid]
+            power = calculate_effective_power(game, player, action.card, action)
+            power_by_player[pid] = power_by_player.get(pid, 0) + power
 
         # Add existing defense (owned tile: credited to owner; unowned tile with intrinsic
         # defense: modeled as a neutral blocker that real players must beat)
-        current_defense = tile.defense_power
+        # Skip defense if ignore_defense is active for this tile
+        if tile_key not in ignore_defense_tiles:
+            current_defense = tile.defense_power
+        else:
+            current_defense = tile.base_defense  # only base, not bonus from defense cards
         if tile.owner:
             power_by_player.setdefault(tile.owner, 0)
             power_by_player[tile.owner] += current_defense
@@ -505,6 +560,8 @@ def execute_reveal(game: GameState) -> GameState:
         if not real_contenders:
             # All attackers were beaten by intrinsic tile defense
             game._log(f"Tile {tile_key}: intrinsic defense held (def {current_defense})")
+            for pid, _ in claims:
+                claim_results.setdefault(tile_key, {})[pid] = False
             continue
 
         if len(real_contenders) == 1:
@@ -514,7 +571,13 @@ def execute_reveal(game: GameState) -> GameState:
         else:
             # Tie between attackers — nobody wins
             game._log(f"Tile {tile_key}: tie between attackers, no change")
+            for pid, _ in claims:
+                claim_results.setdefault(tile_key, {})[pid] = False
             continue
+
+        # Record results for all claimers
+        for pid, _ in claims:
+            claim_results.setdefault(tile_key, {})[pid] = (pid == winner_id)
 
         if winner_id != tile.owner:
             old_owner = tile.owner
@@ -524,6 +587,21 @@ def execute_reveal(game: GameState) -> GameState:
             game._log(f"{game.players[winner_id].name} claims tile {tile_key} (power {max_power})")
         else:
             game._log(f"{tile.owner and game.players[tile.owner].name} defends tile {tile_key}")
+
+    # Resolve on_resolution effects for claim cards
+    for tile_key, claims in claims_by_tile.items():
+        tile = game.grid.tiles.get(tile_key)
+        for pid, action in claims:
+            player = game.players[pid]
+            succeeded = claim_results.get(tile_key, {}).get(pid, False)
+            defender_id = tile.owner if tile and tile.owner != pid else None
+            # Resolve structured effects
+            if action.card.effects:
+                resolve_on_resolution_effects(
+                    game, player, action.card, action,
+                    claim_succeeded=succeeded,
+                    defender_id=defender_id,
+                )
 
     # Resolve non-claim actions (on_resolution effects)
     for pid, action in other_actions:
@@ -551,6 +629,10 @@ def execute_reveal(game: GameState) -> GameState:
             if target:
                 target.forced_discard_next_turn += card.forced_discard
                 game._log(f"{player.name} forces {target.name} to discard {card.forced_discard} next turn")
+
+        # Resolve structured on_resolution effects for non-claim cards
+        if card.effects:
+            resolve_on_resolution_effects(game, player, card, action)
 
         # Trash on use
         if card.trash_on_use:
@@ -583,6 +665,10 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
     if not player:
         return False, "Player not found"
 
+    # Check buy restriction (Blitz Rush)
+    if player.turn_modifiers.buy_locked:
+        return False, "Cannot purchase cards this round (buy restriction active)"
+
     if source == "upgrade":
         if player.resources < UPGRADE_CREDIT_COST:
             return False, f"Need {UPGRADE_CREDIT_COST} resources for upgrade credit"
@@ -599,10 +685,11 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 break
         if not target:
             return False, "Card not in archetype market"
-        if target.buy_cost is not None and player.resources < target.buy_cost:
-            return False, f"Need {target.buy_cost} resources"
-        if target.buy_cost is not None:
-            player.resources -= target.buy_cost
+        effective_cost = _apply_cost_reductions(player, target)
+        if effective_cost > 0 and player.resources < effective_cost:
+            return False, f"Need {effective_cost} resources"
+        if effective_cost > 0:
+            player.resources -= effective_cost
         player.archetype_market.remove(target)
         player.archetype_deck.remove(target)
         player.deck.add_to_discard([target])
@@ -613,17 +700,56 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         purchased = game.neutral_market.purchase(card_id)
         if not purchased:
             return False, "Card not available in neutral market"
-        if purchased.buy_cost is not None and player.resources < purchased.buy_cost:
+        effective_cost = _apply_cost_reductions(player, purchased)
+        if effective_cost > 0 and player.resources < effective_cost:
             # Put it back
             game.neutral_market.stacks.setdefault(card_id, []).insert(0, purchased)
-            return False, f"Need {purchased.buy_cost} resources"
-        if purchased.buy_cost is not None:
-            player.resources -= purchased.buy_cost
+            return False, f"Need {effective_cost} resources"
+        if effective_cost > 0:
+            player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
         game._log(f"{player.name} buys {purchased.name} from neutral market")
         return True, f"Bought {purchased.name}"
 
     return False, "Invalid source"
+
+
+def _apply_cost_reductions(player: Player, card: Card) -> int:
+    """Apply any active cost reductions to a card purchase. Returns effective cost."""
+    base_cost = card.buy_cost if card.buy_cost is not None else 0
+    discount = 0
+
+    reductions_to_remove = []
+    for i, reduction in enumerate(player.turn_modifiers.cost_reductions):
+        scope = reduction.get("scope", "any_one_card")
+        remaining = reduction.get("remaining", 1)
+
+        if remaining <= 0:
+            continue
+
+        applies = False
+        if scope == "any_one_card":
+            applies = True
+        elif scope == "next_defense" and card.card_type == CardType.DEFENSE:
+            applies = True
+
+        if applies:
+            amount = reduction.get("amount", 0)
+            if amount == 0:
+                # Free (cost becomes 0)
+                discount = base_cost
+            else:
+                discount += amount
+            reduction["remaining"] = remaining - 1
+            if reduction["remaining"] <= 0:
+                reductions_to_remove.append(i)
+            break  # Only one reduction per purchase
+
+    # Remove consumed reductions
+    for i in sorted(reductions_to_remove, reverse=True):
+        player.turn_modifiers.cost_reductions.pop(i)
+
+    return max(0, base_cost - discount)
 
 
 def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
@@ -671,6 +797,10 @@ def execute_end_of_turn(game: GameState) -> GameState:
         # Discard remaining hand
         player.deck.add_to_discard(player.hand)
         player.hand = []
+
+    # Note: turn_modifiers.reset_for_new_turn() is called at START of next turn
+    # so that multi-round effects (like Stronghold's 2-round immunity) persist
+    # across the end-of-turn boundary.
 
     # Rotate first player
     game.first_player_index = (game.first_player_index + 1) % len(game.player_order)

@@ -55,6 +55,9 @@ class PlayCardRequest(BaseModel):
     target_q: Optional[int] = None
     target_r: Optional[int] = None
     target_player_id: Optional[str] = None
+    discard_card_indices: Optional[list[int]] = None
+    trash_card_indices: Optional[list[int]] = None
+    extra_targets: Optional[list[list[int]]] = None
 
 
 class SubmitPlanRequest(BaseModel):
@@ -128,9 +131,16 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     if not game:
         raise HTTPException(404, "Game not found")
 
+    extra_targets = None
+    if req.extra_targets:
+        extra_targets = [(t[0], t[1]) for t in req.extra_targets if len(t) >= 2]
+
     success, msg = play_card(
         game, req.player_id, req.card_index,
         req.target_q, req.target_r, req.target_player_id,
+        discard_card_indices=req.discard_card_indices,
+        trash_card_indices=req.trash_card_indices,
+        extra_targets=extra_targets,
     )
     if not success:
         raise HTTPException(400, msg)
