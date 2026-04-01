@@ -458,7 +458,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
             game, player, card, action,
             discard_card_indices=discard_card_indices,
             trash_card_indices=trash_card_indices,
-            extra_targets=[tuple(t) for t in (extra_targets or [])],
+            extra_targets=[(t[0], t[1]) for t in (extra_targets or [])],
         )
 
     game._log(f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})",
