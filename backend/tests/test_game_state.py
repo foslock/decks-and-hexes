@@ -344,12 +344,18 @@ class TestRevealPhase:
                 break
 
         p0 = game.players["p0"]
-        # Find any claim card that can target an owned (occupied) tile
-        claim_entry = next(
-            (i, c) for i, c in enumerate(p0.hand)
-            if c.card_type == CardType.CLAIM and not c.unoccupied_only
+        # Inject a known claim card that can target occupied tiles, so the test
+        # is not sensitive to which cards happen to be drawn into hand.
+        claim_card = Card(
+            id="test_claim",
+            name="Test Claim",
+            archetype=Archetype.VANGUARD,
+            card_type=CardType.CLAIM,
+            power=1,
+            unoccupied_only=False,
         )
-        claim_idx, claim_card = claim_entry
+        p0.hand.insert(0, claim_card)
+        claim_idx = 0
 
         # Set defense equal to attacker power so it's a tie → defender wins
         target.defense_power = claim_card.effective_power

@@ -3,6 +3,7 @@ export interface HexTile {
   r: number;
   is_blocked: boolean;
   is_vp: boolean;
+  vp_value: number;  // 1 = standard, 2 = premium
   owner: string | null;
   defense_power: number;
   base_defense: number;

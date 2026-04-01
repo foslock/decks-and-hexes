@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface TooltipProps {
   content: string;
@@ -48,7 +49,7 @@ export default function Tooltip({ content, delay = 0, children }: TooltipProps) 
       >
         {children}
       </span>
-      {visible && (
+      {visible && createPortal(
         <div
           style={{
             position: 'fixed',
@@ -70,7 +71,8 @@ export default function Tooltip({ content, delay = 0, children }: TooltipProps) 
           }}
         >
           {content}
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
@@ -120,7 +122,7 @@ export function IrreversibleButton({
       >
         {children}
       </button>
-      {showWarning && (
+      {showWarning && createPortal(
         <div
           style={{
             position: 'fixed',
@@ -142,7 +144,8 @@ export function IrreversibleButton({
           }}
         >
           {message}
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );

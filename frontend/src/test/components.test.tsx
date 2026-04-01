@@ -62,7 +62,7 @@ describe('CardHand', () => {
   ];
 
   it('renders all cards', () => {
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText('Advance')).toBeInTheDocument();
     expect(screen.getByText('Gather')).toBeInTheDocument();
     expect(screen.getByText('Blitz')).toBeInTheDocument();
@@ -70,18 +70,18 @@ describe('CardHand', () => {
 
   it('calls onSelect when card clicked', async () => {
     const onSelect = vi.fn();
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={onSelect} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={onSelect} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     await userEvent.click(screen.getByText('Advance'));
     expect(onSelect).toHaveBeenCalledWith(0);
   });
 
   it('shows empty message when no cards', () => {
-    render(<WithSettings><CardHand cards={[]} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={[]} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText(/No cards in hand/)).toBeInTheDocument();
   });
 
   it('shows reduced opacity when disabled', () => {
-    const { container } = render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={true} /></WithSettings>);
+    const { container } = render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={true} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     const cardElements = container.querySelectorAll('[role="button"]');
     expect(cardElements.length).toBe(3);
     cardElements.forEach((el) => {
@@ -90,13 +90,13 @@ describe('CardHand', () => {
   });
 
   it('shows power in stats line', () => {
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText('Power 1')).toBeInTheDocument();
     expect(screen.getByText('Power 4')).toBeInTheDocument();
   });
 
   it('shows resource gain for engine cards', () => {
-    render(<WithSettings><CardHand cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText(/\+2 Resources/)).toBeInTheDocument();
   });
 });
