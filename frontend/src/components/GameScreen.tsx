@@ -1,6 +1,6 @@
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { GameState, Card } from '../types/game';
-import HexGrid from './HexGrid';
+import HexGrid, { type GridTransform } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand from './CardHand';
 import CardDetail from './CardDetail';
@@ -39,11 +39,19 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const animated = useAnimated();
   const [activePlayerIndex, setActivePlayerIndex] = useState(0);
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
-  const [selectedTile, setSelectedTile] = useState<string | null>(null);
+  const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
   const [showFullLog, setShowFullLog] = useState(false);
   const gridContainerRef = useRef<HTMLDivElement>(null);
+  const gridTransformRef = useRef<GridTransform | null>(null);
+
+  // Auto-dismiss error toast after 4 seconds
+  useEffect(() => {
+    if (!error) return;
+    const timer = setTimeout(() => setError(null), 4000);
+    return () => clearTimeout(timer);
+  }, [error]);
 
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
@@ -81,7 +89,6 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       const result = await api.playCard(gameState.id, activePlayerId, cardIndex, q, r);
       onStateUpdate(result.state);
       setSelectedCardIndex(null);
-      setSelectedTile(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -114,19 +121,35 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       return;
     }
 
-    // Targeting cards (claim/defense): convert to hex coords
+    // Targeting cards (claim/defense): convert screen → canvas → hex-local → axial
     const rect = gridContainerRef.current.getBoundingClientRect();
-    const centerX = rect.left + rect.width / 2;
-    const centerY = rect.top + rect.height / 2;
-    const relX = screenX - centerX;
-    const relY = screenY - centerY;
-    const { q, r } = pixelToAxial(relX, relY);
+    const canvasX = screenX - rect.left;
+    const canvasY = screenY - rect.top;
+    const transform = gridTransformRef.current;
+    if (!transform) return;
+    const localX = (canvasX - transform.offsetX) / transform.scale;
+    const localY = (canvasY - transform.offsetY) / transform.scale;
+    const { q, r } = pixelToAxial(localX, localY);
+
+    // Validate claim card restrictions
+    if (card.card_type === 'claim') {
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+      if (tile && !tile.owner && tile.base_defense > card.power) {
+        setError(`${card.name} (power ${card.power}) is too weak to capture this tile (defense ${tile.base_defense})`);
+        return;
+      }
+      if (tile && tile.owner && card.unoccupied_only) {
+        setError(`${card.name} can only target unoccupied tiles`);
+        return;
+      }
+    }
+
     playCardAtTile(cardIndex, q, r);
-  }, [activePlayer, playCardAtTile, playCardNoTarget]);
+  }, [activePlayer, gameState.grid, playCardAtTile, playCardNoTarget]);
 
   const handleTileClick = useCallback(async (q: number, r: number) => {
     if (phase !== 'plan' || !activePlayer || selectedCardIndex === null) {
-      setSelectedTile(`${q},${r}`);
       return;
     }
 
@@ -134,9 +157,22 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     if (!card) return;
 
     if (card.card_type === 'claim' || card.card_type === 'defense') {
+      // Validate claim card restrictions
+      if (card.card_type === 'claim') {
+        const tileKey = `${q},${r}`;
+        const tile = gameState.grid?.tiles[tileKey];
+        if (tile && !tile.owner && tile.base_defense > card.power) {
+          setError(`${card.name} (power ${card.power}) is too weak to capture this tile (defense ${tile.base_defense})`);
+          return;
+        }
+        if (tile && tile.owner && card.unoccupied_only) {
+          setError(`${card.name} can only target unoccupied tiles`);
+          return;
+        }
+      }
       await playCardAtTile(selectedCardIndex, q, r);
     }
-  }, [phase, activePlayer, selectedCardIndex, playCardAtTile]);
+  }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile]);
 
   const handlePlayEngine = useCallback(async () => {
     if (selectedCardIndex === null) return;
@@ -144,6 +180,18 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   }, [selectedCardIndex, playCardNoTarget]);
 
   const handleSubmitPlan = useCallback(async () => {
+    // Warn if player still has cards and unused actions (and hasn't hit the cap)
+    if (activePlayer) {
+      const hasCardsLeft = activePlayer.hand.length > 0;
+      const actionsLeft = activePlayer.actions_available - activePlayer.actions_used;
+      const atCap = activePlayer.actions_used >= 6;
+      if (hasCardsLeft && actionsLeft > 0 && !atCap) {
+        const ok = window.confirm(
+          `${activePlayer.name} still has ${activePlayer.hand.length} card(s) in hand and ${actionsLeft} action(s) remaining. Submit plan anyway?`
+        );
+        if (!ok) return;
+      }
+    }
     try {
       setError(null);
       const result = await api.submitPlan(gameState.id, activePlayerId);
@@ -156,7 +204,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate]);
+  }, [gameState, activePlayer, activePlayerId, activePlayerIndex, onStateUpdate]);
 
   const handleBuyArchetype = useCallback(async (cardId: string) => {
     try {
@@ -213,11 +261,50 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const handleSwitchPlayer = useCallback((index: number) => {
     setActivePlayerIndex(index);
     setSelectedCardIndex(null);
-    setSelectedTile(null);
     setError(null);
   }, []);
 
   const selectedCard = selectedCardIndex !== null ? activePlayer?.hand[selectedCardIndex] : null;
+
+  // Filter adjacent tiles to only those a given claim card can actually capture
+  const getValidClaimTiles = useCallback((card: Card | null | undefined): Set<string> => {
+    if (!card || card.card_type !== 'claim') return adjacentTiles;
+    const valid = new Set<string>();
+    const tiles = gameState.grid?.tiles;
+    if (!tiles) return valid;
+    for (const key of adjacentTiles) {
+      const tile = tiles[key];
+      // Exclude neutral tiles with base_defense higher than card power
+      if (tile && !tile.owner && tile.base_defense > card.power) continue;
+      // Exclude owned tiles for unoccupied_only cards (e.g. Explore)
+      if (tile && tile.owner && card.unoccupied_only) continue;
+      valid.add(key);
+    }
+    return valid;
+  }, [adjacentTiles, gameState.grid?.tiles]);
+
+  const playerInfo = useMemo(() => {
+    const info: Record<string, { name: string; archetype: string }> = {};
+    for (const [pid, p] of Object.entries(gameState.players)) {
+      info[pid] = { name: p.name, archetype: p.archetype };
+    }
+    return info;
+  }, [gameState.players]);
+
+  // Build planned action icons map for the active player
+  const plannedActions = useMemo(() => {
+    if (!activePlayer?.planned_actions) return undefined;
+    const map = new Map<string, { type: string; power: number }>();
+    for (const action of activePlayer.planned_actions) {
+      if (action.target_q != null && action.target_r != null) {
+        const key = `${action.target_q},${action.target_r}`;
+        const type = action.card.card_type;
+        const power = type === 'defense' ? action.card.defense_bonus : action.card.power;
+        map.set(key, { type, power });
+      }
+    }
+    return map.size > 0 ? map : undefined;
+  }, [activePlayer?.planned_actions]);
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#1a1a2e', color: '#fff' }}>
@@ -275,77 +362,140 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         <SettingsPanel />
       </div>
 
-      {/* Center: hex grid */}
+      {/* Center: hex grid + overlays */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div ref={gridContainerRef} style={{ flex: 1, position: 'relative' }}>
           {gameState.grid && (
             <HexGrid
               tiles={gameState.grid.tiles}
-              selectedTile={selectedTile}
               onTileClick={handleTileClick}
-              highlightTiles={phase === 'plan' && selectedCard?.card_type === 'claim' ? adjacentTiles : undefined}
+              highlightTiles={
+                phase === 'plan' && (
+                  selectedCard?.card_type === 'claim' ||
+                  (draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim')
+                ) ? getValidClaimTiles(
+                  selectedCard?.card_type === 'claim' ? selectedCard :
+                  draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] : null
+                ) : undefined
+              }
+              borderTiles={phase === 'plan' ? adjacentTiles : undefined}
+              playerInfo={playerInfo}
+              transformRef={gridTransformRef}
+              activePlayerId={phase === 'plan' ? activePlayerId : undefined}
+              plannedActions={phase === 'plan' ? plannedActions : undefined}
             />
           )}
-        </div>
 
-        {/* Bottom panel: hand + actions */}
-        <div style={{ padding: 12, borderTop: '1px solid #333', maxHeight: '35vh', overflowY: 'auto' }}>
-          {error && (
-            <div style={{
-              color: '#ff4a4a', fontSize: 13, marginBottom: 8,
-              padding: '4px 8px', background: '#ff4a4a22', borderRadius: 4,
-              transition: animated ? 'opacity 0.2s' : 'none',
-            }}>
-              {error}
-            </div>
-          )}
+          {/* Toasts — floating above the hand panel */}
+          <div style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, zIndex: 20, pointerEvents: 'none' }}>
+            {phase === 'plan' && activePlayer && !activePlayer.has_submitted_plan && (
+              <div style={{
+                fontSize: 12,
+                padding: '4px 14px',
+                background: '#ffffff11',
+                border: '1px solid #ffffff22',
+                borderRadius: 6,
+                color: '#888',
+                whiteSpace: 'nowrap',
+              }}>
+                {activePlayer.name}'s turn — drag a card onto the board, or select + click
+              </div>
+            )}
+            {error && (
+              <div style={{
+                fontSize: 13,
+                padding: '6px 16px',
+                background: '#ff4a4a22',
+                border: '1px solid #ff4a4a55',
+                borderRadius: 6,
+                color: '#ff4a4a',
+                whiteSpace: 'nowrap',
+              }}>
+                {error}
+              </div>
+            )}
+          </div>
 
-          {phase === 'plan' && activePlayer && (
-            <div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 13, color: '#aaa' }}>
-                  {activePlayer.name}'s turn — drag a card onto the board, or select + click
-                </span>
-                {selectedCard?.card_type === 'engine' && (
-                  <IrreversibleButton
-                    onClick={handlePlayEngine}
-                    tooltip="Playing a card uses an action and cannot be undone."
-                    style={{
-                      padding: '4px 12px',
-                      background: '#4a9eff',
-                      border: 'none',
-                      borderRadius: 4,
-                      color: '#fff',
-                      cursor: 'pointer',
-                      fontSize: 13,
-                    }}
-                  >
-                    Play {selectedCard.name}
-                  </IrreversibleButton>
-                )}
+          {/* Action buttons — floating bottom-right of board */}
+          <div style={{ position: 'absolute', bottom: 12, right: 12, display: 'flex', gap: 8, zIndex: 20 }}>
+            {phase === 'plan' && activePlayer && selectedCard?.card_type === 'engine' && (
+              <IrreversibleButton
+                onClick={handlePlayEngine}
+                tooltip="Playing a card uses an action and cannot be undone."
+                style={{
+                  padding: '6px 14px',
+                  background: '#4a9eff',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#fff',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                }}
+              >
+                Play {selectedCard.name}
+              </IrreversibleButton>
+            )}
+            {phase === 'plan' && activePlayer && (() => {
+              const hasCardsLeft = activePlayer.hand.length > 0;
+              const actionsLeft = activePlayer.actions_available - activePlayer.actions_used;
+              const atCap = activePlayer.actions_used >= 6;
+              const canStillPlay = hasCardsLeft && actionsLeft > 0 && !atCap;
+              return (
                 <IrreversibleButton
                   onClick={handleSubmitPlan}
-                  tooltip="Submitting locks your plan for this round. You cannot change it after."
+                  tooltip={canStillPlay
+                    ? "You still have cards and actions remaining. Are you sure?"
+                    : "Submitting locks your plan for this round. You cannot change it after."
+                  }
                   style={{
-                    marginLeft: 'auto',
                     padding: '6px 16px',
-                    background: '#4aff6a',
+                    background: canStillPlay ? '#ff8844' : '#2a9a3e',
                     border: 'none',
-                    borderRadius: 4,
-                    color: '#000',
+                    borderRadius: 6,
+                    color: '#fff',
                     fontWeight: 'bold',
                     cursor: 'pointer',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                   }}
                 >
-                  Submit Plan ✓
+                  Submit Plan{canStillPlay ? '' : ' ✓'}
                 </IrreversibleButton>
-              </div>
+              );
+            })()}
+            {phase === 'buy' && activePlayer && (
+              <IrreversibleButton
+                onClick={handleEndTurn}
+                tooltip="Ending the turn advances to the next round. Any unspent resources carry over."
+                style={{
+                  padding: '6px 16px',
+                  background: '#ff8844',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#fff',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                }}
+              >
+                End Turn →
+              </IrreversibleButton>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom panel: hand / market */}
+        <div style={{ padding: '8px 12px', borderTop: '1px solid #333', maxHeight: '30vh', overflowY: 'auto' }}>
+          {phase === 'plan' && activePlayer && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <CardHand
                 cards={activePlayer.hand}
                 selectedIndex={selectedCardIndex}
                 onSelect={setSelectedCardIndex}
                 onDragPlay={handleDragPlay}
                 onCardDetail={setDetailCard}
+                onDragStart={setDraggingCardIndex}
+                onDragEnd={() => setDraggingCardIndex(null)}
                 disabled={activePlayer.has_submitted_plan}
               />
             </div>
@@ -353,26 +503,8 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
           {phase === 'buy' && activePlayer && (
             <div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-                <span style={{ fontSize: 13, color: '#aaa' }}>
-                  {activePlayer.name}'s Buy Phase — 💰 {activePlayer.resources} resources
-                </span>
-                <IrreversibleButton
-                  onClick={handleEndTurn}
-                  tooltip="Ending the turn advances to the next round. Any unspent resources carry over."
-                  style={{
-                    marginLeft: 'auto',
-                    padding: '6px 16px',
-                    background: '#ff8844',
-                    border: 'none',
-                    borderRadius: 4,
-                    color: '#fff',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                  }}
-                >
-                  End Turn →
-                </IrreversibleButton>
+              <div style={{ fontSize: 12, color: '#666', marginBottom: 6, textAlign: 'center' }}>
+                {activePlayer.name}'s Buy Phase — 💰 {activePlayer.resources} resources
               </div>
               <MarketPanel
                 archetypeMarket={activePlayer.archetype_market}
@@ -389,7 +521,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           )}
 
           {phase === 'reveal' && (
-            <div style={{ color: '#aaa', fontSize: 14 }}>
+            <div style={{ color: '#aaa', fontSize: 14, textAlign: 'center' }}>
               Resolving claims and effects...
             </div>
           )}

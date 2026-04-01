@@ -122,6 +122,9 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     if "up to" in effect.lower() and "steps" in effect.lower():
         adjacency_required = False
 
+    # Unoccupied only (e.g. Explore can only claim neutral tiles)
+    unoccupied_only = bool(entry.get("unoccupied_only", False))
+
     # Starter flag
     starter = bool(entry.get("starter", False))
 
@@ -142,6 +145,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         draw_cards=draw_cards,
         defense_bonus=defense_bonus,
         adjacency_required=adjacency_required,
+        unoccupied_only=unoccupied_only,
         description=effect,
         copies=_safe_optional_int(entry.get("copies")),
     )

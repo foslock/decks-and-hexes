@@ -135,7 +135,7 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict(for_player_id=req.player_id)}
+    return {"message": msg, "state": game.to_dict()}
 
 
 @router.post("/games/{game_id}/submit-plan")
@@ -163,7 +163,7 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict(for_player_id=req.player_id)}
+    return {"message": msg, "state": game.to_dict()}
 
 
 @router.post("/games/{game_id}/reroll")
@@ -177,7 +177,7 @@ async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict(for_player_id=req.player_id)}
+    return {"message": msg, "state": game.to_dict()}
 
 
 @router.post("/games/{game_id}/end-buy")

@@ -34,6 +34,7 @@ class HexTile:
     is_vp: bool = False
     owner: Optional[str] = None  # player_id
     defense_power: int = 0
+    base_defense: int = 0  # intrinsic defense set at generation; defense resets to this on capture
     held_since_turn: Optional[int] = None  # track when ownership started
 
     @property
@@ -91,6 +92,7 @@ def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
         "is_vp": tile.is_vp,
         "owner": tile.owner,
         "defense_power": tile.defense_power,
+        "base_defense": tile.base_defense,
         "held_since_turn": tile.held_since_turn,
     }
 
@@ -134,15 +136,33 @@ def generate_hex_grid(size: GridSize, num_players: int, rng: Optional[random.Ran
     for tile in blocked_tiles:
         tile.is_blocked = True
 
-    # Place VP hexes - distributed evenly (not center-clustered)
+    # Place VP hexes - distributed evenly and balanced across player starting positions
     remaining = [
         t for t in grid.tiles.values()
         if not t.is_blocked and t.key not in reserved and t.key != "0,0"
     ]
     num_vp = config["vp_hexes"]
-    vp_tiles = _distribute_vp_hexes(remaining, num_vp, radius, rng)
+    vp_tiles = _distribute_vp_hexes(remaining, num_vp, radius, rng,
+                                    starting_clusters=starting_clusters)
     for tile in vp_tiles:
         tile.is_vp = True
+
+    # Set intrinsic tile defense based on proximity to VP hexes
+    VP_DEFENSE = 2
+    VP_ADJACENT_DEFENSE = 1
+    for tile in grid.tiles.values():
+        if tile.is_blocked:
+            continue
+        if tile.is_vp:
+            tile.base_defense = VP_DEFENSE
+            tile.defense_power = VP_DEFENSE
+        elif any(
+            grid.tiles.get(f"{nq},{nr}") is not None
+            and grid.tiles[f"{nq},{nr}"].is_vp
+            for nq, nr in tile.neighbors()
+        ):
+            tile.base_defense = VP_ADJACENT_DEFENSE
+            tile.defense_power = VP_ADJACENT_DEFENSE
 
     return grid
 
@@ -199,23 +219,48 @@ def _pick_starting_positions(
     return clusters
 
 
-def _distribute_vp_hexes(
+def _hex_distance(q1: float, r1: float, q2: float, r2: float) -> float:
+    """Axial hex distance between two points (supports float centroids)."""
+    s1 = -q1 - r1
+    s2 = -q2 - r2
+    return max(abs(q1 - q2), abs(r1 - r2), abs(s1 - s2))
+
+
+def _vp_fairness_score(
+    vp_tiles: list[HexTile],
+    starting_clusters: list[list[tuple[int, int]]],
+) -> float:
+    """Score a VP placement by how evenly VP tiles are distributed across players.
+
+    Returns max(avg_dist) - min(avg_dist) across players; lower is fairer.
+    Returns 0.0 if there are fewer than 2 players or no VP tiles.
+    """
+    if len(starting_clusters) < 2 or not vp_tiles:
+        return 0.0
+
+    avg_distances = []
+    for cluster in starting_clusters:
+        cx = sum(q for q, r in cluster) / len(cluster)
+        cr = sum(r for q, r in cluster) / len(cluster)
+        avg_dist = sum(
+            _hex_distance(cx, cr, t.q, t.r) for t in vp_tiles
+        ) / len(vp_tiles)
+        avg_distances.append(avg_dist)
+
+    return max(avg_distances) - min(avg_distances)
+
+
+def _single_vp_placement(
     eligible: list[HexTile], count: int, radius: int, rng: random.Random
 ) -> list[HexTile]:
-    """Distribute VP hexes evenly across the grid (not center-clustered).
-
-    Divides the grid into distance rings and distributes VP hexes
-    proportionally across rings.
-    """
+    """One random VP placement using ring-band distribution."""
     if count >= len(eligible):
-        return eligible
+        return list(eligible)
 
-    # Group tiles by distance from center into bands
     inner = [t for t in eligible if max(abs(t.q), abs(t.r), abs(t.s)) <= radius // 3]
     mid = [t for t in eligible if radius // 3 < max(abs(t.q), abs(t.r), abs(t.s)) <= 2 * radius // 3]
     outer = [t for t in eligible if max(abs(t.q), abs(t.r), abs(t.s)) > 2 * radius // 3]
 
-    # Distribute proportionally but favor mid and outer
     bands = [inner, mid, outer]
     weights = [0.2, 0.4, 0.4]
 
@@ -225,12 +270,12 @@ def _distribute_vp_hexes(
     for band, weight in zip(bands, weights):
         if not band or remaining_count <= 0:
             continue
-        band_count = min(round(count * weight), len(band), remaining_count)
-        rng.shuffle(band)
-        selected.extend(band[:band_count])
+        band_copy = list(band)
+        rng.shuffle(band_copy)
+        band_count = min(round(count * weight), len(band_copy), remaining_count)
+        selected.extend(band_copy[:band_count])
         remaining_count -= band_count
 
-    # Fill any remaining from all eligible
     if remaining_count > 0:
         used = {t.key for t in selected}
         extras = [t for t in eligible if t.key not in used]
@@ -238,3 +283,29 @@ def _distribute_vp_hexes(
         selected.extend(extras[:remaining_count])
 
     return selected[:count]
+
+
+def _distribute_vp_hexes(
+    eligible: list[HexTile],
+    count: int,
+    radius: int,
+    rng: random.Random,
+    starting_clusters: Optional[list[list[tuple[int, int]]]] = None,
+    attempts: int = 50,
+) -> list[HexTile]:
+    """Distribute VP hexes evenly across the grid with player-fairness scoring.
+
+    Runs `attempts` random ring-band placements and keeps the one with the
+    most balanced average distance from each player's starting cluster.
+    """
+    best: list[HexTile] = []
+    best_score = float("inf")
+
+    for _ in range(attempts):
+        placement = _single_vp_placement(eligible, count, radius, rng)
+        score = _vp_fairness_score(placement, starting_clusters or [])
+        if score < best_score:
+            best_score = score
+            best = placement
+
+    return best
