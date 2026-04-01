@@ -239,8 +239,7 @@ class TestPlanPhase:
         p0 = game.players["p0"]
         assert game.grid is not None
 
-        # Need a target with defense_power=0 so any second claim card (even power 0)
-        # reaches the stacking check rather than the defense check.
+        # Find a claim card + any adjacent unowned target
         idx1 = None
         target = None
         for i, c in enumerate(p0.hand):
@@ -248,7 +247,7 @@ class TestPlanPhase:
                 continue
             for ot in game.grid.get_player_tiles("p0"):
                 for adj in game.grid.get_adjacent(ot.q, ot.r):
-                    if adj.owner is None and adj.defense_power == 0:
+                    if adj.owner is None and adj.defense_power <= c.effective_power:
                         idx1 = i
                         target = adj
                         break
@@ -257,6 +256,9 @@ class TestPlanPhase:
             if target:
                 break
         assert idx1 is not None and target is not None
+
+        # Zero out defense so any second claim card (even power 0) reaches the stacking check
+        target.defense_power = 0
 
         ok1, _ = play_card(game, "p0", idx1, target.q, target.r)
         assert ok1
