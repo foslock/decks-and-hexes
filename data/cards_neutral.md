@@ -71,6 +71,10 @@ cards:
     effect_upgraded: "Gain 2 VP immediately. This card is trashed after use."
     trash_on_use: true
     note: "One of the few cards that directly awards VP. Limited copies make buying multiples a real investment."
+    effects:
+      - type: gain_vp
+        value: 1
+        timing: immediate
 
   - id: neutral_sabotage
     name: Sabotage
@@ -95,6 +99,10 @@ cards:
     effect: "You and one chosen opponent cannot contest each other's tiles this round. Neither player may play Claim cards targeting the other's tiles."
     effect_upgraded: "You and up to two chosen opponents cannot contest each other's tiles this round."
     trash_on_use: false
+    effects:
+      - type: truce
+        timing: immediate
+        target: chosen_player
 
   - id: neutral_road_builder
     name: Road Builder
@@ -107,6 +115,9 @@ cards:
     effect: "Treat two of your non-adjacent tile groups as adjacent to each other this round for purposes of Claim card targeting."
     effect_upgraded: "Treat all of your tile groups as fully adjacent to each other this round for purposes of Claim card targeting."
     trash_on_use: false
+    effects:
+      - type: adjacency_bridge
+        timing: immediate
 
   - id: neutral_prospector
     name: Prospector
@@ -131,6 +142,10 @@ cards:
     effect: "Look at the top 3 cards of any one archetype deck (including your own). Reorder them freely."
     effect_upgraded: "Look at the top 5 cards of any one archetype deck. Reorder them freely."
     trash_on_use: false
+    effects:
+      - type: deck_peek
+        value: 3
+        timing: immediate
 
   - id: neutral_militia
     name: Militia
@@ -143,6 +158,12 @@ cards:
     effect: "Claim: Power 2. If you own 3 or more tiles adjacent to the target tile, power is 4 instead."
     effect_upgraded: "Claim: Power 2. If you own 3 or more tiles adjacent to the target tile, power is 5 instead."
     trash_on_use: false
+    effects:
+      - type: power_modifier
+        value: 2
+        timing: on_resolution
+        condition: if_adjacent_owned_gte
+        condition_threshold: 3
 
   - id: neutral_eminent_domain
     name: Eminent Domain
@@ -180,6 +201,11 @@ cards:
     effect_upgraded: "Engine: Gain 2 actions back. All other active players also gain 2 actions this turn."
     trash_on_use: false
     note: "The shared action gain creates diplomatic tension — helping opponents may be worth the tempo."
+    effects:
+      - type: grant_actions
+        value: 1
+        timing: immediate
+        target: all_others
 
   - id: neutral_war_bonds
     name: War Bonds

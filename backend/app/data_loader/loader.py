@@ -12,6 +12,7 @@ from typing import Any, Optional
 import yaml
 
 from app.game_engine.cards import Archetype, Card, CardType, Timing
+from app.game_engine.effects import parse_effect
 
 
 DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
@@ -128,6 +129,16 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     # Starter flag
     starter = bool(entry.get("starter", False))
 
+    # Parse structured effects list from YAML
+    effects_data = entry.get("effects", [])
+    effects = []
+    if isinstance(effects_data, list):
+        for eff_entry in effects_data:
+            if isinstance(eff_entry, dict):
+                eff = parse_effect(eff_entry)
+                if eff is not None:
+                    effects.append(eff)
+
     card = Card(
         id=card_id,
         name=name,
@@ -148,6 +159,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         unoccupied_only=unoccupied_only,
         description=effect,
         copies=_safe_optional_int(entry.get("copies")),
+        effects=effects,
     )
 
     return card
