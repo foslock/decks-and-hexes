@@ -62,6 +62,7 @@ export function makeTile(q: number, r: number, overrides: Partial<HexTile> = {})
     is_vp: false,
     owner: null,
     defense_power: 0,
+    base_defense: 0,
     held_since_turn: null,
     ...overrides,
   };

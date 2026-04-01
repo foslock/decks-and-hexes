@@ -151,20 +151,24 @@ class TestPlanPhase:
     def test_play_claim_card(self, small_2p_game: GameState) -> None:
         game = small_2p_game
         p0 = game.players["p0"]
-        # Find a claim card in hand
-        claim_idx = next(i for i, c in enumerate(p0.hand) if c.card_type == CardType.CLAIM)
-        # Find an adjacent unowned tile
         assert game.grid is not None
-        owned = game.grid.get_player_tiles("p0")
+        # Find a claim card + compatible adjacent unowned tile (defense <= card power)
+        claim_idx = None
         target = None
-        for ot in owned:
-            for adj in game.grid.get_adjacent(ot.q, ot.r):
-                if adj.owner is None:
-                    target = adj
+        for i, c in enumerate(p0.hand):
+            if c.card_type != CardType.CLAIM:
+                continue
+            for ot in game.grid.get_player_tiles("p0"):
+                for adj in game.grid.get_adjacent(ot.q, ot.r):
+                    if adj.owner is None and adj.defense_power <= c.effective_power:
+                        claim_idx = i
+                        target = adj
+                        break
+                if target:
                     break
             if target:
                 break
-        assert target is not None
+        assert claim_idx is not None and target is not None, "No playable claim card + target found"
 
         hand_before = len(p0.hand)
         ok, msg = play_card(game, "p0", claim_idx, target.q, target.r)
@@ -235,20 +239,24 @@ class TestPlanPhase:
         p0 = game.players["p0"]
         assert game.grid is not None
 
-        # Find target tile
-        owned = game.grid.get_player_tiles("p0")
+        # Find a claim card + compatible target (defense <= card power)
+        idx1 = None
         target = None
-        for ot in owned:
-            for adj in game.grid.get_adjacent(ot.q, ot.r):
-                if adj.owner is None:
-                    target = adj
+        for i, c in enumerate(p0.hand):
+            if c.card_type != CardType.CLAIM:
+                continue
+            for ot in game.grid.get_player_tiles("p0"):
+                for adj in game.grid.get_adjacent(ot.q, ot.r):
+                    if adj.owner is None and adj.defense_power <= c.effective_power:
+                        idx1 = i
+                        target = adj
+                        break
+                if target:
                     break
             if target:
                 break
-        assert target is not None
+        assert idx1 is not None and target is not None
 
-        # Play first claim
-        idx1 = next(i for i, c in enumerate(p0.hand) if c.card_type == CardType.CLAIM)
         ok1, _ = play_card(game, "p0", idx1, target.q, target.r)
         assert ok1
 
@@ -285,19 +293,24 @@ class TestRevealPhase:
         game = small_2p_game
         assert game.grid is not None
 
-        # p0 claims an empty adjacent tile
+        # p0 claims an empty adjacent tile — pair card with a target it can overcome
         p0 = game.players["p0"]
-        claim_idx = next(i for i, c in enumerate(p0.hand) if c.card_type == CardType.CLAIM)
-        owned = game.grid.get_player_tiles("p0")
+        claim_idx = None
         target = None
-        for ot in owned:
-            for adj in game.grid.get_adjacent(ot.q, ot.r):
-                if adj.owner is None:
-                    target = adj
+        for i, c in enumerate(p0.hand):
+            if c.card_type != CardType.CLAIM:
+                continue
+            for ot in game.grid.get_player_tiles("p0"):
+                for adj in game.grid.get_adjacent(ot.q, ot.r):
+                    if adj.owner is None and adj.defense_power <= c.effective_power:
+                        claim_idx = i
+                        target = adj
+                        break
+                if target:
                     break
             if target:
                 break
-        assert target is not None
+        assert claim_idx is not None and target is not None
         play_card(game, "p0", claim_idx, target.q, target.r)
 
         # Both submit
