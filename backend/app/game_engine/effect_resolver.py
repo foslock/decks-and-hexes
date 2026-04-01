@@ -112,7 +112,7 @@ def calculate_effective_power(
 
         if effect.condition == ConditionType.CARDS_IN_HAND:
             # Numbers Game: power = hand size (replaces base power)
-            return len(player.hand) + effect.value
+            return int(len(player.hand) + effect.value)
 
         if effect.condition == ConditionType.IF_ADJACENT_OWNED_GTE:
             if effect.metadata.get("per_tile"):
@@ -204,8 +204,8 @@ def check_condition(
             for eff in card.effects:
                 if (eff.type == EffectType.POWER_MODIFIER
                         and eff.condition == ConditionType.IF_ADJACENT_OWNED_GTE):
-                    return owned_adj >= eff.condition_threshold
-            return owned_adj >= 1
+                    return bool(owned_adj >= eff.condition_threshold)
+            return bool(owned_adj >= 1)
         return False
 
     if condition == ConditionType.CARDS_IN_HAND:
@@ -396,14 +396,14 @@ def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
         ctx.game._log(f"{ctx.player.name} grants {effect.value} action(s) to all other players",
                       actor=ctx.player.id)
     elif effect.target == "chosen_player" and ctx.action.target_player_id:
-        other = ctx.game.players.get(ctx.action.target_player_id)
-        if other:
-            other.actions_available = min(
-                other.actions_available + effect.value,
+        other_player = ctx.game.players.get(ctx.action.target_player_id)
+        if other_player:
+            other_player.actions_available = min(
+                other_player.actions_available + effect.value,
                 ACTION_HARD_CAP,
             )
             ctx.game._log(
-                f"{ctx.player.name} grants {effect.value} action(s) to {other.name}",
+                f"{ctx.player.name} grants {effect.value} action(s) to {other_player.name}",
                 actor=ctx.player.id)
 
 
