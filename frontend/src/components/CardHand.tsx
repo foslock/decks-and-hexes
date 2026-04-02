@@ -908,7 +908,7 @@ export default function CardHand({
             let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : 'none';
             // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
-            let cardOpacity: number = isDiscardingAll ? 0 : disabled ? 0.5 : isBeingDragged ? 0.3 : 1;
+            let cardOpacity: number = isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';
@@ -982,6 +982,15 @@ export default function CardHand({
                 <div style={{ fontSize: 9, color: '#aaa', lineHeight: 1.3 }}>
                   <CardStats card={card} />
                 </div>
+                <div style={{
+                  position: 'absolute',
+                  inset: 0,
+                  background: 'rgba(10, 10, 20, 0.55)',
+                  borderRadius: 'inherit',
+                  pointerEvents: 'none',
+                  opacity: disabled && !isDiscardingAll ? 1 : 0,
+                  transition: animated ? 'opacity 0.25s ease' : 'none',
+                }} />
               </div>
             );
           })}

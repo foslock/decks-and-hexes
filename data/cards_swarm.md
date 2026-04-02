@@ -66,10 +66,13 @@ cards:
     name_upgraded: Swarm Tactics+
     type: Engine
     buy_cost: 1
-    action_return: 2
+    action_return: 1
     power: 0
-    effect: "Engine: Draw 2 cards immediately. Gain 2 actions back."
-    effect_upgraded: "Engine: Draw 3 cards immediately. Gain 2 actions back."
+    draw_cards: 1
+    upgraded_draw_cards: 2
+    upgraded_action_return: 1
+    effect: "Engine: Draw 1 card immediately. Gain 1 action back (↺)."
+    effect_upgraded: "Engine: Draw 2 cards immediately. Gain 1 action back (↺)."
     secondary_effect: null
     secondary_timing: null
 
@@ -236,3 +239,39 @@ cards:
     effects:
       - type: buy_restriction
         timing: immediate
+
+  - id: swarm_territorial_dominance
+    name: Territorial Dominance
+    name_upgraded: Territorial Dominance+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Engine: Gain VP equal to the number of tiles you control divided by 5 (rounded down). Trash this card."
+    effect_upgraded: "Engine: Gain VP equal to the number of tiles you control divided by 4 (rounded down). Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: vp_from_tiles
+        timing: immediate
+        metadata: {divisor: 5, upgraded_divisor: 4}
+
+  - id: swarm_scorched_earth
+    name: Scorched Earth
+    name_upgraded: Scorched Earth+
+    type: Engine
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Engine: Sacrifice any number of tiles you own (not VP hexes). Gain 1 VP per 3 tiles sacrificed. Trash this card."
+    effect_upgraded: "Engine: Sacrifice any number of tiles you own (not VP hexes). Gain 1 VP per 2 tiles sacrificed. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: vp_from_tile_sacrifice
+        timing: immediate
+        metadata: {tiles_per_vp: 3, upgraded_tiles_per_vp: 2}

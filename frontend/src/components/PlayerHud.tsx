@@ -17,12 +17,12 @@ const ARCHETYPE_ICONS: Record<string, string> = {
 };
 
 const PLAYER_COLORS: Record<string, string> = {
-  player_0: '#4a9eff',
-  player_1: '#ff4a4a',
-  player_2: '#4aff6a',
-  player_3: '#ffaa4a',
-  player_4: '#aa4aff',
-  player_5: '#ff4aaa',
+  player_0: '#2a6ecc',
+  player_1: '#cc2a2a',
+  player_2: '#2aaa4a',
+  player_3: '#cc7a2a',
+  player_4: '#7a2acc',
+  player_5: '#cc2a7a',
 };
 
 function getStatus(player: Player, phase: string): { label: string; color: string } {

@@ -10,6 +10,7 @@ from app.game_engine.cards import (
     ACTION_HARD_CAP,
     ARCHETYPE_SLOTS,
     HAND_SIZE,
+    STARTER_DECK_COMPOSITION,
     Archetype,
     Card,
     CardType,
@@ -127,35 +128,59 @@ class TestDeck:
 
 
 class TestStartingDecks:
-    def test_vanguard_starting_deck(self, card_registry: dict[str, Card]) -> None:
-        deck = build_starting_deck(Archetype.VANGUARD, card_registry)
-        assert deck.total_cards == 8  # 2 Blitz + 4 Explore + 2 Gather
-
-    def test_swarm_starting_deck(self, card_registry: dict[str, Card]) -> None:
-        deck = build_starting_deck(Archetype.SWARM, card_registry)
-        assert deck.total_cards == 10  # 2 Scout + 1 Swarm Tactics + 5 Explore + 2 Gather
-
-    def test_fortress_starting_deck(self, card_registry: dict[str, Card]) -> None:
-        deck = build_starting_deck(Archetype.FORTRESS, card_registry)
-        assert deck.total_cards == 6  # 1 Garrison + 1 Fortify + 2 Explore + 2 Gather
+    def test_all_archetypes_start_with_10_cards(self, card_registry: dict[str, Card]) -> None:
+        """All archetypes start with 10 cards."""
+        for archetype in [Archetype.VANGUARD, Archetype.SWARM, Archetype.FORTRESS]:
+            deck = build_starting_deck(archetype, card_registry)
+            assert deck.total_cards == 10, f"{archetype.value} has {deck.total_cards} cards"
 
     def test_starting_deck_has_correct_hand_size_ratio(self, card_registry: dict[str, Card]) -> None:
-        """Starting decks should be 2x hand size."""
+        """Starting decks should be 2x hand size (10 cards, hand size 5)."""
         for archetype in [Archetype.VANGUARD, Archetype.SWARM, Archetype.FORTRESS]:
             deck = build_starting_deck(archetype, card_registry)
             assert deck.total_cards == 2 * HAND_SIZE[archetype]
 
+    def test_vanguard_starter_composition(self, card_registry: dict[str, Card]) -> None:
+        """Vanguard: 4× Explore, 4× Gather, 2× War Chest."""
+        deck = build_starting_deck(Archetype.VANGUARD, card_registry)
+        war_chests = [c for c in deck.cards if "war_chest" in c.id]
+        explores = [c for c in deck.cards if "explore" in c.id]
+        gathers = [c for c in deck.cards if "gather" in c.id]
+        assert len(war_chests) == 2
+        assert len(explores) == 4
+        assert len(gathers) == 4
+
+    def test_swarm_starter_composition(self, card_registry: dict[str, Card]) -> None:
+        """Swarm: 5× Explore, 3× Gather, 2× Scout."""
+        deck = build_starting_deck(Archetype.SWARM, card_registry)
+        scouts = [c for c in deck.cards if "scout" in c.id]
+        explores = [c for c in deck.cards if "explore" in c.id]
+        gathers = [c for c in deck.cards if "gather" in c.id]
+        assert len(scouts) == 2
+        assert len(explores) == 5
+        assert len(gathers) == 3
+
+    def test_fortress_starter_composition(self, card_registry: dict[str, Card]) -> None:
+        """Fortress: 3× Explore, 5× Gather, 2× Bunker."""
+        deck = build_starting_deck(Archetype.FORTRESS, card_registry)
+        bunkers = [c for c in deck.cards if "bunker" in c.id]
+        explores = [c for c in deck.cards if "explore" in c.id]
+        gathers = [c for c in deck.cards if "gather" in c.id]
+        assert len(bunkers) == 2
+        assert len(explores) == 3
+        assert len(gathers) == 5
+
 
 class TestArchetypeConstants:
     def test_action_slots(self) -> None:
-        assert ARCHETYPE_SLOTS[Archetype.VANGUARD] == 4
-        assert ARCHETYPE_SLOTS[Archetype.SWARM] == 4
+        assert ARCHETYPE_SLOTS[Archetype.VANGUARD] == 3
+        assert ARCHETYPE_SLOTS[Archetype.SWARM] == 3
         assert ARCHETYPE_SLOTS[Archetype.FORTRESS] == 3
 
     def test_hand_sizes(self) -> None:
-        assert HAND_SIZE[Archetype.VANGUARD] == 4
+        assert HAND_SIZE[Archetype.VANGUARD] == 5
         assert HAND_SIZE[Archetype.SWARM] == 5
-        assert HAND_SIZE[Archetype.FORTRESS] == 3
+        assert HAND_SIZE[Archetype.FORTRESS] == 5
 
     def test_action_hard_cap(self) -> None:
         assert ACTION_HARD_CAP == 6

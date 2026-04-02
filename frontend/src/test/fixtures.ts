@@ -21,6 +21,7 @@ export function makeCard(overrides: Partial<Card> = {}): Card {
     claim_range: 1,
     unoccupied_only: false,
     multi_target_count: 0,
+    defense_target_count: 1,
     flood: false,
     target_own_tile: false,
     description: 'Test card',
@@ -58,6 +59,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     planned_actions: [],
     has_submitted_plan: false,
     has_ended_turn: false,
+    trash: [],
     ...overrides,
   };
 }

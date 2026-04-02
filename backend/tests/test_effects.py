@@ -159,12 +159,11 @@ class TestCardsLoadEffects:
         assert discard_effects[0].requires_choice is True
         assert discard_effects[0].value == 1
 
-    def test_land_grant_has_vp_effect(self, card_registry):
+    def test_land_grant_is_passive_vp(self, card_registry):
         card = card_registry.get("neutral_land_grant")
         assert card is not None
-        vp_effects = [e for e in card.effects if e.type == EffectType.GAIN_VP]
-        assert len(vp_effects) == 1
-        assert vp_effects[0].value == 1
+        assert card.unplayable is True
+        assert card.passive_vp == 1
 
     def test_iron_wall_has_immunity_effect(self, card_registry):
         card = card_registry.get("fortress_iron_wall")
@@ -336,18 +335,17 @@ class TestSelfTrash:
 
 
 class TestVPGain:
-    def test_land_grant_awards_vp(self, small_2p_game, card_registry):
-        """Land Grant: gain 1 VP immediately, card is trashed."""
+    def test_land_grant_unplayable(self, small_2p_game, card_registry):
+        """Land Grant: cannot be played from hand."""
         game = small_2p_game
         player = game.players["p0"]
 
         land_grant = _copy_card(card_registry["neutral_land_grant"], "test_lg")
         player.hand = [land_grant] + player.hand[1:]
-        initial_vp = player.vp
 
         success, msg = play_card(game, "p0", 0)
-        assert success, msg
-        assert player.vp == initial_vp + 1
+        assert not success
+        assert "cannot be played" in msg
 
 
 # ── Buy Restriction Tests ─────────────────────────────────────────

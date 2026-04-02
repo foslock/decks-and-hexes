@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import type { GameState, Card, ResolutionStep } from '../types/game';
-import HexGrid, { type GridTransform, type PlannedActionIcon } from './HexGrid';
+import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, PLAYER_COLORS } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardDetail from './CardDetail';
@@ -51,6 +51,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dragHintHidden, setDragHintHidden] = useState(false);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
   const [showFullLog, setShowFullLog] = useState(false);
   const [showDeckViewer, setShowDeckViewer] = useState(false);
@@ -68,6 +69,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [surgePrimaryTarget, setSurgePrimaryTarget] = useState<[number, number] | null>(null);
   // Phase banner state
   const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
+  const [bannerKey, setBannerKey] = useState(0);
   const [interactionBlocked, setInteractionBlocked] = useState(false);
   const prevPhaseRef = useRef<string>(gameState.current_phase);
   // Resolve animation state
@@ -81,6 +83,14 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridTransformRef = useRef<GridTransform | null>(null);
   const tileClickedRef = useRef(false);
+  // Chevron reveal state (resolve phase pre-animation)
+  const [chevronRevealPhase, setChevronRevealPhase] = useState(false);
+  const [chevronAlpha, setChevronAlpha] = useState(0);
+  // Chevron fade-out during resolution (per-step)
+  const [resolvedUpToStep, setResolvedUpToStep] = useState(-1);
+  const [currentStepFade, setCurrentStepFade] = useState(1);
+  // Cache resolve chevron sources so they don't shift as tiles change owners
+  const resolveChevronCacheRef = useRef<{ targetQ: number; targetR: number; sourceQ: number; sourceR: number; color: number; stepIndex: number }[]>([]);
 
   // Auto-dismiss error toast after 4 seconds
   useEffect(() => {
@@ -93,6 +103,13 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
 
+  // Auto-dismiss drag hint after 2 seconds, reset on player/phase change
+  useEffect(() => {
+    setDragHintHidden(false);
+    const timer = setTimeout(() => setDragHintHidden(true), 2000);
+    return () => clearTimeout(timer);
+  }, [activePlayerId, phase]);
+
 
   // The state to feed to HexGrid during resolve animations (shows incremental tile changes)
   const displayState = resolveDisplayState ?? gameState;
@@ -104,13 +121,68 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     if (prev === phase) return;
     // Don't show banner if currently resolving (resolve has its own banner flow)
     if (resolving) return;
+    // Don't trigger if a banner is already active (e.g. reveal→buy chain)
+    if (phaseBanner) return;
     // Only show banners for main phases, and skip if animations are off
     const bannerPhases = ['plan', 'buy'];
     if (bannerPhases.includes(phase) && !animationOff) {
       setPhaseBanner(phase);
       setInteractionBlocked(true);
     }
-  }, [phase, animationOff, resolving]);
+  }, [phase, animationOff, resolving, phaseBanner]);
+
+  // Chevron reveal animation: fade in all claim chevrons before resolve overlay
+  useEffect(() => {
+    if (!chevronRevealPhase) return;
+    const duration = animationMode === 'normal' ? 1500
+      : animationMode === 'simplified' ? 500 : 0;
+
+    if (duration === 0) {
+      setChevronAlpha(1);
+      setChevronRevealPhase(false);
+      return;
+    }
+
+    const startTime = performance.now();
+    const intervalId = setInterval(() => {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // Ease-out for smooth fade-in
+      const eased = 1 - Math.pow(1 - progress, 2);
+      setChevronAlpha(eased);
+
+      if (progress >= 1) {
+        clearInterval(intervalId);
+        // Brief pause at full visibility, then proceed to resolve animation
+        setTimeout(() => setChevronRevealPhase(false), 300);
+      }
+    }, 50);
+
+    return () => clearInterval(intervalId);
+  }, [chevronRevealPhase, animationMode]);
+
+  // Chevron fade-out during resolution step animation
+  useEffect(() => {
+    if (resolvedUpToStep < 0) return;
+    const duration = animationMode === 'normal' ? 1000
+      : animationMode === 'simplified' ? 400 : 0;
+
+    if (duration === 0) {
+      setCurrentStepFade(0);
+      return;
+    }
+
+    const startTime = performance.now();
+    setCurrentStepFade(1);
+    const intervalId = setInterval(() => {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      setCurrentStepFade(1 - progress);
+      if (progress >= 1) clearInterval(intervalId);
+    }, 50);
+
+    return () => clearInterval(intervalId);
+  }, [resolvedUpToStep, animationMode]);
 
   // Keep grid rect up to date for resolve overlay positioning
   useEffect(() => {
@@ -223,6 +295,16 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     const localY = (canvasY - transform.offsetY) / transform.scale;
     const { q, r } = pixelToAxial(localX, localY);
 
+    // Validate defense card restrictions — must target own tile
+    if (card.card_type === 'defense') {
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+      if (tile && tile.owner !== activePlayerId) {
+        setError(`${card.name} must target a tile you own`);
+        return;
+      }
+    }
+
     // Validate claim card restrictions
     if (card.card_type === 'claim' && !card.target_own_tile) {
       const tileKey = `${q},${r}`;
@@ -246,6 +328,15 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       return;
     }
 
+    // Multi-tile defense card (Bulwark, etc.): enter multi-target selection mode
+    if (card.card_type === 'defense' && (card.defense_target_count ?? 1) > 1) {
+      setSurgeCardIndex(cardIndex);
+      setSurgePrimaryTarget([q, r]);
+      setSurgeTargets([]);
+      setSelectedCardIndex(cardIndex);
+      return;
+    }
+
     playCardAtTile(cardIndex, q, r);
   }, [activePlayer, gameState.grid, playCardAtTile, playCardNoTarget]);
 
@@ -253,17 +344,30 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     tileClickedRef.current = true;
     if (phase !== 'plan' || !activePlayer) return;
 
-    // Surge multi-target mode: adding extra targets
+    // Multi-target mode (Surge or multi-tile Defense): adding extra targets
     if (surgeCardIndex !== null && surgePrimaryTarget) {
       const tileKey = `${q},${r}`;
       // Don't allow duplicate targets or the primary target
       if (surgeTargets.some(([tq, tr]) => tq === q && tr === r)) return;
       if (surgePrimaryTarget[0] === q && surgePrimaryTarget[1] === r) return;
-      // Validate tile is a valid claim target
+
+      const surgeCard = activePlayer.hand[surgeCardIndex];
+      const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
+
       const tile = gameState.grid?.tiles[tileKey];
-      if (!tile || tile.is_blocked || tile.owner === activePlayerId) return;
-      const maxExtra = activePlayer.hand[surgeCardIndex]?.multi_target_count ?? 0;
-      if (surgeTargets.length >= maxExtra) return;
+      if (!tile || tile.is_blocked) return;
+
+      if (isDefenseMulti) {
+        // Defense multi-target: must select own tiles
+        if (tile.owner !== activePlayerId) return;
+        const maxExtra = (surgeCard?.defense_target_count ?? 1) - 1;
+        if (surgeTargets.length >= maxExtra) return;
+      } else {
+        // Claim multi-target (Surge): must select non-own tiles
+        if (tile.owner === activePlayerId) return;
+        const maxExtra = surgeCard?.multi_target_count ?? 0;
+        if (surgeTargets.length >= maxExtra) return;
+      }
       setSurgeTargets(prev => [...prev, [q, r]]);
       return;
     }
@@ -274,10 +378,19 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     if (!card) return;
 
     if (card.card_type === 'claim' || card.card_type === 'defense') {
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+
+      // Validate defense card restrictions — must target own tile
+      if (card.card_type === 'defense') {
+        if (tile && tile.owner !== activePlayerId) {
+          setError(`${card.name} must target a tile you own`);
+          return;
+        }
+      }
+
       // Validate claim card restrictions
       if (card.card_type === 'claim') {
-        const tileKey = `${q},${r}`;
-        const tile = gameState.grid?.tiles[tileKey];
         if (!card.target_own_tile) {
           if (tile && !tile.owner && tile.base_defense > card.power) {
             setError(`${card.name} (power ${card.power}) is too weak to capture this tile (defense ${tile.base_defense})`);
@@ -297,6 +410,15 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           return;
         }
       }
+
+      // Multi-tile defense card: enter multi-target selection mode
+      if (card.card_type === 'defense' && (card.defense_target_count ?? 1) > 1) {
+        setSurgeCardIndex(selectedCardIndex);
+        setSurgePrimaryTarget([q, r]);
+        setSurgeTargets([]);
+        return;
+      }
+
       await playCardAtTile(selectedCardIndex, q, r);
     }
   }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile, surgeCardIndex, surgePrimaryTarget, surgeTargets, activePlayerId]);
@@ -348,8 +470,32 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           setResolving(true);
           setInteractionBlocked(true);
           setPhaseBanner('reveal');
+          // Pre-compute chevron sources using pre-resolve tile state (before ownership changes)
+          const preResolveTiles = gameState.grid.tiles;
+          const cachedChevrons: typeof resolveChevronCacheRef.current = [];
+          for (let i = 0; i < steps.length; i++) {
+            const step = steps[i];
+            for (const claimant of step.claimants) {
+              const color = PLAYER_COLORS[claimant.player_id] ?? 0xffffff;
+              const source = findClosestOwnedTile(step.q, step.r, preResolveTiles, claimant.player_id);
+              if (!source) continue;
+              cachedChevrons.push({
+                targetQ: step.q, targetR: step.r,
+                sourceQ: source.q, sourceR: source.r,
+                color, stepIndex: i,
+              });
+            }
+          }
+          resolveChevronCacheRef.current = cachedChevrons;
+          // Start chevron reveal animation (chevrons fade in before resolve overlay)
+          setChevronAlpha(0);
+          setChevronRevealPhase(true);
+        } else if (!animationOff) {
+          // No claim steps but animations on — show reveal banner, then transition to buy
+          setInteractionBlocked(true);
+          setPhaseBanner('reveal');
         } else {
-          // No claim steps or animations off — apply final state immediately
+          // Animations off — apply final state immediately
           onStateUpdate(result.state);
           resolveFinishedStateRef.current = null;
           setActivePlayerIndex(0);
@@ -451,6 +597,22 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
     const bannerPhase = phaseBanner;
+
+    if (bannerPhase === 'reveal' && !resolving) {
+      // Reveal banner finished but no resolution steps to animate —
+      // apply the held-back state and immediately show the buy banner.
+      if (resolveFinishedStateRef.current) {
+        onStateUpdate(resolveFinishedStateRef.current);
+        resolveFinishedStateRef.current = null;
+      }
+      setActivePlayerIndex(0);
+      // Switch directly to buy banner (bump key to force remount)
+      setPhaseBanner('buy');
+      setBannerKey(k => k + 1);
+      // Keep interactionBlocked = true through the buy banner
+      return;
+    }
+
     setPhaseBanner(null);
     // If resolving, don't unblock interactions yet — resolve overlay will do that
     if (!resolving) {
@@ -460,7 +622,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         setShowShopOverlay(true);
       }
     }
-  }, [resolving, phaseBanner]);
+  }, [resolving, phaseBanner, onStateUpdate]);
 
   // Phase banner midpoint — start drawing cards if it's start_of_turn
   const handleBannerMidpoint = useCallback(() => {
@@ -473,6 +635,9 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     setResolving(false);
     setResolutionSteps([]);
     setResolveDisplayState(null);
+    setResolvedUpToStep(-1);
+    setCurrentStepFade(1);
+    resolveChevronCacheRef.current = [];
     if (resolveFinishedStateRef.current) {
       onStateUpdate(resolveFinishedStateRef.current);
       resolveFinishedStateRef.current = null;
@@ -488,10 +653,13 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     }
   }, [onStateUpdate, animationOff]);
 
-  // Called by ResolveOverlay as each step completes — update the displayed tile state
+  // Called by ResolveOverlay as each step begins — update the displayed tile state & fade chevrons
   const applyResolveStep = useCallback((stepIdx: number) => {
     const step = resolutionSteps[stepIdx];
     if (!step) return;
+    // Start fading chevrons for this step's tile
+    setResolvedUpToStep(stepIdx);
+    setCurrentStepFade(1);
     setResolveDisplayState(prev => {
       if (!prev?.grid) return prev;
       const newTiles = { ...prev.grid.tiles };
@@ -615,7 +783,22 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   // All tiles a card can legally be played on (includes own tiles for defensive claims)
   const getAllValidPlayTiles = useCallback((card: Card | null | undefined): Set<string> => {
     if (!card) return new Set();
-    // Start with the highlighted expansion targets
+
+    // Defense cards: only own tiles are valid targets
+    if (card.card_type === 'defense') {
+      const valid = new Set<string>();
+      const tiles = gameState.grid?.tiles;
+      if (tiles) {
+        for (const [key, tile] of Object.entries(tiles)) {
+          if (tile.owner === activePlayerId && !tile.is_blocked) {
+            valid.add(key);
+          }
+        }
+      }
+      return valid;
+    }
+
+    // Start with the highlighted expansion targets for claim cards
     const valid = new Set(getValidClaimTiles(card));
     // For claim cards (not unoccupied_only, not target_own_tile which is already handled),
     // also include own tiles as valid defensive placements
@@ -637,19 +820,101 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         }
       }
     }
-    // For defense cards, own tiles are valid
-    if (card.card_type === 'defense') {
-      const tiles = gameState.grid?.tiles;
-      if (tiles) {
-        for (const [key, tile] of Object.entries(tiles)) {
-          if (tile.owner === activePlayerId && !tile.is_blocked) {
-            valid.add(key);
-          }
+    return valid;
+  }, [getValidClaimTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId]);
+
+  // Helper: find closest tile owned by a player to a target position
+  const findClosestOwnedTile = useCallback((
+    targetQ: number, targetR: number,
+    tiles: Record<string, import('../types/game').HexTile>,
+    playerId: string,
+  ): { q: number; r: number } | null => {
+    let closest: { q: number; r: number } | null = null;
+    let minDist = Infinity;
+    for (const tile of Object.values(tiles)) {
+      if (tile.owner !== playerId) continue;
+      const dist = hexDistance(tile.q, tile.r, targetQ, targetR);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = { q: tile.q, r: tile.r };
+      }
+    }
+    return closest;
+  }, [hexDistance]);
+
+  // Build claim chevrons for the active player during plan phase
+  const planChevrons = useMemo((): ClaimChevron[] => {
+    if (phase !== 'plan' || !activePlayer?.planned_actions || resolving) return [];
+    const tiles = gameState.grid?.tiles;
+    if (!tiles) return [];
+
+    const color = PLAYER_COLORS[activePlayerId] ?? 0xffffff;
+    const chevrons: ClaimChevron[] = [];
+
+    for (const action of activePlayer.planned_actions) {
+      if (action.card.card_type !== 'claim') continue;
+      if (action.target_q == null || action.target_r == null) continue;
+
+      const source = findClosestOwnedTile(action.target_q, action.target_r, tiles, activePlayerId);
+      if (!source) continue;
+      // Skip if claim is on own tile (defensive play, no directional chevron needed)
+      const targetKey = `${action.target_q},${action.target_r}`;
+      if (tiles[targetKey]?.owner === activePlayerId) continue;
+
+      chevrons.push({
+        targetQ: action.target_q, targetR: action.target_r,
+        sourceQ: source.q, sourceR: source.r,
+        color, alpha: 1,
+      });
+
+      // Extra targets (Surge)
+      if (action.extra_targets) {
+        for (const [eq, er] of action.extra_targets) {
+          const es = findClosestOwnedTile(eq, er, tiles, activePlayerId);
+          if (!es) continue;
+          const ek = `${eq},${er}`;
+          if (tiles[ek]?.owner === activePlayerId) continue;
+          chevrons.push({
+            targetQ: eq, targetR: er,
+            sourceQ: es.q, sourceR: es.r,
+            color, alpha: 1,
+          });
         }
       }
     }
-    return valid;
-  }, [getValidClaimTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId]);
+    return chevrons;
+  }, [phase, activePlayer?.planned_actions, gameState.grid?.tiles, activePlayerId, findClosestOwnedTile, resolving]);
+
+  // Build chevrons for ALL players' claims during resolve phase (from resolution_steps)
+  const resolveChevrons = useMemo((): ClaimChevron[] => {
+    if (!resolving || !resolutionSteps.length) return [];
+    const cached = resolveChevronCacheRef.current;
+    if (!cached.length) return [];
+
+    const chevrons: ClaimChevron[] = [];
+    for (const entry of cached) {
+      // Per-step alpha: already resolved → 0, currently resolving → fading, pending → full
+      let stepAlpha: number;
+      if (entry.stepIndex < resolvedUpToStep) {
+        stepAlpha = 0;
+      } else if (entry.stepIndex === resolvedUpToStep) {
+        stepAlpha = chevronAlpha * currentStepFade;
+      } else {
+        stepAlpha = chevronAlpha;
+      }
+      if (stepAlpha <= 0) continue;
+
+      chevrons.push({
+        targetQ: entry.targetQ, targetR: entry.targetR,
+        sourceQ: entry.sourceQ, sourceR: entry.sourceR,
+        color: entry.color, alpha: stepAlpha,
+      });
+    }
+    return chevrons;
+  }, [resolving, resolutionSteps, chevronAlpha, resolvedUpToStep, currentStepFade]);
+
+  // Active chevrons: plan phase or resolve reveal
+  const activeChevrons = resolving ? resolveChevrons : planChevrons;
 
   const playerInfo = useMemo(() => {
     const info: Record<string, { name: string; archetype: string }> = {};
@@ -663,19 +928,39 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const plannedActions = useMemo(() => {
     if (!activePlayer?.planned_actions) return undefined;
     const map = new Map<string, PlannedActionIcon>();
+
+    const addToMap = (key: string, type: string, power: number, name: string, card: Card) => {
+      const existing = map.get(key);
+      if (existing) {
+        // Stackable: accumulate power from multiple cards on the same tile
+        existing.power += power;
+        existing.name = `${existing.name} + ${name}`;
+        existing.card = card;
+      } else {
+        map.set(key, { type, power, name, card });
+      }
+    };
+
     for (const action of activePlayer.planned_actions) {
       if (action.target_q != null && action.target_r != null) {
         const key = `${action.target_q},${action.target_r}`;
         const type = action.card.card_type;
         const power = type === 'defense' ? action.card.defense_bonus : action.card.power;
-        const existing = map.get(key);
-        if (existing) {
-          // Stackable: accumulate power from multiple cards on the same tile
-          existing.power += power;
-          existing.name = `${existing.name} + ${action.card.name}`;
-          existing.card = action.card;  // tooltip shows latest card
-        } else {
-          map.set(key, { type, power, name: action.card.name, card: action.card });
+        addToMap(key, type, power, action.card.name, action.card);
+
+        // Also show defense overlay on extra targets (multi-tile defense like Bulwark)
+        if (type === 'defense' && action.extra_targets) {
+          for (const [eq, er] of action.extra_targets) {
+            const extraKey = `${eq},${er}`;
+            addToMap(extraKey, type, action.card.defense_bonus, action.card.name, action.card);
+          }
+        }
+        // Also show claim overlay on extra targets (Surge)
+        if (type === 'claim' && action.extra_targets) {
+          for (const [eq, er] of action.extra_targets) {
+            const extraKey = `${eq},${er}`;
+            addToMap(extraKey, type, action.card.power, action.card.name, action.card);
+          }
         }
       }
     }
@@ -698,6 +983,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       { label: 'In Hand', items: activePlayer.hand },
       { label: 'Draw Pile', items: activePlayer.deck_cards },
       { label: 'Discard Pile', items: activePlayer.discard },
+      ...(activePlayer.trash?.length > 0 ? [{ label: 'Trashed', items: activePlayer.trash }] : []),
     ];
   }, [activePlayer, inPlayCards]);
 
@@ -863,7 +1149,18 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               onTileClick={handleTileClick}
               highlightTiles={(() => {
                 if (phase !== 'plan') return undefined;
-                if (surgeCardIndex !== null) return getValidClaimTiles(activePlayer?.hand[surgeCardIndex]);
+                if (surgeCardIndex !== null) {
+                  const surgeCard = activePlayer?.hand[surgeCardIndex];
+                  const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
+                  if (isDefenseMulti) {
+                    const ownTiles = new Set<string>();
+                    for (const [k, t] of Object.entries(displayState.grid.tiles)) {
+                      if (t.owner === activePlayerId) ownTiles.add(k);
+                    }
+                    return ownTiles;
+                  }
+                  return getValidClaimTiles(surgeCard);
+                }
                 const card = selectedCard?.card_type === 'claim' ? selectedCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
                     ? activePlayer?.hand[draggingCardIndex] : null;
@@ -902,6 +1199,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   : null;
                 return card ? getAllValidPlayTiles(card) : undefined;
               })()}
+              claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
             />
           )}
 
@@ -973,6 +1271,8 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 borderRadius: 6,
                 color: '#888',
                 whiteSpace: 'nowrap',
+                opacity: dragHintHidden ? 0 : 1,
+                transition: animationOff ? 'none' : 'opacity 0.4s ease',
               }}>
                 {activePlayer.name}'s turn — drag a card onto the board, or select + click
               </div>
@@ -1034,44 +1334,52 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 Play {selectedCard.name}
               </IrreversibleButton>
             )}
-            {/* Surge multi-target confirm/cancel */}
-            {phase === 'plan' && surgeCardIndex !== null && surgePrimaryTarget && (
-              <>
-                <span style={{ fontSize: 12, color: '#aaa' }}>
-                  Surge: {1 + surgeTargets.length}/{1 + (activePlayer?.hand[surgeCardIndex]?.multi_target_count ?? 0)} tiles selected
-                </span>
-                <button
-                  onClick={handleCancelSurge}
-                  style={{
-                    padding: '6px 12px',
-                    background: '#555',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                  }}
-                >
-                  Cancel
-                </button>
-                <IrreversibleButton
-                  onClick={handleConfirmSurge}
-                  tooltip="Confirm all selected tiles for this Surge card."
-                  style={{
-                    padding: '6px 16px',
-                    background: '#4a9eff',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: '#fff',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                  }}
-                >
-                  Confirm Surge
-                </IrreversibleButton>
-              </>
-            )}
+            {/* Multi-target confirm/cancel (Surge or Defense) */}
+            {phase === 'plan' && surgeCardIndex !== null && surgePrimaryTarget && (() => {
+              const surgeCard = activePlayer?.hand[surgeCardIndex];
+              const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
+              const maxTotal = isDefenseMulti
+                ? (surgeCard?.defense_target_count ?? 1)
+                : 1 + (surgeCard?.multi_target_count ?? 0);
+              const label = isDefenseMulti ? 'Defend' : 'Surge';
+              return (
+                <>
+                  <span style={{ fontSize: 12, color: '#aaa' }}>
+                    {label}: {1 + surgeTargets.length}/{maxTotal} tiles selected
+                  </span>
+                  <button
+                    onClick={handleCancelSurge}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#555',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <IrreversibleButton
+                    onClick={handleConfirmSurge}
+                    tooltip={`Confirm all selected tiles for this ${label} card.`}
+                    style={{
+                      padding: '6px 16px',
+                      background: '#4a9eff',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: '#fff',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                    }}
+                  >
+                    Confirm {label}
+                  </IrreversibleButton>
+                </>
+              );
+            })()}
             {phase === 'plan' && activePlayer && !resolving && surgeCardIndex === null && (
               <HoldToSubmitButton
                 key={activePlayerId}
@@ -1155,7 +1463,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               playerId={activePlayerId}
               cards={activePlayer.hand}
               selectedIndex={selectedCardIndex}
-              onSelect={setSelectedCardIndex}
+              onSelect={(idx) => { setSelectedCardIndex(idx); setDragHintHidden(true); }}
               onDragPlay={handleDragPlay}
               onCardDetail={setDetailCard}
               onDragStart={setDraggingCardIndex}
@@ -1198,7 +1506,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       )}
 
       {/* Resolve overlay — power numbers over grid */}
-      {resolving && resolutionSteps.length > 0 && !phaseBanner && (
+      {resolving && resolutionSteps.length > 0 && !phaseBanner && !chevronRevealPhase && (
         <ResolveOverlay
           steps={resolutionSteps}
           gridTransform={gridTransformSnapshot}
@@ -1211,6 +1519,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       {/* Phase banner — full-screen announcement */}
       {phaseBanner && (
         <PhaseBanner
+          key={bannerKey}
           phase={phaseBanner}
           onMidpoint={handleBannerMidpoint}
           onComplete={handleBannerComplete}
@@ -1218,7 +1527,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       )}
 
       {/* Interaction blocker overlay (invisible, blocks clicks during banner/resolve) */}
-      {interactionBlocked && !phaseBanner && (
+      {interactionBlocked && (
         <div style={{
           position: 'fixed',
           inset: 0,
