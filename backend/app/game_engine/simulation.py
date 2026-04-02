@@ -95,7 +95,7 @@ class BatchResult:
 
 # ── Single game simulation ───────────────────────────────────────
 
-def run_game(config: SimConfig, card_registry: Optional[dict] = None) -> GameResult:
+def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) -> GameResult:
     """Run a single complete game and return structured results."""
     start_time = time.monotonic()
     result = GameResult(seed=config.seed, grid_size=config.grid_size.value)
@@ -305,7 +305,7 @@ def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
 # ── Batch simulation ─────────────────────────────────────────────
 
 def run_batch(config: BatchConfig,
-              card_registry: Optional[dict] = None) -> BatchResult:
+              card_registry: Optional[dict[str, Any]] = None) -> BatchResult:
     """Run N games with the given configuration."""
     start_time = time.monotonic()
 

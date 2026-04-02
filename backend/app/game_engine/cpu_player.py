@@ -175,10 +175,10 @@ class CPUPlayer:
 
     def _score_claim_targets(self, game: Any, player: Any, card: Card,
                              card_index: int,
-                             weights: StrategyWeights) -> list[tuple[float, dict]]:
+                             weights: StrategyWeights) -> list[tuple[float, dict[str, Any]]]:
         """Score all valid target tiles for a claim card."""
         assert game.grid is not None
-        results: list[tuple[float, dict]] = []
+        results: list[tuple[float, dict[str, Any]]] = []
         player_tiles = game.grid.get_player_tiles(self.player_id)
 
         if not player_tiles and not card.flood:
@@ -347,10 +347,10 @@ class CPUPlayer:
 
     def _score_defense_targets(self, game: Any, player: Any, card: Card,
                                card_index: int,
-                               weights: StrategyWeights) -> list[tuple[float, dict]]:
+                               weights: StrategyWeights) -> list[tuple[float, dict[str, Any]]]:
         """Score all valid targets for a defense card."""
         assert game.grid is not None
-        results: list[tuple[float, dict]] = []
+        results: list[tuple[float, dict[str, Any]]] = []
         player_tiles = game.grid.get_player_tiles(self.player_id)
 
         # Score each tile for defense priority
@@ -394,7 +394,7 @@ class CPUPlayer:
                 # Boost score when we can actually use all target slots
                 score += len(extra_targets) * 1.5
 
-            action_dict: dict = {
+            action_dict: dict[str, Any] = {
                 "card_index": card_index,
                 "target_q": tile.q, "target_r": tile.r,
             }
@@ -406,7 +406,7 @@ class CPUPlayer:
 
     def _score_engine(self, game: Any, player: Any, card: Card,
                       card_index: int,
-                      weights: StrategyWeights) -> Optional[tuple[float, dict]]:
+                      weights: StrategyWeights) -> Optional[tuple[float, dict[str, Any]]]:
         """Score an engine card."""
         score = 0.0
 
