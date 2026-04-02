@@ -81,6 +81,7 @@ export interface Player {
   has_ended_turn: boolean;
   effective_buy_costs?: Record<string, number>;
   trash: Card[];
+  last_upkeep_paid: number;
 }
 
 export interface MarketStack {
@@ -121,6 +122,7 @@ export interface GameState {
   current_round: number;
   first_player_index: number;
   neutral_market: MarketStack[];
+  vp_target: number;
   winner: string | null;
   log: string[];
   resolution_steps?: ResolutionStep[];

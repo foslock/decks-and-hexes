@@ -88,6 +88,7 @@ class Player:
     has_ended_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
     trash: list[Card] = field(default_factory=list)
+    last_upkeep_paid: int = 0  # resources actually deducted at start of this turn
 
     @property
     def hand_size(self) -> int:
@@ -120,6 +121,7 @@ class Player:
             "has_submitted_plan": self.has_submitted_plan,
             "has_ended_turn": self.has_ended_turn,
             "trash": [c.to_dict() for c in self.trash],
+            "last_upkeep_paid": self.last_upkeep_paid,
         }
 
 
@@ -235,6 +237,7 @@ class GameState:
             "first_player_index": self.first_player_index,
             "neutral_market": self.neutral_market.get_available(),
             "winner": self.winner,
+            "vp_target": self.vp_target,
             "log": self.log[-20:],  # last 20 for backward compat
             "test_mode": self.test_mode,
         }
@@ -334,8 +337,15 @@ def execute_start_of_turn(game: GameState) -> GameState:
 
         # Pay upkeep (skip round 1)
         if game.current_round > 1:
-            player.resources = max(0, player.resources - UPKEEP_COST)
-            game._log(f"{player.name} pays {UPKEEP_COST} upkeep ({player.resources} remaining)")
+            actual_cost = min(UPKEEP_COST, player.resources)
+            player.resources -= actual_cost
+            player.last_upkeep_paid = actual_cost
+            if actual_cost > 0:
+                game._log(f"{player.name} pays {actual_cost} upkeep ({player.resources} remaining)")
+            else:
+                game._log(f"{player.name} has no resources for upkeep")
+        else:
+            player.last_upkeep_paid = 0
 
         # VP from held tiles removed — VP hexes now score once on capture
         # (see execute_reveal for the one-time VP award)

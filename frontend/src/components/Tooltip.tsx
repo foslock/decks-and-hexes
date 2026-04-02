@@ -154,16 +154,17 @@ export function IrreversibleButton({
 
 /**
  * A button that requires hold-to-confirm when `requireHold` is true.
- * On click/tap it shows a warning tooltip. The user must press and hold for
- * `holdDuration` ms (default 3000) to actually trigger `onConfirm`.
- * A progress bar fills the button during the hold.
+ * The user must press and hold; a white outline grows around the button over
+ * `animDuration` ms (driven purely by CSS transition), then after a short
+ * buffer the action confirms at `holdDuration` ms total.
  * When `requireHold` is false, it acts as a normal click button.
  */
 export function HoldToSubmitButton({
   children,
   onConfirm,
   requireHold,
-  holdDuration = 1000,
+  holdDuration = 1200,
+  animDuration = 1000,
   warning,
   tooltip,
   style,
@@ -172,71 +173,56 @@ export function HoldToSubmitButton({
   onConfirm: () => void;
   requireHold: boolean;
   holdDuration?: number;
+  /** How long the outline animation takes (must be ≤ holdDuration). */
+  animDuration?: number;
   warning: string;
   tooltip?: string;
 }) {
   const animMode = useAnimationMode();
-  const [holding, setHolding] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const animated = animMode === 'normal';
+  // 'idle' → 'holding' (outline animates via CSS) → 'filled' (outline complete, waiting for buffer) → 'idle'
+  const [phase, setPhase] = useState<'idle' | 'holding' | 'filled'>('idle');
   const [showWarning, setShowWarning] = useState(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const startTimeRef = useRef<number>(0);
-  const rafRef = useRef<number>(0);
-  const holdingRef = useRef(false);
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirmedRef = useRef(false);
   const onConfirmRef = useRef(onConfirm);
   onConfirmRef.current = onConfirm;
 
-  const clearWarningTimer = useCallback(() => {
+  const clearTimers = useCallback(() => {
     if (warningTimerRef.current) {
       clearTimeout(warningTimerRef.current);
       warningTimerRef.current = null;
     }
+    if (confirmTimerRef.current) {
+      clearTimeout(confirmTimerRef.current);
+      confirmTimerRef.current = null;
+    }
   }, []);
 
   const stopHold = useCallback(() => {
-    holdingRef.current = false;
-    setHolding(false);
-    setProgress(0);
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    rafRef.current = 0;
-  }, []);
-
-  const tick = useCallback(() => {
-    if (!holdingRef.current) return;
-    const elapsed = Date.now() - startTimeRef.current;
-    const p = Math.min(elapsed / holdDuration, 1);
-    setProgress(p);
-    if (p >= 1) {
-      confirmedRef.current = true;
-      holdingRef.current = false;
-      setHolding(false);
-      setProgress(0);
-      rafRef.current = 0;
-      onConfirmRef.current();
-    } else {
-      rafRef.current = requestAnimationFrame(tick);
-    }
-  }, [holdDuration]);
+    clearTimers();
+    setPhase('idle');
+  }, [clearTimers]);
 
   const startHold = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     if (!requireHold) return;
     const rect = e.currentTarget.getBoundingClientRect();
     setPosition({ x: rect.left + rect.width / 2, y: rect.top });
     setShowWarning(true);
-    clearWarningTimer();
+    clearTimers();
     confirmedRef.current = false;
-    startTimeRef.current = Date.now();
-    holdingRef.current = true;
-    setHolding(true);
-    setProgress(0);
-    rafRef.current = requestAnimationFrame(tick);
-  }, [requireHold, tick, clearWarningTimer]);
 
-  const endHold = useCallback(() => {
-    stopHold();
-  }, [stopHold]);
+    // Start holding: CSS transition drives the outline from 0→100% over animDuration.
+    // A setTimeout fires onConfirm after the full holdDuration.
+    setPhase('holding');
+    confirmTimerRef.current = setTimeout(() => {
+      confirmedRef.current = true;
+      setPhase('idle');
+      onConfirmRef.current();
+    }, holdDuration);
+  }, [requireHold, holdDuration, clearTimers]);
 
   const handleClick = useCallback(() => {
     if (!requireHold) {
@@ -252,7 +238,6 @@ export function HoldToSubmitButton({
     const rect = e.currentTarget.getBoundingClientRect();
     setPosition({ x: rect.left + rect.width / 2, y: rect.top });
     if (requireHold) {
-      // Show warning immediately on hover when hold is required
       setShowWarning(true);
     } else if (tooltip) {
       warningTimerRef.current = setTimeout(() => setShowWarning(true), 1000);
@@ -260,20 +245,19 @@ export function HoldToSubmitButton({
   }, [requireHold, tooltip]);
 
   const handleLeave = useCallback(() => {
-    if (!holding) {
-      clearWarningTimer();
+    if (phase === 'idle') {
+      clearTimers();
       setShowWarning(false);
     }
-  }, [holding, clearWarningTimer]);
+  }, [phase, clearTimers]);
 
   useEffect(() => {
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      clearWarningTimer();
-    };
-  }, [clearWarningTimer]);
+    return () => { clearTimers(); };
+  }, [clearTimers]);
 
-  const progressTransition = animMode === 'normal' ? 'width 0.1s linear' : 'none';
+  // The outline is fully clipped when idle, fully revealed when holding/filled.
+  // CSS transition on clip-path handles the smooth left-to-right reveal.
+  const outlineRevealed = phase === 'holding' || phase === 'filled';
 
   return (
     <>
@@ -281,8 +265,8 @@ export function HoldToSubmitButton({
         {...buttonProps}
         onClick={handleClick}
         onPointerDown={startHold}
-        onPointerUp={endHold}
-        onPointerLeave={(e) => { endHold(); handleLeave(); buttonProps.onPointerLeave?.(e); }}
+        onPointerUp={stopHold}
+        onPointerLeave={(e) => { stopHold(); handleLeave(); buttonProps.onPointerLeave?.(e); }}
         onPointerEnter={handleEnter}
         style={{
           ...style,
@@ -293,17 +277,18 @@ export function HoldToSubmitButton({
           touchAction: 'none',
         }}
       >
+        {/* White outline that reveals left-to-right via CSS transition */}
         {requireHold && (
           <div style={{
             position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            background: 'rgba(255,255,255,0.25)',
-            width: `${progress * 100}%`,
-            transition: progressTransition,
-            pointerEvents: 'none',
+            inset: 0,
+            border: '2px solid rgba(255,255,255,0.85)',
             borderRadius: 'inherit',
+            pointerEvents: 'none',
+            clipPath: outlineRevealed ? 'inset(0 0% 0 0)' : 'inset(0 100% 0 0)',
+            transition: outlineRevealed && animated
+              ? `clip-path ${animDuration}ms linear`
+              : 'none',
           }} />
         )}
         <span style={{ position: 'relative' }}>{children}</span>

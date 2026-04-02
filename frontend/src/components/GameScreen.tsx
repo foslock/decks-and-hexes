@@ -10,6 +10,7 @@ import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import PhaseBanner from './PhaseBanner';
 import ResolveOverlay from './ResolveOverlay';
+import GameIntroOverlay from './GameIntroOverlay';
 import { useAnimated, useAnimationMode, useAnimationOff } from './SettingsContext';
 import { IrreversibleButton, HoldToSubmitButton } from './Tooltip';
 import * as api from '../api/client';
@@ -67,6 +68,12 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [surgeTargets, setSurgeTargets] = useState<[number, number][]>([]);
   const [surgeCardIndex, setSurgeCardIndex] = useState<number | null>(null);
   const [surgePrimaryTarget, setSurgePrimaryTarget] = useState<[number, number] | null>(null);
+  // Intro overlay state
+  const [showIntro, setShowIntro] = useState(true);
+  // Intro sequence after overlay: 'overlay' → 'shuffle' → 'draw' → 'done'
+  const [introSequence, setIntroSequence] = useState<'overlay' | 'shuffle' | 'draw' | 'done'>('overlay');
+  // Settings collapse state
+  const [settingsExpanded, setSettingsExpanded] = useState(false);
   // Phase banner state
   const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
   const [bannerKey, setBannerKey] = useState(0);
@@ -91,6 +98,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [currentStepFade, setCurrentStepFade] = useState(1);
   // Cache resolve chevron sources so they don't shift as tiles change owners
   const resolveChevronCacheRef = useRef<{ targetQ: number; targetR: number; sourceQ: number; sourceR: number; color: number; stepIndex: number }[]>([]);
+  const [bannerSubtitle, setBannerSubtitle] = useState<string | null>(null);
 
   // Auto-dismiss error toast after 4 seconds
   useEffect(() => {
@@ -119,6 +127,8 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     const prev = prevPhaseRef.current;
     prevPhaseRef.current = phase;
     if (prev === phase) return;
+    // Don't show banner during intro overlay
+    if (showIntro) return;
     // Don't show banner if currently resolving (resolve has its own banner flow)
     if (resolving) return;
     // Don't trigger if a banner is already active (e.g. reveal→buy chain)
@@ -126,10 +136,20 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     // Only show banners for main phases, and skip if animations are off
     const bannerPhases = ['plan', 'buy'];
     if (bannerPhases.includes(phase) && !animationOff) {
+      // Set subtitle per phase
+      if (phase === 'plan') {
+        const pid = gameState.player_order[0];
+        const paid = gameState.players[pid]?.last_upkeep_paid ?? 0;
+        setBannerSubtitle(paid > 0 ? `Upkeep: -${paid} Resource${paid > 1 ? 's' : ''}` : 'Choose Wisely');
+      } else if (phase === 'buy') {
+        setBannerSubtitle('Grow Your Deck');
+      } else {
+        setBannerSubtitle(null);
+      }
       setPhaseBanner(phase);
       setInteractionBlocked(true);
     }
-  }, [phase, animationOff, resolving, phaseBanner]);
+  }, [phase, animationOff, resolving, phaseBanner, gameState, showIntro]);
 
   // Chevron reveal animation: fade in all claim chevrons before resolve overlay
   useEffect(() => {
@@ -469,6 +489,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           setGridTransformSnapshot(gridTransformRef.current);
           setResolving(true);
           setInteractionBlocked(true);
+          setBannerSubtitle('Battle & Expand');
           setPhaseBanner('reveal');
           // Pre-compute chevron sources using pre-resolve tile state (before ownership changes)
           const preResolveTiles = gameState.grid.tiles;
@@ -493,6 +514,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         } else if (!animationOff) {
           // No claim steps but animations on — show reveal banner, then transition to buy
           setInteractionBlocked(true);
+          setBannerSubtitle('Battle & Expand');
           setPhaseBanner('reveal');
         } else {
           // Animations off — apply final state immediately
@@ -594,6 +616,46 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     setSelectedCardIndex(null);
   }, [onStateUpdate]);
 
+  // Intro overlay dismissed — start shuffle → draw → plan banner sequence
+  const handleIntroReady = useCallback(() => {
+    setShowIntro(false);
+    if (animationOff) {
+      // No animations: skip straight to done
+      setIntroSequence('done');
+      return;
+    }
+    // Start shuffle animation on the draw pile
+    setIntroSequence('shuffle');
+    setInteractionBlocked(true);
+  }, [animationOff]);
+
+  // Intro sequence: shuffle → draw → plan banner
+  useEffect(() => {
+    if (introSequence === 'shuffle') {
+      // Show shuffle animation for 2s (normal) or 0.8s (simplified), then transition to draw
+      const duration = animated ? 2000 : 800;
+      const timer = setTimeout(() => setIntroSequence('draw'), duration);
+      return () => clearTimeout(timer);
+    }
+    if (introSequence === 'draw') {
+      // Cards are now being passed to CardHand — entering animations will play.
+      // Wait for all cards to finish their staggered draw animation, then show plan banner.
+      const handSize = activePlayer?.hand.length ?? 0;
+      // Each card takes 500ms stagger + ~500ms animation duration
+      const drawDuration = handSize * 500 + 500;
+      const timer = setTimeout(() => {
+        setIntroSequence('done');
+        // Now trigger the plan banner
+        const pid = gameState.player_order[0];
+        const paid = gameState.players[pid]?.last_upkeep_paid ?? 0;
+        setBannerSubtitle(paid > 0 ? `Upkeep: -${paid} Resource${paid > 1 ? 's' : ''}` : 'Choose Wisely');
+        setPhaseBanner('plan');
+        setBannerKey(k => k + 1);
+      }, drawDuration);
+      return () => clearTimeout(timer);
+    }
+  }, [introSequence, animated, activePlayer, gameState]);
+
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
     const bannerPhase = phaseBanner;
@@ -607,6 +669,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       }
       setActivePlayerIndex(0);
       // Switch directly to buy banner (bump key to force remount)
+      setBannerSubtitle('Grow Your Deck');
       setPhaseBanner('buy');
       setBannerKey(k => k + 1);
       // Keep interactionBlocked = true through the buy banner
@@ -645,6 +708,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     setActivePlayerIndex(0);
     // Show the buy phase banner after resolution (which will open the shop when it completes)
     if (!animationOff) {
+      setBannerSubtitle('Grow Your Deck');
       setPhaseBanner('buy');
       setInteractionBlocked(true);
     } else {
@@ -670,7 +734,30 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           owner: step.winner_id,
         };
       }
-      return { ...prev, grid: { ...prev.grid, tiles: newTiles } };
+
+      // Move resolved claim cards from planned_actions → discard for each claimant
+      const newPlayers = { ...prev.players };
+      for (const claimant of step.claimants) {
+        const player = newPlayers[claimant.player_id];
+        if (!player) continue;
+        const actionIdx = player.planned_actions.findIndex(a =>
+          a.card.card_type === 'claim' && a.target_q === step.q && a.target_r === step.r
+        );
+        if (actionIdx >= 0) {
+          const action = player.planned_actions[actionIdx];
+          const newPlanned = [...player.planned_actions];
+          newPlanned.splice(actionIdx, 1);
+          const newDiscard = [...player.discard, action.card];
+          newPlayers[claimant.player_id] = {
+            ...player,
+            planned_actions: newPlanned,
+            discard: newDiscard,
+            discard_count: player.discard_count + 1,
+          };
+        }
+      }
+
+      return { ...prev, grid: { ...prev.grid, tiles: newTiles }, players: newPlayers };
     });
   }, [resolutionSteps]);
 
@@ -968,12 +1055,14 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   }, [activePlayer?.planned_actions]);
 
   // Cards currently placed on the board during plan phase (shown as "In Play" in deck viewer)
+  // After resolve, these cards move to discard, so only show during plan/reveal.
   const inPlayCards = useMemo(() => {
+    if (phase !== 'plan' && phase !== 'reveal') return [];
     if (!activePlayer?.planned_actions) return [];
     return activePlayer.planned_actions
       .filter(a => a.target_q != null)
       .map(a => a.card);
-  }, [activePlayer?.planned_actions]);
+  }, [activePlayer?.planned_actions, phase]);
 
   // Full deck breakdown for the Deck viewer button
   const allDeckCards = useMemo(() => {
@@ -1006,7 +1095,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               padding: 8, background: '#4a9eff33', borderRadius: 6, fontWeight: 'bold',
               transition: animated ? 'all 0.3s' : 'none',
             }}>
-              🏆 {gameState.players[gameState.winner]?.name} wins!
+              ★ {gameState.players[gameState.winner]?.name} wins!
             </div>
           )}
         </div>
@@ -1016,8 +1105,11 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>PLAYERS (click to switch)</div>
           {gameState.player_order.map((pid, i) => {
             const p = gameState.players[pid];
-            const pPlanned = p.planned_actions?.length ?? 0;
-            const pTotal = p.hand_count + p.deck_size + p.discard_count + pPlanned;
+            // During plan phase, played cards leave the hand but aren't in discard yet —
+            // they're in planned_actions, so add those. After resolve they move to discard,
+            // but planned_actions isn't cleared until next turn, so don't double-count.
+            const pInPlay = phase === 'plan' ? (p.planned_actions?.filter(a => a.target_q != null).length ?? 0) : 0;
+            const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
             const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
             return (
               <div key={pid} onClick={() => handleSwitchPlayer(i)} style={{ cursor: 'pointer', marginBottom: 6 }}>
@@ -1029,6 +1121,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   phase={phase}
                   totalCards={pTotal}
                   tileCount={pTiles}
+                  vpTarget={gameState.vp_target}
                 />
               </div>
             );
@@ -1056,7 +1149,27 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           Full Game Log
         </button>
 
-        <SettingsPanel />
+        {/* Collapsible settings */}
+        <div style={{ borderTop: '1px solid #333', paddingTop: 4 }}>
+          <button
+            onClick={() => setSettingsExpanded(e => !e)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: '#666',
+              cursor: 'pointer',
+              fontSize: 13,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 0',
+            }}
+          >
+            <span style={{ fontSize: 15 }}>⚙️</span>
+            <span>{settingsExpanded ? 'Hide Settings' : 'Settings'}</span>
+          </button>
+          {settingsExpanded && <SettingsPanel />}
+        </div>
 
         {/* Test Mode Panel */}
         {gameState.test_mode && (
@@ -1461,7 +1574,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           {activePlayer && (
             <CardHand
               playerId={activePlayerId}
-              cards={activePlayer.hand}
+              cards={introSequence === 'overlay' || introSequence === 'shuffle' ? [] : activePlayer.hand}
               selectedIndex={selectedCardIndex}
               onSelect={(idx) => { setSelectedCardIndex(idx); setDragHintHidden(true); }}
               onDragPlay={handleDragPlay}
@@ -1477,6 +1590,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               discardAll={discardingAll}
               onDiscardAllComplete={handleDiscardAllComplete}
               lastPlayedTarget={lastPlayedTarget}
+              forceShuffleAnim={introSequence === 'shuffle'}
             />
           )}
         </div>
@@ -1516,11 +1630,17 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         />
       )}
 
+      {/* Game intro overlay */}
+      {showIntro && (
+        <GameIntroOverlay gameState={gameState} onReady={handleIntroReady} />
+      )}
+
       {/* Phase banner — full-screen announcement */}
       {phaseBanner && (
         <PhaseBanner
           key={bannerKey}
           phase={phaseBanner}
+          subtitle={bannerSubtitle ?? undefined}
           onMidpoint={handleBannerMidpoint}
           onComplete={handleBannerComplete}
         />

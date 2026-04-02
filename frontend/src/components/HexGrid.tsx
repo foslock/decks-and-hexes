@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import type { HexTile, Card } from '../types/game';
+import { useTooltips } from './SettingsContext';
 
 // Flat-top hex geometry
 const HEX_SIZE = 32;
@@ -198,6 +199,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const hiddenLabelKeyRef = useRef<string | null>(null);
   const tileGraphicsRef = useRef<Map<string, { g: Graphics; baseColor: number; isBlocked: boolean; baseAlpha: number }>>(new Map());
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card } | null>(null);
+  const tooltipsEnabled = useTooltips();
+  const tooltipsEnabledRef = useRef(tooltipsEnabled);
+  tooltipsEnabledRef.current = tooltipsEnabled;
 
   tilesRef.current = tiles;
   highlightRef.current = highlightTiles;
@@ -321,7 +325,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           const hoverEdgeG = hoverEdgeGraphicsRef.current;
           if (hoverEdgeG) {
             hoverEdgeG.clear();
-            hoverEdgeG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.9 });
+            hoverEdgeG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.9, cap: 'round' });
             for (const [, , vA, vB] of DIRECTIONS_WITH_EDGES) {
               const a = hexVertex(x, y, vA, HEX_SIZE);
               const b = hexVertex(x, y, vB, HEX_SIZE);
@@ -387,14 +391,31 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           }
         }
 
-        // Planned action card tooltip (only active player's own actions)
+        // Planned action card tooltip (always shown — critical gameplay info)
         const plannedAction = plannedActionsRef.current?.get(key);
         if (plannedAction) {
           setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card });
-        } else if (tile.owner && playerInfoRef.current?.[tile.owner]) {
-          const info = playerInfoRef.current[tile.owner];
-          const label = ARCHETYPE_LABELS[info.archetype] || info.archetype;
-          setTooltip({ x: e.global.x, y: e.global.y, text: `${info.name} (${label})` });
+        } else if (tooltipsEnabledRef.current) {
+          // Non-critical info tooltips (gated by Tooltips setting)
+          const lines: string[] = [];
+          if (tile.is_blocked) {
+            lines.push('This tile cannot be claimed.');
+          } else {
+            if (tile.is_vp) {
+              lines.push(`Claiming this tile awards ${tile.vp_value} VP.`);
+            }
+            if (tile.defense_power > 0) {
+              lines.push(`Claiming this tile requires at least ${tile.defense_power} power.`);
+            }
+            if (tile.owner && playerInfoRef.current?.[tile.owner]) {
+              const info = playerInfoRef.current[tile.owner];
+              const label = ARCHETYPE_LABELS[info.archetype] || info.archetype;
+              lines.push(`${info.name} (${label})`);
+            }
+          }
+          if (lines.length > 0) {
+            setTooltip({ x: e.global.x, y: e.global.y, text: lines.join('\n') });
+          }
         }
       });
       g.on('pointermove', (e) => {
@@ -423,7 +444,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     // === PASS 3: Base grid edges — each edge drawn exactly once ===
     // Interior edges between same-owner tiles are skipped; solid fills tile seamlessly.
     const edgeG = new Graphics();
-    edgeG.setStrokeStyle({ width: 1.5, color: 0x555577 });
+    edgeG.setStrokeStyle({ width: 1.5, color: 0x555577, cap: 'round' });
     for (const [, tile] of Object.entries(tiles)) {
       const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
       for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
@@ -442,7 +463,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     // === PASS 4: Highlighted tile outlines ===
     if (highlights && highlights.size > 0) {
       const hlEdgeG = new Graphics();
-      hlEdgeG.setStrokeStyle({ width: 2.5, color: 0xffff00 });
+      hlEdgeG.setStrokeStyle({ width: 2.5, color: 0xffff00, cap: 'round' });
       for (const key of highlights) {
         const tile = tiles[key];
         if (!tile) continue;
@@ -463,7 +484,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     // === PASS 5: Active player territory outline ===
     if (activePlayer) {
       const outlineG = new Graphics();
-      outlineG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.8 });
+      outlineG.setStrokeStyle({ width: 3, color: 0xccccdd, cap: 'round', join: 'round' });
       for (const [, tile] of Object.entries(tiles)) {
         if (tile.owner !== activePlayer) continue;
         const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
@@ -660,13 +681,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       }
 
       if (tile.is_blocked) {
+        // Deterministic pseudo-random flip based on tile coords for visual variety
+        const flipHash = ((tile.q * 7 + tile.r * 13) & 1) === 0;
         const mountain = new Text({
           text: '⛰️',
-          style: new TextStyle({ fontSize: 22, fill: 0x888888 }),
+          style: new TextStyle({ fontSize: 40, fill: 0x888888 }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         mountain.anchor.set(0.5);
-        mountain.position.set(x, y);
+        mountain.position.set(x, y - 4);
+        if (flipHash) mountain.scale.x = -1;
         hexContainer.addChild(mountain);
       }
 
@@ -731,6 +755,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       background: '#1a1a2e',
       resizeTo: containerRef.current,
       antialias: true,
+      resolution: window.devicePixelRatio || 1,
+      autoDensity: true,
     }).then(() => {
       if (destroyed) { app.destroy(); return; }
       containerRef.current!.appendChild(app.canvas);
@@ -781,7 +807,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           borderRadius: 4,
           fontSize: 12,
           pointerEvents: 'none',
-          whiteSpace: 'nowrap',
+          whiteSpace: 'pre-line',
           zIndex: 10,
           border: '1px solid #555',
         }}>
