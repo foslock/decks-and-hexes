@@ -13,12 +13,12 @@ function axialToPixel(q: number, r: number): { x: number; y: number } {
 }
 
 const PLAYER_COLORS: Record<string, string> = {
-  player_0: '#4a9eff',
-  player_1: '#ff4a4a',
-  player_2: '#4aff6a',
-  player_3: '#ffaa4a',
-  player_4: '#aa4aff',
-  player_5: '#ff4aaa',
+  player_0: '#2a6ecc',
+  player_1: '#cc2a2a',
+  player_2: '#2aaa4a',
+  player_3: '#cc7a2a',
+  player_4: '#7a2acc',
+  player_5: '#cc2a7a',
 };
 
 interface ResolveOverlayProps {
@@ -280,28 +280,7 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
         );
       })}
 
-      {/* Tile highlight ring during resolution */}
-      {step && (() => {
-        const target = toScreen(step.q, step.r);
-        const ringSize = HEX_SIZE * (gridTransform?.scale ?? 1);
-        const winnerColor = step.winner_id ? (PLAYER_COLORS[step.winner_id] || '#fff') : '#888';
-        return (
-          <div style={{
-            position: 'fixed',
-            left: target.x,
-            top: target.y,
-            width: ringSize * 2,
-            height: ringSize * 2,
-            transform: 'translate(-50%, -50%)',
-            borderRadius: '50%',
-            border: `2px solid ${winnerColor}`,
-            boxShadow: `0 0 12px ${winnerColor}44`,
-            opacity: numbersActive ? 0.8 : 0,
-            transition: `opacity ${isSimplified ? 200 : 400}ms ease`,
-            pointerEvents: 'none',
-          }} />
-        );
-      })()}
+      {/* Tile highlight ring removed — chevrons provide directional context */}
     </div>
   );
 }

@@ -36,6 +36,7 @@ class HexTile:
     owner: Optional[str] = None  # player_id
     defense_power: int = 0
     base_defense: int = 0  # intrinsic defense set at generation; defense resets to this on capture
+    permanent_defense_bonus: int = 0  # Entrench: persists until tile is captured
     held_since_turn: Optional[int] = None  # track when ownership started
 
     @property
@@ -168,14 +169,14 @@ def generate_hex_grid(size: GridSize, num_players: int, rng: Optional[random.Ran
         tile.vp_value = 2 if i < num_premium else 1
 
     # Set intrinsic tile defense:
-    #   Premium VP (vp_value=2): defense 2; their non-VP neighbors: defense 1
-    #   Standard VP (vp_value=1): defense 1; their neighbors: no extra defense (0)
+    #   Premium VP (vp_value=2): defense 3; their non-VP neighbors: defense 1
+    #   Standard VP (vp_value=1): defense 2; their neighbors: no extra defense (0)
     premium_keys = {t.key for t in sorted_vp[:num_premium]}
     for tile in grid.tiles.values():
         if tile.is_blocked:
             continue
         if tile.is_vp:
-            defense = 2 if tile.vp_value == 2 else 1
+            defense = 3 if tile.vp_value == 2 else 2
             tile.base_defense = defense
             tile.defense_power = defense
         elif any(

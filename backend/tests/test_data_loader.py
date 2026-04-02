@@ -36,7 +36,7 @@ class TestCardLoading:
         gather = card_registry["neutral_gather"]
         assert gather.name == "Gather"
         assert gather.card_type == CardType.ENGINE
-        assert gather.resource_gain == 2
+        assert gather.resource_gain == 1
         assert gather.starter is True
         assert gather.buy_cost is None
 
@@ -71,7 +71,7 @@ class TestCardLoading:
         assert blitz is not None
         assert blitz.name == "Blitz"
         assert blitz.card_type == CardType.CLAIM
-        assert blitz.power == 4
+        assert blitz.power == 2
         assert blitz.archetype == Archetype.VANGUARD
 
     def test_scout_properties(self, card_registry: dict[str, Card]) -> None:

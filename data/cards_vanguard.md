@@ -11,15 +11,30 @@
 
 cards:
 
+  - id: vanguard_war_chest
+    name: War Chest
+    name_upgraded: War Chest+
+    type: Engine
+    buy_cost: null
+    starter: true
+    action_return: 0
+    power: 0
+    effect: "Engine: Gain 2 resources."
+    effect_upgraded: "Engine: Gain 3 resources."
+    resource_gain: 2
+    upgraded_resource_gain: 3
+    note: "Vanguard starter economy card. Fuels purchases of expensive high-power claim cards."
+
   - id: vanguard_blitz
     name: Blitz
     name_upgraded: Blitz+
     type: Claim
     buy_cost: 4
     action_return: 0
-    power: 4
-    effect: "Claim: Power 4."
-    effect_upgraded: "Claim: Power 5."
+    power: 2
+    upgraded_power: 3
+    effect: "Claim: Power 2."
+    effect_upgraded: "Claim: Power 3."
     secondary_effect: "If successful, draw 1 card next turn."
     secondary_timing: on_resolution
 
@@ -33,10 +48,10 @@ cards:
     name: Overrun
     name_upgraded: Overrun+
     type: Claim
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
-    power: 5
-    effect: "Claim: Power 5. May target a tile up to 2 steps away from any tile you own."
+    power: 4
+    effect: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own."
     effect_upgraded: "Claim: Power 6. May target a tile up to 2 steps away from any tile you own."
     secondary_effect: null
     secondary_timing: null
@@ -46,7 +61,7 @@ cards:
     name: Strike Team
     name_upgraded: Strike Team+
     type: Claim
-    buy_cost: 3
+    buy_cost: 4
     action_return: 0
     power: 3
     effect: "Claim: Power 3. If you played another Claim card this turn, +2 power."
@@ -64,7 +79,7 @@ cards:
     name: Rapid Assault
     name_upgraded: Rapid Assault+
     type: Claim
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     power: 3
     effect: "Claim: Power 3."
@@ -82,10 +97,10 @@ cards:
     name: Spearhead
     name_upgraded: Spearhead+
     type: Claim
-    buy_cost: 6
+    buy_cost: 7
     action_return: 0
-    power: 6
-    effect: "Claim: Power 6. Resolve immediately — skip the reveal phase for this tile."
+    power: 5
+    effect: "Claim: Power 5. Resolve immediately — skip the reveal phase for this tile."
     effect_upgraded: "Claim: Power 7. Resolve immediately — skip the reveal phase for this tile. If successful, gain 2 resources."
     secondary_effect: null
     secondary_timing: null
@@ -98,7 +113,7 @@ cards:
     name: Coordinated Push
     name_upgraded: Coordinated Push+
     type: Claim
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     power: 3
     effect: "Claim: Power 3. Stackable — can be played on a tile where you already have a claim this turn."
@@ -177,10 +192,10 @@ cards:
     name: Breakthrough
     name_upgraded: Breakthrough+
     type: Claim
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
-    power: 4
-    effect: "Claim: Power 4."
+    power: 3
+    effect: "Claim: Power 3."
     effect_upgraded: "Claim: Power 5."
     secondary_effect: "If successful, also claim one adjacent neutral tile automatically."
     secondary_timing: on_resolution
@@ -195,7 +210,7 @@ cards:
     name: Flanking Strike
     name_upgraded: Flanking Strike+
     type: Claim
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     power: 3
     claim_range: 2
@@ -227,7 +242,7 @@ cards:
     name: Spoils of War
     name_upgraded: Spoils of War+
     type: Claim
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
     power: 3
     effect: "Claim: Power 3. If this claim wins a contested tile, the opponent's claim card is permanently trashed."
@@ -245,10 +260,10 @@ cards:
     name: Elite Vanguard
     name_upgraded: Elite Vanguard+
     type: Claim
-    buy_cost: 6
+    buy_cost: 8
     action_return: 0
-    power: 7
-    effect: "Claim: Power 7. Costs 1 less resource to purchase for each VP hex you currently control."
+    power: 6
+    effect: "Claim: Power 6. Costs 1 less resource to purchase for each VP hex you currently control."
     effect_upgraded: "Claim: Power 8. Costs 1 less resource to purchase for each VP hex you currently control."
     secondary_effect: null
     secondary_timing: null
@@ -258,3 +273,41 @@ cards:
         condition: vp_hexes_controlled
         value: -1
         metadata: {per_unit: true}
+
+  - id: vanguard_battle_glory
+    name: Battle Glory
+    name_upgraded: Battle Glory+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Engine: At resolution, if you won 4 or more contested non-neutral tiles this turn, gain 2 VP. Trash this card."
+    effect_upgraded: "Engine: At resolution, if you won 4 or more contested non-neutral tiles this turn, gain 3 VP. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: vp_from_contested_wins
+        value: 2
+        timing: on_resolution
+        metadata: {required_wins: 4, upgraded_value: 3}
+
+  - id: vanguard_sacrifice_for_glory
+    name: Sacrifice for Glory
+    name_upgraded: Sacrifice for Glory+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Engine: Trash any number of Claim cards from your hand. Gain VP equal to the total power of trashed cards divided by 3 (rounded down). Trash this card."
+    effect_upgraded: "Engine: Trash any number of Claim cards from your hand. Gain VP equal to the total power of trashed cards divided by 2 (rounded down). Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: vp_from_trash_claims
+        timing: immediate
+        requires_choice: true
+        metadata: {divisor: 3, upgraded_divisor: 2}

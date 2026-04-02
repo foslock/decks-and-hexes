@@ -9,7 +9,6 @@ from enum import Enum
 from typing import Any, Optional
 
 from .cards import (
-    ACTION_HARD_CAP,
     ARCHETYPE_SLOTS,
     HAND_SIZE,
     Archetype,
@@ -41,7 +40,7 @@ class Phase(str, Enum):
 
 STARTING_RESOURCES = 3
 UPKEEP_COST = 1
-VP_TARGET = 20
+VP_TARGET = 10
 REROLL_COST = 2
 RETAIN_COST = 1
 UPGRADE_CREDIT_COST = 5
@@ -57,12 +56,15 @@ class PlannedAction:
     extra_targets: list[tuple[int, int]] = field(default_factory=list)  # Surge multi-targets
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "card": self.card.to_dict(),
             "target_q": self.target_q,
             "target_r": self.target_r,
             "target_player_id": self.target_player_id,
         }
+        if self.extra_targets:
+            d["extra_targets"] = [[q, r] for q, r in self.extra_targets]
+        return d
 
 
 @dataclass
@@ -85,6 +87,7 @@ class Player:
     has_submitted_plan: bool = False
     has_ended_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
+    trash: list[Card] = field(default_factory=list)
 
     @property
     def hand_size(self) -> int:
@@ -116,6 +119,7 @@ class Player:
             "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
             "has_submitted_plan": self.has_submitted_plan,
             "has_ended_turn": self.has_ended_turn,
+            "trash": [c.to_dict() for c in self.trash],
         }
 
 
@@ -179,6 +183,7 @@ class GameState:
     log: list[str] = field(default_factory=list)
     game_log: list[LogEntry] = field(default_factory=list)
     test_mode: bool = False
+    vp_target: int = VP_TARGET
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None) -> None:
@@ -244,12 +249,15 @@ def create_game(
     card_registry: dict[str, Card],
     seed: Optional[int] = None,
     test_mode: bool = False,
+    vp_target: Optional[int] = None,
 ) -> GameState:
     """Create a new game with the given configuration."""
     rng = random.Random(seed)
     num_players = len(player_configs)
 
     game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode)
+    if vp_target is not None:
+        game.vp_target = vp_target
     game.grid = generate_hex_grid(grid_size, num_players, rng)
 
     # Create players and assign starting positions
@@ -329,20 +337,11 @@ def execute_start_of_turn(game: GameState) -> GameState:
             player.resources = max(0, player.resources - UPKEEP_COST)
             game._log(f"{player.name} pays {UPKEEP_COST} upkeep ({player.resources} remaining)")
 
-        # Score VP for hexes held since last turn
-        if game.current_round > 1 and game.grid is not None:
-            vp_scored = 0
-            for tile in game.grid.tiles.values():
-                if (tile.owner == pid and tile.is_vp
-                        and tile.held_since_turn is not None
-                        and tile.held_since_turn < game.current_round):
-                    vp_scored += tile.vp_value
-            if vp_scored > 0:
-                player.vp += vp_scored
-                game._log(f"{player.name} scores {vp_scored} VP from held tiles (total: {player.vp})")
+        # VP from held tiles removed — VP hexes now score once on capture
+        # (see execute_reveal for the one-time VP award)
 
         # Check win condition
-        if player.vp >= VP_TARGET:
+        if player.vp >= game.vp_target:
             game.winner = pid
             game.current_phase = Phase.GAME_OVER
             game._log(f"{player.name} wins with {player.vp} VP!")
@@ -360,6 +359,15 @@ def execute_start_of_turn(game: GameState) -> GameState:
 
         # Reset turn modifiers (decrement multi-round effects)
         player.turn_modifiers.reset_for_new_turn()
+
+    # Reset all tile defense_power to base + permanent (round-based bonuses expire)
+    if game.grid:
+        for tile in game.grid.tiles.values():
+            if not tile.is_blocked:
+                tile.defense_power = tile.base_defense + tile.permanent_defense_bonus
+
+    for pid in game.player_order:
+        player = game.players[pid]
 
         # Reset action tracking
         player.actions_used = 0
@@ -405,12 +413,13 @@ def play_card(game: GameState, player_id: str, card_index: int,
 
     card = player.hand[card_index]
 
+    # Block unplayable cards (e.g. Land Grant — passive VP, takes up a slot)
+    if card.unplayable:
+        return False, f"{card.name} cannot be played"
+
     # Check action availability (skip in test mode)
     net_cost = 1 - card.effective_action_return
     if not game.test_mode:
-        if player.actions_used + 1 > ACTION_HARD_CAP:
-            return False, f"Action hard cap ({ACTION_HARD_CAP}) reached"
-
         if player.actions_used >= player.actions_available and net_cost > 0:
             return False, "No action slots available"
 
@@ -456,40 +465,69 @@ def play_card(game: GameState, player_id: str, card_index: int,
             if existing_claims and not card.stackable:
                 return False, "This card is not Stackable"
 
-        # Validate extra targets for multi-target cards (Surge)
-        validated_extra = []
-        if card.effective_multi_target_count > 0 and extra_targets:
-            max_extra = card.effective_multi_target_count
-            player_tiles = game.grid.get_player_tiles(player_id)
-            for et_q, et_r in extra_targets[:max_extra]:
-                et_tile = game.grid.get_tile(et_q, et_r)
-                if not et_tile or et_tile.is_blocked:
+    # Validate target for defense cards — must target a tile the player owns
+    if card.card_type == CardType.DEFENSE and target_q is not None:
+        assert game.grid is not None
+        _target_r = target_r if target_r is not None else 0
+        tile = game.grid.get_tile(target_q, _target_r)
+        if not tile:
+            return False, "Invalid target tile"
+        if tile.is_blocked:
+            return False, "Cannot target blocked tile"
+        if tile.owner != player_id:
+            return False, "Defense cards must target a tile you own"
+
+    # Validate extra targets for multi-target cards (Surge)
+    validated_extra: list[tuple[int, int]] = []
+    if card.card_type == CardType.CLAIM and card.effective_multi_target_count > 0 and extra_targets:
+        assert game.grid is not None
+        max_extra = card.effective_multi_target_count
+        player_tiles = game.grid.get_player_tiles(player_id)
+        for et_q, et_r in extra_targets[:max_extra]:
+            et_tile = game.grid.get_tile(et_q, et_r)
+            if not et_tile or et_tile.is_blocked:
+                continue
+            if card.adjacency_required:
+                if not any(pt.distance_to(et_tile) <= card.claim_range for pt in player_tiles):
                     continue
-                if card.adjacency_required:
-                    if not any(pt.distance_to(et_tile) <= card.claim_range for pt in player_tiles):
-                        continue
-                if card.unoccupied_only and et_tile.owner is not None:
-                    continue
-                validated_extra.append((et_q, et_r))
+            if card.unoccupied_only and et_tile.owner is not None:
+                continue
+            validated_extra.append((et_q, et_r))
+
+    # Validate extra targets for multi-tile defense cards (Bulwark, etc.)
+    if card.card_type == CardType.DEFENSE and card.effective_defense_target_count > 1 and extra_targets:
+        assert game.grid is not None
+        max_extra_defense = card.effective_defense_target_count - 1  # primary target is already one
+        for et_q, et_r in extra_targets[:max_extra_defense]:
+            et_tile = game.grid.get_tile(et_q, et_r)
+            if not et_tile or et_tile.is_blocked:
+                continue
+            if et_tile.owner != player_id:
+                continue
+            # Don't duplicate primary target
+            if et_q == target_q and et_r == target_r:
+                continue
+            validated_extra.append((et_q, et_r))
 
     # Remove card from hand and create planned action
     player.hand.pop(card_index)
+    has_extra = (
+        (card.card_type == CardType.CLAIM and target_q is not None and card.effective_multi_target_count > 0)
+        or (card.card_type == CardType.DEFENSE and card.effective_defense_target_count > 1)
+    )
     action = PlannedAction(
         card=card,
         target_q=target_q,
         target_r=target_r,
         target_player_id=target_player_id,
-        extra_targets=validated_extra if (card.card_type == CardType.CLAIM and target_q is not None and card.effective_multi_target_count > 0) else [],
+        extra_targets=validated_extra if has_extra else [],
     )
     player.planned_actions.append(action)
     player.actions_used += 1
 
     # Handle immediate effects (↺ and ↑ return actions)
     if card.effective_action_return > 0:
-        player.actions_available = min(
-            player.actions_available + card.effective_action_return,
-            ACTION_HARD_CAP - player.actions_used + player.actions_available,
-        )
+        player.actions_available += card.effective_action_return
 
     # Immediate resource gain
     if card.timing == Timing.IMMEDIATE and card.effective_resource_gain > 0:
@@ -739,7 +777,13 @@ def execute_reveal(game: GameState) -> GameState:
             tile.owner = winner_id
             tile.held_since_turn = game.current_round
             tile.defense_power = tile.base_defense  # reset to intrinsic defense, not 0
+            tile.permanent_defense_bonus = 0  # Entrench bonuses lost on capture
             game._log(f"{game.players[winner_id].name} claims tile {tile_key} (power {max_power})")
+            # VP hexes award VP once on capture
+            if tile.is_vp:
+                winner = game.players[winner_id]
+                winner.vp += tile.vp_value
+                game._log(f"{winner.name} scores {tile.vp_value} VP from capturing VP hex {tile_key} (total: {winner.vp})")
         else:
             game._log(f"{tile.owner and game.players[tile.owner].name} defends tile {tile_key}")
 
@@ -770,13 +814,19 @@ def execute_reveal(game: GameState) -> GameState:
                 drawn = player.deck.draw(card.effective_draw_cards, game.rng)
                 player.hand.extend(drawn)
 
-        # Defense bonus applied to target tile
+        # Defense bonus applied to target tile(s)
         if card.card_type == CardType.DEFENSE and action.target_q is not None:
             _action_target_r = action.target_r if action.target_r is not None else 0
             tile = game.grid.get_tile(action.target_q, _action_target_r)
             if tile and tile.owner == pid:
                 tile.defense_power += card.effective_defense_bonus
                 game._log(f"{player.name} fortifies tile {action.target_q},{action.target_r} (+{card.effective_defense_bonus} defense)")
+            # Apply defense bonus to extra targets (multi-tile defense cards like Bulwark)
+            for et_q, et_r in action.extra_targets:
+                et_tile = game.grid.get_tile(et_q, et_r)
+                if et_tile and et_tile.owner == pid:
+                    et_tile.defense_power += card.effective_defense_bonus
+                    game._log(f"{player.name} fortifies tile {et_q},{et_r} (+{card.effective_defense_bonus} defense)")
 
         # Forced discards
         if card.forced_discard > 0 and action.target_player_id:
@@ -787,10 +837,12 @@ def execute_reveal(game: GameState) -> GameState:
 
         # Resolve structured on_resolution effects for non-claim cards
         if card.effects:
-            resolve_on_resolution_effects(game, player, card, action)
+            resolve_on_resolution_effects(game, player, card, action,
+                                          claim_results=claim_results)
 
         # Trash on use
         if card.trash_on_use:
+            player.trash.append(card)
             game._log(f"{card.name} is trashed after use")
         else:
             player.deck.add_to_discard([card])
@@ -836,12 +888,14 @@ def execute_reveal(game: GameState) -> GameState:
             else:
                 game._log(f"{player.name}'s Cease Fire bonus forfeited — claimed an opponent tile")
 
-    # Discard planned claim cards
+    # Discard planned claim cards (or trash if trash_on_use)
     for pid in game.player_order:
         player = game.players[pid]
         for action in player.planned_actions:
             if action.card.card_type == CardType.CLAIM:
-                if not action.card.trash_on_use:
+                if action.card.trash_on_use:
+                    player.trash.append(action.card)
+                else:
                     player.deck.add_to_discard([action.card])
 
     game.current_phase = Phase.BUY
@@ -914,6 +968,10 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             if effective_cost > 0:
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
+        # Award passive VP (e.g. Land Grant)
+        if purchased.passive_vp > 0:
+            player.vp += purchased.passive_vp
+            game._log(f"{player.name} gains {purchased.passive_vp} VP from purchasing {purchased.name}")
         game._log(f"{player.name} buys {purchased.name} from neutral market")
         return True, f"Bought {purchased.name}"
 

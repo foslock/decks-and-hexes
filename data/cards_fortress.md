@@ -11,13 +11,31 @@
 
 cards:
 
+  - id: fortress_bunker
+    name: Bunker
+    name_upgraded: Bunker+
+    type: Defense
+    buy_cost: null
+    starter: true
+    action_return: 0
+    power: 0
+    defense_bonus: 2
+    upgraded_defense_bonus: 3
+    effect: "Defense: One tile you own gains +2 defense this round. Gain 1 resource."
+    effect_upgraded: "Defense: One tile you own gains +3 defense this round. Gain 2 resources."
+    resource_gain: 1
+    upgraded_resource_gain: 2
+    note: "Fortress starter. Defensive positioning plus economy in one card."
+
   - id: fortress_fortify
     name: Fortify
     name_upgraded: Fortify+
     type: Defense
     buy_cost: 2
-    action_return: 0
+    action_return: 1
     power: 3
+    defense_target_count: 1
+    upgraded_defense_target_count: 2
     effect: "Defense: One tile you own gains +3 defense power when defending this round."
     effect_upgraded: "Defense: Two tiles you own each gain +3 defense power when defending this round."
     secondary_effect: null
@@ -31,6 +49,8 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 2
+    defense_target_count: 2
+    upgraded_defense_target_count: 3
     effect: "Defense: Two tiles you own each gain +2 defense power when defending this round."
     effect_upgraded: "Defense: Three tiles you own each gain +2 defense power when defending this round."
     secondary_effect: null
@@ -60,6 +80,8 @@ cards:
     buy_cost: 2
     action_return: 0
     power: 0
+    defense_target_count: 1
+    upgraded_defense_target_count: 2
     effect: "Defense: One tile you own cannot be claimed this round."
     effect_upgraded: "Defense: Two tiles you own cannot be claimed this round."
     secondary_effect: null
@@ -129,13 +151,20 @@ cards:
     type: Defense
     buy_cost: 1
     action_return: 0
-    power: 1
+    power: 0
+    defense_bonus: 0
     effect: "Defense: Target tile you own permanently gains +1 defense power until it is captured."
     effect_upgraded: "Defense: Target tile you own permanently gains +2 defense power until it is captured."
     secondary_effect: null
     secondary_timing: null
 
     note: "Permanent defense bonus persists across rounds and stacks with round-based Defense cards."
+
+    effects:
+      - type: permanent_defense
+        value: 1
+        timing: immediate
+        metadata: {upgraded_value: 2}
 
   - id: fortress_war_of_attrition
     name: War of Attrition
@@ -162,6 +191,8 @@ cards:
     buy_cost: 5
     action_return: 0
     power: 0
+    defense_target_count: 1
+    upgraded_defense_target_count: 2
     effect: "Defense: One tile you own cannot be claimed this round or next round."
     effect_upgraded: "Defense: Two tiles you own cannot be claimed this round or next round."
     secondary_effect: null
@@ -237,4 +268,43 @@ cards:
     effect_upgraded: "Engine: Gain 2 resources. Draw 1 card immediately. Gain 1 action back."
     secondary_effect: null
     secondary_timing: null
+
+
+  - id: fortress_fortified_position
+    name: Fortified Position
+    name_upgraded: Fortified Position+
+    type: Engine
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Engine: Gain 2 VP for each tile you own with 2 or more defense. Trash this card."
+    effect_upgraded: "Engine: Gain 2 VP for each tile you own with 1 or more defense. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: vp_from_defense
+        value: 2
+        timing: immediate
+        metadata: {min_defense: 2, upgraded_min_defense: 1}
+
+  - id: fortress_diplomacy
+    name: Diplomacy
+    name_upgraded: Diplomacy+
+    type: Engine
+    buy_cost: 2
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Engine: You gain 2 VP. All other players each gain 1 VP. Trash this card."
+    effect_upgraded: "Engine: You gain 3 VP. All other players each gain 1 VP. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: vp_for_all
+        value: 1
+        timing: immediate
+        metadata: {self_bonus: 1, self_bonus_upgraded: 2}
 

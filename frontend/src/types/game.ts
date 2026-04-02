@@ -30,6 +30,7 @@ export interface Card {
   claim_range: number;
   unoccupied_only: boolean;
   multi_target_count: number;
+  defense_target_count: number;
   flood: boolean;
   target_own_tile: boolean;
   description: string;
@@ -45,6 +46,7 @@ export interface Card {
     forced_discard?: number;
     defense_bonus?: number;
     multi_target_count?: number;
+    defense_target_count?: number;
   };
 }
 
@@ -53,6 +55,7 @@ export interface PlannedAction {
   target_q: number | null;
   target_r: number | null;
   target_player_id: string | null;
+  extra_targets?: [number, number][];
 }
 
 export interface Player {
@@ -77,6 +80,7 @@ export interface Player {
   has_submitted_plan: boolean;
   has_ended_turn: boolean;
   effective_buy_costs?: Record<string, number>;
+  trash: Card[];
 }
 
 export interface MarketStack {

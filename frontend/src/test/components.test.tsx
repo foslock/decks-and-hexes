@@ -81,12 +81,17 @@ describe('CardHand', () => {
     expect(screen.getByText(/No cards in hand/)).toBeInTheDocument();
   });
 
-  it('shows reduced opacity when disabled', () => {
+  it('shows dark overlay when disabled', () => {
     const { container } = render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={true} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     const cardElements = container.querySelectorAll('[role="button"]');
     expect(cardElements.length).toBe(3);
     cardElements.forEach((el) => {
-      expect((el as HTMLElement).style.opacity).toBe('0.5');
+      // Cards should have full opacity (no transparency through overlapping cards)
+      expect((el as HTMLElement).style.opacity).toBe('1');
+      // A dark overlay div should be visible inside the card
+      const overlay = (el as HTMLElement).querySelector('div[style*="position: absolute"]');
+      expect(overlay).toBeTruthy();
+      expect((overlay as HTMLElement).style.opacity).toBe('1');
     });
   });
 

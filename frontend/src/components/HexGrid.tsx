@@ -7,14 +7,14 @@ const HEX_SIZE = 32;
 const HEX_WIDTH = HEX_SIZE * 2;
 const HEX_HEIGHT = Math.sqrt(3) * HEX_SIZE;
 
-// Player colors
-const PLAYER_COLORS: Record<string, number> = {
-  player_0: 0x4a9eff,
-  player_1: 0xff4a4a,
-  player_2: 0x4aff6a,
-  player_3: 0xffaa4a,
-  player_4: 0xaa4aff,
-  player_5: 0xff4aaa,
+// Player colors (exported for use in GameScreen chevrons)
+export const PLAYER_COLORS: Record<string, number> = {
+  player_0: 0x2a6ecc,
+  player_1: 0xcc2a2a,
+  player_2: 0x2aaa4a,
+  player_3: 0xcc7a2a,
+  player_4: 0x7a2acc,
+  player_5: 0xcc2a7a,
 };
 
 const TILE_COLORS = {
@@ -43,6 +43,15 @@ export interface PlannedActionIcon {
   card: Card;
 }
 
+export interface ClaimChevron {
+  targetQ: number;
+  targetR: number;
+  sourceQ: number;
+  sourceR: number;
+  color: number;
+  alpha: number;
+}
+
 interface HexGridProps {
   tiles: Record<string, HexTile>;
   onTileClick: (q: number, r: number) => void;
@@ -57,6 +66,8 @@ interface HexGridProps {
   previewCard?: Card | null;
   /** All tiles the preview card can legally be played on (superset of highlightTiles — includes own tiles for defensive claims) */
   previewValidTiles?: Set<string>;
+  /** Claim direction chevrons shown during plan/reveal phases */
+  claimChevrons?: ClaimChevron[];
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -164,7 +175,7 @@ function PlannedCardTooltip({ card, x, y }: { card: Card; x: number; y: number }
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -178,6 +189,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const surgeTargetsRef = useRef(surgeTargets);
   const previewCardRef = useRef(previewCard);
   const previewValidTilesRef = useRef(previewValidTiles);
+  const claimChevronsRef = useRef(claimChevrons);
   const hexContainerRef = useRef<Container | null>(null);
   const hoveredTileRef = useRef<string | null>(null);
   const hoverEdgeGraphicsRef = useRef<Graphics | null>(null);
@@ -198,6 +210,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   surgeTargetsRef.current = surgeTargets;
   previewCardRef.current = previewCard;
   previewValidTilesRef.current = previewValidTiles;
+  claimChevronsRef.current = claimChevrons;
 
   // Compute bounding box of all tiles in unscaled pixel space, then fit to canvas.
   const fitGrid = useCallback(() => {
@@ -358,7 +371,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           const textY = tile.is_vp ? y + 8 : y;
           const lbl = new Text({
             text: previewText,
-            style: new TextStyle({ fontSize: 13, fill: previewColor, fontWeight: 'bold' }),
+            style: new TextStyle({ fontSize: 13, fill: previewColor, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
             resolution: Math.ceil(window.devicePixelRatio || 2),
           });
           lbl.anchor.set(0.5);
@@ -467,6 +480,132 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       hexContainer.addChild(outlineG);
     }
 
+    // === PASS 6: Claim direction chevrons ===
+    const chevrons = claimChevronsRef.current;
+    if (chevrons && chevrons.length > 0) {
+      // Flat-top hex: vertex i is at angle (60*i)° from center.
+      // Edge i connects vertex i to vertex (i+1)%6.
+      // The outward normal of edge i bisects vertices i and i+1, at angle (60*i + 30)°.
+      // Edge 0 → vertices [0,1], normal 30° (lower-right in screen coords)
+      // Edge 1 → vertices [1,2], normal 90° (bottom)
+      // Edge 2 → vertices [2,3], normal 150° (lower-left)
+      // Edge 3 → vertices [3,4], normal 210° (upper-left)
+      // Edge 4 → vertices [4,5], normal 270° (top)
+      // Edge 5 → vertices [5,0], normal 330° (upper-right)
+      const edgeVertexPairs: [number, number][] = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 0]];
+      const edgeNormalAngles = [
+        Math.PI / 6,       // 30°
+        Math.PI / 2,       // 90°
+        5 * Math.PI / 6,   // 150°
+        7 * Math.PI / 6,   // 210°
+        3 * Math.PI / 2,   // 270°
+        11 * Math.PI / 6,  // 330°
+      ];
+
+      for (const chev of chevrons) {
+        if (chev.alpha <= 0) continue;
+        const target = axialToPixel(chev.targetQ, chev.targetR);
+        const source = axialToPixel(chev.sourceQ, chev.sourceR);
+
+        // Angle from target center toward source tile
+        const dx = source.x - target.x;
+        const dy = source.y - target.y;
+        const angleToSource = Math.atan2(dy, dx);
+
+        // Find edge whose outward normal best matches the direction to source
+        let bestEdge = 0;
+        let bestDot = -Infinity;
+        for (let i = 0; i < 6; i++) {
+          const dot = Math.cos(angleToSource - edgeNormalAngles[i]);
+          if (dot > bestDot) {
+            bestDot = dot;
+            bestEdge = i;
+          }
+        }
+
+        const [vA, vB] = edgeVertexPairs[bestEdge];
+        const pA = hexVertex(target.x, target.y, vA, HEX_SIZE);
+        const pB = hexVertex(target.x, target.y, vB, HEX_SIZE);
+
+        // Edge midpoint (on the boundary of the target tile)
+        const midX = (pA.x + pB.x) / 2;
+        const midY = (pA.y + pB.y) / 2;
+
+        // Inward direction (edge midpoint toward target hex center)
+        const inX = target.x - midX;
+        const inY = target.y - midY;
+        const inLen = Math.sqrt(inX * inX + inY * inY);
+        const inNx = inX / inLen;
+        const inNy = inY / inLen;
+
+        // Chevron straddles the edge: base is OUTSIDE (source side), tip is INSIDE (target side)
+        const tipDepth = HEX_SIZE * 0.30;   // how far tip extends into target tile
+        const baseDepth = HEX_SIZE * 0.25;  // how far base extends outside toward source
+        const chevWidth = 0.70;             // fraction of edge length
+
+        // Tip: offset inward from edge midpoint (into the target tile)
+        const tipX = midX + inNx * tipDepth;
+        const tipY = midY + inNy * tipDepth;
+
+        // Base center: offset outward from edge midpoint (toward source/player tile)
+        const baseCx = midX - inNx * baseDepth;
+        const baseCy = midY - inNy * baseDepth;
+
+        // Base corners: along the edge direction at the base center
+        const edgeDx = pB.x - pA.x;
+        const edgeDy = pB.y - pA.y;
+        const edgeLen = Math.sqrt(edgeDx * edgeDx + edgeDy * edgeDy);
+        const eDirX = edgeDx / edgeLen;
+        const eDirY = edgeDy / edgeLen;
+        const halfW = edgeLen * chevWidth / 2;
+        const baseAx = baseCx - eDirX * halfW;
+        const baseAy = baseCy - eDirY * halfW;
+        const baseBx = baseCx + eDirX * halfW;
+        const baseBy = baseCy + eDirY * halfW;
+
+        const g = new Graphics();
+
+        // Gradient: 0% at base → 100% at edge center → 50% at tip
+        // Split into strips for smooth gradient approximation
+        const totalLen = baseDepth + tipDepth;
+        const tEdge = baseDepth / totalLen; // parameter where edge midpoint is (~0.45)
+        const numStrips = 8;
+
+        for (let s = 0; s < numStrips; s++) {
+          const t0 = s / numStrips;
+          const t1 = (s + 1) / numStrips;
+          const tMid = (t0 + t1) / 2;
+
+          // Alpha: 0% at t=0 (base), 100% at t=tEdge (edge), 50% at t=1 (tip)
+          let stripAlpha: number;
+          if (tMid <= tEdge) {
+            stripAlpha = tMid / tEdge; // 0 → 1
+          } else {
+            stripAlpha = 1.0 - 0.5 * ((tMid - tEdge) / (1 - tEdge)); // 1 → 0.5
+          }
+
+          // Trapezoid corners: lerp base corners and tip at t0 and t1
+          const lx0 = baseAx + (tipX - baseAx) * t0;
+          const ly0 = baseAy + (tipY - baseAy) * t0;
+          const rx0 = baseBx + (tipX - baseBx) * t0;
+          const ry0 = baseBy + (tipY - baseBy) * t0;
+          const lx1 = baseAx + (tipX - baseAx) * t1;
+          const ly1 = baseAy + (tipY - baseAy) * t1;
+          const rx1 = baseBx + (tipX - baseBx) * t1;
+          const ry1 = baseBy + (tipY - baseBy) * t1;
+
+          g.moveTo(lx0, ly0);
+          g.lineTo(rx0, ry0);
+          g.lineTo(rx1, ry1);
+          g.lineTo(lx1, ly1);
+          g.closePath();
+          g.fill({ color: chev.color, alpha: chev.alpha * stripAlpha });
+        }
+
+        hexContainer.addChild(g);
+      }
+    }
+
     // === PASS 7: Hover edge overlay (updated dynamically on pointer events) ===
     const hoverEdgeG = new Graphics();
     hoverEdgeGraphicsRef.current = hoverEdgeG;
@@ -480,13 +619,13 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         const [sq, sr] = sTargets[i];
         const { x: sx, y: sy } = axialToPixel(sq, sr);
         // Pulsing ring to mark selected surge targets
-        surgeG.setStrokeStyle({ width: 3, color: 0x00ffff, alpha: 0.9 });
+        surgeG.setStrokeStyle({ width: 3, color: 0xffff00, alpha: 0.9 });
         drawHexagon(surgeG, sx, sy, HEX_SIZE - 2);
         surgeG.stroke();
         // Number label
         const numLabel = new Text({
           text: `${i + 1}`,
-          style: new TextStyle({ fontSize: 16, fill: 0x00ffff, fontWeight: 'bold' }),
+          style: new TextStyle({ fontSize: 16, fill: 0xffff00, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         numLabel.anchor.set(0.5);
@@ -545,7 +684,12 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
 
         const actionLabel = new Text({
           text: label,
-          style: new TextStyle({ fontSize: 13, fill: labelColor, fontWeight: 'bold' }),
+          style: new TextStyle({
+            fontSize: 13,
+            fill: labelColor,
+            fontWeight: 'bold',
+            stroke: { color: 0x000000, width: 2 },
+          }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         actionLabel.anchor.set(0.5);
@@ -553,11 +697,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         actionLabel.alpha = 1;
         hexContainer.addChild(actionLabel);
         tileLabelRef.current.set(key, actionLabel);
-      } else if (tile.defense_power > 0 || inBorder) {
-        const defColor = inBorder && tile.defense_power === 0 ? 0x888888 : 0xffffff;
+      } else if (tile.defense_power > 0) {
+        const defColor = 0xffffff;
         const def = new Text({
-          text: `${tile.defense_power}`,
-          style: new TextStyle({ fontSize: 14, fill: defColor, fontWeight: 'bold' }),
+          text: `🛡${tile.defense_power}`,
+          style: new TextStyle({
+            fontSize: 13,
+            fill: defColor,
+            fontWeight: 'bold',
+            stroke: { color: 0x000000, width: 2 },
+          }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         def.anchor.set(0.5);
@@ -610,7 +759,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   // Re-render tiles when data changes
   useEffect(() => {
     renderTiles();
-  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, renderTiles]);
+  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, claimChevrons, renderTiles]);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>

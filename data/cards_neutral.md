@@ -41,8 +41,8 @@ cards:
     starter: true
     action_return: 0
     power: 0
-    effect: "Engine: Gain 2 resources."
-    effect_upgraded: "Engine: Gain 3 resources."
+    effect: "Engine: Gain 1 resources."
+    effect_upgraded: "Engine: Gain 2 resources."
     trash_on_use: false
     note: "The baseline economy card. Every archetype starts with copies of this card."
 
@@ -64,18 +64,16 @@ cards:
     name: Land Grant
     name_upgraded: Land Grant+
     type: Engine
-    buy_cost: 2
+    buy_cost: 4
     copies: 3
     action_return: 0
     power: 0
-    effect: "Gain 1 VP immediately. This card is trashed after use."
-    effect_upgraded: "Gain 2 VP immediately. This card is trashed after use."
-    trash_on_use: true
-    note: "One of the few cards that directly awards VP. Limited copies make buying multiples a real investment."
-    effects:
-      - type: gain_vp
-        value: 1
-        timing: immediate
+    unplayable: true
+    passive_vp: 1
+    effect: "Passive: Worth 1 VP when purchased. Cannot be played — takes up a card slot in your deck."
+    effect_upgraded: "Passive: Worth 2 VP when purchased. Cannot be played — takes up a card slot in your deck."
+    trash_on_use: false
+    note: "Awards VP on purchase but clogs your deck permanently. Limited copies make buying multiples a real investment."
 
   - id: neutral_sabotage
     name: Sabotage
@@ -85,6 +83,8 @@ cards:
     copies: 3
     action_return: 0
     power: 0
+    forced_discard: 1
+    upgraded_forced_discard: 2
     effect: "Choose a target opponent. That opponent draws 1 fewer card at the start of their next turn."
     effect_upgraded: "Choose a target opponent. That opponent draws 2 fewer cards at the start of their next turn."
     trash_on_use: false

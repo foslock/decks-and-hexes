@@ -180,14 +180,15 @@ class TestPlanPhase:
     def test_play_engine_card_no_target(self, small_2p_game: GameState) -> None:
         game = small_2p_game
         p0 = game.players["p0"]
-        # Find an engine card (Gather)
+        # Find an engine card (Gather or archetype starter engine)
         engine_idx = next((i for i, c in enumerate(p0.hand) if c.card_type == CardType.ENGINE), None)
         if engine_idx is not None:
+            engine_card = p0.hand[engine_idx]
+            expected_gain = engine_card.resource_gain
             resources_before = p0.resources
             ok, msg = play_card(game, "p0", engine_idx)
             assert ok, msg
-            # Gather gives 2 resources immediately
-            assert p0.resources == resources_before + 2
+            assert p0.resources == resources_before + expected_gain
 
     def test_cannot_play_on_blocked_tile(self, small_2p_game: GameState) -> None:
         game = small_2p_game
@@ -487,47 +488,71 @@ class TestEndOfTurn:
 
 
 class TestVPScoring:
-    def test_vp_hex_scores_after_held_one_round(self, small_2p_game: GameState) -> None:
+    def test_vp_hex_scores_on_capture(self, small_2p_game: GameState) -> None:
+        """VP hexes award VP once when captured during reveal."""
         game = small_2p_game
         assert game.grid is not None
 
-        # Give p0 a VP hex that was "held since round 0" (before round 1)
-        vp_tile = next(t for t in game.grid.tiles.values() if t.is_vp and not t.is_blocked)
+        p0 = game.players["p0"]
+        vp_before = p0.vp
+
+        # Find a VP tile and give p0 a claim card with enough power
+        vp_tile = next(t for t in game.grid.tiles.values()
+                       if t.is_vp and not t.is_blocked and t.owner is None)
+
+        # Give p0 a card powerful enough to overcome tile defense
+        from app.game_engine.cards import Card, CardType, Archetype, Timing
+        strong_card = Card(
+            id="test_strong_claim", name="Test Strong Claim",
+            archetype=Archetype.VANGUARD, card_type=CardType.CLAIM,
+            power=10,  # high enough to beat any defense
+        )
+        p0.hand.append(strong_card)
+
+        # Ensure p0 has an adjacent tile to claim from
+        p0_tiles = game.grid.get_player_tiles("p0")
+        adj_to_owned = set()
+        for pt in p0_tiles:
+            for adj in game.grid.get_adjacent(pt.q, pt.r):
+                if adj.key == vp_tile.key:
+                    adj_to_owned.add(vp_tile.key)
+
+        # If VP tile isn't adjacent, place p0 adjacent to it
+        if not adj_to_owned:
+            adj_tiles = game.grid.get_adjacent(vp_tile.q, vp_tile.r)
+            if adj_tiles:
+                adj_tiles[0].owner = "p0"
+
+        card_idx = len(p0.hand) - 1
+        play_card(game, "p0", card_idx,
+                  target_q=vp_tile.q, target_r=vp_tile.r)
+
+        for pid in game.player_order:
+            submit_plan(game, pid)
+
+        # After reveal, p0 should have scored VP from capturing the VP hex
+        assert p0.vp > vp_before
+
+    def test_holding_vp_hex_does_not_score_per_turn(self, small_2p_game: GameState) -> None:
+        """VP hexes no longer score passively each turn."""
+        game = small_2p_game
+        assert game.grid is not None
+
+        # Give p0 a VP hex that was held since before round 1
+        vp_tile = next(t for t in game.grid.tiles.values()
+                       if t.is_vp and not t.is_blocked)
         vp_tile.owner = "p0"
         vp_tile.held_since_turn = 0
 
-        # Advance through round 1
-        for pid in game.player_order:
-            submit_plan(game, pid)
-        execute_end_of_turn(game)
-
-        # Now in round 2 after start_of_turn — p0 should have scored
-        p0 = game.players["p0"]
-        assert p0.vp >= 1
-
-    def test_newly_claimed_tile_doesnt_score_same_round(self, small_2p_game: GameState) -> None:
-        game = small_2p_game
-        assert game.grid is not None
-
-        # Claim a VP tile this round
-        vp_tile = next(t for t in game.grid.tiles.values() if t.is_vp and not t.is_blocked and t.owner is None)
-        vp_tile.owner = "p0"
-        vp_tile.held_since_turn = game.current_round  # Claimed this round
-
         vp_before = game.players["p0"].vp
 
-        # Advance through round
+        # Advance through a full round (no cards played)
         for pid in game.player_order:
             submit_plan(game, pid)
         execute_end_of_turn(game)
 
-        # Should not score in round 2 because held_since_turn == 1 and it's now round 2
-        # Actually it should score: held_since_turn (1) < current_round (2)
-        # But per rules: "score VP hexes held since PREVIOUS turn (not the turn claimed)"
-        # held_since_turn=1, current_round=2, condition is held_since < current => 1 < 2 = True
-        # This means it DOES score. Let's verify.
-        p0 = game.players["p0"]
-        assert p0.vp > vp_before
+        # VP should NOT have increased from passive holding
+        assert game.players["p0"].vp == vp_before
 
 
 class TestForcedDiscards:

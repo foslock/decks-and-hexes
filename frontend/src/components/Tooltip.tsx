@@ -163,7 +163,7 @@ export function HoldToSubmitButton({
   children,
   onConfirm,
   requireHold,
-  holdDuration = 2000,
+  holdDuration = 1000,
   warning,
   tooltip,
   style,
@@ -296,11 +296,14 @@ export function HoldToSubmitButton({
         {requireHold && (
           <div style={{
             position: 'absolute',
-            inset: 0,
-            background: 'rgba(255,255,255,0.2)',
-            width: holding ? `${progress * 100}%` : '0%',
-            transition: holding ? progressTransition : 'none',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            background: 'rgba(255,255,255,0.25)',
+            width: `${progress * 100}%`,
+            transition: progressTransition,
             pointerEvents: 'none',
+            borderRadius: 'inherit',
           }} />
         )}
         <span style={{ position: 'relative' }}>{children}</span>
@@ -329,7 +332,7 @@ export function HoldToSubmitButton({
           {requireHold ? warning : (tooltip || '')}
           {requireHold && (
             <div style={{ fontSize: 10, color: '#aa8833', marginTop: 3 }}>
-              Hold button for 2 seconds to confirm
+              Hold button for 1 second to confirm
             </div>
           )}
         </div>,

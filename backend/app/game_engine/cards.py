@@ -32,15 +32,15 @@ class Archetype(str, Enum):
 
 # Action slots per archetype
 ARCHETYPE_SLOTS = {
-    Archetype.VANGUARD: 4,
-    Archetype.SWARM: 4,
+    Archetype.VANGUARD: 3,
+    Archetype.SWARM: 3,
     Archetype.FORTRESS: 3,
 }
 
 HAND_SIZE = {
-    Archetype.VANGUARD: 4,
+    Archetype.VANGUARD: 5,
     Archetype.SWARM: 5,
-    Archetype.FORTRESS: 3,
+    Archetype.FORTRESS: 5,
 }
 
 ACTION_HARD_CAP = 6
@@ -69,8 +69,11 @@ class Card:
     claim_range: int = 1  # max hex distance from owned tiles (1=adjacent, 2=two steps, etc.)
     unoccupied_only: bool = False
     multi_target_count: int = 0  # Surge: max extra targets (0=single, 1=up to 2 total, 2=up to 3)
+    defense_target_count: int = 1  # Defense: number of tiles to apply defense to (default 1)
     flood: bool = False  # Flood: target own tile, claim all adjacent at resolution
     target_own_tile: bool = False  # Must target a tile you own (Flood)
+    unplayable: bool = False  # Cannot be played from hand (e.g. Land Grant — dead weight)
+    passive_vp: int = 0  # VP awarded on purchase (card stays in deck)
     description: str = ""
     upgrade_description: str = ""
     # Structured effects list (parsed from YAML)
@@ -85,6 +88,7 @@ class Card:
     upgraded_forced_discard: Optional[int] = None
     upgraded_defense_bonus: Optional[int] = None
     upgraded_multi_target_count: Optional[int] = None
+    upgraded_defense_target_count: Optional[int] = None
 
     name_upgraded: str = ""
 
@@ -124,6 +128,12 @@ class Card:
             return self.upgraded_multi_target_count
         return self.multi_target_count
 
+    @property
+    def effective_defense_target_count(self) -> int:
+        if self.is_upgraded and self.upgraded_defense_target_count is not None:
+            return self.upgraded_defense_target_count
+        return self.defense_target_count
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -145,8 +155,11 @@ class Card:
             "claim_range": self.claim_range,
             "unoccupied_only": self.unoccupied_only,
             "multi_target_count": self.effective_multi_target_count,
+            "defense_target_count": self.effective_defense_target_count,
             "flood": self.flood,
             "target_own_tile": self.target_own_tile,
+            "unplayable": self.unplayable,
+            "passive_vp": self.passive_vp,
             "description": self.description,
             "upgrade_description": self.upgrade_description,
             "name_upgraded": self.name_upgraded,
@@ -174,6 +187,8 @@ class Card:
             upgraded["defense_bonus"] = self.upgraded_defense_bonus
         if self.upgraded_multi_target_count is not None:
             upgraded["multi_target_count"] = self.upgraded_multi_target_count
+        if self.upgraded_defense_target_count is not None:
+            upgraded["defense_target_count"] = self.upgraded_defense_target_count
         if upgraded:
             return {"upgraded_stats": upgraded}
         return {}
@@ -212,51 +227,48 @@ class Deck:
         return len(self.cards) + len(self.discard)
 
 
+STARTER_CARD_IDS = {
+    Archetype.VANGUARD: "vanguard_war_chest",
+    Archetype.SWARM: "swarm_scout",
+    Archetype.FORTRESS: "fortress_bunker",
+}
+
+
+# Starting deck composition per archetype: (explores, gathers)
+# All archetypes get 2× archetype starter, total = explores + gathers + 2 = 10
+STARTER_DECK_COMPOSITION: dict[Archetype, tuple[int, int]] = {
+    Archetype.VANGUARD: (4, 4),   # balanced
+    Archetype.SWARM: (5, 3),      # more explores → faster expansion
+    Archetype.FORTRESS: (3, 5),   # more gathers → more resources for defense
+}
+
+
 def build_starting_deck(archetype: Archetype, card_registry: dict[str, Card]) -> Deck:
-    """Build a starting deck for the given archetype."""
+    """Build a starting deck for the given archetype.
+
+    Swarm:    5× Explore, 3× Gather, 2× Scout     = 10 cards
+    Vanguard: 4× Explore, 4× Gather, 2× War Chest = 10 cards
+    Fortress: 3× Explore, 5× Gather, 2× Bunker    = 10 cards
+    """
     cards = []
+    num_explores, num_gathers = STARTER_DECK_COMPOSITION.get(archetype, (4, 4))
 
-    if archetype == Archetype.VANGUARD:
-        # 2× Blitz, 4× Explore, 2× Gather = 8 cards
-        blitz = card_registry.get("vanguard_blitz")
-        if blitz:
-            cards.extend([_copy_card(blitz, f"start_{i}") for i in range(2)])
-        advance = card_registry.get("neutral_explore")
-        if advance:
-            cards.extend([_copy_card(advance, f"start_adv_{i}") for i in range(4)])
-        gather = card_registry.get("neutral_gather")
-        if gather:
-            cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(2)])
+    # 2× archetype-specific starter card
+    starter_id = STARTER_CARD_IDS.get(archetype)
+    if starter_id:
+        starter = card_registry.get(starter_id)
+        if starter:
+            cards.extend([_copy_card(starter, f"start_{i}") for i in range(2)])
 
-    elif archetype == Archetype.SWARM:
-        # 2× Scout, 1× Swarm Tactics, 5× Explore, 2× Gather = 10 cards
-        scout = card_registry.get("swarm_scout")
-        if scout:
-            cards.extend([_copy_card(scout, f"start_{i}") for i in range(2)])
-        tactics = card_registry.get("swarm_swarm_tactics")
-        if tactics:
-            cards.append(_copy_card(tactics, "start_tac"))
-        advance = card_registry.get("neutral_explore")
-        if advance:
-            cards.extend([_copy_card(advance, f"start_adv_{i}") for i in range(5)])
-        gather = card_registry.get("neutral_gather")
-        if gather:
-            cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(2)])
+    # Explores
+    explore = card_registry.get("neutral_explore")
+    if explore:
+        cards.extend([_copy_card(explore, f"start_adv_{i}") for i in range(num_explores)])
 
-    elif archetype == Archetype.FORTRESS:
-        # 1× Garrison, 1× Fortify, 2× Explore, 2× Gather = 6 cards
-        garrison = card_registry.get("fortress_garrison")
-        if garrison:
-            cards.append(_copy_card(garrison, "start_gar"))
-        fortify = card_registry.get("fortress_fortify")
-        if fortify:
-            cards.append(_copy_card(fortify, "start_fort"))
-        advance = card_registry.get("neutral_explore")
-        if advance:
-            cards.extend([_copy_card(advance, f"start_adv_{i}") for i in range(2)])
-        gather = card_registry.get("neutral_gather")
-        if gather:
-            cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(2)])
+    # Gathers
+    gather = card_registry.get("neutral_gather")
+    if gather:
+        cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(num_gathers)])
 
     deck = Deck(cards=cards)
     return deck

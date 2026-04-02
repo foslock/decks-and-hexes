@@ -15,7 +15,7 @@ from app.game_engine.cards import Archetype, Card, CardType, Timing
 from app.game_engine.effects import parse_effect
 
 
-DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
 
 def load_all_cards() -> dict[str, Card]:
@@ -134,12 +134,20 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     multi_target_count = _safe_int(entry.get("multi_target_count", 0))
     upgraded_multi_target_count = _safe_optional_int(entry.get("upgraded_multi_target_count"))
 
+    # Defense multi-target (e.g. Bulwark defends 2 tiles)
+    defense_target_count = _safe_int(entry.get("defense_target_count", 1)) or 1
+    upgraded_defense_target_count = _safe_optional_int(entry.get("upgraded_defense_target_count"))
+
     # Flood: target own tile, claim all adjacent at resolution
     flood = bool(entry.get("flood", False))
     target_own_tile = bool(entry.get("target_own_tile", False))
 
     # Starter flag
     starter = bool(entry.get("starter", False))
+
+    # Unplayable flag (e.g. Land Grant — passive VP, can't be played from hand)
+    unplayable = bool(entry.get("unplayable", False))
+    passive_vp = _safe_int(entry.get("passive_vp", 0))
 
     # Parse structured effects list from YAML
     effects_data = entry.get("effects", [])
@@ -217,8 +225,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         unoccupied_only=unoccupied_only,
         multi_target_count=multi_target_count,
         upgraded_multi_target_count=upgraded_multi_target_count,
+        defense_target_count=defense_target_count,
+        upgraded_defense_target_count=upgraded_defense_target_count,
         flood=flood,
         target_own_tile=target_own_tile,
+        unplayable=unplayable,
+        passive_vp=passive_vp,
         description=description,
         upgrade_description=upgrade_description,
         name_upgraded=name_upgraded,
