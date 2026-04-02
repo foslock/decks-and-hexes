@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSettings, type AnimationMode } from './SettingsContext';
 
 interface SetupScreenProps {
   onStart: (config: {
@@ -21,11 +22,13 @@ const GRID_SIZES = [
 ];
 
 export default function SetupScreen({ onStart }: SetupScreenProps) {
+  const { settings, setAnimationMode, setTooltips } = useSettings();
   const [gridSize, setGridSize] = useState('small');
-  const [playerCount, setPlayerCount] = useState(2);
+  const [playerCount, setPlayerCount] = useState(3);
   const [players, setPlayers] = useState([
     { name: 'Player 1', archetype: 'vanguard' },
     { name: 'Player 2', archetype: 'swarm' },
+    { name: 'Player 3', archetype: 'fortress' },
   ]);
   const [testMode, setTestMode] = useState(false);
 
@@ -182,6 +185,53 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
         Test Mode
         {testMode && <span style={{ fontSize: 11, color: '#888' }}>— free cards, unlimited actions, stat editing</span>}
       </label>
+
+      {/* Settings */}
+      <div style={{ marginBottom: 24 }}>
+        <h3>Settings</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, color: '#aaa', minWidth: 90 }}>Animations:</span>
+            {(['normal', 'simplified', 'off'] as AnimationMode[]).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setAnimationMode(mode)}
+                style={{
+                  padding: '4px 12px',
+                  fontSize: 12,
+                  background: settings.animationMode === mode ? '#4a9eff' : '#2a2a3e',
+                  border: '1px solid #555',
+                  borderRadius: 4,
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {mode === 'normal' ? 'Normal' : mode === 'simplified' ? 'Simplified' : 'Off'}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, color: '#aaa', minWidth: 90 }}>Tooltips:</span>
+            {([true, false] as const).map((on) => (
+              <button
+                key={String(on)}
+                onClick={() => setTooltips(on)}
+                style={{
+                  padding: '4px 12px',
+                  fontSize: 12,
+                  background: settings.tooltips === on ? '#4a9eff' : '#2a2a3e',
+                  border: '1px solid #555',
+                  borderRadius: 4,
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                {on ? 'On' : 'Off'}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <button
         onClick={handleStart}

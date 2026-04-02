@@ -36,6 +36,8 @@ interface CardHandProps {
   onDiscardAllComplete?: () => void;
   /** Where the last played card should animate toward */
   lastPlayedTarget?: PlayTarget | null;
+  /** Force the shuffle animation on the draw pile (used during intro sequence) */
+  forceShuffleAnim?: boolean;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -331,6 +333,7 @@ export default function CardHand({
   discardAll,
   onDiscardAllComplete,
   lastPlayedTarget,
+  forceShuffleAnim,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -376,6 +379,12 @@ export default function CardHand({
   const prevDeckSizeRef = useRef(deckSize);
   const prevDiscardCountRef = useRef(discardCount);
   const discardAllFiredRef = useRef(false);
+
+  // Force shuffle animation from parent (intro sequence)
+  useEffect(() => {
+    if (forceShuffleAnim) setShuffling(true);
+    else if (forceShuffleAnim === false) setShuffling(false);
+  }, [forceShuffleAnim]);
 
   // ResizeObserver for card overlap
   useEffect(() => {
@@ -838,7 +847,7 @@ export default function CardHand({
           color: '#4a9eff',
           fontStyle: 'italic',
         }}>
-          Draw pile empty, shuffling discarded cards.
+          {forceShuffleAnim ? 'Shuffling deck...' : 'Draw pile empty, shuffling discarded cards.'}
         </div>
       )}
 
@@ -887,7 +896,7 @@ export default function CardHand({
             position: 'relative',
           }}
         >
-          {cards.length === 0 && (
+          {cards.length === 0 && !shuffling && (
             <div style={{ color: '#555', fontStyle: 'italic', fontSize: 13, alignSelf: 'center' }}>
               No cards in hand
             </div>

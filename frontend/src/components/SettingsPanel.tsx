@@ -1,30 +1,52 @@
 import { useSettings, type AnimationMode } from './SettingsContext';
 
 export default function SettingsPanel() {
-  const { settings, setAnimationMode } = useSettings();
+  const { settings, setAnimationMode, setTooltips } = useSettings();
 
   return (
     <div style={{ padding: 8, borderTop: '1px solid #333' }}>
       <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>SETTINGS</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ fontSize: 12, color: '#aaa' }}>Animations:</span>
-        {(['normal', 'simplified', 'off'] as AnimationMode[]).map((mode) => (
-          <button
-            key={mode}
-            onClick={() => setAnimationMode(mode)}
-            style={{
-              padding: '2px 8px',
-              fontSize: 11,
-              background: settings.animationMode === mode ? '#4a9eff' : '#2a2a3e',
-              border: '1px solid #555',
-              borderRadius: 4,
-              color: '#fff',
-              cursor: 'pointer',
-            }}
-          >
-            {mode === 'normal' ? 'Normal' : mode === 'simplified' ? 'Simplified' : 'Off'}
-          </button>
-        ))}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: '#aaa' }}>Animations:</span>
+          {(['normal', 'simplified', 'off'] as AnimationMode[]).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setAnimationMode(mode)}
+              style={{
+                padding: '2px 8px',
+                fontSize: 11,
+                background: settings.animationMode === mode ? '#4a9eff' : '#2a2a3e',
+                border: '1px solid #555',
+                borderRadius: 4,
+                color: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              {mode === 'normal' ? 'Normal' : mode === 'simplified' ? 'Simplified' : 'Off'}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: '#aaa' }}>Tooltips:</span>
+          {([true, false] as const).map((on) => (
+            <button
+              key={String(on)}
+              onClick={() => setTooltips(on)}
+              style={{
+                padding: '2px 8px',
+                fontSize: 11,
+                background: settings.tooltips === on ? '#4a9eff' : '#2a2a3e',
+                border: '1px solid #555',
+                borderRadius: 4,
+                color: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              {on ? 'On' : 'Off'}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

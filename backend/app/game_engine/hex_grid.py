@@ -6,7 +6,9 @@ Grid sizes: Small (37 tiles), Medium (61 tiles), Large (91 tiles).
 
 from __future__ import annotations
 
+import heapq
 import random
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -157,7 +159,8 @@ def generate_hex_grid(size: GridSize, num_players: int, rng: Optional[random.Ran
     ]
     num_vp = config["vp_hexes"]
     vp_tiles = _distribute_vp_hexes(remaining, num_vp, radius, rng,
-                                    starting_clusters=starting_clusters)
+                                    starting_clusters=starting_clusters,
+                                    tiles=grid.tiles)
     for tile in vp_tiles:
         tile.is_vp = True
 
@@ -249,28 +252,160 @@ def _hex_distance(q1: float, r1: float, q2: float, r2: float) -> float:
     return max(abs(q1 - q2), abs(r1 - r2), abs(s1 - s2))
 
 
+def _dijkstra_distances_from(
+    start_q: int, start_r: int,
+    tiles: dict[str, HexTile],
+    defense_overrides: Optional[dict[str, int]] = None,
+) -> dict[str, float]:
+    """Dijkstra from a single source, returning weighted distances to all reachable tiles.
+
+    The cost to enter a tile is 1 + its defense_power (or override).  Tiles with
+    higher defense are "harder" to reach, modelling the extra power a player needs
+    to claim through defended territory.  Blocked tiles are impassable.
+
+    Args:
+        defense_overrides: optional {tile_key: defense} to apply instead of the
+            tile's current defense_power (used to project anticipated VP-tile
+            defense before it has been assigned on the grid).
+    """
+    start_key = f"{start_q},{start_r}"
+    if start_key not in tiles:
+        return {}
+
+    directions = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
+    distances: dict[str, float] = {start_key: 0.0}
+    # (cost, q, r)
+    heap: list[tuple[float, int, int]] = [(0.0, start_q, start_r)]
+
+    while heap:
+        cost, q, r = heapq.heappop(heap)
+        current_key = f"{q},{r}"
+        if cost > distances.get(current_key, float("inf")):
+            continue
+        for dq, dr in directions:
+            nq, nr = q + dq, r + dr
+            nk = f"{nq},{nr}"
+            if nk not in tiles:
+                continue
+            tile = tiles[nk]
+            if tile.is_blocked:
+                continue
+            defense = (defense_overrides or {}).get(nk, tile.defense_power)
+            edge_cost = 1.0 + defense
+            new_cost = cost + edge_cost
+            if new_cost < distances.get(nk, float("inf")):
+                distances[nk] = new_cost
+                heapq.heappush(heap, (new_cost, nq, nr))
+
+    return distances
+
+
+def _compute_anticipated_defense(
+    vp_tiles: list[HexTile],
+    tiles: dict[str, HexTile],
+) -> dict[str, int]:
+    """Compute the defense values that would be assigned for a candidate VP placement.
+
+    Mirrors the logic in generate_hex_grid:
+      - Closest 1/3 of VP tiles (by distance to center) are premium (vp_value=2, defense=3)
+      - Remaining VP tiles are standard (vp_value=1, defense=2)
+      - Non-VP neighbors of premium tiles get defense=1
+    """
+    num_vp = len(vp_tiles)
+    if num_vp == 0:
+        return {}
+
+    num_premium = max(1, round(num_vp / 3))
+    sorted_vp = sorted(vp_tiles,
+                        key=lambda t: (max(abs(t.q), abs(t.r), abs(t.s)), t.key))
+
+    overrides: dict[str, int] = {}
+    premium_keys: set[str] = set()
+
+    for i, tile in enumerate(sorted_vp):
+        if i < num_premium:
+            overrides[tile.key] = 3  # premium VP
+            premium_keys.add(tile.key)
+        else:
+            overrides[tile.key] = 2  # standard VP
+
+    # Neighbors of premium tiles get defense 1 (if not already a VP tile)
+    vp_keys = {t.key for t in vp_tiles}
+    directions = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
+    for tile in sorted_vp[:num_premium]:
+        for dq, dr in directions:
+            nk = f"{tile.q + dq},{tile.r + dr}"
+            if nk not in tiles or nk in vp_keys:
+                continue
+            neighbor = tiles[nk]
+            if neighbor.is_blocked:
+                continue
+            # Only set if not already overridden to something higher
+            if nk not in overrides or overrides[nk] < 1:
+                overrides[nk] = 1
+
+    return overrides
+
+
 def _vp_fairness_score(
     vp_tiles: list[HexTile],
     starting_clusters: list[list[tuple[int, int]]],
+    tiles: dict[str, HexTile],
 ) -> float:
-    """Score a VP placement by how evenly VP tiles are distributed across players.
+    """Score a VP placement by how evenly VP tiles are reachable across players.
 
-    Returns max(avg_dist) - min(avg_dist) across players; lower is fairer.
+    Uses Dijkstra pathfinding around blocked tiles with defense-weighted costs.
+    Tiles with higher defense cost more to traverse, modelling the difficulty
+    of claiming through defended territory.
+
+    For each player, computes a VP potential as the sum of (vp_value / weighted_dist)
+    for each VP tile.  Returns max(potential) - min(potential); lower is fairer.
     Returns 0.0 if there are fewer than 2 players or no VP tiles.
     """
     if len(starting_clusters) < 2 or not vp_tiles:
         return 0.0
 
-    avg_distances = []
-    for cluster in starting_clusters:
-        cx = sum(q for q, r in cluster) / len(cluster)
-        cr = sum(r for q, r in cluster) / len(cluster)
-        avg_dist = sum(
-            _hex_distance(cx, cr, t.q, t.r) for t in vp_tiles
-        ) / len(vp_tiles)
-        avg_distances.append(avg_dist)
+    # Project what defense values these VP tiles (and their neighbors) would get
+    defense_overrides = _compute_anticipated_defense(vp_tiles, tiles)
 
-    return max(avg_distances) - min(avg_distances)
+    # Determine anticipated vp_value for potential scoring
+    num_vp = len(vp_tiles)
+    num_premium = max(1, round(num_vp / 3))
+    sorted_vp = sorted(vp_tiles,
+                        key=lambda t: (max(abs(t.q), abs(t.r), abs(t.s)), t.key))
+    vp_values: dict[str, int] = {}
+    for i, tile in enumerate(sorted_vp):
+        vp_values[tile.key] = 2 if i < num_premium else 1
+
+    # Compute weighted distances from each player's starting cluster
+    player_potentials: list[float] = []
+    for cluster in starting_clusters:
+        # Dijkstra from each tile in the cluster
+        cluster_distances: dict[str, dict[str, float]] = {}
+        for sq, sr in cluster:
+            cluster_distances[f"{sq},{sr}"] = _dijkstra_distances_from(
+                sq, sr, tiles, defense_overrides)
+
+        potential = 0.0
+        for vp_tile in vp_tiles:
+            vp_key = vp_tile.key
+            # Minimum weighted distance from any cluster tile to this VP tile
+            min_dist = float("inf")
+            for _start_key, dist_map in cluster_distances.items():
+                d = dist_map.get(vp_key, float("inf"))
+                if d < min_dist:
+                    min_dist = d
+            if min_dist == float("inf") or min_dist == 0:
+                continue
+            # VP potential: higher value tiles and closer tiles contribute more
+            potential += vp_values.get(vp_key, 1) / min_dist
+
+        player_potentials.append(potential)
+
+    if not player_potentials:
+        return 0.0
+
+    return max(player_potentials) - min(player_potentials)
 
 
 def _single_vp_placement(
@@ -314,19 +449,22 @@ def _distribute_vp_hexes(
     radius: int,
     rng: random.Random,
     starting_clusters: Optional[list[list[tuple[int, int]]]] = None,
+    tiles: Optional[dict[str, HexTile]] = None,
     attempts: int = 50,
 ) -> list[HexTile]:
     """Distribute VP hexes evenly across the grid with player-fairness scoring.
 
     Runs `attempts` random ring-band placements and keeps the one with the
-    most balanced average distance from each player's starting cluster.
+    most balanced VP potential from each player's starting cluster, using
+    BFS pathfinding around blocked tiles.
     """
     best: list[HexTile] = []
     best_score = float("inf")
 
     for _ in range(attempts):
         placement = _single_vp_placement(eligible, count, radius, rng)
-        score = _vp_fairness_score(placement, starting_clusters or [])
+        score = _vp_fairness_score(placement, starting_clusters or [],
+                                   tiles or {})
         if score < best_score:
             best_score = score
             best = placement

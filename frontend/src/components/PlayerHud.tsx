@@ -8,6 +8,7 @@ interface PlayerHudProps {
   phase: string;
   totalCards: number;
   tileCount: number;
+  vpTarget: number;
 }
 
 const ARCHETYPE_ICONS: Record<string, string> = {
@@ -38,7 +39,7 @@ function getStatus(player: Player, phase: string): { label: string; color: strin
   return { label: phase.replace(/_/g, ' '), color: '#888' };
 }
 
-export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, phase, totalCards, tileCount }: PlayerHudProps) {
+export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, phase, totalCards, tileCount, vpTarget }: PlayerHudProps) {
   const status = getStatus(player, phase);
 
   return (
@@ -97,7 +98,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
 
       {/* Stats row */}
       <div style={{ fontSize: 12, display: 'flex', gap: 10, color: '#bbb' }}>
-        <span title="Victory Points">🏆 {player.vp}</span>
+        <span title="Victory Points">★ {player.vp}/{vpTarget}</span>
         <span title="Unspent Resources">💰 {player.resources}</span>
         <span title="Tiles owned">🔷 {tileCount}</span>
         <span title="Total cards in deck (hand + draw + discard + in play)">🃏 {totalCards}</span>

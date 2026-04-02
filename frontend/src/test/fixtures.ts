@@ -60,6 +60,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     has_submitted_plan: false,
     has_ended_turn: false,
     trash: [],
+    last_upkeep_paid: 0,
     ...overrides,
   };
 }
@@ -125,6 +126,7 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
       { card: makeCard({ id: 'neutral_mercenary', name: 'Mercenary', buy_cost: 3, power: 3 }), remaining: 5 },
       { card: makeCard({ id: 'neutral_gather', name: 'Land Grant', buy_cost: 2, card_type: 'engine' }), remaining: 3 },
     ],
+    vp_target: 10,
     winner: null,
     log: ['Game created', '=== Round 1, Start of Turn ===', 'Plan phase begins'],
     ...overrides,
