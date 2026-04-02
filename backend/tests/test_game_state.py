@@ -268,7 +268,7 @@ class TestPlanPhase:
         if idx2 is not None:
             ok2, msg2 = play_card(game, "p0", idx2, target.q, target.r)
             assert not ok2
-            assert "stacking" in msg2.lower()
+            assert "stackable" in msg2.lower()
 
 
 class TestSubmitPlan:

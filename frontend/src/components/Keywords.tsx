@@ -13,7 +13,7 @@ const KEYWORDS: Record<string, string> = {
   'Discard': 'Forces the targeted opponent to draw fewer cards on their next turn.',
   'Upkeep': 'A cost of 1 resource paid at the start of each turn (skipped on round 1).',
   'Adjacent': 'A hex tile directly neighboring one you already own (6 possible directions).',
-  'Stacking': 'Playing multiple claim cards on the same tile in one turn (normally not allowed).',
+  'Stackable': 'This card can be played on a tile where you already have a claim this turn. Powers stack additively.',
   'Trash': 'Remove this card from the game permanently after it is played.',
   'Upgrade': 'Permanently improve a card using an upgrade credit, enhancing its stats.',
   'VP': 'Victory Points; first player to reach 20 wins the game.',

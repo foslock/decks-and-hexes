@@ -4,13 +4,13 @@
     {
       "name": "frontend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd /Users/james_lockwood/github-dot-com/decks-and-hexes/frontend && npm install && npm run dev"],
+      "runtimeArgs": ["-c", "source /Users/jfl/.nvm/nvm.sh && cd /Users/jfl/github-dot-com/decks-and-hexes/frontend && npm install && npm run dev"],
       "port": 5173
     },
     {
       "name": "backend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd /Users/james_lockwood/github-dot-com/decks-and-hexes/backend && /Users/james_lockwood/github-dot-com/decks-and-hexes/backend/.venv/bin/uvicorn app.main:app --port 8000"],
+      "runtimeArgs": ["-c", "cd /Users/jfl/github-dot-com/decks-and-hexes/backend && /Users/jfl/github-dot-com/decks-and-hexes/backend/.venv/bin/uvicorn app.main:app --port 8000"],
       "port": 8000
     }
   ],

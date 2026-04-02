@@ -13,11 +13,12 @@ export default function App() {
   const handleStart = async (config: {
     gridSize: string;
     players: { id: string; name: string; archetype: string }[];
+    testMode?: boolean;
   }) => {
     try {
       setLoading(true);
       setError(null);
-      const result = await api.createGame(config.gridSize, config.players);
+      const result = await api.createGame(config.gridSize, config.players, undefined, config.testMode);
       setGameState(result.state);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));

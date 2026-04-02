@@ -2,6 +2,10 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Card, MarketStack } from '../types/game';
 import { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
+import { useAnimationMode } from './SettingsContext';
+import CardFull, { CARD_FULL_WIDTH } from './CardFull';
+import { useShiftKey } from '../hooks/useShiftKey';
+import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 
 const TYPE_COLORS: Record<string, string> = {
   claim: '#4a9eff',
@@ -22,16 +26,22 @@ const ARCHETYPE_EMOJI: Record<string, string> = {
   neutral: '⬜',
 };
 
+// Persists shop view mode across opens (reset on page reload)
+let shopViewMemory: boolean | null = null;
+
 interface ShopOverlayProps {
   archetypeMarket: Card[];
   neutralMarket: MarketStack[];
   playerResources: number;
   playerArchetype: string;
+  effectiveBuyCosts?: Record<string, number>;
   onBuyArchetype: (cardId: string) => void;
   onBuyNeutral: (cardId: string) => void;
   onBuyUpgrade: () => void;
   onReroll: () => void;
   disabled: boolean;
+  onClose?: () => void;
+  testMode?: boolean;
 }
 
 interface HoverState {
@@ -57,91 +67,50 @@ function FullShopCard({
   card,
   remaining,
   canAfford,
+  effectiveCost,
   onBuy,
   onHover,
   onLeave,
   disabled,
+  shiftHeld,
 }: {
   card: Card;
   remaining: number | null;
   canAfford: boolean;
+  effectiveCost?: number | null;
   onBuy: () => void;
   onHover: (e: React.MouseEvent, card: Card) => void;
   onLeave: () => void;
   disabled: boolean;
+  shiftHeld: boolean;
 }) {
+  const displayCost = effectiveCost ?? card.buy_cost;
+  const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
+  const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   return (
     <div
       data-card-id={card.id}
       onMouseEnter={(e) => onHover(e, card)}
       onMouseLeave={onLeave}
       style={{
-        width: 190,
-        background: '#1e1e3a',
-        border: `2px solid ${canAfford && !disabled ? TYPE_COLORS[card.card_type] || '#4a9eff' : '#333'}`,
-        borderRadius: 10,
-        padding: 12,
-        color: '#fff',
         opacity: disabled || !canAfford ? 0.55 : 1,
         display: 'flex',
         flexDirection: 'column',
-        gap: 6,
+        gap: 4,
       }}
     >
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 26 }}>{CARD_EMOJI[card.card_type] || '📄'}</div>
-        <div style={{ fontSize: 9, color: '#888' }}>
-          {ARCHETYPE_EMOJI[card.archetype]} {card.archetype.toUpperCase()}
-        </div>
-        <div style={{ fontWeight: 'bold', fontSize: 13 }}>
-          {card.name}
-          {card.is_upgraded && <span style={{ color: '#ffd700' }}> +</span>}
-        </div>
-        <div style={{
-          display: 'inline-block',
-          marginTop: 2,
-          padding: '1px 8px',
-          borderRadius: 10,
-          background: TYPE_COLORS[card.card_type] || '#555',
-          color: '#000',
-          fontSize: 10,
-          fontWeight: 'bold',
-        }}>
-          {card.card_type.toUpperCase()}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, justifyContent: 'center' }}>
-        {card.buy_cost !== null && <StatChip value={`💰${card.buy_cost}`} />}
-        {card.power > 0 && <StatChip value={`⚔️${card.power}`} />}
-        {card.resource_gain > 0 && <StatChip value={`+${card.resource_gain}💰`} />}
-        {card.draw_cards > 0 && <StatChip value={`+${card.draw_cards}🃏`} />}
-        {card.defense_bonus > 0 && <StatChip value={`+${card.defense_bonus}🛡️`} />}
-        {card.forced_discard > 0 && <StatChip value={`-${card.forced_discard}🃏`} />}
-        {card.action_return > 0 && <StatChip value={card.action_return === 1 ? '↺' : '↑'} />}
-        {remaining !== null && <StatChip value={`×${remaining}`} />}
-      </div>
-
-      {card.description && (
-        <div style={{
-          fontSize: 11,
-          color: '#bbb',
-          lineHeight: 1.4,
-          background: '#151530',
-          borderRadius: 6,
-          padding: '5px 8px',
-          flex: 1,
-        }}>
-          {renderWithKeywords(card.description)}
+      <CardFull card={displayCard} effectiveCost={effectiveCost} remaining={remaining} />
+      {shiftHeld && hasUpgradePreview(card) && (
+        <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginBottom: 2 }}>
+          Upgraded
         </div>
       )}
-
       <IrreversibleButton
         onClick={onBuy}
         disabled={disabled || !canAfford}
-        tooltip={`Purchasing ${card.name} spends ${card.buy_cost} resources and adds it to your discard pile.`}
+        tooltip={`Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`}
         style={{
-          width: '100%',
+          width: CARD_FULL_WIDTH,
           padding: '4px 0',
           background: canAfford && !disabled ? '#4a9eff' : '#333',
           border: 'none',
@@ -152,7 +121,7 @@ function FullShopCard({
           cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
         }}
       >
-        Buy{card.buy_cost !== null ? ` (${card.buy_cost}💰)` : ''}
+        Buy{displayCost !== null ? ` (${displayCost}${isDiscounted ? '*' : ''}💰)` : ''}
       </IrreversibleButton>
     </div>
   );
@@ -162,6 +131,7 @@ function CompactShopCard({
   card,
   remaining,
   canAfford,
+  effectiveCost,
   onBuy,
   onHover,
   onLeave,
@@ -170,11 +140,14 @@ function CompactShopCard({
   card: Card;
   remaining: number | null;
   canAfford: boolean;
+  effectiveCost?: number | null;
   onBuy: () => void;
   onHover: (e: React.MouseEvent, card: Card) => void;
   onLeave: () => void;
   disabled: boolean;
 }) {
+  const displayCost = effectiveCost ?? card.buy_cost;
+  const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
   return (
     <div
       data-card-id={card.id}
@@ -184,7 +157,7 @@ function CompactShopCard({
         width: 130,
         padding: 6,
         background: '#2a2a3e',
-        border: `1px solid ${canAfford && !disabled ? '#4a9eff' : '#333'}`,
+        border: `1px solid ${canAfford && !disabled ? TYPE_COLORS[card.card_type] || '#4a9eff' : '#333'}`,
         borderRadius: 6,
         color: '#fff',
         opacity: disabled || !canAfford ? 0.5 : 1,
@@ -194,8 +167,8 @@ function CompactShopCard({
         <div style={{ fontWeight: 'bold', fontSize: 12 }}>
           {CARD_EMOJI[card.card_type]} {card.name}
         </div>
-        <div style={{ fontSize: 11, color: '#aaa' }}>
-          {card.buy_cost !== null ? `💰 ${card.buy_cost}` : 'Free'}
+        <div style={{ fontSize: 11, color: '#aaa' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
+          {displayCost !== null ? `💰 ${displayCost}${isDiscounted ? '*' : ''}` : 'Free'}
           {card.power > 0 && ` · Pow ${card.power}`}
           {card.resource_gain > 0 && ` · +${card.resource_gain}`}
           {remaining !== null && ` · ×${remaining}`}
@@ -228,25 +201,42 @@ export default function ShopOverlay({
   neutralMarket,
   playerResources,
   playerArchetype,
+  effectiveBuyCosts,
   onBuyArchetype,
   onBuyNeutral,
   onBuyUpgrade,
   onReroll,
   disabled,
+  onClose,
+  testMode,
 }: ShopOverlayProps) {
-  const [fullView, setFullView] = useState(false);
+  const [fullView, setFullViewRaw] = useState(() => shopViewMemory ?? false);
+  const setFullView = useCallback((v: boolean) => { setFullViewRaw(v); shopViewMemory = v; }, []);
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
-  const [minimized, setMinimized] = useState(false);
+  const [hoverVisible, setHoverVisible] = useState(false);
   const mousePosRef = useRef<{ x: number; y: number } | null>(null);
+  const animMode = useAnimationMode();
+  const shiftHeld = useShiftKey();
 
   const handleCardHover = useCallback((e: React.MouseEvent, card: Card) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setHoverVisible(false);
     setHoverState({ card, rect });
   }, []);
 
   const handleCardLeave = useCallback(() => {
     setHoverState(null);
+    setHoverVisible(false);
   }, []);
+
+  // Trigger fade-in on hover
+  useEffect(() => {
+    if (hoverState && animMode === 'normal') {
+      requestAnimationFrame(() => setHoverVisible(true));
+    } else if (hoverState) {
+      setHoverVisible(true);
+    }
+  }, [hoverState, animMode]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     mousePosRef.current = { x: e.clientX, y: e.clientY };
@@ -297,26 +287,50 @@ export default function ShopOverlay({
     };
   })() : null;
 
+  const [visible, setVisible] = useState(animMode === 'off');
+
+  useEffect(() => {
+    if (animMode !== 'off') {
+      requestAnimationFrame(() => setVisible(true));
+    }
+  }, [animMode]);
+
+  const panelTransition = animMode === 'normal' ? 'opacity 0.25s ease, transform 0.25s ease'
+    : animMode === 'simplified' ? 'opacity 0.1s ease, transform 0.1s ease'
+    : 'none';
+
   return (
     <>
-      {/* Shop panel — centered over the board area */}
+      {/* Shop panel — centered over the entire window with backdrop */}
       <div
+        onClick={onClose}
         onMouseMove={handleMouseMove}
         style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        zIndex: 200,
-        width: 'min(92vw, 800px)',
-        background: '#12122a',
-        border: '2px solid #4a4a6a',
-        borderRadius: 12,
-        boxShadow: '0 8px 40px rgba(0,0,0,0.8)',
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.75)',
         display: 'flex',
-        flexDirection: 'column',
-        maxHeight: minimized ? 'auto' : '70vh',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 5000,
+        opacity: visible ? 1 : 0,
+        transition: animMode === 'normal' ? 'opacity 0.25s ease' : animMode === 'simplified' ? 'opacity 0.1s ease' : 'none',
       }}>
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{
+          width: 'min(92vw, 800px)',
+          background: '#12122a',
+          border: '2px solid #4a4a6a',
+          borderRadius: 12,
+          boxShadow: '0 8px 40px rgba(0,0,0,0.8)',
+          display: 'flex',
+          flexDirection: 'column',
+          maxHeight: '70vh',
+          opacity: visible ? 1 : 0,
+          transform: visible ? 'scale(1)' : 'scale(0.95)',
+          transition: panelTransition,
+        }}>
         {/* Header */}
         <div style={{
           display: 'flex',
@@ -325,66 +339,65 @@ export default function ShopOverlay({
           padding: '8px 14px',
           background: '#1a1a40',
           borderRadius: '10px 10px 0 0',
-          borderBottom: minimized ? 'none' : '1px solid #333',
+          borderBottom: '1px solid #333',
           flexShrink: 0,
         }}>
           <span style={{ fontWeight: 'bold', color: '#fff', fontSize: 14 }}>🛒 Shop</span>
           <span style={{ fontSize: 13, color: '#aaa' }}>· 💰 {playerResources} resources</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            {!minimized && (
-              <div style={{
-                display: 'flex',
-                border: '1px solid #444',
-                borderRadius: 6,
-                overflow: 'hidden',
-              }}>
-                <button
-                  onClick={() => setFullView(false)}
-                  style={{
-                    padding: '3px 10px',
-                    background: !fullView ? '#4a4aff' : '#2a2a3e',
-                    border: 'none',
-                    color: '#fff',
-                    fontSize: 11,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Compact
-                </button>
-                <button
-                  onClick={() => setFullView(true)}
-                  style={{
-                    padding: '3px 10px',
-                    background: fullView ? '#4a4aff' : '#2a2a3e',
-                    border: 'none',
-                    color: '#fff',
-                    fontSize: 11,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Full
-                </button>
-              </div>
+            <div style={{
+              display: 'flex',
+              border: '1px solid #444',
+              borderRadius: 6,
+              overflow: 'hidden',
+            }}>
+              <button
+                onClick={() => setFullView(false)}
+                style={{
+                  padding: '3px 10px',
+                  background: !fullView ? '#4a4aff' : '#2a2a3e',
+                  border: 'none',
+                  color: '#fff',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                }}
+              >
+                Compact
+              </button>
+              <button
+                onClick={() => setFullView(true)}
+                style={{
+                  padding: '3px 10px',
+                  background: fullView ? '#4a4aff' : '#2a2a3e',
+                  border: 'none',
+                  color: '#fff',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                }}
+              >
+                Full
+              </button>
+            </div>
+            {onClose && (
+              <button
+                onClick={onClose}
+                style={{
+                  padding: '3px 8px',
+                  background: '#2a2a3e',
+                  border: '1px solid #555',
+                  borderRadius: 4,
+                  color: '#aaa',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                ✕
+              </button>
             )}
-            <button
-              onClick={() => setMinimized(m => !m)}
-              style={{
-                padding: '3px 8px',
-                background: '#2a2a3e',
-                border: '1px solid #444',
-                borderRadius: 4,
-                color: '#aaa',
-                fontSize: 12,
-                cursor: 'pointer',
-              }}
-            >
-              {minimized ? '▲ Open' : '▼ Hide'}
-            </button>
           </div>
         </div>
 
         {/* Content */}
-        {!minimized && (
           <div style={{ overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Archetype Market */}
             <div>
@@ -392,7 +405,7 @@ export default function ShopOverlay({
                 <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
                 <IrreversibleButton
                   onClick={onReroll}
-                  disabled={disabled || playerResources < 2}
+                  disabled={disabled || (!testMode && playerResources < 2)}
                   tooltip="Re-rolling replaces your market cards and spends 2 resources."
                   style={{
                     fontSize: 11,
@@ -400,8 +413,8 @@ export default function ShopOverlay({
                     background: '#2a2a3e',
                     border: '1px solid #555',
                     borderRadius: 4,
-                    color: playerResources >= 2 && !disabled ? '#fff' : '#555',
-                    cursor: disabled || playerResources < 2 ? 'not-allowed' : 'pointer',
+                    color: (testMode || playerResources >= 2) && !disabled ? '#fff' : '#555',
+                    cursor: disabled || (!testMode && playerResources < 2) ? 'not-allowed' : 'pointer',
                   }}
                 >
                   Re-roll (2💰)
@@ -411,18 +424,21 @@ export default function ShopOverlay({
                 {archetypeMarket.length === 0 && (
                   <span style={{ color: '#666', fontSize: 12 }}>No cards available</span>
                 )}
-                {archetypeMarket.map((card) => {
-                  const canAfford = card.buy_cost !== null && playerResources >= card.buy_cost;
+                {[...archetypeMarket].sort((a, b) => (a.buy_cost ?? 0) - (b.buy_cost ?? 0)).map((card) => {
+                  const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
+                  const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
                   return fullView ? (
                     <FullShopCard
                       key={card.id}
                       card={card}
                       remaining={null}
                       canAfford={canAfford}
+                      effectiveCost={effCost}
                       onBuy={() => onBuyArchetype(card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
                       disabled={disabled}
+                      shiftHeld={shiftHeld}
                     />
                   ) : (
                     <CompactShopCard
@@ -430,6 +446,7 @@ export default function ShopOverlay({
                       card={card}
                       remaining={null}
                       canAfford={canAfford}
+                      effectiveCost={effCost}
                       onBuy={() => onBuyArchetype(card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
@@ -446,7 +463,7 @@ export default function ShopOverlay({
                 <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>Neutral Market</span>
                 <IrreversibleButton
                   onClick={onBuyUpgrade}
-                  disabled={disabled || playerResources < 5}
+                  disabled={disabled || (!testMode && playerResources < 5)}
                   tooltip="Buying an upgrade credit spends 5 resources."
                   style={{
                     fontSize: 11,
@@ -454,26 +471,29 @@ export default function ShopOverlay({
                     background: '#2a2a3e',
                     border: '1px solid #555',
                     borderRadius: 4,
-                    color: playerResources >= 5 && !disabled ? '#fff' : '#555',
-                    cursor: disabled || playerResources < 5 ? 'not-allowed' : 'pointer',
+                    color: (testMode || playerResources >= 5) && !disabled ? '#fff' : '#555',
+                    cursor: disabled || (!testMode && playerResources < 5) ? 'not-allowed' : 'pointer',
                   }}
                 >
                   Buy Upgrade (5💰)
                 </IrreversibleButton>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                {neutralMarket.map((stack) => {
-                  const canAfford = stack.card.buy_cost !== null && playerResources >= stack.card.buy_cost;
+                {[...neutralMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
+                  const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
+                  const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
                   return fullView ? (
                     <FullShopCard
                       key={stack.card.id}
                       card={stack.card}
                       remaining={stack.remaining}
                       canAfford={canAfford}
+                      effectiveCost={effCost}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
                       disabled={disabled}
+                      shiftHeld={shiftHeld}
                     />
                   ) : (
                     <CompactShopCard
@@ -481,6 +501,7 @@ export default function ShopOverlay({
                       card={stack.card}
                       remaining={stack.remaining}
                       canAfford={canAfford}
+                      effectiveCost={effCost}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
@@ -491,60 +512,28 @@ export default function ShopOverlay({
               </div>
             </div>
           </div>
-        )}
+        </div>
       </div>
 
       {/* Floating hover preview (fixed, viewport-relative) */}
       {hoverState && previewStyle && (
-        <div style={previewStyle}>
-          <div style={{
-            background: '#1a1a38',
-            border: `2px solid ${TYPE_COLORS[hoverState.card.card_type] || '#555'}`,
-            borderRadius: 12,
-            padding: 16,
-            color: '#fff',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.8)',
-          }}>
-            <div style={{ textAlign: 'center', marginBottom: 10 }}>
-              <div style={{ fontSize: 36 }}>{CARD_EMOJI[hoverState.card.card_type] || '📄'}</div>
-              <div style={{ fontSize: 9, color: '#888', marginBottom: 3 }}>
-                {ARCHETYPE_EMOJI[hoverState.card.archetype]} {hoverState.card.archetype.toUpperCase()}
-              </div>
-              <div style={{ fontWeight: 'bold', fontSize: 16 }}>
-                {hoverState.card.name}
-                {hoverState.card.is_upgraded && <span style={{ color: '#ffd700' }}> +</span>}
-              </div>
-              <div style={{
-                display: 'inline-block', marginTop: 4,
-                padding: '2px 10px', borderRadius: 10,
-                background: TYPE_COLORS[hoverState.card.card_type] || '#555',
-                color: '#000', fontSize: 11, fontWeight: 'bold',
-              }}>
-                {hoverState.card.card_type.toUpperCase()}
-              </div>
+        <div style={{
+          ...previewStyle,
+          opacity: hoverVisible ? 1 : 0,
+          transition: animMode === 'normal' ? 'opacity 0.15s ease' : 'none',
+        }}>
+          <CardFull card={shiftHeld ? getUpgradedPreview(hoverState.card) : hoverState.card} />
+          {shiftHeld && hasUpgradePreview(hoverState.card) && (
+            <div style={{
+              textAlign: 'center',
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: 'bold',
+              color: '#4aff6a',
+            }}>
+              Upgraded
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10, justifyContent: 'center' }}>
-              {hoverState.card.buy_cost !== null && <StatChip value={`💰 ${hoverState.card.buy_cost}`} />}
-              {hoverState.card.power > 0 && <StatChip value={`⚔️ ${hoverState.card.power}`} />}
-              {hoverState.card.resource_gain > 0 && <StatChip value={`+${hoverState.card.resource_gain} 💰`} />}
-              {hoverState.card.draw_cards > 0 && <StatChip value={`+${hoverState.card.draw_cards} 🃏`} />}
-              {hoverState.card.defense_bonus > 0 && <StatChip value={`+${hoverState.card.defense_bonus} 🛡️`} />}
-              {hoverState.card.forced_discard > 0 && <StatChip value={`-${hoverState.card.forced_discard} 🃏`} />}
-              {hoverState.card.action_return > 0 && <StatChip value={hoverState.card.action_return === 1 ? '↺ Returns 1' : '↑ Returns 2'} />}
-            </div>
-            {hoverState.card.description && (
-              <div style={{
-                fontSize: 12,
-                color: '#bbb',
-                lineHeight: 1.5,
-                background: '#111130',
-                borderRadius: 6,
-                padding: '8px 10px',
-              }}>
-                {renderWithKeywords(hoverState.card.description)}
-              </div>
-            )}
-          </div>
+          )}
         </div>
       )}
     </>

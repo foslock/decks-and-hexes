@@ -6,7 +6,7 @@
 # EDITING NOTES:
 # - action_return: 0 = standard, 1 = net-neutral (↺), 2 = net-positive (↑)
 # - timing: "immediate" | "on_resolution" | "next_turn"
-# - stacking_exception: true = this card allows multiple Claims on same tile
+# - stackable: true = this card can be played on a tile where you already have a claim this turn
 # - upgraded: the "+" version of the card after spending an upgrade credit
 
 cards:
@@ -19,11 +19,12 @@ cards:
     action_return: 0
     power: 1
     unoccupied_only: true
+    upgraded_unoccupied_only: false
     effect: "Claim: Power 1 on any adjacent unoccupied tile."
-    effect_upgraded: "Claim: Power 2 on any adjacent unoccupied tile."
+    effect_upgraded: "Claim: Power 2."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: swarm_surge
     name: Surge
@@ -32,11 +33,13 @@ cards:
     buy_cost: 2
     action_return: 0
     power: 1
+    multi_target_count: 1
+    upgraded_multi_target_count: 2
     effect: "Claim: Power 1 on up to 2 adjacent tiles simultaneously."
     effect_upgraded: "Claim: Power 1 on up to 3 adjacent tiles simultaneously."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: swarm_overwhelm
     name: Overwhelm
@@ -49,7 +52,7 @@ cards:
     effect_upgraded: "Claim: Power 2. +1 power for each other tile you own adjacent to the target tile."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: power_modifier
         value: 1
@@ -69,7 +72,7 @@ cards:
     effect_upgraded: "Engine: Draw 3 cards immediately. Gain 2 actions back."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: swarm_cheap_shot
     name: Cheap Shot
@@ -78,11 +81,11 @@ cards:
     buy_cost: 2
     action_return: 0
     power: 2
-    effect: "Claim: Power 2. Costs 1 less resource to purchase if you own more tiles than the target tile's controller."
-    effect_upgraded: "Claim: Power 3. Costs 1 less resource to purchase if you own more tiles than the target tile's controller."
+    effect: "Claim: Power 2. Costs 1 less resource to purchase if you control the most tiles."
+    effect_upgraded: "Claim: Power 3. Costs 1 less resource to purchase if you control the most tiles."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: dynamic_buy_cost
         condition: tiles_more_than_defender
@@ -99,20 +102,22 @@ cards:
     effect_upgraded: "Claim: Power 2 on any neutral tile on the board, ignoring adjacency restrictions."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: swarm_flood
     name: Flood
     name_upgraded: Flood+
     type: Claim
-    buy_cost: 2
+    buy_cost: 3
     action_return: 0
     power: 1
-    effect: "Claim: Power 1 on all neutral tiles adjacent to one tile you own, simultaneously."
-    effect_upgraded: "Claim: Power 2 on all neutral tiles adjacent to one tile you own, simultaneously."
+    flood: true
+    target_own_tile: true
+    effect: "Claim: Target one tile you own. Power 1 claim on all adjacent tiles simultaneously."
+    effect_upgraded: "Claim: Target one tile you own. Power 2 claim on all adjacent tiles simultaneously."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: swarm_rabble
     name: Rabble
@@ -125,7 +130,7 @@ cards:
     effect_upgraded: "Claim: Power 1. If you play another Rabble+ card this turn, gain 1 action back. Additionally, +1 power per Rabble+ played this turn."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: conditional_action_return
         value: 1
@@ -136,14 +141,14 @@ cards:
     name: Dog Pile
     name_upgraded: Dog Pile+
     type: Claim
-    buy_cost: 3
+    buy_cost: 2
     action_return: 0
-    power: 0
-    effect: "Claim: Play any number of additional Claim cards on the same tile this round. Each additional Claim card adds +1 power on top of its own value."
-    effect_upgraded: "Claim: Play any number of additional Claim cards on the same tile this round. Each additional Claim card adds +2 power on top of its own value."
+    power: 1
+    effect: "Claim: Power 1. Stackable. Each other claim you play on the same tile this turn gets +1 power."
+    effect_upgraded: "Claim: Power 2. Stackable. Each other claim you play on the same tile this turn gets +2 power."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: true
+    stackable: true
     effects:
       - type: stacking_power_bonus
         value: 1
@@ -160,7 +165,7 @@ cards:
     effect_upgraded: "Engine: Trash 1 card from your hand. Draw 3 cards immediately. Gain 2 actions back."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: self_trash
         value: 1
@@ -178,7 +183,7 @@ cards:
     effect_upgraded: "Claim: Power equal to the number of cards in your hand +2 when this card is played."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: power_modifier
         value: 0
@@ -196,7 +201,7 @@ cards:
     effect_upgraded: "Engine: Gain 2 actions back. Discard 1 card. Gain 1 resource."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: self_discard
         value: 1
@@ -214,7 +219,7 @@ cards:
     effect_upgraded: "Engine: Gain 3 resources. Draw 1 card immediately. Gain 1 action back."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: swarm_blitz_rush
     name: Blitz Rush
@@ -227,7 +232,7 @@ cards:
     effect_upgraded: "Engine: Gain 3 actions back. You cannot purchase any cards during the Buy Phase this round."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: buy_restriction
         timing: immediate

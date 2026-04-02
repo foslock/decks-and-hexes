@@ -116,15 +116,27 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         if match:
             forced_discard = int(match.group(1))
 
-    # Parse adjacency from effect
+    # Parse adjacency and range from effect text
     adjacency_required = True
-    if "any tile" in effect.lower() and "adjacent" not in effect.lower():
-        adjacency_required = False
-    if "up to" in effect.lower() and "steps" in effect.lower():
+    claim_range = _safe_int(entry.get("claim_range", 1)) or 1
+    # "up to N steps" → extended range (still adjacency-checked via claim_range)
+    range_match = re.search(r'up to\s+(\d+)\s+steps', effect.lower())
+    if range_match:
+        claim_range = int(range_match.group(1))
+    elif "any tile" in effect.lower() and "adjacent" not in effect.lower():
+        # Truly unrestricted targeting (no adjacency at all)
         adjacency_required = False
 
     # Unoccupied only (e.g. Explore can only claim neutral tiles)
     unoccupied_only = bool(entry.get("unoccupied_only", False))
+
+    # Multi-target (Surge: up to N extra targets beyond the first)
+    multi_target_count = _safe_int(entry.get("multi_target_count", 0))
+    upgraded_multi_target_count = _safe_optional_int(entry.get("upgraded_multi_target_count"))
+
+    # Flood: target own tile, claim all adjacent at resolution
+    flood = bool(entry.get("flood", False))
+    target_own_tile = bool(entry.get("target_own_tile", False))
 
     # Starter flag
     starter = bool(entry.get("starter", False))
@@ -139,6 +151,51 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
                 if eff is not None:
                     effects.append(eff)
 
+    # Build full description from primary + secondary effect text
+    secondary_effect = str(entry.get("secondary_effect", "") or "")
+    description = effect
+    if secondary_effect:
+        description = f"{effect} {secondary_effect}".strip()
+
+    # Parse upgraded fields
+    name_upgraded = str(entry.get("name_upgraded", "") or "")
+    effect_upgraded = str(entry.get("effect_upgraded", "") or "")
+    upgrade_description = effect_upgraded
+
+    # Parse upgraded stats from effect_upgraded text and/or explicit YAML fields
+    upgraded_power = _safe_optional_int(entry.get("upgraded_power"))
+    upgraded_resource_gain = _safe_optional_int(entry.get("upgraded_resource_gain"))
+    upgraded_action_return = _safe_optional_int(entry.get("upgraded_action_return"))
+    upgraded_draw_cards = _safe_optional_int(entry.get("upgraded_draw_cards"))
+    upgraded_forced_discard = _safe_optional_int(entry.get("upgraded_forced_discard"))
+    upgraded_defense_bonus = _safe_optional_int(entry.get("upgraded_defense_bonus"))
+
+    if effect_upgraded:
+        if upgraded_power is None and "power" in effect_upgraded.lower():
+            m = re.search(r'[Pp]ower\s+(\d+)', effect_upgraded)
+            if m:
+                upgraded_power = int(m.group(1))
+
+        if upgraded_resource_gain is None and "gain" in effect_upgraded.lower() and "resource" in effect_upgraded.lower():
+            m = re.search(r'[Gg]ain\s+(\d+)\s+resource', effect_upgraded)
+            if m:
+                upgraded_resource_gain = int(m.group(1))
+
+        if upgraded_draw_cards is None and "draw" in effect_upgraded.lower():
+            m = re.search(r'[Dd]raw\s+(\d+)\s+card', effect_upgraded)
+            if m:
+                upgraded_draw_cards = int(m.group(1))
+
+        if upgraded_defense_bonus is None and "defense" in effect_upgraded.lower():
+            m = re.search(r'\+(\d+)\s+defense', effect_upgraded)
+            if m:
+                upgraded_defense_bonus = int(m.group(1))
+
+        if upgraded_forced_discard is None and "discard" in effect_upgraded.lower():
+            m = re.search(r'[Dd]iscard\w*\s+(\d+)', effect_upgraded)
+            if m:
+                upgraded_forced_discard = int(m.group(1))
+
     card = Card(
         id=card_id,
         name=name,
@@ -151,15 +208,28 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         buy_cost=_safe_optional_int(entry.get("buy_cost")),
         starter=starter,
         trash_on_use=bool(entry.get("trash_on_use", False)),
-        stacking_exception=bool(entry.get("stacking_exception", False)),
+        stackable=bool(entry.get("stackable", False)),
         forced_discard=forced_discard,
         draw_cards=draw_cards,
         defense_bonus=defense_bonus,
         adjacency_required=adjacency_required,
+        claim_range=claim_range,
         unoccupied_only=unoccupied_only,
-        description=effect,
+        multi_target_count=multi_target_count,
+        upgraded_multi_target_count=upgraded_multi_target_count,
+        flood=flood,
+        target_own_tile=target_own_tile,
+        description=description,
+        upgrade_description=upgrade_description,
+        name_upgraded=name_upgraded,
         copies=_safe_optional_int(entry.get("copies")),
         effects=effects,
+        upgraded_power=upgraded_power,
+        upgraded_resource_gain=upgraded_resource_gain,
+        upgraded_action_return=upgraded_action_return,
+        upgraded_draw_cards=upgraded_draw_cards,
+        upgraded_forced_discard=upgraded_forced_discard,
+        upgraded_defense_bonus=upgraded_defense_bonus,
     )
 
     return card

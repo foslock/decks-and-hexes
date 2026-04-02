@@ -3,6 +3,19 @@
 ## What This Is
 HexDraft is a 2–6 player simultaneous deck-building territory control game. This repository contains the full game rules, card data, and will house the digital prototype implementation.
 
+## Development Commands
+
+### Backend (Python)
+- Use `uv` to run Python commands and manage dependencies: `uv run python ...`, `uv run pytest ...`
+- Backend tests: `cd backend && uv run pytest tests/ -x -q`
+- Start backend: `cd backend && uv run uvicorn app.main:app --reload`
+
+### Frontend (Node/React)
+- Always run `npm install` before running frontend tests or builds
+- Frontend tests: `cd frontend && npm install && npx vitest run`
+- Frontend typecheck: `cd frontend && npx tsc --noEmit`
+- Start frontend: `cd frontend && npm run dev`
+
 ## Repository Structure
 ```
 /rules/          # Core game rules (machine-readable markdown)
@@ -145,7 +158,7 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 Card data files use YAML-style fields within markdown. Key fields:
 - `action_return: 0/1/2` — 0=standard, 1=net-neutral(↺), 2=net-positive(↑)
 - `timing: immediate/on_resolution/next_turn`
-- `stacking_exception: true` — allows second Claim on same tile
+- `stackable: true` — card can be played on a tile where you already have a claim this turn
 - `starter: true` — starting deck card, not in market
 - `buy_cost: null` — not purchasable
 - `trash_on_use: true` — remove from game after playing

@@ -61,12 +61,16 @@ class Card:
     is_upgraded: bool = False
     starter: bool = False
     trash_on_use: bool = False
-    stacking_exception: bool = False
+    stackable: bool = False
     forced_discard: int = 0
     draw_cards: int = 0
     defense_bonus: int = 0
     adjacency_required: bool = True
+    claim_range: int = 1  # max hex distance from owned tiles (1=adjacent, 2=two steps, etc.)
     unoccupied_only: bool = False
+    multi_target_count: int = 0  # Surge: max extra targets (0=single, 1=up to 2 total, 2=up to 3)
+    flood: bool = False  # Flood: target own tile, claim all adjacent at resolution
+    target_own_tile: bool = False  # Must target a tile you own (Flood)
     description: str = ""
     upgrade_description: str = ""
     # Structured effects list (parsed from YAML)
@@ -80,6 +84,9 @@ class Card:
     upgraded_draw_cards: Optional[int] = None
     upgraded_forced_discard: Optional[int] = None
     upgraded_defense_bonus: Optional[int] = None
+    upgraded_multi_target_count: Optional[int] = None
+
+    name_upgraded: str = ""
 
     @property
     def effective_power(self) -> int:
@@ -111,6 +118,12 @@ class Card:
             return self.upgraded_defense_bonus
         return self.defense_bonus
 
+    @property
+    def effective_multi_target_count(self) -> int:
+        if self.is_upgraded and self.upgraded_multi_target_count is not None:
+            return self.upgraded_multi_target_count
+        return self.multi_target_count
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -124,16 +137,46 @@ class Card:
             "buy_cost": self.buy_cost,
             "is_upgraded": self.is_upgraded,
             "trash_on_use": self.trash_on_use,
-            "stacking_exception": self.stacking_exception,
+            "stackable": self.stackable,
             "forced_discard": self.forced_discard,
             "draw_cards": self.effective_draw_cards,
             "defense_bonus": self.effective_defense_bonus,
             "adjacency_required": self.adjacency_required,
+            "claim_range": self.claim_range,
             "unoccupied_only": self.unoccupied_only,
+            "multi_target_count": self.effective_multi_target_count,
+            "flood": self.flood,
+            "target_own_tile": self.target_own_tile,
             "description": self.description,
+            "upgrade_description": self.upgrade_description,
+            "name_upgraded": self.name_upgraded,
             "starter": self.starter,
             "effects": [e.to_dict() for e in self.effects if hasattr(e, 'to_dict')],
+            **self._upgraded_stats_dict(),
         }
+
+    def _upgraded_stats_dict(self) -> dict[str, Any]:
+        """Return upgraded_stats for frontend preview (only when not already upgraded)."""
+        if self.is_upgraded:
+            return {}
+        upgraded: dict[str, Any] = {}
+        if self.upgraded_power is not None:
+            upgraded["power"] = self.upgraded_power
+        if self.upgraded_resource_gain is not None:
+            upgraded["resource_gain"] = self.upgraded_resource_gain
+        if self.upgraded_action_return is not None:
+            upgraded["action_return"] = self.upgraded_action_return
+        if self.upgraded_draw_cards is not None:
+            upgraded["draw_cards"] = self.upgraded_draw_cards
+        if self.upgraded_forced_discard is not None:
+            upgraded["forced_discard"] = self.upgraded_forced_discard
+        if self.upgraded_defense_bonus is not None:
+            upgraded["defense_bonus"] = self.upgraded_defense_bonus
+        if self.upgraded_multi_target_count is not None:
+            upgraded["multi_target_count"] = self.upgraded_multi_target_count
+        if upgraded:
+            return {"upgraded_stats": upgraded}
+        return {}
 
 
 @dataclass

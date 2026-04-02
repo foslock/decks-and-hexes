@@ -20,7 +20,7 @@ from .cards import (
     build_starting_deck,
     _copy_card,
 )
-from .effects import EffectType, TurnModifiers
+from .effects import ConditionType, EffectType, TurnModifiers
 from .effect_resolver import (
     calculate_effective_power,
     resolve_immediate_effects,
@@ -54,6 +54,7 @@ class PlannedAction:
     target_q: Optional[int] = None
     target_r: Optional[int] = None
     target_player_id: Optional[str] = None  # for forced discards
+    extra_targets: list[tuple[int, int]] = field(default_factory=list)  # Surge multi-targets
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +83,7 @@ class Player:
     passive: Optional[dict[str, Any]] = None
     forced_discard_next_turn: int = 0
     has_submitted_plan: bool = False
+    has_ended_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
 
     @property
@@ -113,6 +115,7 @@ class Player:
             "planned_action_count": len(self.planned_actions),
             "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
             "has_submitted_plan": self.has_submitted_plan,
+            "has_ended_turn": self.has_ended_turn,
         }
 
 
@@ -132,9 +135,11 @@ class NeutralMarket:
         return result
 
     def purchase(self, card_id: str) -> Optional[Card]:
-        # Match by base card ID (without instance suffix)
+        # Match by base card ID (without instance suffix).
+        # The frontend may pass an instance ID like "card_id_neutral_0",
+        # so also try matching when card_id starts with the base ID.
         for base_id, copies in self.stacks.items():
-            if copies and base_id == card_id:
+            if copies and (base_id == card_id or card_id.startswith(base_id)):
                 return copies.pop(0)
         return None
 
@@ -173,6 +178,7 @@ class GameState:
     card_registry: dict[str, Card] = field(default_factory=dict)
     log: list[str] = field(default_factory=list)
     game_log: list[LogEntry] = field(default_factory=list)
+    test_mode: bool = False
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None) -> None:
@@ -197,14 +203,27 @@ class GameState:
         """Return all log entries (for spectators or hot-seat)."""
         return [entry.to_dict() for entry in self.game_log]
 
+    # Structured resolution data for frontend animations (populated by execute_reveal)
+    resolution_steps: list[dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self, for_player_id: Optional[str] = None) -> dict[str, Any]:
-        return {
+        players_dict: dict[str, Any] = {}
+        for pid, p in self.players.items():
+            pdata = p.to_dict(hide_hand=(for_player_id is not None and pid != for_player_id))
+            # Add effective buy costs for all market cards visible to this player
+            effective_costs: dict[str, int] = {}
+            for card in p.archetype_market:
+                effective_costs[card.id] = calculate_dynamic_buy_cost(self, p, card)
+            for stack in self.neutral_market.stacks.values():
+                if stack:
+                    effective_costs[stack[0].id] = calculate_dynamic_buy_cost(self, p, stack[0])
+            pdata["effective_buy_costs"] = effective_costs
+            players_dict[pid] = pdata
+
+        result: dict[str, Any] = {
             "id": self.id,
             "grid": self.grid.to_dict() if self.grid else None,
-            "players": {
-                pid: p.to_dict(hide_hand=(for_player_id is not None and pid != for_player_id))
-                for pid, p in self.players.items()
-            },
+            "players": players_dict,
             "player_order": self.player_order,
             "current_phase": self.current_phase.value,
             "current_round": self.current_round,
@@ -212,7 +231,11 @@ class GameState:
             "neutral_market": self.neutral_market.get_available(),
             "winner": self.winner,
             "log": self.log[-20:],  # last 20 for backward compat
+            "test_mode": self.test_mode,
         }
+        if self.resolution_steps:
+            result["resolution_steps"] = self.resolution_steps
+        return result
 
 
 def create_game(
@@ -220,12 +243,13 @@ def create_game(
     player_configs: list[dict[str, Any]],
     card_registry: dict[str, Card],
     seed: Optional[int] = None,
+    test_mode: bool = False,
 ) -> GameState:
     """Create a new game with the given configuration."""
     rng = random.Random(seed)
     num_players = len(player_configs)
 
-    game = GameState(rng=rng, card_registry=card_registry)
+    game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode)
     game.grid = generate_hex_grid(grid_size, num_players, rng)
 
     # Create players and assign starting positions
@@ -342,12 +366,16 @@ def execute_start_of_turn(game: GameState) -> GameState:
         player.actions_available = player.action_slots
         player.planned_actions = []
         player.has_submitted_plan = False
+        player.has_ended_turn = False
 
-        # Reveal archetype market (3 random cards from archetype deck)
+        # Reveal archetype market (3 random, or all in test mode)
         player.archetype_market = []
         if player.archetype_deck:
-            market_draw = min(3, len(player.archetype_deck))
-            player.archetype_market = player.archetype_deck[:market_draw]
+            if game.test_mode:
+                player.archetype_market = list(player.archetype_deck)
+            else:
+                market_draw = min(3, len(player.archetype_deck))
+                player.archetype_market = player.archetype_deck[:market_draw]
 
     game.current_phase = Phase.PLAN
     game._log("Plan phase begins — place cards face-down on tiles")
@@ -377,13 +405,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
 
     card = player.hand[card_index]
 
-    # Check action availability
+    # Check action availability (skip in test mode)
     net_cost = 1 - card.effective_action_return
-    if player.actions_used + 1 > ACTION_HARD_CAP:
-        return False, f"Action hard cap ({ACTION_HARD_CAP}) reached"
+    if not game.test_mode:
+        if player.actions_used + 1 > ACTION_HARD_CAP:
+            return False, f"Action hard cap ({ACTION_HARD_CAP}) reached"
 
-    if player.actions_used >= player.actions_available and net_cost > 0:
-        return False, "No action slots available"
+        if player.actions_used >= player.actions_available and net_cost > 0:
+            return False, "No action slots available"
 
     # Validate target for claim cards
     if card.card_type == CardType.CLAIM and target_q is not None:
@@ -392,34 +421,56 @@ def play_card(game: GameState, player_id: str, card_index: int,
         tile = game.grid.get_tile(target_q, _target_r)
         if not tile:
             return False, "Invalid target tile"
-        if tile.is_blocked:
-            return False, "Cannot claim blocked tile"
 
-        # Check adjacency requirement
-        if card.adjacency_required:
+        # Flood: must target own tile (the "center" of the flood)
+        if card.target_own_tile:
+            if tile.owner != player_id:
+                return False, f"{card.name} must target a tile you own"
+        else:
+            if tile.is_blocked:
+                return False, "Cannot claim blocked tile"
+
+            # Check range requirement (adjacency_required + claim_range)
+            if card.adjacency_required:
+                player_tiles = game.grid.get_player_tiles(player_id)
+                max_range = card.claim_range  # 1 = adjacent, 2 = two steps, etc.
+                if not any(pt.distance_to(tile) <= max_range for pt in player_tiles):
+                    if max_range <= 1:
+                        return False, "Must claim a tile adjacent to one you own"
+                    return False, f"Must claim a tile within {max_range} steps of one you own"
+
+            # Prevent unoccupied_only cards from targeting owned tiles
+            if card.unoccupied_only and tile.owner is not None:
+                return False, f"{card.name} can only target unoccupied tiles"
+
+            # Prevent claiming neutral tiles with defense higher than card power
+            if not tile.owner and tile.defense_power > card.effective_power:
+                return False, f"Card power ({card.effective_power}) too low to overcome tile defense ({tile.defense_power})"
+
+            # Check stacking (only one claim per tile unless exception)
+            existing_claims = [
+                a for a in player.planned_actions
+                if a.target_q == target_q and a.target_r == target_r
+                and a.card.card_type == CardType.CLAIM
+            ]
+            if existing_claims and not card.stackable:
+                return False, "This card is not Stackable"
+
+        # Validate extra targets for multi-target cards (Surge)
+        validated_extra = []
+        if card.effective_multi_target_count > 0 and extra_targets:
+            max_extra = card.effective_multi_target_count
             player_tiles = game.grid.get_player_tiles(player_id)
-            if not any(
-                (target_q, _target_r) in [(n.q, n.r) for n in game.grid.get_adjacent(pt.q, pt.r)]
-                for pt in player_tiles
-            ):
-                return False, "Must claim a tile adjacent to one you own"
-
-        # Prevent unoccupied_only cards from targeting owned tiles
-        if card.unoccupied_only and tile.owner is not None:
-            return False, f"{card.name} can only target unoccupied tiles"
-
-        # Prevent claiming neutral tiles with defense higher than card power
-        if not tile.owner and tile.defense_power > card.effective_power:
-            return False, f"Card power ({card.effective_power}) too low to overcome tile defense ({tile.defense_power})"
-
-        # Check stacking (only one claim per tile unless exception)
-        existing_claims = [
-            a for a in player.planned_actions
-            if a.target_q == target_q and a.target_r == target_r
-            and a.card.card_type == CardType.CLAIM
-        ]
-        if existing_claims and not card.stacking_exception:
-            return False, "Already have a claim on this tile (no stacking)"
+            for et_q, et_r in extra_targets[:max_extra]:
+                et_tile = game.grid.get_tile(et_q, et_r)
+                if not et_tile or et_tile.is_blocked:
+                    continue
+                if card.adjacency_required:
+                    if not any(pt.distance_to(et_tile) <= card.claim_range for pt in player_tiles):
+                        continue
+                if card.unoccupied_only and et_tile.owner is not None:
+                    continue
+                validated_extra.append((et_q, et_r))
 
     # Remove card from hand and create planned action
     player.hand.pop(card_index)
@@ -428,6 +479,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         target_q=target_q,
         target_r=target_r,
         target_player_id=target_player_id,
+        extra_targets=validated_extra if (card.card_type == CardType.CLAIM and target_q is not None and card.effective_multi_target_count > 0) else [],
     )
     player.planned_actions.append(action)
     player.actions_used += 1
@@ -482,9 +534,29 @@ def submit_plan(game: GameState, player_id: str) -> tuple[bool, str]:
     return True, "Plan submitted"
 
 
+def _find_closest_owned_tile(
+    game: GameState, player_id: str, target_q: int, target_r: int,
+) -> tuple[int, int] | None:
+    """Find the closest tile owned by player_id to the target tile."""
+    assert game.grid is not None
+    best: tuple[int, int] | None = None
+    best_dist = float("inf")
+    for key, tile in game.grid.tiles.items():
+        if tile.owner == player_id:
+            # Axial distance
+            dq = tile.q - target_q
+            dr = tile.r - target_r
+            dist = (abs(dq) + abs(dq + dr) + abs(dr)) / 2
+            if dist < best_dist:
+                best_dist = dist
+                best = (tile.q, tile.r)
+    return best
+
+
 def execute_reveal(game: GameState) -> GameState:
     """Phase 3: Reveal & Resolve — flip all cards and resolve claims."""
     game.current_phase = Phase.REVEAL
+    game.resolution_steps = []
     game._log("=== Reveal & Resolve ===")
 
     assert game.grid is not None
@@ -498,8 +570,27 @@ def execute_reveal(game: GameState) -> GameState:
         for action in player.planned_actions:
             if (action.card.card_type == CardType.CLAIM
                     and action.target_q is not None):
-                tile_key = f"{action.target_q},{action.target_r}"
-                claims_by_tile.setdefault(tile_key, []).append((pid, action))
+
+                # Flood: target is an owned tile; expand to all adjacent tiles
+                if action.card.flood:
+                    _target_r = action.target_r if action.target_r is not None else 0
+                    adj_tiles = game.grid.get_adjacent(action.target_q, _target_r)
+                    for adj_tile in adj_tiles:
+                        if not adj_tile.is_blocked:
+                            adj_key = f"{adj_tile.q},{adj_tile.r}"
+                            claims_by_tile.setdefault(adj_key, []).append((pid, action))
+                    game._log(
+                        f"{player.name} floods from {action.target_q},{_target_r} "
+                        f"({len([t for t in adj_tiles if not t.is_blocked])} adjacent tiles)",
+                        actor=pid)
+                else:
+                    tile_key = f"{action.target_q},{action.target_r}"
+                    claims_by_tile.setdefault(tile_key, []).append((pid, action))
+
+                    # Surge: add extra targets as additional claims on separate tiles
+                    for et_q, et_r in action.extra_targets:
+                        et_key = f"{et_q},{et_r}"
+                        claims_by_tile.setdefault(et_key, []).append((pid, action))
             else:
                 other_actions.append((pid, action))
 
@@ -562,6 +653,27 @@ def execute_reveal(game: GameState) -> GameState:
             game._log(f"Tile {tile_key}: intrinsic defense held (def {current_defense})")
             for pid, _ in claims:
                 claim_results.setdefault(tile_key, {})[pid] = False
+            # Build resolution step for failed claims
+            claimants = []
+            for pid, _action in claims:
+                src = _find_closest_owned_tile(game, pid, tile.q, tile.r)
+                claimants.append({
+                    "player_id": pid,
+                    "power": power_by_player.get(pid, 0),
+                    "source_q": src[0] if src else None,
+                    "source_r": src[1] if src else None,
+                })
+            game.resolution_steps.append({
+                "tile_key": tile_key,
+                "q": tile.q, "r": tile.r,
+                "contested": len(claims) > 1 or tile.owner is not None,
+                "claimants": claimants,
+                "defender_id": None,
+                "defender_power": current_defense,
+                "winner_id": None,
+                "previous_owner": tile.owner,
+                "outcome": "defense_held",
+            })
             continue
 
         if len(real_contenders) == 1:
@@ -573,11 +685,54 @@ def execute_reveal(game: GameState) -> GameState:
             game._log(f"Tile {tile_key}: tie between attackers, no change")
             for pid, _ in claims:
                 claim_results.setdefault(tile_key, {})[pid] = False
+            claimants = []
+            for pid, _action in claims:
+                src = _find_closest_owned_tile(game, pid, tile.q, tile.r)
+                claimants.append({
+                    "player_id": pid,
+                    "power": power_by_player.get(pid, 0),
+                    "source_q": src[0] if src else None,
+                    "source_r": src[1] if src else None,
+                })
+            game.resolution_steps.append({
+                "tile_key": tile_key,
+                "q": tile.q, "r": tile.r,
+                "contested": True,
+                "claimants": claimants,
+                "defender_id": tile.owner,
+                "defender_power": power_by_player.get(tile.owner, 0) if tile.owner else 0,
+                "winner_id": None,
+                "previous_owner": tile.owner,
+                "outcome": "tie",
+            })
             continue
 
         # Record results for all claimers
         for pid, _ in claims:
             claim_results.setdefault(tile_key, {})[pid] = (pid == winner_id)
+
+        # Build resolution step data BEFORE mutating tile
+        is_contested = len(claims) > 1 or (tile.owner is not None and tile.owner != winner_id)
+        claimants = []
+        for pid, _action in claims:
+            src = _find_closest_owned_tile(game, pid, tile.q, tile.r)
+            claimants.append({
+                "player_id": pid,
+                "power": power_by_player.get(pid, 0),
+                "source_q": src[0] if src else None,
+                "source_r": src[1] if src else None,
+            })
+        game.resolution_steps.append({
+            "tile_key": tile_key,
+            "q": tile.q, "r": tile.r,
+            "contested": is_contested,
+            "claimants": claimants,
+            "defender_id": tile.owner if tile.owner and tile.owner != winner_id else None,
+            "defender_power": power_by_player.get(tile.owner, 0) if tile.owner else 0,
+            "winner_id": winner_id,
+            "previous_owner": tile.owner,
+            "outcome": "claimed" if winner_id != tile.owner else "defended",
+        })
 
         if winner_id != tile.owner:
             old_owner = tile.owner
@@ -640,6 +795,47 @@ def execute_reveal(game: GameState) -> GameState:
         else:
             player.deck.add_to_discard([card])
 
+    # Sort resolution steps by turn order starting from first player.
+    # Each step is assigned to the first claimant that appears in turn order
+    # (rotated so first_player_index leads), so that player's claims animate first.
+    if game.resolution_steps:
+        n = len(game.player_order)
+        fpi = game.first_player_index % n if n > 0 else 0
+        rotated_order = game.player_order[fpi:] + game.player_order[:fpi]
+        pid_rank = {pid: i for i, pid in enumerate(rotated_order)}
+
+        def step_sort_key(step: dict[str, Any]) -> tuple[int, int, int]:
+            # Primary: rank of the earliest claimant in turn order
+            claimant_ids = [c["player_id"] for c in step.get("claimants", [])]
+            min_rank = min((pid_rank.get(pid, n) for pid in claimant_ids), default=n)
+            # Secondary: uncontested before contested (so a player's clean claims
+            # resolve before their fights)
+            contested = 1 if step.get("contested") else 0
+            # Tertiary: stable sort by tile position for determinism
+            return (min_rank, contested, step.get("q", 0) * 1000 + step.get("r", 0))
+
+        game.resolution_steps.sort(key=step_sort_key)
+
+    # Cease Fire check: grant bonus draws if player didn't claim opponent tiles
+    for pid in game.player_order:
+        player = game.players[pid]
+        bonus = player.turn_modifiers.cease_fire_bonus
+        if bonus > 0:
+            # Check if this player captured any tile that was owned by another player
+            claimed_opponent_tile = False
+            for tile_key, results in claim_results.items():
+                if pid in results and results[pid]:  # player won this claim
+                    step = next((s for s in game.resolution_steps
+                                 if s["tile_key"] == tile_key), None)
+                    if step and step.get("previous_owner") and step["previous_owner"] != pid:
+                        claimed_opponent_tile = True
+                        break
+            if not claimed_opponent_tile:
+                player.turn_modifiers.extra_draws_next_turn += bonus
+                game._log(f"{player.name} draws {bonus} extra card(s) next turn (Cease Fire)")
+            else:
+                game._log(f"{player.name}'s Cease Fire bonus forfeited — claimed an opponent tile")
+
     # Discard planned claim cards
     for pid in game.player_order:
         player = game.players[pid]
@@ -665,14 +861,20 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
     if not player:
         return False, "Player not found"
 
+    if player.has_ended_turn:
+        return False, "Already ended turn"
+
     # Check buy restriction (Blitz Rush)
     if player.turn_modifiers.buy_locked:
         return False, "Cannot purchase cards this round (buy restriction active)"
 
+    free = game.test_mode  # skip resource costs in test mode
+
     if source == "upgrade":
-        if player.resources < UPGRADE_CREDIT_COST:
+        if not free and player.resources < UPGRADE_CREDIT_COST:
             return False, f"Need {UPGRADE_CREDIT_COST} resources for upgrade credit"
-        player.resources -= UPGRADE_CREDIT_COST
+        if not free:
+            player.resources -= UPGRADE_CREDIT_COST
         player.upgrade_credits += 1
         game._log(f"{player.name} buys upgrade credit ({player.upgrade_credits} total)")
         return True, "Upgrade credit purchased"
@@ -685,11 +887,13 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 break
         if not target:
             return False, "Card not in archetype market"
-        effective_cost = _apply_cost_reductions(player, target)
-        if effective_cost > 0 and player.resources < effective_cost:
-            return False, f"Need {effective_cost} resources"
-        if effective_cost > 0:
-            player.resources -= effective_cost
+        if not free:
+            dynamic_cost = calculate_dynamic_buy_cost(game, player, target)
+            effective_cost = _apply_cost_reductions(player, target, base_cost_override=dynamic_cost)
+            if effective_cost > 0 and player.resources < effective_cost:
+                return False, f"Need {effective_cost} resources"
+            if effective_cost > 0:
+                player.resources -= effective_cost
         player.archetype_market.remove(target)
         player.archetype_deck.remove(target)
         player.deck.add_to_discard([target])
@@ -700,13 +904,15 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         purchased = game.neutral_market.purchase(card_id)
         if not purchased:
             return False, "Card not available in neutral market"
-        effective_cost = _apply_cost_reductions(player, purchased)
-        if effective_cost > 0 and player.resources < effective_cost:
-            # Put it back
-            game.neutral_market.stacks.setdefault(card_id, []).insert(0, purchased)
-            return False, f"Need {effective_cost} resources"
-        if effective_cost > 0:
-            player.resources -= effective_cost
+        if not free:
+            dynamic_cost = calculate_dynamic_buy_cost(game, player, purchased)
+            effective_cost = _apply_cost_reductions(player, purchased, base_cost_override=dynamic_cost)
+            if effective_cost > 0 and player.resources < effective_cost:
+                # Put it back
+                game.neutral_market.stacks.setdefault(card_id, []).insert(0, purchased)
+                return False, f"Need {effective_cost} resources"
+            if effective_cost > 0:
+                player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
         game._log(f"{player.name} buys {purchased.name} from neutral market")
         return True, f"Bought {purchased.name}"
@@ -714,9 +920,50 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
     return False, "Invalid source"
 
 
-def _apply_cost_reductions(player: Player, card: Card) -> int:
-    """Apply any active cost reductions to a card purchase. Returns effective cost."""
+def calculate_dynamic_buy_cost(game: GameState, player: Player, card: Card) -> int:
+    """Calculate the dynamic buy cost for a card based on its DYNAMIC_BUY_COST effects.
+
+    Returns the adjusted base cost (before turn-based cost reductions).
+    """
     base_cost = card.buy_cost if card.buy_cost is not None else 0
+    discount = 0
+
+    for effect in card.effects:
+        if effect.type != EffectType.DYNAMIC_BUY_COST:
+            continue
+
+        if effect.condition == ConditionType.VP_HEXES_CONTROLLED:
+            # Elite Vanguard: reduce cost by |value| per VP hex controlled
+            if game.grid is not None:
+                vp_hex_count = sum(
+                    1 for t in game.grid.tiles.values()
+                    if t.is_vp and t.owner == player.id
+                )
+                per_unit = effect.metadata.get("per_unit", False)
+                if per_unit:
+                    discount += abs(effect.value) * vp_hex_count
+                else:
+                    discount += abs(effect.value)
+
+        elif effect.condition == ConditionType.TILES_MORE_THAN_DEFENDER:
+            # Cheap Shot: reduce cost by 1 if the player controls the most
+            # tiles (strictly more than every other player).
+            if game.grid is not None:
+                player_tile_count = len(game.grid.get_player_tiles(player.id))
+                has_most = all(
+                    player_tile_count > len(game.grid.get_player_tiles(pid))
+                    for pid in game.players
+                    if pid != player.id
+                )
+                if has_most:
+                    discount += abs(effect.value)
+
+    return max(0, base_cost - discount)
+
+
+def _apply_cost_reductions(player: Player, card: Card, base_cost_override: Optional[int] = None) -> int:
+    """Apply any active cost reductions to a card purchase. Returns effective cost."""
+    base_cost = base_cost_override if base_cost_override is not None else (card.buy_cost if card.buy_cost is not None else 0)
     discount = 0
 
     reductions_to_remove = []
@@ -761,6 +1008,9 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
     if not player:
         return False, "Player not found"
 
+    if player.has_ended_turn:
+        return False, "Already ended turn"
+
     if player.resources < REROLL_COST:
         return False, f"Need {REROLL_COST} resources"
 
@@ -779,12 +1029,18 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
 
 def end_buy_phase(game: GameState, player_id: str) -> tuple[bool, str]:
     """Player signals they're done buying."""
+    if game.current_phase != Phase.BUY:
+        return False, "Not in Buy phase"
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
-
-    # For hot-seat, we just mark done. Could track per-player.
-    return True, "Done buying"
+    if player.has_ended_turn:
+        return False, "Already ended turn"
+    player.has_ended_turn = True
+    game._log(f"{player.name} ends their turn", actor=player_id)
+    if all(p.has_ended_turn for p in game.players.values()):
+        execute_end_of_turn(game)
+    return True, "Turn ended"
 
 
 def execute_end_of_turn(game: GameState) -> GameState:

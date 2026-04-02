@@ -13,11 +13,9 @@ from app.data_loader.loader import load_all_cards
 from app.game_engine.cards import Archetype
 from app.game_engine.game_state import (
     GameState,
-    Phase,
     buy_card,
     create_game,
     end_buy_phase,
-    execute_end_of_turn,
     execute_start_of_turn,
     play_card,
     reroll_market,
@@ -47,6 +45,7 @@ class CreateGameRequest(BaseModel):
     grid_size: str = "small"
     players: list[dict[str, Any]]
     seed: Optional[int] = None
+    test_mode: bool = False
 
 
 class PlayCardRequest(BaseModel):
@@ -79,7 +78,7 @@ class EndBuyRequest(BaseModel):
 
 
 class EndTurnRequest(BaseModel):
-    pass
+    player_id: str
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -107,7 +106,7 @@ async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
             "archetype": p["archetype"],
         })
 
-    game = create_game(grid_size, player_configs, registry, seed=req.seed)
+    game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode)
     # Auto-execute start of turn for round 1
     execute_start_of_turn(game)
     _games[game.id] = game
@@ -201,22 +200,21 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict(for_player_id=req.player_id)}
+    return {"message": msg, "state": game.to_dict()}
 
 
 @router.post("/games/{game_id}/end-turn")
-async def end_turn_route(game_id: str) -> dict[str, Any]:
-    """End the current turn and advance to next round."""
+async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
+    """End the current turn for a player (delegates to end_buy_phase)."""
     game = _games.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
-    if game.current_phase not in (Phase.BUY, Phase.END_OF_TURN):
-        raise HTTPException(400, "Cannot end turn in current phase")
+    success, msg = end_buy_phase(game, req.player_id)
+    if not success:
+        raise HTTPException(400, msg)
 
-    execute_end_of_turn(game)
-
-    return {"state": game.to_dict()}
+    return {"message": msg, "state": game.to_dict()}
 
 
 @router.get("/games/{game_id}/log")
@@ -239,3 +237,72 @@ async def list_cards() -> dict[str, Any]:
     """List all available cards (for debugging/reference)."""
     registry = _get_card_registry()
     return {cid: c.to_dict() for cid, c in registry.items()}
+
+
+# ── Test Mode Endpoints ────────────────────────────────────────
+
+
+class TestGiveCardRequest(BaseModel):
+    player_id: str
+    card_id: str
+
+
+class TestSetStatsRequest(BaseModel):
+    player_id: str
+    vp: Optional[int] = None
+    resources: Optional[int] = None
+
+
+@router.post("/games/{game_id}/test/give-card")
+async def test_give_card(game_id: str, req: TestGiveCardRequest) -> dict[str, Any]:
+    """Test mode: add a copy of any card from the registry to a player's hand."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+
+    player = game.players.get(req.player_id)
+    if not player:
+        raise HTTPException(404, "Player not found")
+
+    registry = _get_card_registry()
+    template = registry.get(req.card_id)
+    if not template:
+        raise HTTPException(404, f"Card '{req.card_id}' not found in registry")
+
+    # Create a copy with a unique ID
+    import copy as _copy
+    card = _copy.deepcopy(template)
+    card.id = f"test_{req.card_id}_{len(player.hand)}"
+    player.hand.append(card)
+    game._log(f"[TEST] {player.name} receives {card.name}", actor=req.player_id)
+
+    return {"message": f"Gave {card.name} to {player.name}", "state": game.to_dict()}
+
+
+@router.post("/games/{game_id}/test/set-stats")
+async def test_set_stats(game_id: str, req: TestSetStatsRequest) -> dict[str, Any]:
+    """Test mode: set VP and/or resources for a player."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+
+    player = game.players.get(req.player_id)
+    if not player:
+        raise HTTPException(404, "Player not found")
+
+    changes = []
+    if req.vp is not None:
+        player.vp = req.vp
+        changes.append(f"VP={req.vp}")
+    if req.resources is not None:
+        player.resources = req.resources
+        changes.append(f"Resources={req.resources}")
+
+    if changes:
+        game._log(f"[TEST] {player.name}: {', '.join(changes)}", actor=req.player_id)
+
+    return {"message": f"Updated {player.name}: {', '.join(changes)}", "state": game.to_dict()}

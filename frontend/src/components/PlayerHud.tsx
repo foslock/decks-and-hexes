@@ -4,6 +4,10 @@ interface PlayerHudProps {
   player: Player;
   isActive: boolean;
   isCurrent: boolean;
+  isFirstPlayer?: boolean;
+  phase: string;
+  totalCards: number;
+  tileCount: number;
 }
 
 const ARCHETYPE_ICONS: Record<string, string> = {
@@ -21,7 +25,22 @@ const PLAYER_COLORS: Record<string, string> = {
   player_5: '#ff4aaa',
 };
 
-export default function PlayerHud({ player, isActive, isCurrent }: PlayerHudProps) {
+function getStatus(player: Player, phase: string): { label: string; color: string } {
+  if (phase === 'plan') {
+    if (player.has_submitted_plan) return { label: 'Ready', color: '#4aff6a' };
+    return { label: 'Planning', color: '#ffaa4a' };
+  }
+  if (phase === 'buy') {
+    if (player.has_ended_turn) return { label: 'Ready', color: '#4aff6a' };
+    return { label: 'Buying', color: '#ffaa4a' };
+  }
+  if (phase === 'reveal') return { label: 'Resolving', color: '#aa88ff' };
+  return { label: phase.replace(/_/g, ' '), color: '#888' };
+}
+
+export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, phase, totalCards, tileCount }: PlayerHudProps) {
+  const status = getStatus(player, phase);
+
   return (
     <div
       style={{
@@ -32,6 +51,7 @@ export default function PlayerHud({ player, isActive, isCurrent }: PlayerHudProp
         opacity: isActive ? 1 : 0.7,
       }}
     >
+      {/* Name row */}
       <div style={{ fontWeight: 'bold', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{
           display: 'inline-block',
@@ -42,23 +62,46 @@ export default function PlayerHud({ player, isActive, isCurrent }: PlayerHudProp
           flexShrink: 0,
         }} />
         {ARCHETYPE_ICONS[player.archetype] || ''} {player.name}
-      </div>
-      <div style={{ fontSize: 13, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <span title="Victory Points">🏆 {player.vp}</span>
-        <span title="Resources">💰 {player.resources}</span>
-        <span title="Cards in hand">🃏 {player.hand_count}</span>
-        <span title="Cards in draw pile">🎴 {player.deck_size}</span>
-        <span title="Cards in discard">🗑️ {player.discard_count}</span>
-        <span title="Actions">⚡ {player.actions_used}/{player.actions_available}</span>
-        {player.upgrade_credits > 0 && (
-          <span title="Upgrade credits">⬆️ {player.upgrade_credits}</span>
+        {isFirstPlayer && (
+          <span
+            title="First player — resolves first this round"
+            style={{
+              fontSize: 9,
+              padding: '1px 5px',
+              borderRadius: 6,
+              background: '#ffd700',
+              color: '#000',
+              fontWeight: 'bold',
+              letterSpacing: 0.5,
+              marginLeft: 2,
+              lineHeight: 1.4,
+            }}
+          >
+            1st
+          </span>
         )}
+        {/* Status badge, right-aligned */}
+        <span style={{
+          marginLeft: 'auto',
+          fontSize: 10,
+          padding: '1px 6px',
+          borderRadius: 6,
+          background: `${status.color}22`,
+          color: status.color,
+          fontWeight: 'bold',
+          whiteSpace: 'nowrap',
+        }}>
+          {status.label}
+        </span>
       </div>
-      {player.has_submitted_plan && (
-        <div style={{ fontSize: 11, color: '#4aff6a', marginTop: 4 }}>
-          ✓ Plan submitted ({player.planned_action_count} actions)
-        </div>
-      )}
+
+      {/* Stats row */}
+      <div style={{ fontSize: 12, display: 'flex', gap: 10, color: '#bbb' }}>
+        <span title="Victory Points">🏆 {player.vp}</span>
+        <span title="Unspent Resources">💰 {player.resources}</span>
+        <span title="Tiles owned">🔷 {tileCount}</span>
+        <span title="Total cards in deck (hand + draw + discard + in play)">🃏 {totalCards}</span>
+      </div>
     </div>
   );
 }

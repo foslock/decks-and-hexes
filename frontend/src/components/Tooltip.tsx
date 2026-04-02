@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useAnimationMode } from './SettingsContext';
 
 interface TooltipProps {
   content: string;
@@ -144,6 +145,193 @@ export function IrreversibleButton({
           }}
         >
           {message}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+/**
+ * A button that requires hold-to-confirm when `requireHold` is true.
+ * On click/tap it shows a warning tooltip. The user must press and hold for
+ * `holdDuration` ms (default 3000) to actually trigger `onConfirm`.
+ * A progress bar fills the button during the hold.
+ * When `requireHold` is false, it acts as a normal click button.
+ */
+export function HoldToSubmitButton({
+  children,
+  onConfirm,
+  requireHold,
+  holdDuration = 2000,
+  warning,
+  tooltip,
+  style,
+  ...buttonProps
+}: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
+  onConfirm: () => void;
+  requireHold: boolean;
+  holdDuration?: number;
+  warning: string;
+  tooltip?: string;
+}) {
+  const animMode = useAnimationMode();
+  const [holding, setHolding] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [showWarning, setShowWarning] = useState(false);
+  const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const startTimeRef = useRef<number>(0);
+  const rafRef = useRef<number>(0);
+  const holdingRef = useRef(false);
+  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirmedRef = useRef(false);
+  const onConfirmRef = useRef(onConfirm);
+  onConfirmRef.current = onConfirm;
+
+  const clearWarningTimer = useCallback(() => {
+    if (warningTimerRef.current) {
+      clearTimeout(warningTimerRef.current);
+      warningTimerRef.current = null;
+    }
+  }, []);
+
+  const stopHold = useCallback(() => {
+    holdingRef.current = false;
+    setHolding(false);
+    setProgress(0);
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
+  }, []);
+
+  const tick = useCallback(() => {
+    if (!holdingRef.current) return;
+    const elapsed = Date.now() - startTimeRef.current;
+    const p = Math.min(elapsed / holdDuration, 1);
+    setProgress(p);
+    if (p >= 1) {
+      confirmedRef.current = true;
+      holdingRef.current = false;
+      setHolding(false);
+      setProgress(0);
+      rafRef.current = 0;
+      onConfirmRef.current();
+    } else {
+      rafRef.current = requestAnimationFrame(tick);
+    }
+  }, [holdDuration]);
+
+  const startHold = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!requireHold) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPosition({ x: rect.left + rect.width / 2, y: rect.top });
+    setShowWarning(true);
+    clearWarningTimer();
+    confirmedRef.current = false;
+    startTimeRef.current = Date.now();
+    holdingRef.current = true;
+    setHolding(true);
+    setProgress(0);
+    rafRef.current = requestAnimationFrame(tick);
+  }, [requireHold, tick, clearWarningTimer]);
+
+  const endHold = useCallback(() => {
+    stopHold();
+  }, [stopHold]);
+
+  const handleClick = useCallback(() => {
+    if (!requireHold) {
+      onConfirm();
+      return;
+    }
+    if (confirmedRef.current) {
+      confirmedRef.current = false;
+    }
+  }, [requireHold, onConfirm]);
+
+  const handleEnter = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPosition({ x: rect.left + rect.width / 2, y: rect.top });
+    if (requireHold) {
+      // Show warning immediately on hover when hold is required
+      setShowWarning(true);
+    } else if (tooltip) {
+      warningTimerRef.current = setTimeout(() => setShowWarning(true), 1000);
+    }
+  }, [requireHold, tooltip]);
+
+  const handleLeave = useCallback(() => {
+    if (!holding) {
+      clearWarningTimer();
+      setShowWarning(false);
+    }
+  }, [holding, clearWarningTimer]);
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      clearWarningTimer();
+    };
+  }, [clearWarningTimer]);
+
+  const progressTransition = animMode === 'normal' ? 'width 0.1s linear' : 'none';
+
+  return (
+    <>
+      <button
+        {...buttonProps}
+        onClick={handleClick}
+        onPointerDown={startHold}
+        onPointerUp={endHold}
+        onPointerLeave={(e) => { endHold(); handleLeave(); buttonProps.onPointerLeave?.(e); }}
+        onPointerEnter={handleEnter}
+        style={{
+          ...style,
+          position: 'relative',
+          overflow: 'hidden',
+          userSelect: 'none',
+          WebkitUserSelect: 'none',
+          touchAction: 'none',
+        }}
+      >
+        {requireHold && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'rgba(255,255,255,0.2)',
+            width: holding ? `${progress * 100}%` : '0%',
+            transition: holding ? progressTransition : 'none',
+            pointerEvents: 'none',
+          }} />
+        )}
+        <span style={{ position: 'relative' }}>{children}</span>
+      </button>
+      {showWarning && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: position.x,
+            top: position.y - 8,
+            transform: 'translate(-50%, -100%)',
+            background: '#332200',
+            border: '1px solid #aa7722',
+            borderRadius: 6,
+            padding: '6px 10px',
+            fontSize: 11,
+            color: '#ffcc66',
+            maxWidth: 240,
+            zIndex: 20000,
+            pointerEvents: 'none',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            whiteSpace: 'normal',
+            textAlign: 'center',
+          }}
+        >
+          {requireHold ? warning : (tooltip || '')}
+          {requireHold && (
+            <div style={{ fontSize: 10, color: '#aa8833', marginTop: 3 }}>
+              Hold button for 2 seconds to confirm
+            </div>
+          )}
         </div>,
         document.body
       )}

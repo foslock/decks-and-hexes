@@ -47,11 +47,16 @@ interface HexGridProps {
   tiles: Record<string, HexTile>;
   onTileClick: (q: number, r: number) => void;
   highlightTiles?: Set<string>;
+  surgeTargets?: [number, number][];
   playerInfo?: Record<string, PlayerInfo>;
   transformRef?: React.MutableRefObject<GridTransform | null>;
   borderTiles?: Set<string>;
   activePlayerId?: string;
   plannedActions?: Map<string, PlannedActionIcon>;
+  /** Card currently selected or being dragged — used for hover preview on valid tiles */
+  previewCard?: Card | null;
+  /** All tiles the preview card can legally be played on (superset of highlightTiles — includes own tiles for defensive claims) */
+  previewValidTiles?: Set<string>;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -159,7 +164,7 @@ function PlannedCardTooltip({ card, x, y }: { card: Card; x: number; y: number }
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -170,9 +175,15 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
   const borderTilesRef = useRef(borderTiles);
   const activePlayerIdRef = useRef(activePlayerId);
   const plannedActionsRef = useRef(plannedActions);
+  const surgeTargetsRef = useRef(surgeTargets);
+  const previewCardRef = useRef(previewCard);
+  const previewValidTilesRef = useRef(previewValidTiles);
   const hexContainerRef = useRef<Container | null>(null);
   const hoveredTileRef = useRef<string | null>(null);
   const hoverEdgeGraphicsRef = useRef<Graphics | null>(null);
+  const previewLabelRef = useRef<Text | null>(null);
+  const tileLabelRef = useRef<Map<string, Text>>(new Map());
+  const hiddenLabelKeyRef = useRef<string | null>(null);
   const tileGraphicsRef = useRef<Map<string, { g: Graphics; baseColor: number; isBlocked: boolean; baseAlpha: number }>>(new Map());
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card } | null>(null);
 
@@ -184,6 +195,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
   borderTilesRef.current = borderTiles;
   activePlayerIdRef.current = activePlayerId;
   plannedActionsRef.current = plannedActions;
+  surgeTargetsRef.current = surgeTargets;
+  previewCardRef.current = previewCard;
+  previewValidTilesRef.current = previewValidTiles;
 
   // Compute bounding box of all tiles in unscaled pixel space, then fit to canvas.
   const fitGrid = useCallback(() => {
@@ -303,6 +317,63 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
             hoverEdgeG.stroke();
           }
         }
+
+        // Preview card label on valid highlighted tiles
+        const pCard = previewCardRef.current;
+        const hexC = hexContainerRef.current;
+        // Restore any previously hidden label
+        if (hiddenLabelKeyRef.current) {
+          const prev = tileLabelRef.current.get(hiddenLabelKeyRef.current);
+          if (prev) prev.visible = true;
+          hiddenLabelKeyRef.current = null;
+        }
+        const isOwnTile = tile.owner === activePlayerIdRef.current;
+        // Show preview on any tile the card can legally be played on
+        const isValidTarget = previewValidTilesRef.current?.has(key);
+        const showPreview = pCard && hexC && !tile.is_blocked && isValidTarget;
+        if (showPreview) {
+          // Remove previous preview label
+          if (previewLabelRef.current) {
+            previewLabelRef.current.destroy();
+            previewLabelRef.current = null;
+          }
+          // Hide existing label on this tile
+          const existingLabel = tileLabelRef.current.get(key);
+          if (existingLabel) {
+            existingLabel.visible = false;
+            hiddenLabelKeyRef.current = key;
+          }
+          const isDefensive = pCard.card_type === 'defense' || isOwnTile;
+          // Defense cards show their bonus; claim/other cards show their power
+          let previewPower = pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power;
+          // For stackable cards, add power from any already-planned action on this tile
+          const existingPlanned = plannedActionsRef.current?.get(key);
+          if (pCard.stackable && existingPlanned) {
+            previewPower = existingPlanned.power + (pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power);
+          }
+          const icon = isDefensive ? '🛡' : '⚔';
+          const prefix = isDefensive ? '+' : '';
+          const previewText = `${icon} ${prefix}${previewPower}`;
+          const previewColor = isDefensive ? 0x66ff88 : 0xffaa00;
+          const textY = tile.is_vp ? y + 8 : y;
+          const lbl = new Text({
+            text: previewText,
+            style: new TextStyle({ fontSize: 13, fill: previewColor, fontWeight: 'bold' }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          lbl.anchor.set(0.5);
+          lbl.position.set(x, textY);
+          lbl.alpha = 0.7;
+          hexC.addChild(lbl);
+          previewLabelRef.current = lbl;
+        } else {
+          // Not a valid target — clear any stale preview
+          if (previewLabelRef.current) {
+            previewLabelRef.current.destroy();
+            previewLabelRef.current = null;
+          }
+        }
+
         // Planned action card tooltip (only active player's own actions)
         const plannedAction = plannedActionsRef.current?.get(key);
         if (plannedAction) {
@@ -320,6 +391,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
         if (!tile.is_blocked) {
           hoverEdgeGraphicsRef.current?.clear();
           hoveredTileRef.current = null;
+        }
+        // Clear preview label and restore hidden tile label
+        if (previewLabelRef.current) {
+          previewLabelRef.current.destroy();
+          previewLabelRef.current = null;
+        }
+        if (hiddenLabelKeyRef.current) {
+          const prev = tileLabelRef.current.get(hiddenLabelKeyRef.current);
+          if (prev) prev.visible = true;
+          hiddenLabelKeyRef.current = null;
         }
         setTooltip(null);
       });
@@ -391,7 +472,33 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
     hoverEdgeGraphicsRef.current = hoverEdgeG;
     hexContainer.addChild(hoverEdgeG);
 
+    // === PASS 7b: Surge target markers ===
+    const sTargets = surgeTargetsRef.current;
+    if (sTargets && sTargets.length > 0) {
+      const surgeG = new Graphics();
+      for (let i = 0; i < sTargets.length; i++) {
+        const [sq, sr] = sTargets[i];
+        const { x: sx, y: sy } = axialToPixel(sq, sr);
+        // Pulsing ring to mark selected surge targets
+        surgeG.setStrokeStyle({ width: 3, color: 0x00ffff, alpha: 0.9 });
+        drawHexagon(surgeG, sx, sy, HEX_SIZE - 2);
+        surgeG.stroke();
+        // Number label
+        const numLabel = new Text({
+          text: `${i + 1}`,
+          style: new TextStyle({ fontSize: 16, fill: 0x00ffff, fontWeight: 'bold' }),
+          resolution: Math.ceil(window.devicePixelRatio || 2),
+        });
+        numLabel.anchor.set(0.5);
+        numLabel.position.set(sx, sy);
+        hexContainer.addChild(numLabel);
+      }
+      hexContainer.addChild(surgeG);
+    }
+
     // === PASS 8: Text labels — rendered last so they are always on top ===
+    tileLabelRef.current.clear();
+    hiddenLabelKeyRef.current = null;
     for (const [key, tile] of Object.entries(tiles)) {
       const { x, y } = axialToPixel(tile.q, tile.r);
 
@@ -445,6 +552,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
         actionLabel.position.set(x, textY);
         actionLabel.alpha = 1;
         hexContainer.addChild(actionLabel);
+        tileLabelRef.current.set(key, actionLabel);
       } else if (tile.defense_power > 0 || inBorder) {
         const defColor = inBorder && tile.defense_power === 0 ? 0x888888 : 0xffffff;
         const def = new Text({
@@ -457,6 +565,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
         def.position.set(x, tile.is_vp ? y + 8 : y);
         def.alpha = 1;
         hexContainer.addChild(def);
+        tileLabelRef.current.set(key, def);
       }
     }
 
@@ -501,10 +610,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, playerInfo
   // Re-render tiles when data changes
   useEffect(() => {
     renderTiles();
-  }, [tiles, highlightTiles, activePlayerId, plannedActions, renderTiles]);
+  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, renderTiles]);
 
   return (
-    <div style={{ width: '100%', height: '100%', minHeight: 500, position: 'relative' }}>
+    <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <div
         ref={containerRef}
         style={{ width: '100%', height: '100%' }}

@@ -22,14 +22,30 @@ export interface Card {
   buy_cost: number | null;
   is_upgraded: boolean;
   trash_on_use: boolean;
-  stacking_exception: boolean;
+  stackable: boolean;
   forced_discard: number;
   draw_cards: number;
   defense_bonus: number;
   adjacency_required: boolean;
+  claim_range: number;
   unoccupied_only: boolean;
+  multi_target_count: number;
+  flood: boolean;
+  target_own_tile: boolean;
   description: string;
+  upgrade_description?: string;
+  name_upgraded?: string;
   starter: boolean;
+  effects?: { type: string; condition: string; value: number; metadata?: Record<string, unknown> }[];
+  upgraded_stats?: {
+    power?: number;
+    resource_gain?: number;
+    action_return?: number;
+    draw_cards?: number;
+    forced_discard?: number;
+    defense_bonus?: number;
+    multi_target_count?: number;
+  };
 }
 
 export interface PlannedAction {
@@ -59,11 +75,33 @@ export interface Player {
   planned_action_count: number;
   planned_actions: PlannedAction[];
   has_submitted_plan: boolean;
+  has_ended_turn: boolean;
+  effective_buy_costs?: Record<string, number>;
 }
 
 export interface MarketStack {
   card: Card;
   remaining: number;
+}
+
+export interface ResolutionClaimant {
+  player_id: string;
+  power: number;
+  source_q: number | null;
+  source_r: number | null;
+}
+
+export interface ResolutionStep {
+  tile_key: string;
+  q: number;
+  r: number;
+  contested: boolean;
+  claimants: ResolutionClaimant[];
+  defender_id: string | null;
+  defender_power: number;
+  winner_id: string | null;
+  previous_owner: string | null;
+  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held';
 }
 
 export interface GameState {
@@ -81,4 +119,6 @@ export interface GameState {
   neutral_market: MarketStack[];
   winner: string | null;
   log: string[];
+  resolution_steps?: ResolutionStep[];
+  test_mode?: boolean;
 }

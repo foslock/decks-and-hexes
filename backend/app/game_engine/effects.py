@@ -61,13 +61,17 @@ class EffectType(str, Enum):
     COST_REDUCTION = "cost_reduction"      # Supply Line, Tactical Reserve
 
     # Stacking / combo effects
+    GRANT_STACKABLE = "grant_stackable"                # Rally Cry
     STACKING_POWER_BONUS = "stacking_power_bonus"      # Dog Pile
     CONDITIONAL_ACTION_RETURN = "conditional_action_return"  # Rabble
 
-    # Complex effects (stubbed for future)
-    TRUCE = "truce"
+    # Conditional draw effects
+    CEASE_FIRE = "cease_fire"
     ADJACENCY_BRIDGE = "adjacency_bridge"
     DECK_PEEK = "deck_peek"
+
+    # Trash opponent's card on successful claim
+    TRASH_OPPONENT_CARD = "trash_opponent_card"
 
     # Dynamic buy cost (resolved at purchase time, not play time)
     DYNAMIC_BUY_COST = "dynamic_buy_cost"
@@ -139,6 +143,8 @@ class TurnModifiers:
     ignore_defense_tiles: set[str] = field(default_factory=set)
     # Track claims that resolve immediately (tile_key set)
     immediate_resolve_tiles: set[str] = field(default_factory=set)
+    # Cease Fire: pending bonus draws (granted if no opponent tiles claimed)
+    cease_fire_bonus: int = 0
 
     def reset_for_new_turn(self) -> None:
         """Clear single-round modifiers. Decrement multi-round ones."""
@@ -157,6 +163,8 @@ class TurnModifiers:
             del self.immune_tiles[key]
         # Contest costs last only one round
         self.contest_costs.clear()
+        # Cease fire bonus is resolved during reveal, reset after
+        self.cease_fire_bonus = 0
 
 
 def parse_effect(data: dict[str, Any]) -> Optional[Effect]:

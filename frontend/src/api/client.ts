@@ -18,10 +18,11 @@ export async function createGame(
   gridSize: string,
   players: { id: string; name: string; archetype: string }[],
   seed?: number,
+  testMode?: boolean,
 ): Promise<{ game_id: string; state: GameState }> {
   return request('/games', {
     method: 'POST',
-    body: JSON.stringify({ grid_size: gridSize, players, seed }),
+    body: JSON.stringify({ grid_size: gridSize, players, seed, test_mode: testMode }),
   });
 }
 
@@ -37,6 +38,7 @@ export async function playCard(
   targetQ?: number,
   targetR?: number,
   targetPlayerId?: string,
+  extraTargets?: [number, number][],
 ): Promise<{ message: string; state: GameState }> {
   return request(`/games/${gameId}/play`, {
     method: 'POST',
@@ -46,6 +48,7 @@ export async function playCard(
       target_q: targetQ,
       target_r: targetR,
       target_player_id: targetPlayerId,
+      extra_targets: extraTargets,
     }),
   });
 }
@@ -84,10 +87,36 @@ export async function rerollMarket(
 
 export async function endTurn(
   gameId: string,
-): Promise<{ state: GameState }> {
-  return request(`/games/${gameId}/end-turn`, {
+  playerId: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/end-buy`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
+// ── Test Mode APIs ────────────────────────────────────────
+
+export async function testGiveCard(
+  gameId: string,
+  playerId: string,
+  cardId: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/give-card`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, card_id: cardId }),
+  });
+}
+
+export async function testSetStats(
+  gameId: string,
+  playerId: string,
+  vp?: number,
+  resources?: number,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/set-stats`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, vp, resources }),
   });
 }
 
