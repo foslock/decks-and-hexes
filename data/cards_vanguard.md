@@ -6,7 +6,7 @@
 # EDITING NOTES:
 # - action_return: 0 = standard, 1 = net-neutral (↺), 2 = net-positive (↑)
 # - timing: "immediate" | "on_resolution" | "next_turn"
-# - stacking_exception: true = this card allows multiple Claims on same tile
+# - stackable: true = this card can be played on a tile where you already have a claim this turn
 # - upgraded: the "+" version of the card after spending an upgrade credit
 
 cards:
@@ -22,7 +22,7 @@ cards:
     effect_upgraded: "Claim: Power 5."
     secondary_effect: "If successful, draw 1 card next turn."
     secondary_timing: on_resolution
-    stacking_exception: false
+
     effects:
       - type: draw_next_turn
         value: 1
@@ -40,7 +40,7 @@ cards:
     effect_upgraded: "Claim: Power 6. May target a tile up to 2 steps away from any tile you own."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: vanguard_strike_team
     name: Strike Team
@@ -53,7 +53,7 @@ cards:
     effect_upgraded: "Claim: Power 3. If you played another Claim card this turn, +3 power."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: power_modifier
         value: 2
@@ -71,7 +71,7 @@ cards:
     effect_upgraded: "Claim: Power 4."
     secondary_effect: "If successful, opponent must spend 1 resource to contest this tile next round."
     secondary_timing: on_resolution
-    stacking_exception: false
+
     effects:
       - type: contest_cost
         value: 1
@@ -89,7 +89,7 @@ cards:
     effect_upgraded: "Claim: Power 7. Resolve immediately — skip the reveal phase for this tile. If successful, gain 2 resources."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: immediate_resolve
         timing: immediate
@@ -98,14 +98,14 @@ cards:
     name: Coordinated Push
     name_upgraded: Coordinated Push+
     type: Claim
-    buy_cost: 6
+    buy_cost: 4
     action_return: 0
-    power: 0
-    effect: "Claim: Play a second Claim card on the same tile this round. Both cards' power values are added together."
-    effect_upgraded: "Claim: Play a second Claim card on the same tile this round. Both cards' power values are added together. If successful, draw 1 card next turn."
+    power: 3
+    effect: "Claim: Power 3. Stackable — can be played on a tile where you already have a claim this turn."
+    effect_upgraded: "Claim: Power 4. Stackable."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: true
+    stackable: true
 
   - id: vanguard_double_time
     name: Double Time
@@ -118,7 +118,7 @@ cards:
     effect_upgraded: "Engine: Draw 2 cards immediately. Gain 2 actions back."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: vanguard_rally
     name: Rally
@@ -131,7 +131,7 @@ cards:
     effect_upgraded: "Engine: Draw 3 cards immediately. Discard 1. Gain 1 action back."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: self_discard
         value: 1
@@ -149,7 +149,7 @@ cards:
     effect_upgraded: "Claim: Power 3 on any adjacent neutral tile."
     secondary_effect: "If successful, draw 1 card next turn."
     secondary_timing: on_resolution
-    stacking_exception: false
+
     effects:
       - type: draw_next_turn
         value: 1
@@ -167,7 +167,7 @@ cards:
     effect_upgraded: "Engine: Gain 4 resources. Draw 1 card next turn. Gain 1 action back."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: draw_next_turn
         value: 1
@@ -184,7 +184,7 @@ cards:
     effect_upgraded: "Claim: Power 5."
     secondary_effect: "If successful, also claim one adjacent neutral tile automatically."
     secondary_timing: on_resolution
-    stacking_exception: false
+
     effects:
       - type: auto_claim_adjacent_neutral
         value: 1
@@ -198,11 +198,12 @@ cards:
     buy_cost: 4
     action_return: 0
     power: 3
-    effect: "Claim: Power 3. May target any tile adjacent to a tile you own, ignoring normal border adjacency restrictions."
-    effect_upgraded: "Claim: Power 4. May target any tile adjacent to a tile you own, ignoring normal border adjacency restrictions."
+    claim_range: 2
+    effect: "Claim: Power 3. May target a tile up to 2 steps away from any tile you own."
+    effect_upgraded: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
 
   - id: vanguard_surge_protocol
     name: Surge Protocol
@@ -215,12 +216,30 @@ cards:
     effect_upgraded: "Engine: Gain 2 actions back. Two other players of your choice each gain 1 action this turn."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: grant_actions
         value: 1
         timing: immediate
         target: chosen_player
+
+  - id: vanguard_spoils_of_war
+    name: Spoils of War
+    name_upgraded: Spoils of War+
+    type: Claim
+    buy_cost: 5
+    action_return: 0
+    power: 3
+    effect: "Claim: Power 3. If this claim wins a contested tile, the opponent's claim card is permanently trashed."
+    effect_upgraded: "Claim: Power 4. If this claim wins a contested tile, the opponent's claim card is permanently trashed."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: trash_opponent_card
+        timing: on_resolution
+        condition: if_successful
+        value: 1
 
   - id: vanguard_elite_vanguard
     name: Elite Vanguard
@@ -233,7 +252,7 @@ cards:
     effect_upgraded: "Claim: Power 8. Costs 1 less resource to purchase for each VP hex you currently control."
     secondary_effect: null
     secondary_timing: null
-    stacking_exception: false
+
     effects:
       - type: dynamic_buy_cost
         condition: vp_hexes_controlled

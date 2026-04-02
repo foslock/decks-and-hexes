@@ -26,8 +26,9 @@ cards:
     action_return: 0
     power: 0
     unoccupied_only: true
+    upgraded_unoccupied_only: false
     effect: "Claim: Power 0 on any adjacent unoccupied tile. Claims unopposed neutral territory."
-    effect_upgraded: "Claim: Power 1 on any adjacent tile."
+    effect_upgraded: "Claim: Power 1."
     trash_on_use: false
     note: "The baseline scouting action. Claims uncontested neutral tiles; loses any contested claim. Every archetype starts with copies of this card."
 
@@ -55,8 +56,8 @@ cards:
     copies: 5
     action_return: 0
     power: 3
-    effect: "Claim: Power 3 on any adjacent tile."
-    effect_upgraded: "Claim: Power 4 on any adjacent tile."
+    effect: "Claim: Power 3."
+    effect_upgraded: "Claim: Power 4."
     trash_on_use: false
 
   - id: neutral_land_grant
@@ -88,21 +89,23 @@ cards:
     effect_upgraded: "Choose a target opponent. That opponent draws 2 fewer cards at the start of their next turn."
     trash_on_use: false
 
-  - id: neutral_truce
-    name: Truce
-    name_upgraded: Truce+
+  - id: neutral_cease_fire
+    name: Cease Fire
+    name_upgraded: Cease Fire+
     type: Engine
     buy_cost: 2
     copies: 4
     action_return: 0
     power: 0
-    effect: "You and one chosen opponent cannot contest each other's tiles this round. Neither player may play Claim cards targeting the other's tiles."
-    effect_upgraded: "You and up to two chosen opponents cannot contest each other's tiles this round."
+    effect: "Draw 2 extra cards at the start of your next turn if you did not claim any opponent-owned tiles this turn."
+    effect_upgraded: "Draw 3 extra cards at the start of your next turn if you did not claim any opponent-owned tiles this turn."
     trash_on_use: false
     effects:
-      - type: truce
-        timing: immediate
-        target: chosen_player
+      - type: cease_fire
+        timing: on_resolution
+        value: 2
+        upgraded_value: 3
+        upgraded_value: 3
 
   - id: neutral_road_builder
     name: Road Builder
@@ -184,9 +187,9 @@ cards:
     buy_cost: 3
     copies: 3
     action_return: 0
-    power: 2
-    effect: "Defense: Any one tile you own gains +2 defense power when defending this round."
-    effect_upgraded: "Defense: Any one tile you own gains +3 defense power when defending this round."
+    power: 4
+    effect: "Defense: Any one tile you own gains +4 defense power when defending this round."
+    effect_upgraded: "Defense: Any one tile you own gains +5 defense power when defending this round."
     trash_on_use: false
 
   - id: neutral_forced_march
@@ -206,6 +209,21 @@ cards:
         value: 1
         timing: immediate
         target: all_others
+
+  - id: neutral_rally_cry
+    name: Rally Cry
+    name_upgraded: Rally Cry+
+    type: Engine
+    buy_cost: 5
+    copies: 2
+    action_return: 0
+    power: 0
+    effect: "Engine: All Claim cards in your hand gain Stackable this turn."
+    effect_upgraded: "Engine: All Claim cards in your hand gain Stackable this turn. Draw 1 card."
+    trash_on_use: true
+    effects:
+      - type: grant_stackable
+        timing: immediate
 
   - id: neutral_war_bonds
     name: War Bonds

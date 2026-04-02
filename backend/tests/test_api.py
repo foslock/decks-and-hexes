@@ -215,7 +215,15 @@ class TestBuyAndEndTurn:
 
     def test_end_turn(self, client: TestClient) -> None:
         game_id = self._create_and_advance_to_buy(client)
-        resp = client.post(f"/api/games/{game_id}/end-turn")
+        # First player ends turn — still in buy phase
+        resp = client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p0"})
+        assert resp.status_code == 200
+        state = resp.json()["state"]
+        assert state["current_phase"] == "buy"
+        assert state["players"]["p0"]["has_ended_turn"] is True
+        assert state["players"]["p1"]["has_ended_turn"] is False
+        # Second player ends turn — advances to next round
+        resp = client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p1"})
         assert resp.status_code == 200
         state = resp.json()["state"]
         assert state["current_round"] == 2
@@ -231,7 +239,7 @@ class TestBuyAndEndTurn:
             "seed": 42,
         })
         game_id = resp.json()["game_id"]
-        resp = client.post(f"/api/games/{game_id}/end-turn")
+        resp = client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p0"})
         assert resp.status_code == 400
 
     def test_buy_upgrade(self, client: TestClient) -> None:
@@ -335,7 +343,8 @@ class TestGameLog:
         # Play through a round
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
-        client.post(f"/api/games/{game_id}/end-turn")
+        client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p0"})
+        client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p1"})
 
         resp = client.get(f"/api/games/{game_id}/log")
         entries = resp.json()["entries"]

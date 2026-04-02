@@ -191,9 +191,9 @@ objectives:
     name: Diplomatic Incident
     archetype: wildcard
     vp_reward: 2
-    condition: "Play a Truce card targeting each other active player at least once across any number of rounds."
-    verification: "Track Truce card targets cumulatively. Must target every active player at least once."
-    notes: "Rewards political play. In a 6-player game this requires 5 Truce plays — a serious investment."
+    condition: "Successfully trigger Cease Fire's bonus in 3 different rounds (do not claim any opponent-owned tiles those turns)."
+    verification: "Track rounds where a Cease Fire card resolved with its condition met. Must reach 3 qualifying rounds."
+    notes: "Rewards restraint and card economy strategy. Requires investing actions in Cease Fire and forgoing aggression multiple turns."
 
   - id: obj_renaissance
     name: Renaissance

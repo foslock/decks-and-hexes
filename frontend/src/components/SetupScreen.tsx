@@ -4,6 +4,7 @@ interface SetupScreenProps {
   onStart: (config: {
     gridSize: string;
     players: { id: string; name: string; archetype: string }[];
+    testMode?: boolean;
   }) => void;
 }
 
@@ -26,6 +27,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
     { name: 'Player 1', archetype: 'vanguard' },
     { name: 'Player 2', archetype: 'swarm' },
   ]);
+  const [testMode, setTestMode] = useState(false);
 
   const updatePlayerCount = (count: number) => {
     setPlayerCount(count);
@@ -55,6 +57,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
         name: p.name,
         archetype: p.archetype,
       })),
+      testMode: testMode || undefined,
     });
   };
 
@@ -160,12 +163,32 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
         ))}
       </div>
 
+      {/* Test Mode toggle */}
+      <label style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '10px 0',
+        cursor: 'pointer',
+        fontSize: 13,
+        color: testMode ? '#ffaa4a' : '#666',
+      }}>
+        <input
+          type="checkbox"
+          checked={testMode}
+          onChange={(e) => setTestMode(e.target.checked)}
+          style={{ accentColor: '#ffaa4a' }}
+        />
+        Test Mode
+        {testMode && <span style={{ fontSize: 11, color: '#888' }}>— free cards, unlimited actions, stat editing</span>}
+      </label>
+
       <button
         onClick={handleStart}
         style={{
           width: '100%',
           padding: 16,
-          background: '#4a9eff',
+          background: testMode ? '#ffaa4a' : '#4a9eff',
           border: 'none',
           borderRadius: 8,
           color: '#fff',
@@ -174,7 +197,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
           cursor: 'pointer',
         }}
       >
-        Start Game
+        {testMode ? 'Start Test Game' : 'Start Game'}
       </button>
     </div>
   );

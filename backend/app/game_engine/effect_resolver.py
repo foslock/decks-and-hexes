@@ -521,8 +521,64 @@ register_handler(EffectType.RESOURCE_REFUND_IF_NEUTRAL, _handle_resource_refund_
 register_handler(EffectType.STACKING_POWER_BONUS, _handle_stacking_power_bonus)
 register_handler(EffectType.CONDITIONAL_ACTION_RETURN, _handle_conditional_action_return)
 
+
+def _handle_grant_stackable(effect: Effect, ctx: EffectContext) -> None:
+    """Battle Cry / Grant Stackable: make non-stackable claim cards in hand stackable this turn."""
+    count = 0
+    for card in ctx.player.hand:
+        if card.card_type == CardType.CLAIM and not card.stackable:
+            card.stackable = True
+            count += 1
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} grants Stackable to {count} claim card(s)",
+        actor=ctx.player.id)
+
+
+register_handler(EffectType.GRANT_STACKABLE, _handle_grant_stackable)
+
+def _handle_trash_opponent_card(effect: Effect, ctx: EffectContext) -> None:
+    """Spoils of War: if claim wins a contested tile, trash the opponent's claim card."""
+    if not ctx.target_tile_key or not ctx.claim_succeeded:
+        return
+
+    # Find the losing opponent's claim card for the same tile
+    for pid, other_player in ctx.game.players.items():
+        if pid == ctx.player.id:
+            continue
+        for action in other_player.planned_actions:
+            if action.card.card_type != CardType.CLAIM:
+                continue
+            if action.target_q is None:
+                continue
+            action_target_r = action.target_r if action.target_r is not None else 0
+            action_tile_key = f"{action.target_q},{action_target_r}"
+            if action_tile_key == ctx.target_tile_key:
+                # Mark the opponent's card as trash_on_use so it won't go to discard
+                action.card.trash_on_use = True
+                ctx.game._log(
+                    f"{ctx.player.name}'s {ctx.card.name} trashes {other_player.name}'s {action.card.name}!",
+                    actor=ctx.player.id)
+                return  # Only trash one opponent's card
+
+
+def _handle_dynamic_buy_cost(effect: Effect, ctx: EffectContext) -> None:
+    """Dynamic buy cost: evaluated at purchase time, no runtime action needed."""
+    pass
+
+
+def _handle_cease_fire(effect: Effect, ctx: EffectContext) -> None:
+    """Cease Fire: mark pending bonus draws, resolved after all claims."""
+    bonus = effect.value
+    ctx.player.turn_modifiers.cease_fire_bonus += bonus
+    ctx.game._log(
+        f"{ctx.player.name} plays {ctx.card.name} — will draw {bonus} extra card(s) "
+        f"next turn if no opponent tiles are claimed",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
 # Stubs for complex effects
-register_handler(EffectType.TRUCE, _handle_stub)
+register_handler(EffectType.CEASE_FIRE, _handle_cease_fire)
 register_handler(EffectType.ADJACENCY_BRIDGE, _handle_stub)
 register_handler(EffectType.DECK_PEEK, _handle_stub)
-register_handler(EffectType.DYNAMIC_BUY_COST, _handle_stub)
+register_handler(EffectType.DYNAMIC_BUY_COST, _handle_dynamic_buy_cost)
+register_handler(EffectType.TRASH_OPPONENT_CARD, _handle_trash_opponent_card)

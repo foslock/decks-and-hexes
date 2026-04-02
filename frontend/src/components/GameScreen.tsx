@@ -1,15 +1,17 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import type { GameState, Card } from '../types/game';
+import type { GameState, Card, ResolutionStep } from '../types/game';
 import HexGrid, { type GridTransform, type PlannedActionIcon } from './HexGrid';
 import PlayerHud from './PlayerHud';
-import CardHand from './CardHand';
+import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardDetail from './CardDetail';
 import ShopOverlay from './ShopOverlay';
 import GameLog from './GameLog';
 import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
-import { useAnimated } from './SettingsContext';
-import { IrreversibleButton } from './Tooltip';
+import PhaseBanner from './PhaseBanner';
+import ResolveOverlay from './ResolveOverlay';
+import { useAnimated, useAnimationMode, useAnimationOff } from './SettingsContext';
+import { IrreversibleButton, HoldToSubmitButton } from './Tooltip';
 import * as api from '../api/client';
 
 // Hex geometry constants (must match HexGrid.tsx)
@@ -18,6 +20,12 @@ const HEX_SIZE = 32;
 interface GameScreenProps {
   gameState: GameState;
   onStateUpdate: (state: GameState) => void;
+}
+
+function axialToPixel(q: number, r: number): { x: number; y: number } {
+  const x = HEX_SIZE * (3 / 2) * q;
+  const y = HEX_SIZE * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
+  return { x, y };
 }
 
 function pixelToAxial(px: number, py: number): { q: number; r: number } {
@@ -37,12 +45,39 @@ function pixelToAxial(px: number, py: number): { q: number; r: number } {
 
 export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps) {
   const animated = useAnimated();
+  const animationMode = useAnimationMode();
+  const animationOff = useAnimationOff();
   const [activePlayerIndex, setActivePlayerIndex] = useState(0);
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
   const [showFullLog, setShowFullLog] = useState(false);
+  const [showDeckViewer, setShowDeckViewer] = useState(false);
+  const [showShopOverlay, setShowShopOverlay] = useState(false);
+  const [discardingAll, setDiscardingAll] = useState(false);
+  const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
+  // Test mode state
+  const [showTestPanel, setShowTestPanel] = useState(false);
+  const [testCardId, setTestCardId] = useState('');
+  const [testVp, setTestVp] = useState('');
+  const [testResources, setTestResources] = useState('');
+  // Surge multi-target mode
+  const [surgeTargets, setSurgeTargets] = useState<[number, number][]>([]);
+  const [surgeCardIndex, setSurgeCardIndex] = useState<number | null>(null);
+  const [surgePrimaryTarget, setSurgePrimaryTarget] = useState<[number, number] | null>(null);
+  // Phase banner state
+  const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
+  const [interactionBlocked, setInteractionBlocked] = useState(false);
+  const prevPhaseRef = useRef<string>(gameState.current_phase);
+  // Resolve animation state
+  const [resolving, setResolving] = useState(false);
+  const [resolutionSteps, setResolutionSteps] = useState<ResolutionStep[]>([]);
+  const [resolveDisplayState, setResolveDisplayState] = useState<GameState | null>(null);
+  const resolveFinishedStateRef = useRef<GameState | null>(null);
+  const [gridRect, setGridRect] = useState<DOMRect | null>(null);
+  const [gridTransformSnapshot, setGridTransformSnapshot] = useState<GridTransform | null>(null);
+  const pendingStateRef = useRef<GameState | null>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridTransformRef = useRef<GridTransform | null>(null);
   const tileClickedRef = useRef(false);
@@ -57,6 +92,44 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+
+  // The state to feed to HexGrid during resolve animations (shows incremental tile changes)
+  const displayState = resolveDisplayState ?? gameState;
+
+  // Phase change detection → show phase banner
+  useEffect(() => {
+    const prev = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+    if (prev === phase) return;
+    // Don't show banner if currently resolving (resolve has its own banner flow)
+    if (resolving) return;
+    // Only show banners for main phases, and skip if animations are off
+    const bannerPhases = ['plan', 'buy'];
+    if (bannerPhases.includes(phase) && !animationOff) {
+      setPhaseBanner(phase);
+      setInteractionBlocked(true);
+    }
+  }, [phase, animationOff, resolving]);
+
+  // Keep grid rect up to date for resolve overlay positioning
+  useEffect(() => {
+    const el = gridContainerRef.current;
+    if (!el) return;
+    const update = () => setGridRect(el.getBoundingClientRect());
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Auto-open shop when entering buy phase.
+  // During resolve flow, shop opening is handled explicitly by handleBannerComplete.
+  useEffect(() => {
+    if (phase === 'buy' && !resolving && !phaseBanner) {
+      setShowShopOverlay(true);
+    }
+  }, [phase, resolving, phaseBanner]);
 
   // Compute which tiles are adjacent to the active player's territory
   const adjacentTiles = useMemo(() => {
@@ -80,16 +153,30 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     return adj;
   }, [gameState.grid, activePlayerId, activePlayer]);
 
-  const playCardAtTile = useCallback(async (cardIndex: number, q: number, r: number) => {
+  const playCardAtTile = useCallback(async (cardIndex: number, q: number, r: number, extraTargets?: [number, number][]) => {
     if (phase !== 'plan' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
 
+    // Compute screen position of the target tile for card animation
+    const transform = gridTransformRef.current;
+    const gridRect = gridContainerRef.current?.getBoundingClientRect();
+    if (transform && gridRect) {
+      const local = axialToPixel(q, r);
+      const screenX = local.x * transform.scale + transform.offsetX + gridRect.left;
+      const screenY = local.y * transform.scale + transform.offsetY + gridRect.top;
+      setLastPlayedTarget({ cardId: card.id, screenX, screenY });
+    }
+
     try {
       setError(null);
-      const result = await api.playCard(gameState.id, activePlayerId, cardIndex, q, r);
+      const result = await api.playCard(gameState.id, activePlayerId, cardIndex, q, r, undefined, extraTargets);
       onStateUpdate(result.state);
       setSelectedCardIndex(null);
+      // Clear surge state
+      setSurgeTargets([]);
+      setSurgeCardIndex(null);
+      setSurgePrimaryTarget(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -97,6 +184,10 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
   const playCardNoTarget = useCallback(async (cardIndex: number) => {
     if (phase !== 'plan' || !activePlayer) return;
+    const card = activePlayer.hand[cardIndex];
+    if (card) {
+      setLastPlayedTarget({ cardId: card.id, screenX: null, screenY: null });
+    }
     try {
       setError(null);
       const result = await api.playCard(gameState.id, activePlayerId, cardIndex);
@@ -133,7 +224,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     const { q, r } = pixelToAxial(localX, localY);
 
     // Validate claim card restrictions
-    if (card.card_type === 'claim') {
+    if (card.card_type === 'claim' && !card.target_own_tile) {
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (tile && !tile.owner && tile.base_defense > card.power) {
@@ -146,14 +237,38 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       }
     }
 
+    // Multi-target card (Surge): enter multi-target selection mode on drag
+    if (card.multi_target_count > 0) {
+      setSurgeCardIndex(cardIndex);
+      setSurgePrimaryTarget([q, r]);
+      setSurgeTargets([]);
+      setSelectedCardIndex(cardIndex);
+      return;
+    }
+
     playCardAtTile(cardIndex, q, r);
   }, [activePlayer, gameState.grid, playCardAtTile, playCardNoTarget]);
 
   const handleTileClick = useCallback(async (q: number, r: number) => {
     tileClickedRef.current = true;
-    if (phase !== 'plan' || !activePlayer || selectedCardIndex === null) {
+    if (phase !== 'plan' || !activePlayer) return;
+
+    // Surge multi-target mode: adding extra targets
+    if (surgeCardIndex !== null && surgePrimaryTarget) {
+      const tileKey = `${q},${r}`;
+      // Don't allow duplicate targets or the primary target
+      if (surgeTargets.some(([tq, tr]) => tq === q && tr === r)) return;
+      if (surgePrimaryTarget[0] === q && surgePrimaryTarget[1] === r) return;
+      // Validate tile is a valid claim target
+      const tile = gameState.grid?.tiles[tileKey];
+      if (!tile || tile.is_blocked || tile.owner === activePlayerId) return;
+      const maxExtra = activePlayer.hand[surgeCardIndex]?.multi_target_count ?? 0;
+      if (surgeTargets.length >= maxExtra) return;
+      setSurgeTargets(prev => [...prev, [q, r]]);
       return;
     }
+
+    if (selectedCardIndex === null) return;
 
     const card = activePlayer.hand[selectedCardIndex];
     if (!card) return;
@@ -163,50 +278,95 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       if (card.card_type === 'claim') {
         const tileKey = `${q},${r}`;
         const tile = gameState.grid?.tiles[tileKey];
-        if (tile && !tile.owner && tile.base_defense > card.power) {
-          setError(`${card.name} (power ${card.power}) is too weak to capture this tile (defense ${tile.base_defense})`);
-          return;
+        if (!card.target_own_tile) {
+          if (tile && !tile.owner && tile.base_defense > card.power) {
+            setError(`${card.name} (power ${card.power}) is too weak to capture this tile (defense ${tile.base_defense})`);
+            return;
+          }
+          if (tile && tile.owner && card.unoccupied_only) {
+            setError(`${card.name} can only target unoccupied tiles`);
+            return;
+          }
         }
-        if (tile && tile.owner && card.unoccupied_only) {
-          setError(`${card.name} can only target unoccupied tiles`);
+
+        // Multi-target card (Surge): enter multi-target selection mode
+        if (card.multi_target_count > 0) {
+          setSurgeCardIndex(selectedCardIndex);
+          setSurgePrimaryTarget([q, r]);
+          setSurgeTargets([]);
           return;
         }
       }
       await playCardAtTile(selectedCardIndex, q, r);
     }
-  }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile]);
+  }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile, surgeCardIndex, surgePrimaryTarget, surgeTargets, activePlayerId]);
 
   const handlePlayEngine = useCallback(async () => {
     if (selectedCardIndex === null) return;
     await playCardNoTarget(selectedCardIndex);
   }, [selectedCardIndex, playCardNoTarget]);
 
+  // Confirm Surge multi-target selection
+  const handleConfirmSurge = useCallback(async () => {
+    if (surgeCardIndex === null || !surgePrimaryTarget) return;
+    await playCardAtTile(surgeCardIndex, surgePrimaryTarget[0], surgePrimaryTarget[1], surgeTargets);
+  }, [surgeCardIndex, surgePrimaryTarget, surgeTargets, playCardAtTile]);
+
+  const handleCancelSurge = useCallback(() => {
+    setSurgeCardIndex(null);
+    setSurgePrimaryTarget(null);
+    setSurgeTargets([]);
+  }, []);
+
   const handleSubmitPlan = useCallback(async () => {
-    // Warn if player still has cards and unused actions (and hasn't hit the cap)
-    if (activePlayer) {
-      const hasCardsLeft = activePlayer.hand.length > 0;
-      const actionsLeft = activePlayer.actions_available - activePlayer.actions_used;
-      const atCap = activePlayer.actions_used >= 6;
-      if (hasCardsLeft && actionsLeft > 0 && !atCap) {
-        const ok = window.confirm(
-          `${activePlayer.name} still has ${activePlayer.hand.length} card(s) in hand and ${actionsLeft} action(s) remaining. Submit plan anyway?`
-        );
-        if (!ok) return;
-      }
-    }
     try {
       setError(null);
       const result = await api.submitPlan(gameState.id, activePlayerId);
-      onStateUpdate(result.state);
-      const nextIndex = gameState.player_order.findIndex(
-        (pid, i) => i !== activePlayerIndex && !gameState.players[pid].has_submitted_plan,
-      );
-      if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
-      setSelectedCardIndex(null);
+      const steps = result.state.resolution_steps;
+      const revealHappened = result.state.current_phase === 'buy' || result.state.current_phase === 'reveal';
+
+      if (revealHappened) {
+        // All plans submitted — reveal phase happened server-side.
+        // Hold back the final state and animate the resolution.
+        const hasSteps = steps && steps.length > 0;
+        resolveFinishedStateRef.current = result.state;
+        setSelectedCardIndex(null);
+
+        if (hasSteps && !animationOff) {
+          // Build pre-resolve display state with old tile ownership for animation
+          const preResolveState: GameState = {
+            ...result.state,
+            current_phase: 'reveal',
+            grid: result.state.grid ? {
+              ...result.state.grid,
+              tiles: { ...gameState.grid.tiles },
+            } : result.state.grid,
+          };
+          setResolveDisplayState(preResolveState);
+          setResolutionSteps(steps);
+          setGridTransformSnapshot(gridTransformRef.current);
+          setResolving(true);
+          setInteractionBlocked(true);
+          setPhaseBanner('reveal');
+        } else {
+          // No claim steps or animations off — apply final state immediately
+          onStateUpdate(result.state);
+          resolveFinishedStateRef.current = null;
+          setActivePlayerIndex(0);
+        }
+      } else {
+        // Not all plans submitted yet — just apply the updated state
+        onStateUpdate(result.state);
+        const nextIndex = gameState.player_order.findIndex(
+          (pid, i) => i !== activePlayerIndex && !gameState.players[pid].has_submitted_plan,
+        );
+        if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
+        setSelectedCardIndex(null);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayer, activePlayerId, activePlayerIndex, onStateUpdate]);
+  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationOff]);
 
   const handleBuyArchetype = useCallback(async (cardId: string) => {
     try {
@@ -251,14 +411,121 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const handleEndTurn = useCallback(async () => {
     try {
       setError(null);
-      const result = await api.endTurn(gameState.id);
-      onStateUpdate(result.state);
-      setActivePlayerIndex(0);
-      setSelectedCardIndex(null);
+      const result = await api.endTurn(gameState.id, activePlayerId);
+      const allDone = result.state.current_phase !== 'buy';
+
+      if (allDone) {
+        // All players ended turn — game advanced to next round
+        if (animationMode !== 'off' && activePlayer && activePlayer.hand.length > 0) {
+          pendingStateRef.current = result.state;
+          setDiscardingAll(true);
+        } else {
+          onStateUpdate(result.state);
+          setActivePlayerIndex(0);
+          setSelectedCardIndex(null);
+        }
+      } else {
+        // Not all players done — switch to next unfinished player
+        onStateUpdate(result.state);
+        const nextIndex = gameState.player_order.findIndex(
+          (pid, i) => i !== activePlayerIndex && !result.state.players[pid].has_ended_turn,
+        );
+        if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
+        setSelectedCardIndex(null);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState.id, onStateUpdate]);
+  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer]);
+
+  const handleDiscardAllComplete = useCallback(() => {
+    setDiscardingAll(false);
+    if (pendingStateRef.current) {
+      onStateUpdate(pendingStateRef.current);
+      pendingStateRef.current = null;
+    }
+    setActivePlayerIndex(0);
+    setSelectedCardIndex(null);
+  }, [onStateUpdate]);
+
+  // Phase banner completed
+  const handleBannerComplete = useCallback(() => {
+    const bannerPhase = phaseBanner;
+    setPhaseBanner(null);
+    // If resolving, don't unblock interactions yet — resolve overlay will do that
+    if (!resolving) {
+      setInteractionBlocked(false);
+      // Auto-open shop after buy banner completes
+      if (bannerPhase === 'buy') {
+        setShowShopOverlay(true);
+      }
+    }
+  }, [resolving, phaseBanner]);
+
+  // Phase banner midpoint — start drawing cards if it's start_of_turn
+  const handleBannerMidpoint = useCallback(() => {
+    // Card drawing is handled by the state update, which has already been applied.
+    // The banner just delays interaction, so nothing special at midpoint currently.
+  }, []);
+
+  // Resolve animation completed — apply final state and move to buy phase
+  const handleResolveComplete = useCallback(() => {
+    setResolving(false);
+    setResolutionSteps([]);
+    setResolveDisplayState(null);
+    if (resolveFinishedStateRef.current) {
+      onStateUpdate(resolveFinishedStateRef.current);
+      resolveFinishedStateRef.current = null;
+    }
+    setActivePlayerIndex(0);
+    // Show the buy phase banner after resolution (which will open the shop when it completes)
+    if (!animationOff) {
+      setPhaseBanner('buy');
+      setInteractionBlocked(true);
+    } else {
+      setInteractionBlocked(false);
+      setShowShopOverlay(true);
+    }
+  }, [onStateUpdate, animationOff]);
+
+  // Called by ResolveOverlay as each step completes — update the displayed tile state
+  const applyResolveStep = useCallback((stepIdx: number) => {
+    const step = resolutionSteps[stepIdx];
+    if (!step) return;
+    setResolveDisplayState(prev => {
+      if (!prev?.grid) return prev;
+      const newTiles = { ...prev.grid.tiles };
+      const tile = newTiles[step.tile_key];
+      if (tile && step.winner_id && step.outcome === 'claimed') {
+        newTiles[step.tile_key] = {
+          ...tile,
+          owner: step.winner_id,
+        };
+      }
+      return { ...prev, grid: { ...prev.grid, tiles: newTiles } };
+    });
+  }, [resolutionSteps]);
+
+  // ── Test mode handlers ──────────────────────────────────────
+  const handleTestGiveCard = useCallback(async (cardId: string) => {
+    try {
+      setError(null);
+      const result = await api.testGiveCard(gameState.id, activePlayerId, cardId);
+      onStateUpdate(result.state);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, activePlayerId, onStateUpdate]);
+
+  const handleTestSetStats = useCallback(async (vp?: number, resources?: number) => {
+    try {
+      setError(null);
+      const result = await api.testSetStats(gameState.id, activePlayerId, vp, resources);
+      onStateUpdate(result.state);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, activePlayerId, onStateUpdate]);
 
   const handleSwitchPlayer = useCallback((index: number) => {
     setActivePlayerIndex(index);
@@ -268,6 +535,17 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
   const selectedCard = selectedCardIndex !== null ? activePlayer?.hand[selectedCardIndex] : null;
 
+  // Submit Plan button state
+  const submitHasCardsLeft = activePlayer ? activePlayer.hand.length > 0 : false;
+  const submitActionsLeft = activePlayer ? activePlayer.actions_available - activePlayer.actions_used : 0;
+  const submitAtCap = activePlayer ? activePlayer.actions_used >= 6 : false;
+  const submitCanStillPlay = submitHasCardsLeft && submitActionsLeft > 0 && !submitAtCap;
+
+  // Hex distance in axial coordinates
+  const hexDistance = useCallback((q1: number, r1: number, q2: number, r2: number): number => {
+    return Math.max(Math.abs(q1 - q2), Math.abs(r1 - r2), Math.abs((q1 + r1) - (q2 + r2)));
+  }, []);
+
   // Filter tiles to only those a given claim card can actually be played on
   const getValidClaimTiles = useCallback((card: Card | null | undefined): Set<string> => {
     if (!card || card.card_type !== 'claim') return adjacentTiles;
@@ -275,9 +553,19 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     const tiles = gameState.grid?.tiles;
     if (!tiles) return valid;
 
+    // Flood / target_own_tile: highlight player's own tiles as valid targets
+    if (card.target_own_tile) {
+      for (const [key, tile] of Object.entries(tiles)) {
+        if (tile.owner === activePlayerId) {
+          valid.add(key);
+        }
+      }
+      return valid;
+    }
+
     // Tiles where the player already has a non-stacking claim this turn
     const alreadyClaimed = new Set<string>();
-    if (!card.stacking_exception && activePlayer?.planned_actions) {
+    if (!card.stackable && activePlayer?.planned_actions) {
       for (const action of activePlayer.planned_actions) {
         if (action.card.card_type === 'claim' && action.target_q != null) {
           alreadyClaimed.add(`${action.target_q},${action.target_r}`);
@@ -285,10 +573,28 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       }
     }
 
-    // Cards without adjacency requirement can target any tile on the board
-    const candidates: Iterable<string> = card.adjacency_required
-      ? adjacentTiles
-      : Object.keys(tiles);
+    // Determine candidate tiles based on adjacency requirement + claim_range
+    let candidates: Iterable<string>;
+    if (!card.adjacency_required) {
+      candidates = Object.keys(tiles);
+    } else if (card.claim_range > 1) {
+      // Extended range: find all tiles within N steps of any owned tile
+      const rangedSet = new Set<string>();
+      const ownedTiles = Object.values(tiles).filter(t => t.owner === activePlayerId);
+      for (const key of Object.keys(tiles)) {
+        const t = tiles[key];
+        if (!t || t.is_blocked || t.owner === activePlayerId) continue;
+        for (const owned of ownedTiles) {
+          if (hexDistance(t.q, t.r, owned.q, owned.r) <= card.claim_range) {
+            rangedSet.add(key);
+            break;
+          }
+        }
+      }
+      candidates = rangedSet;
+    } else {
+      candidates = adjacentTiles;
+    }
 
     for (const key of candidates) {
       const tile = tiles[key];
@@ -304,7 +610,46 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       valid.add(key);
     }
     return valid;
-  }, [adjacentTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId]);
+  }, [adjacentTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId, hexDistance]);
+
+  // All tiles a card can legally be played on (includes own tiles for defensive claims)
+  const getAllValidPlayTiles = useCallback((card: Card | null | undefined): Set<string> => {
+    if (!card) return new Set();
+    // Start with the highlighted expansion targets
+    const valid = new Set(getValidClaimTiles(card));
+    // For claim cards (not unoccupied_only, not target_own_tile which is already handled),
+    // also include own tiles as valid defensive placements
+    if (card.card_type === 'claim' && !card.unoccupied_only && !card.target_own_tile) {
+      const tiles = gameState.grid?.tiles;
+      if (tiles) {
+        const alreadyClaimed = new Set<string>();
+        if (!card.stackable && activePlayer?.planned_actions) {
+          for (const action of activePlayer.planned_actions) {
+            if (action.card.card_type === 'claim' && action.target_q != null) {
+              alreadyClaimed.add(`${action.target_q},${action.target_r}`);
+            }
+          }
+        }
+        for (const [key, tile] of Object.entries(tiles)) {
+          if (tile.owner === activePlayerId && !tile.is_blocked && !alreadyClaimed.has(key)) {
+            valid.add(key);
+          }
+        }
+      }
+    }
+    // For defense cards, own tiles are valid
+    if (card.card_type === 'defense') {
+      const tiles = gameState.grid?.tiles;
+      if (tiles) {
+        for (const [key, tile] of Object.entries(tiles)) {
+          if (tile.owner === activePlayerId && !tile.is_blocked) {
+            valid.add(key);
+          }
+        }
+      }
+    }
+    return valid;
+  }, [getValidClaimTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId]);
 
   const playerInfo = useMemo(() => {
     const info: Record<string, { name: string; archetype: string }> = {};
@@ -323,7 +668,15 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         const key = `${action.target_q},${action.target_r}`;
         const type = action.card.card_type;
         const power = type === 'defense' ? action.card.defense_bonus : action.card.power;
-        map.set(key, { type, power, name: action.card.name, card: action.card });
+        const existing = map.get(key);
+        if (existing) {
+          // Stackable: accumulate power from multiple cards on the same tile
+          existing.power += power;
+          existing.name = `${existing.name} + ${action.card.name}`;
+          existing.card = action.card;  // tooltip shows latest card
+        } else {
+          map.set(key, { type, power, name: action.card.name, card: action.card });
+        }
       }
     }
     return map.size > 0 ? map : undefined;
@@ -336,6 +689,23 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       .filter(a => a.target_q != null)
       .map(a => a.card);
   }, [activePlayer?.planned_actions]);
+
+  // Full deck breakdown for the Deck viewer button
+  const allDeckCards = useMemo(() => {
+    if (!activePlayer) return [];
+    return [
+      ...(inPlayCards.length > 0 ? [{ label: 'In Play', items: inPlayCards }] : []),
+      { label: 'In Hand', items: activePlayer.hand },
+      { label: 'Draw Pile', items: activePlayer.deck_cards },
+      { label: 'Discard Pile', items: activePlayer.discard },
+    ];
+  }, [activePlayer, inPlayCards]);
+
+  const totalDeckCount = useMemo(() => {
+    if (!activePlayer) return 0;
+    return inPlayCards.length + activePlayer.hand.length +
+      (activePlayer.deck_cards?.length ?? 0) + (activePlayer.discard?.length ?? 0);
+  }, [activePlayer, inPlayCards]);
 
   return (
     <div style={{ display: 'flex', height: '100vh', background: '#1a1a2e', color: '#fff' }}>
@@ -358,15 +728,25 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         {/* Player tabs */}
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>PLAYERS (click to switch)</div>
-          {gameState.player_order.map((pid, i) => (
-            <div key={pid} onClick={() => handleSwitchPlayer(i)} style={{ cursor: 'pointer', marginBottom: 6 }}>
-              <PlayerHud
-                player={gameState.players[pid]}
-                isActive={i === activePlayerIndex}
-                isCurrent={i === activePlayerIndex}
-              />
-            </div>
-          ))}
+          {gameState.player_order.map((pid, i) => {
+            const p = gameState.players[pid];
+            const pPlanned = p.planned_actions?.length ?? 0;
+            const pTotal = p.hand_count + p.deck_size + p.discard_count + pPlanned;
+            const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
+            return (
+              <div key={pid} onClick={() => handleSwitchPlayer(i)} style={{ cursor: 'pointer', marginBottom: 6 }}>
+                <PlayerHud
+                  player={p}
+                  isActive={i === activePlayerIndex}
+                  isCurrent={i === activePlayerIndex}
+                  isFirstPlayer={i === gameState.first_player_index}
+                  phase={phase}
+                  totalCards={pTotal}
+                  tileCount={pTiles}
+                />
+              </div>
+            );
+          })}
         </div>
 
         <div style={{ flex: 1, minHeight: 0 }}>
@@ -391,41 +771,181 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         </button>
 
         <SettingsPanel />
+
+        {/* Test Mode Panel */}
+        {gameState.test_mode && (
+          <div style={{ borderTop: '1px solid #ffaa4a44', marginTop: 8, paddingTop: 8 }}>
+            <div
+              onClick={() => setShowTestPanel(p => !p)}
+              style={{ fontSize: 12, color: '#ffaa4a', cursor: 'pointer', fontWeight: 'bold', marginBottom: 4 }}
+            >
+              {showTestPanel ? '▾' : '▸'} Test Mode
+            </div>
+            {showTestPanel && (
+              <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {/* Give card to active player */}
+                <div>
+                  <div style={{ color: '#888', marginBottom: 2 }}>Give card to {activePlayer?.name}:</div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <input
+                      value={testCardId}
+                      onChange={e => setTestCardId(e.target.value)}
+                      placeholder="card_id"
+                      style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }}
+                    />
+                    <button
+                      onClick={() => { if (testCardId) handleTestGiveCard(testCardId); }}
+                      style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}
+                    >
+                      Give
+                    </button>
+                  </div>
+                </div>
+
+                {/* Set VP */}
+                <div>
+                  <div style={{ color: '#888', marginBottom: 2 }}>Set {activePlayer?.name} VP:</div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <input
+                      type="number"
+                      value={testVp}
+                      onChange={e => setTestVp(e.target.value)}
+                      placeholder={String(activePlayer?.vp ?? 0)}
+                      style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }}
+                    />
+                    <button
+                      onClick={() => { if (testVp !== '') handleTestSetStats(Number(testVp), undefined); }}
+                      style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      Set
+                    </button>
+                  </div>
+                </div>
+
+                {/* Set Resources */}
+                <div>
+                  <div style={{ color: '#888', marginBottom: 2 }}>Set {activePlayer?.name} Resources:</div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <input
+                      type="number"
+                      value={testResources}
+                      onChange={e => setTestResources(e.target.value)}
+                      placeholder={String(activePlayer?.resources ?? 0)}
+                      style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }}
+                    />
+                    <button
+                      onClick={() => { if (testResources !== '') handleTestSetStats(undefined, Number(testResources)); }}
+                      style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}
+                    >
+                      Set
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Center: hex grid + overlays */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div
           ref={gridContainerRef}
-          style={{ flex: 1, position: 'relative' }}
+          style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}
           onClick={() => {
             if (tileClickedRef.current) { tileClickedRef.current = false; return; }
             setSelectedCardIndex(null);
           }}
         >
-          {gameState.grid && (
+          {displayState.grid && (
             <HexGrid
-              tiles={gameState.grid.tiles}
+              tiles={displayState.grid.tiles}
               onTileClick={handleTileClick}
-              highlightTiles={
-                phase === 'plan' && (
-                  selectedCard?.card_type === 'claim' ||
-                  (draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim')
-                ) ? getValidClaimTiles(
-                  selectedCard?.card_type === 'claim' ? selectedCard :
-                  draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] : null
-                ) : undefined
-              }
+              highlightTiles={(() => {
+                if (phase !== 'plan') return undefined;
+                if (surgeCardIndex !== null) return getValidClaimTiles(activePlayer?.hand[surgeCardIndex]);
+                const card = selectedCard?.card_type === 'claim' ? selectedCard
+                  : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
+                    ? activePlayer?.hand[draggingCardIndex] : null;
+                if (card) return getValidClaimTiles(card);
+                // Defense card: highlight own tiles
+                const defCard = selectedCard?.card_type === 'defense' ? selectedCard
+                  : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'defense'
+                    ? activePlayer?.hand[draggingCardIndex] : null;
+                if (defCard) {
+                  const ownTiles = new Set<string>();
+                  for (const [k, t] of Object.entries(displayState.grid.tiles)) {
+                    if (t.owner === activePlayerId) ownTiles.add(k);
+                  }
+                  return ownTiles;
+                }
+                return undefined;
+              })()}
+              surgeTargets={surgeCardIndex !== null ? [
+                ...(surgePrimaryTarget ? [surgePrimaryTarget] : []),
+                ...surgeTargets,
+              ] : undefined}
               borderTiles={phase === 'plan' ? adjacentTiles : undefined}
               playerInfo={playerInfo}
               transformRef={gridTransformRef}
               activePlayerId={phase === 'plan' ? activePlayerId : undefined}
               plannedActions={phase === 'plan' ? plannedActions : undefined}
+              previewCard={phase === 'plan' ? (
+                selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
+                : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
+                : null
+              ) : null}
+              previewValidTiles={(() => {
+                if (phase !== 'plan') return undefined;
+                const card = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
+                  : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
+                  : null;
+                return card ? getAllValidPlayTiles(card) : undefined;
+              })()}
             />
           )}
 
-          {/* Shop overlay — floats over the board during buy phase */}
-          {phase === 'buy' && activePlayer && (
+          {/* Top-right action buttons: Deck & Shop */}
+          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, zIndex: 210 }}>
+            <button
+              onClick={() => { setShowDeckViewer(true); setShowShopOverlay(false); }}
+              style={{
+                padding: '6px 14px',
+                background: '#2a2a3e',
+                border: '1px solid #555',
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              Deck ({totalDeckCount})
+            </button>
+            <button
+              onClick={() => { setShowShopOverlay(s => !s); setShowDeckViewer(false); }}
+              style={{
+                padding: '6px 14px',
+                background: '#2a2a3e',
+                border: '1px solid #555',
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                ...(phase === 'buy' && !showShopOverlay && !activePlayer?.has_ended_turn ? {
+                  animation: animationMode !== 'off' ? 'shopPulse 2s ease-in-out infinite' : undefined,
+                  boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
+                  borderColor: '#4a9eff',
+                } : {}),
+              }}
+            >
+              Shop
+            </button>
+          </div>
+
+          {/* Shop overlay — available at any phase, purchasing disabled outside buy phase */}
+          {showShopOverlay && activePlayer && (
             <ShopOverlay
               archetypeMarket={activePlayer.archetype_market}
               neutralMarket={gameState.neutral_market}
@@ -435,7 +955,10 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               onBuyNeutral={handleBuyNeutral}
               onBuyUpgrade={handleBuyUpgrade}
               onReroll={handleReroll}
-              disabled={false}
+              disabled={phase !== 'buy' || !!activePlayer?.has_ended_turn}
+              onClose={() => setShowShopOverlay(false)}
+              testMode={!!gameState.test_mode}
+              effectiveBuyCosts={activePlayer?.effective_buy_costs}
             />
           )}
 
@@ -469,9 +992,31 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
             )}
           </div>
 
-          {/* Action buttons — floating bottom-right of board */}
-          <div style={{ position: 'absolute', bottom: 12, right: 12, display: 'flex', gap: 8, zIndex: 20 }}>
-            {phase === 'plan' && activePlayer && selectedCard?.card_type === 'engine' && (
+          {/* Bottom bar: action counter (left) + buttons (right) */}
+          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: 20 }}>
+            {/* Action counter — left aligned */}
+            {phase === 'plan' && activePlayer && !resolving && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 6,
+              }}>
+                <span style={{ fontSize: 16, fontWeight: 'bold', color: submitActionsLeft > 0 ? '#fff' : '#666', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
+                  ⚡ {submitActionsLeft}
+                </span>
+                <span style={{ fontSize: 12, color: '#aaa', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
+                  action{submitActionsLeft !== 1 ? 's' : ''} remaining
+                </span>
+                {submitAtCap && (
+                  <span style={{ fontSize: 10, color: '#ff6666', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
+                    (cap reached)
+                  </span>
+                )}
+              </div>
+            )}
+            <div style={{ flex: 1 }} />
+            {/* Buttons — right aligned */}
+            {phase === 'plan' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && surgeCardIndex === null && (
               <IrreversibleButton
                 onClick={handlePlayEngine}
                 tooltip="Playing a card uses an action and cannot be undone."
@@ -489,21 +1034,32 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 Play {selectedCard.name}
               </IrreversibleButton>
             )}
-            {phase === 'plan' && activePlayer && (() => {
-              const hasCardsLeft = activePlayer.hand.length > 0;
-              const actionsLeft = activePlayer.actions_available - activePlayer.actions_used;
-              const atCap = activePlayer.actions_used >= 6;
-              const canStillPlay = hasCardsLeft && actionsLeft > 0 && !atCap;
-              return (
+            {/* Surge multi-target confirm/cancel */}
+            {phase === 'plan' && surgeCardIndex !== null && surgePrimaryTarget && (
+              <>
+                <span style={{ fontSize: 12, color: '#aaa' }}>
+                  Surge: {1 + surgeTargets.length}/{1 + (activePlayer?.hand[surgeCardIndex]?.multi_target_count ?? 0)} tiles selected
+                </span>
+                <button
+                  onClick={handleCancelSurge}
+                  style={{
+                    padding: '6px 12px',
+                    background: '#555',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                  }}
+                >
+                  Cancel
+                </button>
                 <IrreversibleButton
-                  onClick={handleSubmitPlan}
-                  tooltip={canStillPlay
-                    ? "You still have cards and actions remaining. Are you sure?"
-                    : "Submitting locks your plan for this round. You cannot change it after."
-                  }
+                  onClick={handleConfirmSurge}
+                  tooltip="Confirm all selected tiles for this Surge card."
                   style={{
                     padding: '6px 16px',
-                    background: canStillPlay ? '#ff8844' : '#2a9a3e',
+                    background: '#4a9eff',
                     border: 'none',
                     borderRadius: 6,
                     color: '#fff',
@@ -512,11 +1068,49 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                     boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                   }}
                 >
-                  Submit Plan{canStillPlay ? '' : ' ✓'}
+                  Confirm Surge
                 </IrreversibleButton>
-              );
-            })()}
-            {phase === 'buy' && activePlayer && (
+              </>
+            )}
+            {phase === 'plan' && activePlayer && !resolving && surgeCardIndex === null && (
+              <HoldToSubmitButton
+                key={activePlayerId}
+                onConfirm={handleSubmitPlan}
+                requireHold={submitCanStillPlay}
+                warning={`You still have ${activePlayer.hand.length} card(s) and ${submitActionsLeft} action(s) remaining.`}
+                tooltip="Submitting locks your plan for this round. You cannot change it after."
+                style={{
+                  padding: '6px 16px',
+                  background: submitCanStillPlay ? '#ff8844' : '#2a9a3e',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#fff',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                }}
+              >
+                Submit Plan{submitCanStillPlay ? '' : ' ✓'}
+              </HoldToSubmitButton>
+            )}
+            {resolving && (
+              <button
+                disabled
+                style={{
+                  padding: '6px 16px',
+                  background: '#555',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#aaa',
+                  fontWeight: 'bold',
+                  cursor: 'not-allowed',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                }}
+              >
+                Resolving...
+              </button>
+            )}
+            {phase === 'buy' && activePlayer && !resolving && !activePlayer.has_ended_turn && (
               <IrreversibleButton
                 onClick={handleEndTurn}
                 tooltip="Ending the turn advances to the next round. Any unspent resources carry over."
@@ -534,10 +1128,27 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 End Turn →
               </IrreversibleButton>
             )}
+            {phase === 'buy' && activePlayer && !resolving && activePlayer.has_ended_turn && (
+              <button
+                disabled
+                style={{
+                  padding: '6px 16px',
+                  background: '#555',
+                  border: 'none',
+                  borderRadius: 6,
+                  color: '#aaa',
+                  fontWeight: 'bold',
+                  cursor: 'not-allowed',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                }}
+              >
+                ✓ Turn Ended
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Bottom panel: always shows hand with deck/discard icons */}
+        {/* Bottom panel: hand */}
         <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'hidden' }}>
           {activePlayer && (
             <CardHand
@@ -549,12 +1160,15 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               onCardDetail={setDetailCard}
               onDragStart={setDraggingCardIndex}
               onDragEnd={() => setDraggingCardIndex(null)}
-              disabled={phase !== 'plan' || activePlayer.has_submitted_plan}
+              disabled={phase !== 'plan' || activePlayer.has_submitted_plan || interactionBlocked}
               deckSize={activePlayer.deck_size}
               discardCount={activePlayer.discard_count}
               discardCards={activePlayer.discard}
               deckCards={activePlayer.deck_cards}
               inPlayCards={inPlayCards}
+              discardAll={discardingAll}
+              onDiscardAllComplete={handleDiscardAllComplete}
+              lastPlayedTarget={lastPlayedTarget}
             />
           )}
         </div>
@@ -573,6 +1187,53 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           onClose={() => setShowFullLog(false)}
         />
       )}
+
+      {/* Deck viewer modal */}
+      {showDeckViewer && (
+        <CardViewPopup
+          title="Your Full Deck"
+          cards={allDeckCards}
+          onClose={() => setShowDeckViewer(false)}
+        />
+      )}
+
+      {/* Resolve overlay — power numbers over grid */}
+      {resolving && resolutionSteps.length > 0 && !phaseBanner && (
+        <ResolveOverlay
+          steps={resolutionSteps}
+          gridTransform={gridTransformSnapshot}
+          gridRect={gridRect}
+          onStepApply={applyResolveStep}
+          onComplete={handleResolveComplete}
+        />
+      )}
+
+      {/* Phase banner — full-screen announcement */}
+      {phaseBanner && (
+        <PhaseBanner
+          phase={phaseBanner}
+          onMidpoint={handleBannerMidpoint}
+          onComplete={handleBannerComplete}
+        />
+      )}
+
+      {/* Interaction blocker overlay (invisible, blocks clicks during banner/resolve) */}
+      {interactionBlocked && !phaseBanner && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 25000,
+          cursor: 'not-allowed',
+        }} />
+      )}
+
+      {/* Keyframes for shop pulse glow */}
+      <style>{`
+        @keyframes shopPulse {
+          0%, 100% { box-shadow: 0 0 8px rgba(74, 158, 255, 0.4); }
+          50% { box-shadow: 0 0 20px rgba(74, 158, 255, 0.8), 0 0 40px rgba(74, 158, 255, 0.3); }
+        }
+      `}</style>
     </div>
   );
 }

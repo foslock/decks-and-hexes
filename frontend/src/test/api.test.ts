@@ -115,9 +115,9 @@ describe('API client', () => {
 
   describe('endTurn', () => {
     it('sends end turn request', async () => {
-      mockJsonResponse({ state: makeGameState() });
-      await api.endTurn('abc');
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/abc/end-turn', expect.anything());
+      mockJsonResponse({ message: 'Turn ended', state: makeGameState() });
+      await api.endTurn('abc', 'player_0');
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/abc/end-buy', expect.anything());
     });
   });
 

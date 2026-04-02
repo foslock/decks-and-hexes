@@ -15,40 +15,41 @@ function WithSettings({ children }: { children: ReactNode }) {
 }
 
 describe('PlayerHud', () => {
+  const hudProps = { phase: 'plan', totalCards: 8, tileCount: 2 };
+
   it('renders player name and archetype', () => {
     const player = makePlayer({ name: 'Alice', archetype: 'vanguard' });
-    render(<PlayerHud player={player} isActive={true} isCurrent={true} />);
+    render(<PlayerHud player={player} isActive={true} isCurrent={true} {...hudProps} />);
     expect(screen.getByText(/Alice/)).toBeInTheDocument();
   });
 
   it('shows VP count', () => {
     const player = makePlayer({ vp: 5 });
-    render(<PlayerHud player={player} isActive={true} isCurrent={false} />);
+    render(<PlayerHud player={player} isActive={true} isCurrent={false} {...hudProps} />);
     expect(screen.getByText(/5/)).toBeInTheDocument();
   });
 
   it('shows resources', () => {
     const player = makePlayer({ resources: 7 });
-    render(<PlayerHud player={player} isActive={true} isCurrent={false} />);
+    render(<PlayerHud player={player} isActive={true} isCurrent={false} {...hudProps} />);
     expect(screen.getByText(/7/)).toBeInTheDocument();
   });
 
-  it('shows submitted plan indicator', () => {
+  it('shows status for submitted plan', () => {
     const player = makePlayer({ has_submitted_plan: true, planned_action_count: 3 });
-    render(<PlayerHud player={player} isActive={true} isCurrent={true} />);
-    expect(screen.getByText(/Plan submitted/)).toBeInTheDocument();
-    expect(screen.getByText(/3 actions/)).toBeInTheDocument();
+    render(<PlayerHud player={player} isActive={true} isCurrent={true} {...hudProps} />);
+    expect(screen.getByText(/Ready/)).toBeInTheDocument();
   });
 
-  it('shows upgrade credits when present', () => {
-    const player = makePlayer({ upgrade_credits: 2 });
-    render(<PlayerHud player={player} isActive={true} isCurrent={false} />);
-    expect(screen.getByText(/2/)).toBeInTheDocument();
+  it('shows Planning status when not submitted', () => {
+    const player = makePlayer({ has_submitted_plan: false });
+    render(<PlayerHud player={player} isActive={true} isCurrent={false} {...hudProps} />);
+    expect(screen.getByText(/Planning/)).toBeInTheDocument();
   });
 
   it('reduces opacity when not active', () => {
     const player = makePlayer();
-    const { container } = render(<PlayerHud player={player} isActive={false} isCurrent={false} />);
+    const { container } = render(<PlayerHud player={player} isActive={false} isCurrent={false} {...hudProps} />);
     const div = container.firstChild as HTMLElement;
     expect(div.style.opacity).toBe('0.7');
   });

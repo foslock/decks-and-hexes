@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
-export type AnimationMode = 'normal' | 'simplified';
+export type AnimationMode = 'normal' | 'simplified' | 'off';
 
 interface Settings {
   animationMode: AnimationMode;
@@ -60,4 +60,14 @@ export function useSettings() {
 export function useAnimated() {
   const { settings } = useSettings();
   return settings.animationMode === 'normal';
+}
+
+export function useAnimationOff() {
+  const { settings } = useSettings();
+  return settings.animationMode === 'off';
+}
+
+export function useAnimationMode() {
+  const { settings } = useSettings();
+  return settings.animationMode;
 }

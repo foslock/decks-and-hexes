@@ -1,8 +1,18 @@
 import { useRef, useCallback, useState, useEffect, useLayoutEffect, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
-import { useAnimated } from './SettingsContext';
+import { useAnimated, useAnimationOff, useAnimationMode } from './SettingsContext';
 import { renderWithKeywords } from './Keywords';
+import CardFull, { CARD_FULL_WIDTH } from './CardFull';
+import { useShiftKey } from '../hooks/useShiftKey';
+import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
+
+export interface PlayTarget {
+  cardId: string;
+  /** Screen pixel position for the target tile, or null for non-targeting cards */
+  screenX: number | null;
+  screenY: number | null;
+}
 
 interface CardHandProps {
   playerId: string;
@@ -20,6 +30,12 @@ interface CardHandProps {
   discardCards: Card[];
   deckCards: Card[];
   inPlayCards?: Card[];
+  /** When set to true, all hand cards animate to discard pile. Fires onDiscardAllComplete when done. */
+  discardAll?: boolean;
+  /** Callback when the discard-all animation finishes (or immediately if animation is off). */
+  onDiscardAllComplete?: () => void;
+  /** Where the last played card should animate toward */
+  lastPlayedTarget?: PlayTarget | null;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -44,6 +60,9 @@ const ARCHETYPE_EMOJI: Record<string, string> = {
 const DRAG_THRESHOLD = 12;
 const CARD_WIDTH = 150;
 const CARD_GAP = 6;
+// Approximate rendered height of a hand card (padding + border + content)
+// so the hand area stays consistent when empty
+const CARD_MIN_HEIGHT = 62;
 
 function ActionReturnBadge({ value }: { value: number }) {
   if (value === 0) return null;
@@ -73,43 +92,26 @@ function CardStats({ card }: { card: Card }) {
 
 // Floating card preview shown above/below a hovered hand card
 function CardPreview({ card, anchorRect }: { card: Card; anchorRect: DOMRect }) {
+  const animMode = useAnimationMode();
+  const [visible, setVisible] = useState(animMode !== 'normal');
+
+  useEffect(() => {
+    if (animMode === 'normal') {
+      requestAnimationFrame(() => setVisible(true));
+    }
+  }, [animMode]);
+
   return (
     <div style={{
       position: 'fixed',
-      left: anchorRect.left,
+      left: Math.max(8, Math.min(anchorRect.left + anchorRect.width / 2 - CARD_FULL_WIDTH / 2, window.innerWidth - CARD_FULL_WIDTH - 8)),
       bottom: window.innerHeight - anchorRect.top + 8,
-      width: 150,
-      padding: '14px 10px',
-      background: '#2a2a3e',
-      border: `2px solid ${TYPE_COLORS[card.card_type] || '#555'}`,
-      borderRadius: 10,
-      color: '#fff',
       pointerEvents: 'none',
       zIndex: 9999,
-      boxShadow: '0 -4px 24px rgba(0,0,0,0.6)',
+      opacity: visible ? 1 : 0,
+      transition: animMode === 'normal' ? 'opacity 0.15s ease' : 'none',
     }}>
-      <div style={{ fontSize: 9, color: TYPE_COLORS[card.card_type] || '#aaa', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-        {card.card_type}
-      </div>
-      <div style={{ fontWeight: 'bold', fontSize: 13, lineHeight: 1.3, marginBottom: 8 }}>
-        {card.name} <ActionReturnBadge value={card.action_return} />
-      </div>
-      <div style={{ fontSize: 11, color: '#aaa', marginBottom: 8 }}>
-        <CardStats card={card} />
-      </div>
-      {card.description && (
-        <div style={{ fontSize: 11, color: '#ccc', lineHeight: 1.6 }}>
-          {renderWithKeywords(card.description)}
-        </div>
-      )}
-      {(card.trash_on_use || card.stacking_exception || !card.adjacency_required || card.starter) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
-          {card.trash_on_use && <Flag text="Trashed" color="#ff6666" />}
-          {card.stacking_exception && <Flag text="Stacking" color="#66ff66" />}
-          {!card.adjacency_required && <Flag text="Any tile" color="#66aaff" />}
-          {card.starter && <Flag text="Starter" color="#888" />}
-        </div>
-      )}
+      <CardFull card={card} />
     </div>
   );
 }
@@ -124,93 +126,84 @@ function Flag({ text, color }: { text: string; color: string }) {
 
 // ── Card Popup (deck viewer / discard viewer) ────────────────
 
-function CardPopupItem({ card, full }: { card: Card; full: boolean }) {
-  const color = TYPE_COLORS[card.card_type] || '#555';
+function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; shiftHeld: boolean }) {
+  const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
+  const color = TYPE_COLORS[displayCard.card_type] || '#555';
+  const upgradeLabel = shiftHeld && hasUpgradePreview(card) ? (
+    <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 4 }}>
+      Upgraded
+    </div>
+  ) : null;
   if (!full) {
     return (
       <div style={{
-        width: CARD_WIDTH,
-        padding: 8,
+        width: 130,
+        padding: 6,
         background: '#2a2a3e',
-        border: `2px solid ${color}`,
-        borderRadius: 8,
+        border: `1px solid ${color}`,
+        borderRadius: 6,
         color: '#fff',
         flexShrink: 0,
       }}>
-        <div style={{ fontSize: 9, color, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 3 }}>
-          {CARD_EMOJI[card.card_type]} {card.card_type}
-        </div>
-        <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 2 }}>
-          {card.name} <ActionReturnBadge value={card.action_return} />
-        </div>
-        <div style={{ fontSize: 9, color: '#aaa' }}>
-          <CardStats card={card} />
-        </div>
-        {card.description && (
-          <div style={{ fontSize: 9, color: '#777', marginTop: 4, lineHeight: 1.3 }}>
-            {card.description.slice(0, 60)}{card.description.length > 60 ? '…' : ''}
+        <div style={{ marginBottom: 4 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 12 }}>
+            {CARD_EMOJI[displayCard.card_type]} {displayCard.name}
           </div>
-        )}
+          <div style={{ fontSize: 11, color: '#aaa' }}>
+            {displayCard.buy_cost !== null ? `💰 ${displayCard.buy_cost}` : 'Starter'}
+            {(displayCard.power > 0 || displayCard.card_type === 'claim') && ` · Pow ${displayCard.power}`}
+            {displayCard.resource_gain > 0 && ` · +${displayCard.resource_gain}`}
+          </div>
+        </div>
+        {upgradeLabel}
       </div>
     );
   }
   return (
-    <div style={{
-      width: 190,
-      padding: 12,
-      background: '#1e1e3a',
-      border: `2px solid ${color}`,
-      borderRadius: 10,
-      color: '#fff',
-      flexShrink: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 6,
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 28 }}>{CARD_EMOJI[card.card_type] || '📄'}</div>
-        <div style={{ fontSize: 9, color: '#888' }}>
-          {ARCHETYPE_EMOJI[card.archetype]} {card.archetype.toUpperCase()}
-        </div>
-        <div style={{ fontWeight: 'bold', fontSize: 14 }}>
-          {card.name}
-          {card.is_upgraded && <span style={{ color: '#ffd700' }}> +</span>}
-        </div>
-        <div style={{
-          display: 'inline-block', marginTop: 2,
-          padding: '1px 8px', borderRadius: 10,
-          background: color, color: '#000',
-          fontSize: 10, fontWeight: 'bold',
-        }}>
-          {card.card_type.toUpperCase()}
-        </div>
-      </div>
-      <div style={{ fontSize: 11, color: '#aaa', textAlign: 'center' }}>
-        <CardStats card={card} />
-      </div>
-      {card.description && (
-        <div style={{
-          fontSize: 11, color: '#bbb', lineHeight: 1.4,
-          background: '#151530', borderRadius: 6, padding: '5px 8px',
-        }}>
-          {renderWithKeywords(card.description)}
-        </div>
-      )}
+    <div style={{ flexShrink: 0 }}>
+      <CardFull card={displayCard} style={{ flexShrink: 0 }} />
+      {upgradeLabel}
     </div>
   );
 }
 
-function CardViewPopup({
+// Persists view mode preference per popup title across opens (reset on page reload)
+const viewModeMemory: Record<string, boolean> = {};
+
+export function CardViewPopup({
   title,
   cards,
   onClose,
+  defaultFull = false,
 }: {
   title: string;
   cards: { label: string; items: Card[] }[];
   onClose: () => void;
+  defaultFull?: boolean;
 }) {
-  const [fullView, setFullView] = useState(false);
+  const [fullView, setFullView] = useState(() => viewModeMemory[title] ?? defaultFull);
+  const animMode = useAnimationMode();
+  const shiftHeld = useShiftKey();
+  const [visible, setVisible] = useState(animMode === 'off');
   const totalCount = cards.reduce((s, g) => s + g.items.length, 0);
+
+  const toggleView = useCallback((full: boolean) => {
+    setFullView(full);
+    viewModeMemory[title] = full;
+  }, [title]);
+
+  useEffect(() => {
+    if (animMode !== 'off') {
+      requestAnimationFrame(() => setVisible(true));
+    }
+  }, [animMode]);
+
+  const overlayTransition = animMode === 'normal' ? 'opacity 0.25s ease'
+    : animMode === 'simplified' ? 'opacity 0.1s ease'
+    : 'none';
+  const panelTransition = animMode === 'normal' ? 'opacity 0.25s ease, transform 0.25s ease'
+    : animMode === 'simplified' ? 'opacity 0.1s ease, transform 0.1s ease'
+    : 'none';
 
   return (
     <div
@@ -220,6 +213,8 @@ function CardViewPopup({
         background: 'rgba(0,0,0,0.75)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 5000,
+        opacity: visible ? 1 : 0,
+        transition: overlayTransition,
       }}
     >
       <div
@@ -233,6 +228,9 @@ function CardViewPopup({
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
+          opacity: visible ? 1 : 0,
+          transform: visible ? 'scale(1)' : 'scale(0.95)',
+          transition: panelTransition,
         }}
       >
         <div style={{
@@ -247,13 +245,13 @@ function CardViewPopup({
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
               <button
-                onClick={() => setFullView(false)}
+                onClick={() => toggleView(false)}
                 style={{ padding: '3px 10px', background: !fullView ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
               >
                 Compact
               </button>
               <button
-                onClick={() => setFullView(true)}
+                onClick={() => toggleView(true)}
                 style={{ padding: '3px 10px', background: fullView ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
               >
                 Full
@@ -279,8 +277,8 @@ function CardViewPopup({
                 <div style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>Empty</div>
               ) : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {group.items.map((card, i) => (
-                    <CardPopupItem key={`${card.id}-${i}`} card={card} full={fullView} />
+                  {[...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name)).map((card, i) => (
+                    <CardPopupItem key={`${card.id}-${i}`} card={card} full={fullView} shiftHeld={shiftHeld} />
                   ))}
                 </div>
               )}
@@ -311,6 +309,8 @@ interface DepartingAnim {
   width: number;
   height: number;
   active: boolean;
+  /** Whether the card should shrink as it moves (played to tile) */
+  shrink: boolean;
 }
 
 export default function CardHand({
@@ -328,8 +328,13 @@ export default function CardHand({
   discardCards,
   deckCards,
   inPlayCards,
+  discardAll,
+  onDiscardAllComplete,
+  lastPlayedTarget,
 }: CardHandProps) {
   const animated = useAnimated();
+  const animationOff = useAnimationOff();
+  const animMode = useAnimationMode();
 
   // Local display order — indices into the `cards` prop array
   const [localOrder, setLocalOrder] = useState<number[]>(() => cards.map((_, i) => i));
@@ -367,6 +372,10 @@ export default function CardHand({
   const [enteringAnims, setEnteringAnims] = useState<Map<string, EnteringAnim>>(new Map());
   const [departingAnims, setDepartingAnims] = useState<Map<string, DepartingAnim>>(new Map());
   const [simplifiedHidden, setSimplifiedHidden] = useState<Set<string>>(new Set());
+  const [shuffling, setShuffling] = useState(false);
+  const prevDeckSizeRef = useRef(deckSize);
+  const prevDiscardCountRef = useRef(discardCount);
+  const discardAllFiredRef = useRef(false);
 
   // ResizeObserver for card overlap
   useEffect(() => {
@@ -425,6 +434,10 @@ export default function CardHand({
     if (newCards.length === 0 && removedCards.length === 0) return;
 
     if (!animated) {
+      if (animationOff) {
+        // Off mode: no animations or delays at all
+        return;
+      }
       // Simplified mode: staggered instant reveal, no movement
       if (newCards.length > 0) {
         const ids = newCards.map(c => c.id);
@@ -463,12 +476,36 @@ export default function CardHand({
         removedCards.forEach(card => {
           const rect = cardPosSnapshot.current.get(card.id);
           if (!rect) return;
+
+          let toX: number;
+          let toY: number;
+          let shrink = false;
+
+          if (lastPlayedTarget && lastPlayedTarget.cardId === card.id) {
+            if (lastPlayedTarget.screenX !== null && lastPlayedTarget.screenY !== null) {
+              // Targeting card → animate to tile position
+              toX = lastPlayedTarget.screenX - rect.width / 2;
+              toY = lastPlayedTarget.screenY - rect.height / 2;
+              shrink = true;
+            } else {
+              // Non-targeting card (engine) → animate upward toward the grid
+              toX = rect.left;
+              toY = rect.top - 200;
+              shrink = true;
+            }
+          } else {
+            // Default: animate to discard pile
+            toX = discardCx - rect.width / 2;
+            toY = discardCy - rect.height / 2;
+          }
+
           departing.set(card.id, {
             card,
             startX: rect.left, startY: rect.top,
-            toX: discardCx - rect.width / 2, toY: discardCy - rect.height / 2,
+            toX, toY,
             width: rect.width, height: rect.height,
             active: false,
+            shrink,
           });
         });
 
@@ -494,7 +531,7 @@ export default function CardHand({
         }
       }
     }
-  }, [cards, animated, playerId]);
+  }, [cards, animated, animationOff, playerId, lastPlayedTarget]);
 
   // Phase 2: Compute real draw-pile offsets once card elements are in the DOM.
   // This fires when localOrder updates (which flushes after localOrder's useEffect runs,
@@ -550,6 +587,104 @@ export default function CardHand({
       });
     }, maxDelay + 600);
   }, [localOrder, enteringAnims]);
+
+  // Discard-all animation: triggered by parent when turn ends
+  useEffect(() => {
+    if (!discardAll || discardAllFiredRef.current) return;
+    discardAllFiredRef.current = true;
+
+    if (animationOff || cards.length === 0) {
+      onDiscardAllComplete?.();
+      return;
+    }
+
+    const discardRect = discardBtnRef.current?.getBoundingClientRect();
+    if (!discardRect) {
+      onDiscardAllComplete?.();
+      return;
+    }
+
+    const discardCx = discardRect.left + discardRect.width / 2;
+    const discardCy = discardRect.top + discardRect.height / 2;
+    const departing = new Map<string, DepartingAnim>();
+
+    cards.forEach(card => {
+      const rect = cardPosSnapshot.current.get(card.id) ?? cardElRefs.current.get(card.id)?.getBoundingClientRect();
+      if (!rect) return;
+      departing.set(card.id, {
+        card,
+        startX: rect.left, startY: rect.top,
+        toX: discardCx - rect.width / 2, toY: discardCy - rect.height / 2,
+        width: rect.width, height: rect.height,
+        active: false,
+        shrink: false,
+      });
+    });
+
+    if (departing.size === 0) {
+      onDiscardAllComplete?.();
+      return;
+    }
+
+    const duration = animated ? 500 : 200; // shorter for simplified
+
+    setDepartingAnims(p => new Map([...p, ...departing]));
+    requestAnimationFrame(() => {
+      setDepartingAnims(p => {
+        const next = new Map(p);
+        for (const id of departing.keys()) {
+          const d = next.get(id);
+          if (d) next.set(id, { ...d, active: true });
+        }
+        return next;
+      });
+    });
+
+    setTimeout(() => {
+      setDepartingAnims(p => {
+        const next = new Map(p);
+        for (const id of departing.keys()) next.delete(id);
+        return next;
+      });
+      onDiscardAllComplete?.();
+    }, duration + 60);
+  }, [discardAll, cards, animated, animationOff, onDiscardAllComplete]);
+
+  // Reset discard-all ref when discardAll goes back to false
+  useEffect(() => {
+    if (!discardAll) discardAllFiredRef.current = false;
+  }, [discardAll]);
+
+  // Shuffle detection: discard pile was moved to draw pile during a draw
+  useEffect(() => {
+    const prevDeck = prevDeckSizeRef.current;
+    const prevDiscard = prevDiscardCountRef.current;
+    prevDeckSizeRef.current = deckSize;
+    prevDiscardCountRef.current = discardCount;
+
+    // A shuffle happened when:
+    // - Draw pile was empty (or nearly so) and is now replenished
+    // - Discard pile shrank (cards moved from discard → draw pile)
+    // - New cards appeared in hand (a draw was attempted)
+    const prev = prevCardsRef.current;
+    const hasNewCards = cards.some(c => !prev.some(p => p.id === c.id));
+    const discardMovedToDraw = prevDiscard > 0 && discardCount < prevDiscard;
+    const deckReplenished = deckSize > prevDeck || (prevDeck === 0 && deckSize >= 0 && discardMovedToDraw);
+
+    if (hasNewCards && discardMovedToDraw && deckReplenished && !animationOff) {
+      setShuffling(true);
+      const duration = animated ? 2000 : 800;
+      setTimeout(() => setShuffling(false), duration);
+    }
+  }, [deckSize, discardCount, cards, animated, animationOff]);
+
+  const resetDragState = useCallback(() => {
+    dragStartRef.current = null;
+    isDraggingRef.current = false;
+    setDraggingIndex(null);
+    setDragPos(null);
+    setDropTargetIndex(null);
+  }, []);
 
   const handlePointerDown = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (disabled) return;
@@ -629,12 +764,28 @@ export default function CardHand({
         onSelect(cardIdx);
       }
     }
-    dragStartRef.current = null;
-    isDraggingRef.current = false;
-    setDraggingIndex(null);
-    setDragPos(null);
-    setDropTargetIndex(null);
-  }, [onSelect, onDragPlay, onDragEnd, onCardDetail, selectedIndex, cards, localOrder, dropTargetIndex]);
+    resetDragState();
+  }, [onSelect, onDragPlay, onDragEnd, onCardDetail, selectedIndex, cards, localOrder, dropTargetIndex, resetDragState]);
+
+  // If pointer capture is lost (e.g. card removed from DOM mid-drag), clean up
+  const handleLostPointerCapture = useCallback(() => {
+    if (isDraggingRef.current) {
+      onDragEnd?.();
+    }
+    resetDragState();
+  }, [onDragEnd, resetDragState]);
+
+  // Safety net: if a card is removed from the DOM mid-drag, clean up via window listener
+  useEffect(() => {
+    const cleanup = () => {
+      if (dragStartRef.current) {
+        if (isDraggingRef.current) onDragEnd?.();
+        resetDragState();
+      }
+    };
+    window.addEventListener('pointerup', cleanup);
+    return () => window.removeEventListener('pointerup', cleanup);
+  }, [onDragEnd, resetDragState]);
 
   const handlePointerEnter = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (!isDraggingRef.current) {
@@ -650,12 +801,7 @@ export default function CardHand({
     }
   }, []);
 
-  const allCards = [
-    ...(inPlayCards && inPlayCards.length > 0 ? [{ label: 'In Play', items: inPlayCards }] : []),
-    { label: 'In Hand', items: cards },
-    { label: 'Draw Pile', items: deckCards },
-    { label: 'Discard Pile', items: discardCards },
-  ];
+  const drawPileCards = [{ label: 'Draw Pile', items: deckCards }];
 
   // Fixed button width so cards never push buttons around
   const BTN_WIDTH = 62;
@@ -683,6 +829,19 @@ export default function CardHand({
 
   return (
     <>
+      {/* Shuffle notification above hand */}
+      {shuffling && (
+        <div style={{
+          textAlign: 'center',
+          padding: '4px 0',
+          fontSize: 12,
+          color: '#4a9eff',
+          fontStyle: 'italic',
+        }}>
+          Draw pile empty, shuffling discarded cards.
+        </div>
+      )}
+
       {/* Grid layout: [button | cards | button] — columns are fixed so buttons never shift */}
       <div style={{
         display: 'grid',
@@ -695,11 +854,25 @@ export default function CardHand({
         <button
           ref={drawBtnRef}
           onClick={() => setShowDeckPopup(true)}
-          title="View all cards in your deck"
-          style={iconBtnStyle}
+          title="View cards in draw pile"
+          style={{
+            ...iconBtnStyle,
+            ...(shuffling ? {
+              animation: animated
+                ? 'shufflePulse 0.4s ease-in-out infinite'
+                : 'shufflePulse 0.25s ease-in-out infinite',
+              boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
+              borderColor: '#4a9eff',
+            } : {}),
+          }}
         >
-          <span style={{ fontSize: 12, fontWeight: 'bold', color: '#4a9eff' }}>{deckSize}</span>
-          <span style={{ fontSize: 9, color: '#888' }}>Draw</span>
+          {shuffling
+            ? <span style={{ fontSize: 10, fontWeight: 'bold', color: '#4a9eff' }}>Shuffling...</span>
+            : <>
+                <span style={{ fontSize: 12, fontWeight: 'bold', color: '#4a9eff' }}>{deckSize}</span>
+                <span style={{ fontSize: 9, color: '#888' }}>Draw</span>
+              </>
+          }
         </button>
 
         {/* Cards container */}
@@ -707,6 +880,7 @@ export default function CardHand({
           ref={handContainerRef}
           style={{
             minWidth: 0,
+            minHeight: CARD_MIN_HEIGHT,
             display: 'flex',
             alignItems: 'flex-end',
             justifyContent: 'center',
@@ -732,7 +906,9 @@ export default function CardHand({
             const isHiddenSimplified = simplifiedHidden.has(card.id);
 
             let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : 'none';
-            let cardOpacity: number = disabled ? 0.5 : isBeingDragged ? 0.3 : 1;
+            // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
+            const isDiscardingAll = discardAll && departingAnims.has(card.id);
+            let cardOpacity: number = isDiscardingAll ? 0 : disabled ? 0.5 : isBeingDragged ? 0.3 : 1;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';
@@ -767,6 +943,7 @@ export default function CardHand({
                 onPointerDown={(e) => handlePointerDown(e, localIdx)}
                 onPointerMove={handlePointerMove}
                 onPointerUp={handlePointerUp}
+                onLostPointerCapture={handleLostPointerCapture}
                 onPointerEnter={(e) => handlePointerEnter(e, localIdx)}
                 onPointerLeave={handlePointerLeave}
                 role="button"
@@ -854,12 +1031,13 @@ export default function CardHand({
         </div>
       )}
 
-      {/* Deck viewer popup */}
+      {/* Draw pile viewer popup */}
       {showDeckPopup && (
         <CardViewPopup
-          title="Your Full Deck"
-          cards={allCards}
+          title="Draw Pile"
+          cards={drawPileCards}
           onClose={() => setShowDeckPopup(false)}
+          defaultFull
         />
       )}
 
@@ -869,16 +1047,18 @@ export default function CardHand({
           title="Discard Pile"
           cards={[{ label: 'Discard Pile', items: discardCards }]}
           onClose={() => setShowDiscardPopup(false)}
+          defaultFull
         />
       )}
 
-      {/* Departing card ghosts — animate from last position to discard button */}
+      {/* Departing card ghosts — animate from last position to target */}
       {departingAnims.size > 0 && createPortal(
         <>
           {[...departingAnims.values()].map(d => {
             const typeColor = TYPE_COLORS[d.card.card_type] || '#555';
             const dx = d.active ? d.toX - d.startX : 0;
             const dy = d.active ? d.toY - d.startY : 0;
+            const scale = d.active && d.shrink ? 'scale(0.3)' : 'scale(1)';
             return (
               <div
                 key={d.card.id}
@@ -888,10 +1068,13 @@ export default function CardHand({
                   top: d.startY,
                   width: d.width,
                   height: d.height,
-                  transform: `translate(${dx}px, ${dy}px)`,
+                  transform: `translate(${dx}px, ${dy}px) ${scale}`,
+                  transformOrigin: 'center center',
                   opacity: d.active ? 0 : 1,
                   transition: d.active
-                    ? 'transform 500ms ease-in, opacity 300ms ease-in'
+                    ? animated
+                      ? 'transform 500ms ease-in, opacity 300ms ease-in'
+                      : 'transform 200ms ease-in, opacity 150ms ease-in'
                     : 'none',
                   pointerEvents: 'none',
                   zIndex: 9990,
@@ -916,6 +1099,15 @@ export default function CardHand({
         </>,
         document.body,
       )}
+
+      {/* Keyframes for shuffle animation */}
+      <style>{`
+        @keyframes shufflePulse {
+          0%, 100% { transform: rotate(0deg) scale(1); }
+          25% { transform: rotate(-3deg) scale(1.05); }
+          75% { transform: rotate(3deg) scale(1.05); }
+        }
+      `}</style>
     </>
   );
 }
