@@ -13,7 +13,7 @@ export default function Tooltip({ content, delay = 0, children }: TooltipProps) 
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const triggerRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
   const show = useCallback((e: React.PointerEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -42,14 +42,14 @@ export default function Tooltip({ content, delay = 0, children }: TooltipProps) 
 
   return (
     <>
-      <span
+      <div
         ref={triggerRef}
         onPointerEnter={show}
         onPointerLeave={hide}
         style={{ display: 'inline-block' }}
       >
         {children}
-      </span>
+      </div>
       {visible && createPortal(
         <div
           style={{

@@ -15,7 +15,8 @@ cards:
     name: Scout
     name_upgraded: Scout+
     type: Claim
-    buy_cost: 1
+    buy_cost: null
+    starter: true
     action_return: 0
     power: 1
     resource_gain: 1
@@ -103,6 +104,7 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 1
+    adjacency_required: false
     effect: "Claim: Power 1 on any neutral tile on the board, ignoring adjacency restrictions."
     effect_upgraded: "Claim: Power 2 on any neutral tile on the board, ignoring adjacency restrictions."
     secondary_effect: null

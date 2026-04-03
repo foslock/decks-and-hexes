@@ -267,7 +267,7 @@ class CPUPlayer:
                     if tile.key in seen or tile.is_blocked:
                         continue
                     if pt.distance_to(tile) <= card.claim_range:
-                        if card.unoccupied_only and tile.owner is not None:
+                        if card.effective_unoccupied_only and tile.owner is not None:
                             continue
                         # Don't target tiles with defense higher than our power (for neutral)
                         if not tile.owner and tile.defense_power > card.effective_power:
@@ -279,7 +279,7 @@ class CPUPlayer:
             for tile in game.grid.tiles.values():
                 if tile.is_blocked:
                     continue
-                if card.unoccupied_only and tile.owner is not None:
+                if card.effective_unoccupied_only and tile.owner is not None:
                     continue
                 if not tile.owner and tile.defense_power > card.effective_power:
                     continue
@@ -351,7 +351,7 @@ class CPUPlayer:
         for tile in adj_tiles:
             if tile.is_blocked:
                 continue
-            if card.unoccupied_only and tile.owner is not None:
+            if card.effective_unoccupied_only and tile.owner is not None:
                 continue
             if tile.q == primary_tile.q and tile.r == primary_tile.r:
                 continue

@@ -91,6 +91,7 @@ class Card:
     upgraded_defense_bonus: Optional[int] = None
     upgraded_multi_target_count: Optional[int] = None
     upgraded_defense_target_count: Optional[int] = None
+    upgraded_unoccupied_only: Optional[bool] = None
 
     name_upgraded: str = ""
 
@@ -136,6 +137,12 @@ class Card:
             return self.upgraded_defense_target_count
         return self.defense_target_count
 
+    @property
+    def effective_unoccupied_only(self) -> bool:
+        if self.is_upgraded and self.upgraded_unoccupied_only is not None:
+            return self.upgraded_unoccupied_only
+        return self.unoccupied_only
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
@@ -155,7 +162,7 @@ class Card:
             "defense_bonus": self.effective_defense_bonus,
             "adjacency_required": self.adjacency_required,
             "claim_range": self.claim_range,
-            "unoccupied_only": self.unoccupied_only,
+            "unoccupied_only": self.effective_unoccupied_only,
             "multi_target_count": self.effective_multi_target_count,
             "defense_target_count": self.effective_defense_target_count,
             "flood": self.flood,

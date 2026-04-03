@@ -721,7 +721,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
                     return False, f"Must claim a tile within {max_range} steps of one you own"
 
             # Prevent unoccupied_only cards from targeting owned tiles
-            if card.unoccupied_only and tile.owner is not None:
+            if card.effective_unoccupied_only and tile.owner is not None:
                 return False, f"{card.name} can only target unoccupied tiles"
 
             # Prevent claiming neutral tiles with defense higher than card power
@@ -762,7 +762,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
             if card.adjacency_required:
                 if not any(pt.distance_to(et_tile) <= card.claim_range for pt in player_tiles):
                     continue
-            if card.unoccupied_only and et_tile.owner is not None:
+            if card.effective_unoccupied_only and et_tile.owner is not None:
                 continue
             validated_extra.append((et_q, et_r))
 

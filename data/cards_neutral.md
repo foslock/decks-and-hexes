@@ -212,6 +212,7 @@ cards:
     copies: 3
     action_return: 0
     power: 3
+    adjacency_required: false
     effect: "Claim: Power 3 on any neutral tile on the board, ignoring adjacency restrictions."
     effect_upgraded: "Claim: Power 4 on any neutral tile on the board, ignoring adjacency restrictions."
     trash_on_use: false
@@ -272,16 +273,3 @@ cards:
     effect: "Engine: Gain 2 resources. Gain 1 action back."
     effect_upgraded: "Engine: Gain 3 resources. Gain 1 action back."
     trash_on_use: false
-
-  - id: neutral_upgrade_credit
-    name: Upgrade Credit
-    name_upgraded: null
-    type: Token
-    buy_cost: 5
-    copies: 12
-    action_return: 0
-    power: 0
-    effect: "Token: Not a card. At the start of your next turn (before the Plan Phase), spend this token to upgrade any one card in your current hand. Maximum one upgrade per turn. Upgrades are permanent."
-    effect_upgraded: null
-    trash_on_use: true
-    note: "Copies = 2 × max player count. Buying out upgrade credits is a valid denial strategy."
