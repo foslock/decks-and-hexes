@@ -1,9 +1,10 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import type { GameState, Card, ResolutionStep } from '../types/game';
-import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, PLAYER_COLORS } from './HexGrid';
+import type { GameState, Card, ResolutionStep, PlayerEffect } from '../types/game';
+import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardDetail from './CardDetail';
+import CardBrowser from './CardBrowser';
 import ShopOverlay from './ShopOverlay';
 import GameLog from './GameLog';
 import FullGameLog from './FullGameLog';
@@ -12,8 +13,10 @@ import PhaseBanner from './PhaseBanner';
 import ResolveOverlay from './ResolveOverlay';
 import GameIntroOverlay from './GameIntroOverlay';
 import { useAnimated, useAnimationMode, useAnimationOff } from './SettingsContext';
-import { IrreversibleButton, HoldToSubmitButton } from './Tooltip';
+import Tooltip, { IrreversibleButton, HoldToSubmitButton } from './Tooltip';
 import * as api from '../api/client';
+import CardFull from './CardFull';
+import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 
 // Hex geometry constants (must match HexGrid.tsx)
 const HEX_SIZE = 32;
@@ -44,6 +47,83 @@ function pixelToAxial(px: number, py: number): { q: number; r: number } {
   return { q: rq, r: rr };
 }
 
+const HEX_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+
+/** BFS from each VP tile owned by a player to their base, through owned territory.
+ *  Deduplicates: if a VP tile is already a waypoint on a longer path, its standalone path is omitted. */
+function computePlayerVpPaths(
+  tiles: Record<string, import('../types/game').HexTile>,
+  playerId: string,
+  color: number,
+): VpPath[] {
+  // Find base tile keys
+  const baseKeys = new Set<string>();
+  for (const [key, tile] of Object.entries(tiles)) {
+    if (tile.is_base && tile.owner === playerId) baseKeys.add(key);
+  }
+  if (baseKeys.size === 0) return [];
+
+  // Find VP tiles owned by this player
+  const vpTiles: { q: number; r: number; key: string }[] = [];
+  for (const [key, tile] of Object.entries(tiles)) {
+    if (tile.is_vp && tile.owner === playerId) {
+      vpTiles.push({ q: tile.q, r: tile.r, key });
+    }
+  }
+  if (vpTiles.length === 0) return [];
+
+  // Compute path for each VP tile
+  const allPaths: { vpKey: string; points: [number, number][] }[] = [];
+  for (const vp of vpTiles) {
+    const queue: { key: string; q: number; r: number; path: [number, number][] }[] = [
+      { key: vp.key, q: vp.q, r: vp.r, path: [[vp.q, vp.r]] },
+    ];
+    const visited = new Set<string>([vp.key]);
+    let foundPath: [number, number][] | null = null;
+
+    while (queue.length > 0 && !foundPath) {
+      const current = queue.shift()!;
+      for (const [dq, dr] of HEX_DIRS) {
+        const nq = current.q + dq;
+        const nr = current.r + dr;
+        const nk = `${nq},${nr}`;
+        if (visited.has(nk)) continue;
+        const neighbor = tiles[nk];
+        if (!neighbor || neighbor.owner !== playerId) continue;
+        visited.add(nk);
+        const newPath: [number, number][] = [...current.path, [nq, nr]];
+        if (baseKeys.has(nk)) {
+          foundPath = newPath;
+          break;
+        }
+        queue.push({ key: nk, q: nq, r: nr, path: newPath });
+      }
+    }
+
+    if (foundPath) {
+      allPaths.push({ vpKey: vp.key, points: foundPath });
+    }
+  }
+
+  // Sort longest first, then remove paths whose VP tile is already a waypoint on a longer path
+  allPaths.sort((a, b) => b.points.length - a.points.length);
+  const coveredVpKeys = new Set<string>();
+  const vpKeySet = new Set(vpTiles.map(v => v.key));
+  const result: VpPath[] = [];
+
+  for (const p of allPaths) {
+    if (coveredVpKeys.has(p.vpKey)) continue; // already covered by a longer path
+    result.push({ points: p.points, color, alpha: 0, playerId });
+    // Mark any VP tiles that appear as waypoints in this path (excluding the start)
+    for (let i = 1; i < p.points.length; i++) {
+      const wk = `${p.points[i][0]},${p.points[i][1]}`;
+      if (vpKeySet.has(wk)) coveredVpKeys.add(wk);
+    }
+  }
+
+  return result;
+}
+
 export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps) {
   const animated = useAnimated();
   const animationMode = useAnimationMode();
@@ -54,9 +134,11 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [error, setError] = useState<string | null>(null);
   const [dragHintHidden, setDragHintHidden] = useState(false);
   const [detailCard, setDetailCard] = useState<Card | null>(null);
+  const [showUpgradePreview, setShowUpgradePreview] = useState(false);
   const [showFullLog, setShowFullLog] = useState(false);
   const [showDeckViewer, setShowDeckViewer] = useState(false);
   const [showShopOverlay, setShowShopOverlay] = useState(false);
+  const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [discardingAll, setDiscardingAll] = useState(false);
   const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
   // Test mode state
@@ -99,6 +181,15 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   // Cache resolve chevron sources so they don't shift as tiles change owners
   const resolveChevronCacheRef = useRef<{ targetQ: number; targetR: number; sourceQ: number; sourceR: number; color: number; stepIndex: number }[]>([]);
   const [bannerSubtitle, setBannerSubtitle] = useState<string | null>(null);
+  // VP path animation state
+  const [vpPaths, setVpPaths] = useState<VpPath[]>([]);
+  const [vpPathPhase, setVpPathPhase] = useState<'off' | 'fading_in' | 'visible' | 'fading_out'>('off');
+  const vpPathFadeStartRef = useRef(0); // timestamp when current fade started
+  const vpPathFadeStartAlphaRef = useRef(0); // alpha at start of fade-out
+  // Client-side resolve log entries (VP path disruptions, etc.)
+  const [resolveLogEntries, setResolveLogEntries] = useState<string[]>([]);
+  // Player effect popups (shown over base tiles after resolve steps)
+  const [activePlayerEffects, setActivePlayerEffects] = useState<PlayerEffect[]>([]);
 
   // Auto-dismiss error toast after 4 seconds
   useEffect(() => {
@@ -134,13 +225,26 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     // Don't trigger if a banner is already active (e.g. reveal→buy chain)
     if (phaseBanner) return;
     // Only show banners for main phases, and skip if animations are off
-    const bannerPhases = ['plan', 'buy'];
+    const bannerPhases = ['upkeep', 'plan', 'buy'];
     if (bannerPhases.includes(phase) && !animationOff) {
       // Set subtitle per phase
-      if (phase === 'plan') {
-        const pid = gameState.player_order[0];
-        const paid = gameState.players[pid]?.last_upkeep_paid ?? 0;
-        setBannerSubtitle(paid > 0 ? `Upkeep: -${paid} Resource${paid > 1 ? 's' : ''}` : 'Choose Wisely');
+      if (phase === 'upkeep') {
+        // Show only the active player's upkeep result
+        const ap = activePlayer;
+        if (ap) {
+          const tileCount = Object.values(gameState.grid.tiles).filter(t => t.owner === activePlayerId).length;
+          if (ap.tiles_lost_to_upkeep > 0) {
+            setBannerSubtitle(`Lost ${ap.tiles_lost_to_upkeep} tile(s) — couldn't pay ${ap.upkeep_cost} 💰`);
+          } else if (ap.upkeep_cost > 0) {
+            setBannerSubtitle(`${ap.last_upkeep_paid} 💰 paid for ${tileCount} tiles`);
+          } else {
+            setBannerSubtitle('No upkeep due');
+          }
+        } else {
+          setBannerSubtitle('No upkeep due');
+        }
+      } else if (phase === 'plan') {
+        setBannerSubtitle('Choose Wisely');
       } else if (phase === 'buy') {
         setBannerSubtitle('Grow Your Deck');
       } else {
@@ -148,6 +252,12 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       }
       setPhaseBanner(phase);
       setInteractionBlocked(true);
+    }
+    // Auto-advance upkeep when animations are off
+    if (phase === 'upkeep' && animationOff) {
+      api.advanceUpkeep(gameState.id).then(result => {
+        onStateUpdate(result.state);
+      }).catch(() => {});
     }
   }, [phase, animationOff, resolving, phaseBanner, gameState, showIntro]);
 
@@ -204,6 +314,150 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     return () => clearInterval(intervalId);
   }, [resolvedUpToStep, animationMode]);
 
+  // VP path fade-in animation
+  useEffect(() => {
+    if (vpPathPhase !== 'fading_in') return;
+    const duration = animationMode === 'normal' ? 800
+      : animationMode === 'simplified' ? 400 : 0;
+    if (duration === 0) {
+      setVpPaths(prev => prev.map(p => ({ ...p, alpha: 1 })));
+      setVpPathPhase('visible');
+      return;
+    }
+    vpPathFadeStartRef.current = performance.now();
+    const id = setInterval(() => {
+      const progress = Math.min((performance.now() - vpPathFadeStartRef.current) / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 2); // ease-out
+      setVpPaths(prev => prev.map(p => ({ ...p, alpha: eased })));
+      if (progress >= 1) {
+        clearInterval(id);
+        setVpPathPhase('visible');
+      }
+    }, 50);
+    return () => clearInterval(id);
+  }, [vpPathPhase, animationMode]);
+
+  // VP path fade-out animation
+  useEffect(() => {
+    if (vpPathPhase !== 'fading_out') return;
+    const duration = animationMode === 'normal' ? 500
+      : animationMode === 'simplified' ? 250 : 0;
+    if (duration === 0) {
+      setVpPaths([]);
+      setVpPathPhase('off');
+      return;
+    }
+    const startAlpha = vpPathFadeStartAlphaRef.current;
+    vpPathFadeStartRef.current = performance.now();
+    const id = setInterval(() => {
+      const progress = Math.min((performance.now() - vpPathFadeStartRef.current) / duration, 1);
+      setVpPaths(prev => {
+        if (progress >= 1) return [];
+        return prev.map(p => ({ ...p, alpha: startAlpha * (1 - progress) }));
+      });
+      if (progress >= 1) {
+        clearInterval(id);
+        setVpPathPhase('off');
+      }
+    }, 50);
+    return () => clearInterval(id);
+  }, [vpPathPhase, animationMode]);
+
+  // VP path breaking animation — quickly fade out individual broken paths
+  const breakingCount = vpPaths.filter(p => p.breaking && p.alpha > 0).length;
+  useEffect(() => {
+    if (breakingCount === 0) return;
+    const duration = 300;
+    const startTime = performance.now();
+    const startAlphas = vpPaths.map(p => p.alpha);
+    const id = setInterval(() => {
+      const progress = Math.min((performance.now() - startTime) / duration, 1);
+      setVpPaths(prev => prev.map((p, i) => {
+        if (!p.breaking) return p;
+        return { ...p, alpha: Math.max(0, startAlphas[i] * (1 - progress)) };
+      }));
+      if (progress >= 1) clearInterval(id);
+    }, 30);
+    return () => clearInterval(id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [breakingCount]);
+
+  // Show pulsing VP paths for the active player during plan phase
+  useEffect(() => {
+    if (phase !== 'plan' || resolving) {
+      // If we just left plan phase (not into resolve — resolve handles its own paths),
+      // fade out plan-phase paths
+      if (vpPathPhase !== 'off' && !resolving) {
+        vpPathFadeStartAlphaRef.current = vpPaths[0]?.alpha ?? 1;
+        setVpPathPhase('fading_out');
+      }
+      return;
+    }
+    const tiles = gameState.grid?.tiles;
+    if (!tiles || !activePlayerId) return;
+    const color = PLAYER_COLORS[activePlayerId] ?? 0xffffff;
+    const paths = computePlayerVpPaths(tiles, activePlayerId, color);
+    if (paths.length > 0) {
+      setVpPaths(paths);
+      setVpPathPhase('fading_in');
+    } else {
+      setVpPaths([]);
+      setVpPathPhase('off');
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, activePlayerId, resolving]);
+
+  // Compute which VP tiles are connected to their owner's base (for star rendering)
+  const connectedVpTiles = useMemo(() => {
+    const tiles = displayState.grid?.tiles;
+    if (!tiles) return new Set<string>();
+
+    const connected = new Set<string>();
+    const playerIds = gameState.player_order;
+
+    for (const pid of playerIds) {
+      // Find base tiles for this player
+      const baseKeys: string[] = [];
+      for (const [key, tile] of Object.entries(tiles)) {
+        if (tile.is_base && tile.owner === pid) baseKeys.push(key);
+      }
+      if (baseKeys.length === 0) continue;
+
+      // BFS from base tiles through owned territory
+      const reachable = new Set<string>(baseKeys);
+      const queue = [...baseKeys];
+
+      while (queue.length > 0) {
+        const key = queue.shift()!;
+        const tile = tiles[key];
+        if (!tile) continue;
+        for (const [dq, dr] of HEX_DIRS) {
+          const nk = `${tile.q + dq},${tile.r + dr}`;
+          if (reachable.has(nk)) continue;
+          const neighbor = tiles[nk];
+          if (!neighbor || neighbor.owner !== pid) continue;
+          reachable.add(nk);
+          queue.push(nk);
+        }
+      }
+
+      // Mark reachable VP tiles as connected
+      for (const [key, tile] of Object.entries(tiles)) {
+        if (tile.is_vp && tile.owner === pid && reachable.has(key)) {
+          connected.add(key);
+        }
+      }
+    }
+
+    return connected;
+  }, [displayState.grid?.tiles, gameState.player_order]);
+
+  // Ref tracking latest resolve display tiles (for VP path recomputation in applyResolveStep)
+  const resolveDisplayTilesRef = useRef<Record<string, import('../types/game').HexTile> | null>(null);
+  useEffect(() => {
+    resolveDisplayTilesRef.current = resolveDisplayState?.grid?.tiles ?? null;
+  }, [resolveDisplayState]);
+
   // Keep grid rect up to date for resolve overlay positioning
   useEffect(() => {
     const el = gridContainerRef.current;
@@ -245,7 +499,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     return adj;
   }, [gameState.grid, activePlayerId, activePlayer]);
 
-  const playCardAtTile = useCallback(async (cardIndex: number, q: number, r: number, extraTargets?: [number, number][]) => {
+  const playCardAtTile = useCallback(async (cardIndex: number, q: number, r: number, extraTargets?: [number, number][], targetPlayerId?: string) => {
     if (phase !== 'plan' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
@@ -262,7 +516,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
     try {
       setError(null);
-      const result = await api.playCard(gameState.id, activePlayerId, cardIndex, q, r, undefined, extraTargets);
+      const result = await api.playCard(gameState.id, activePlayerId, cardIndex, q, r, targetPlayerId, extraTargets);
       onStateUpdate(result.state);
       setSelectedCardIndex(null);
       // Clear surge state
@@ -295,6 +549,26 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     if (!gridContainerRef.current || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
+
+    // Player-targeting engine cards (e.g. Sabotage): must drop on an opponent's tile
+    if (card.card_type === 'engine' && card.forced_discard > 0) {
+      const rect = gridContainerRef.current.getBoundingClientRect();
+      const canvasX = screenX - rect.left;
+      const canvasY = screenY - rect.top;
+      const transform = gridTransformRef.current;
+      if (!transform) return;
+      const localX = (canvasX - transform.offsetX) / transform.scale;
+      const localY = (canvasY - transform.offsetY) / transform.scale;
+      const { q, r } = pixelToAxial(localX, localY);
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+      if (!tile || !tile.owner || tile.owner === activePlayerId) {
+        setError(`${card.name} must target an opponent's tile`);
+        return;
+      }
+      playCardAtTile(cardIndex, q, r, undefined, tile.owner);
+      return;
+    }
 
     // Non-targeting cards (engine): just release anywhere on the board
     if (card.card_type === 'engine') {
@@ -396,6 +670,18 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
     const card = activePlayer.hand[selectedCardIndex];
     if (!card) return;
+
+    // Player-targeting engine cards (e.g. Sabotage): click an opponent's tile
+    if (card.card_type === 'engine' && card.forced_discard > 0) {
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+      if (!tile || !tile.owner || tile.owner === activePlayerId) {
+        setError(`${card.name} must target an opponent's tile`);
+        return;
+      }
+      await playCardAtTile(selectedCardIndex, q, r, undefined, tile.owner);
+      return;
+    }
 
     if (card.card_type === 'claim' || card.card_type === 'defense') {
       const tileKey = `${q},${r}`;
@@ -511,6 +797,17 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           // Start chevron reveal animation (chevrons fade in before resolve overlay)
           setChevronAlpha(0);
           setChevronRevealPhase(true);
+          // Initialize VP paths for all players (static/no pulse during resolve)
+          setResolveLogEntries([]);
+          const allVpPaths: VpPath[] = [];
+          for (const pid of gameState.player_order) {
+            const color = PLAYER_COLORS[pid] ?? 0xffffff;
+            allVpPaths.push(...computePlayerVpPaths(preResolveTiles, pid, color).map(p => ({ ...p, noPulse: true })));
+          }
+          if (allVpPaths.length > 0) {
+            setVpPaths(allVpPaths);
+            setVpPathPhase('fading_in');
+          }
         } else if (!animationOff) {
           // No claim steps but animations on — show reveal banner, then transition to buy
           setInteractionBlocked(true);
@@ -560,6 +857,16 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     try {
       setError(null);
       const result = await api.buyCard(gameState.id, activePlayerId, 'upgrade');
+      onStateUpdate(result.state);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, activePlayerId, onStateUpdate]);
+
+  const handleUpgradeCard = useCallback(async (cardIndex: number) => {
+    try {
+      setError(null);
+      const result = await api.upgradeCard(gameState.id, activePlayerId, cardIndex);
       onStateUpdate(result.state);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -645,10 +952,8 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       const drawDuration = handSize * 500 + 500;
       const timer = setTimeout(() => {
         setIntroSequence('done');
-        // Now trigger the plan banner
-        const pid = gameState.player_order[0];
-        const paid = gameState.players[pid]?.last_upkeep_paid ?? 0;
-        setBannerSubtitle(paid > 0 ? `Upkeep: -${paid} Resource${paid > 1 ? 's' : ''}` : 'Choose Wisely');
+        // Now trigger the plan banner (round 1 has no upkeep)
+        setBannerSubtitle('Choose Wisely');
         setPhaseBanner('plan');
         setBannerKey(k => k + 1);
       }, drawDuration);
@@ -659,6 +964,21 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
     const bannerPhase = phaseBanner;
+
+    // Upkeep banner finished → advance to PLAN via API, then show PLAN banner
+    if (bannerPhase === 'upkeep') {
+      api.advanceUpkeep(gameState.id).then(result => {
+        onStateUpdate(result.state);
+        // Chain into the plan banner
+        setBannerSubtitle('Choose Wisely');
+        setPhaseBanner('plan');
+        setBannerKey(k => k + 1);
+      }).catch(() => {
+        setPhaseBanner(null);
+        setInteractionBlocked(false);
+      });
+      return;
+    }
 
     if (bannerPhase === 'reveal' && !resolving) {
       // Reveal banner finished but no resolution steps to animate —
@@ -693,20 +1013,9 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     // The banner just delays interaction, so nothing special at midpoint currently.
   }, []);
 
-  // Resolve animation completed — apply final state and move to buy phase
-  const handleResolveComplete = useCallback(() => {
-    setResolving(false);
-    setResolutionSteps([]);
-    setResolveDisplayState(null);
-    setResolvedUpToStep(-1);
-    setCurrentStepFade(1);
-    resolveChevronCacheRef.current = [];
-    if (resolveFinishedStateRef.current) {
-      onStateUpdate(resolveFinishedStateRef.current);
-      resolveFinishedStateRef.current = null;
-    }
-    setActivePlayerIndex(0);
-    // Show the buy phase banner after resolution (which will open the shop when it completes)
+  // Transition from resolve to buy phase (called after effects popup or directly)
+  const finishResolveAndShowBuy = useCallback(() => {
+    setActivePlayerEffects([]);
     if (!animationOff) {
       setBannerSubtitle('Grow Your Deck');
       setPhaseBanner('buy');
@@ -715,7 +1024,41 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       setInteractionBlocked(false);
       setShowShopOverlay(true);
     }
-  }, [onStateUpdate, animationOff]);
+  }, [animationOff]);
+
+  // Resolve animation completed — apply final state and move to buy phase
+  const handleResolveComplete = useCallback(() => {
+    setResolving(false);
+    setResolutionSteps([]);
+    setResolveDisplayState(null);
+    setResolvedUpToStep(-1);
+    setCurrentStepFade(1);
+    resolveChevronCacheRef.current = [];
+    const finishedState = resolveFinishedStateRef.current;
+    if (finishedState) {
+      onStateUpdate(finishedState);
+      resolveFinishedStateRef.current = null;
+    }
+    setActivePlayerIndex(0);
+    // Fade out VP paths and clear resolve log
+    if (vpPaths.length > 0) {
+      vpPathFadeStartAlphaRef.current = vpPaths[0]?.alpha ?? 1;
+      setVpPathPhase('fading_out');
+    }
+    setResolveLogEntries([]);
+
+    // Show player effect popups if any (e.g. Sabotage forced discards)
+    const effects = finishedState?.player_effects;
+    if (effects && effects.length > 0 && !animationOff) {
+      setActivePlayerEffects(effects);
+      // Auto-dismiss after 2.5 seconds, then show buy banner
+      setTimeout(() => {
+        finishResolveAndShowBuy();
+      }, 2500);
+    } else {
+      finishResolveAndShowBuy();
+    }
+  }, [onStateUpdate, animationOff, vpPaths, finishResolveAndShowBuy]);
 
   // Called by ResolveOverlay as each step begins — update the displayed tile state & fade chevrons
   const applyResolveStep = useCallback((stepIdx: number) => {
@@ -759,7 +1102,75 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
       return { ...prev, grid: { ...prev.grid, tiles: newTiles }, players: newPlayers };
     });
-  }, [resolutionSteps]);
+
+    // Recompute VP paths affected by this tile change
+    if (step.outcome === 'claimed' && step.winner_id && step.previous_owner) {
+      const lostTileKey = step.tile_key;
+      const loserId = step.previous_owner;
+
+      // Build the post-step tile map for path recomputation
+      const prevTiles = resolveDisplayTilesRef.current;
+      let tilesAfterStep: Record<string, import('../types/game').HexTile> | null = null;
+      if (prevTiles) {
+        tilesAfterStep = { ...prevTiles };
+        const t = tilesAfterStep[step.tile_key];
+        if (t) {
+          tilesAfterStep[step.tile_key] = { ...t, owner: step.winner_id };
+        }
+      }
+
+      const winnerId = step.winner_id;
+      const winnerName = gameState.players[winnerId]?.name ?? winnerId;
+      const loserName = gameState.players[loserId]?.name ?? loserId;
+
+      setVpPaths(prev => {
+        let changed = false;
+        const broken: string[] = [];
+        const next = prev.map(p => {
+          if (p.breaking || p.playerId !== loserId) return p;
+          const onPath = p.points.some(([q, r]) => `${q},${r}` === lostTileKey);
+          if (!onPath) return p;
+          changed = true;
+
+          // If the VP tile itself was captured, path is gone
+          const vpQ = p.points[0][0];
+          const vpR = p.points[0][1];
+          const vpKey = `${vpQ},${vpR}`;
+          if (tilesAfterStep && tilesAfterStep[vpKey]?.owner !== loserId) {
+            broken.push(vpKey);
+            return { ...p, breaking: true };
+          }
+
+          // Try to find an alternate route through updated tiles
+          if (tilesAfterStep) {
+            const color = PLAYER_COLORS[loserId] ?? 0xffffff;
+            const newPaths = computePlayerVpPaths(tilesAfterStep, loserId, color);
+            const replacement = newPaths.find(np =>
+              np.points[0][0] === vpQ && np.points[0][1] === vpR
+            );
+            if (replacement) {
+              // Reroute to the new shortest path (keep noPulse for resolve)
+              return { ...p, points: replacement.points, noPulse: true };
+            }
+          }
+
+          // No alternate path — connection is broken
+          broken.push(vpKey);
+          return { ...p, breaking: true };
+        });
+
+        // Log VP path disruptions
+        if (broken.length > 0) {
+          setResolveLogEntries(prev => [
+            ...prev,
+            `★ ${winnerName} disrupted ${loserName}'s VP bonus path${broken.length > 1 ? 's' : ''} at ${lostTileKey}`,
+          ]);
+        }
+
+        return changed ? next : prev;
+      });
+    }
+  }, [resolutionSteps, gameState.players]);
 
   // ── Test mode handlers ──────────────────────────────────────
   const handleTestGiveCard = useCallback(async (cardId: string) => {
@@ -795,6 +1206,24 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const submitActionsLeft = activePlayer ? activePlayer.actions_available - activePlayer.actions_used : 0;
   const submitAtCap = activePlayer ? activePlayer.actions_used >= 6 : false;
   const submitCanStillPlay = submitHasCardsLeft && submitActionsLeft > 0 && !submitAtCap;
+
+  // Upkeep indicator calculations — tiles_per_vp = grid radius - 1, used for both VP and upkeep
+  const UPKEEP_FREE_TILES = 4;
+  const GRID_RADIUS: Record<string, number> = { small: 4, medium: 5, large: 6 };
+  const tilesPerVp = (GRID_RADIUS[gameState.grid.size] ?? 4) - 1;
+  const playerTileCount = activePlayer
+    ? Object.values(gameState.grid.tiles).filter(t => t.owner === activePlayerId).length
+    : 0;
+  const currentUpkeep = Math.max(0, Math.floor((playerTileCount - UPKEEP_FREE_TILES) / tilesPerVp));
+  const upkeepBracketHigh = currentUpkeep === 0
+    ? UPKEEP_FREE_TILES + tilesPerVp - 1
+    : UPKEEP_FREE_TILES + (currentUpkeep + 1) * tilesPerVp - 1;
+  const upkeepBracketLow = currentUpkeep === 0 ? 1 : UPKEEP_FREE_TILES + currentUpkeep * tilesPerVp;
+  // Glow if pending claims might push past bracket boundary
+  const pendingClaimCount = activePlayer
+    ? activePlayer.planned_actions.filter(a => a.card.card_type === 'claim' && a.target_q !== null).length
+    : 0;
+  const upkeepMightIncrease = playerTileCount + pendingClaimCount > upkeepBracketHigh;
 
   // Hex distance in axial coordinates
   const hexDistance = useCallback((q1: number, r1: number, q2: number, r2: number): number => {
@@ -1128,7 +1557,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         </div>
 
         <div style={{ flex: 1, minHeight: 0 }}>
-          <GameLog entries={gameState.log} />
+          <GameLog entries={resolveLogEntries.length > 0 ? [...gameState.log, ...resolveLogEntries] : gameState.log} />
         </div>
 
         <button
@@ -1288,6 +1717,18 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   }
                   return ownTiles;
                 }
+                // Player-targeting engine card (e.g. Sabotage): highlight opponent tiles
+                const ptCard = selectedCard?.card_type === 'engine' && selectedCard?.forced_discard > 0 ? selectedCard
+                  : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'engine'
+                    && activePlayer?.hand[draggingCardIndex]?.forced_discard > 0
+                    ? activePlayer?.hand[draggingCardIndex] : null;
+                if (ptCard) {
+                  const opponentTiles = new Set<string>();
+                  for (const [k, t] of Object.entries(displayState.grid.tiles)) {
+                    if (t.owner && t.owner !== activePlayerId) opponentTiles.add(k);
+                  }
+                  return opponentTiles;
+                }
                 return undefined;
               })()}
               surgeTargets={surgeCardIndex !== null ? [
@@ -1301,6 +1742,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               plannedActions={phase === 'plan' ? plannedActions : undefined}
               previewCard={phase === 'plan' ? (
                 selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
+                : (selectedCard?.card_type === 'engine' && selectedCard?.forced_discard > 0) ? selectedCard
                 : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
                 : null
               ) : null}
@@ -1312,11 +1754,29 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 return card ? getAllValidPlayTiles(card) : undefined;
               })()}
               claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
+              vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
+              connectedVpTiles={connectedVpTiles}
+              disableHover={!!(showIntro || detailCard || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || phaseBanner)}
             />
           )}
 
-          {/* Top-right action buttons: Deck & Shop */}
+          {/* Top-right action buttons: Cards, Deck & Shop */}
           <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, zIndex: 210 }}>
+            <button
+              onClick={() => { setShowCardBrowser(true); }}
+              style={{
+                padding: '6px 14px',
+                background: '#2a2a3e',
+                border: '1px solid #555',
+                borderRadius: 6,
+                color: '#fff',
+                fontSize: 13,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              📖 Cards
+            </button>
             <button
               onClick={() => { setShowDeckViewer(true); setShowShopOverlay(false); }}
               style={{
@@ -1369,6 +1829,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               onClose={() => setShowShopOverlay(false)}
               testMode={!!gameState.test_mode}
               effectiveBuyCosts={activePlayer?.effective_buy_costs}
+              currentUpkeep={currentUpkeep}
             />
           )}
 
@@ -1404,6 +1865,46 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
             )}
           </div>
 
+          {/* Upkeep indicator — top-left of grid view */}
+          {(phase === 'plan' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (
+            <div style={{ position: 'absolute', top: 10, left: 12, zIndex: 20 }}>
+              <Tooltip content={`To maintain your ${playerTileCount} occupied tile${playerTileCount !== 1 ? 's' : ''}, you must pay ${currentUpkeep} resource${currentUpkeep !== 1 ? 's' : ''} before your next Plan phase.`}>
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: upkeepMightIncrease ? '#ffaa33' : '#aaa',
+                    textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    cursor: 'help',
+                    background: 'rgba(10, 10, 20, 0.6)',
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                  }}>
+                  <span style={{ fontSize: 11, color: '#777', marginRight: 2 }}>Upkeep:</span>
+                  <span style={{
+                    fontWeight: upkeepMightIncrease ? 'bold' : 'normal',
+                    color: upkeepMightIncrease ? '#ffaa33' : '#aaa',
+                    textShadow: upkeepMightIncrease
+                      ? '0 0 8px rgba(255,170,51,0.6), 0 1px 4px rgba(0,0,0,0.8)'
+                      : '0 1px 4px rgba(0,0,0,0.8)',
+                  }}>
+                    💰 {currentUpkeep}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#777' }}>
+                    ({upkeepBracketLow}–{upkeepBracketHigh} tiles)
+                  </span>
+                  {upkeepMightIncrease && (
+                    <span style={{ fontSize: 11, color: '#ffaa33', fontWeight: 'bold' }}>
+                      ⚠ may increase
+                    </span>
+                  )}
+                </div>
+              </Tooltip>
+            </div>
+          )}
+
           {/* Bottom bar: action counter (left) + buttons (right) */}
           <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: 20 }}>
             {/* Action counter — left aligned */}
@@ -1428,6 +1929,45 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
             )}
             <div style={{ flex: 1 }} />
             {/* Buttons — right aligned */}
+            {/* Upgrade button — shown when a card is selected during plan phase */}
+            {phase === 'plan' && activePlayer && !resolving && selectedCard && selectedCardIndex !== null &&
+              !selectedCard.is_upgraded && hasUpgradePreview(selectedCard) &&
+              (activePlayer.upgrade_credits > 0 || gameState.test_mode) && surgeCardIndex === null && (
+              <div
+                style={{ position: 'relative', display: 'inline-block' }}
+                onMouseEnter={() => setShowUpgradePreview(true)}
+                onMouseLeave={() => setShowUpgradePreview(false)}
+              >
+                {showUpgradePreview && (
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '100%',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    marginBottom: 8,
+                    zIndex: 100,
+                    pointerEvents: 'none',
+                  }}>
+                    <CardFull card={getUpgradedPreview(selectedCard)} />
+                  </div>
+                )}
+                <button
+                  onClick={() => handleUpgradeCard(selectedCardIndex)}
+                  style={{
+                    padding: '6px 14px',
+                    background: '#7a4acc',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  Upgrade ({activePlayer.upgrade_credits})
+                </button>
+              </div>
+            )}
             {phase === 'plan' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && surgeCardIndex === null && (
               <IrreversibleButton
                 onClick={handlePlayEngine}
@@ -1617,6 +2157,9 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           onClose={() => setShowDeckViewer(false)}
         />
       )}
+      {showCardBrowser && (
+        <CardBrowser onClose={() => setShowCardBrowser(false)} />
+      )}
 
       {/* Resolve overlay — power numbers over grid */}
       {resolving && resolutionSteps.length > 0 && !phaseBanner && !chevronRevealPhase && (
@@ -1628,6 +2171,58 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           onComplete={handleResolveComplete}
         />
       )}
+
+      {/* Player effect popups (e.g. Sabotage forced discard) — shown over target base tiles */}
+      {activePlayerEffects.length > 0 && (() => {
+        const transform = gridTransformRef.current;
+        const rect = gridContainerRef.current?.getBoundingClientRect();
+        if (!transform || !rect) return null;
+        // Find base tiles for targets
+        const tiles = gameState.grid?.tiles ?? {};
+        return activePlayerEffects.map((effect, i) => {
+          // Find target player's base tile
+          const baseTile = Object.values(tiles).find(t => t.is_base && t.base_owner === effect.target_player_id);
+          if (!baseTile) return null;
+          const local = axialToPixel(baseTile.q, baseTile.r);
+          const screenX = local.x * transform.scale + transform.offsetX + rect.left;
+          const screenY = local.y * transform.scale + transform.offsetY + rect.top;
+          const sourceColor = PLAYER_COLORS[effect.source_player_id];
+          const colorStr = sourceColor !== undefined
+            ? `#${sourceColor.toString(16).padStart(6, '0')}`
+            : '#fff';
+          return (
+            <div
+              key={i}
+              style={{
+                position: 'fixed',
+                left: screenX,
+                top: screenY - 40,
+                transform: 'translateX(-50%)',
+                zIndex: 15000,
+                pointerEvents: 'none',
+                animation: 'playerEffectPopup 2.5s ease-out forwards',
+              }}
+            >
+              <div style={{
+                background: 'rgba(15, 15, 35, 0.95)',
+                border: `2px solid ${colorStr}`,
+                borderRadius: 10,
+                padding: '8px 14px',
+                textAlign: 'center',
+                boxShadow: `0 0 20px ${colorStr}44, 0 4px 16px rgba(0,0,0,0.6)`,
+                whiteSpace: 'nowrap',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 'bold', color: '#fff', marginBottom: 2 }}>
+                  {effect.card_name}
+                </div>
+                <div style={{ fontSize: 12, color: '#ff6666', fontWeight: 'bold' }}>
+                  {effect.effect}
+                </div>
+              </div>
+            </div>
+          );
+        });
+      })()}
 
       {/* Game intro overlay */}
       {showIntro && (
@@ -1655,11 +2250,18 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         }} />
       )}
 
-      {/* Keyframes for shop pulse glow */}
+      {/* Keyframes for shop pulse glow + player effect popup */}
       <style>{`
         @keyframes shopPulse {
           0%, 100% { box-shadow: 0 0 8px rgba(74, 158, 255, 0.4); }
           50% { box-shadow: 0 0 20px rgba(74, 158, 255, 0.8), 0 0 40px rgba(74, 158, 255, 0.3); }
+        }
+        @keyframes playerEffectPopup {
+          0% { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.8); }
+          10% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.05); }
+          20% { transform: translateX(-50%) translateY(0) scale(1); }
+          80% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+          100% { opacity: 0; transform: translateX(-50%) translateY(-20px) scale(0.9); }
         }
       `}</style>
     </div>

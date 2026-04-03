@@ -35,7 +35,9 @@ export interface Card {
   defense_target_count: number;
   flood: boolean;
   target_own_tile: boolean;
+  passive_vp: number;
   vp_formula?: string;
+  current_vp?: number;
   description: string;
   upgrade_description?: string;
   name_upgraded?: string;
@@ -85,6 +87,8 @@ export interface Player {
   effective_buy_costs?: Record<string, number>;
   trash: Card[];
   last_upkeep_paid: number;
+  upkeep_cost: number;
+  tiles_lost_to_upkeep: number;
   rubble_count: number;
 }
 
@@ -113,6 +117,15 @@ export interface ResolutionStep {
   outcome: 'claimed' | 'defended' | 'tie' | 'defense_held';
 }
 
+export interface PlayerEffect {
+  source_player_id: string;
+  target_player_id: string;
+  card_name: string;
+  effect: string;
+  effect_type: string;
+  value: number;
+}
+
 export interface GameState {
   id: string;
   grid: {
@@ -130,5 +143,6 @@ export interface GameState {
   winner: string | null;
   log: string[];
   resolution_steps?: ResolutionStep[];
+  player_effects?: PlayerEffect[];
   test_mode?: boolean;
 }

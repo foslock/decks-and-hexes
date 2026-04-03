@@ -76,6 +76,17 @@ export async function buyCard(
   });
 }
 
+export async function upgradeCard(
+  gameId: string,
+  playerId: string,
+  cardIndex: number,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/upgrade-card`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, card_index: cardIndex }),
+  });
+}
+
 export async function rerollMarket(
   gameId: string,
   playerId: string,
@@ -83,6 +94,14 @@ export async function rerollMarket(
   return request(`/games/${gameId}/reroll`, {
     method: 'POST',
     body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
+export async function advanceUpkeep(
+  gameId: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/advance-upkeep`, {
+    method: 'POST',
   });
 }
 

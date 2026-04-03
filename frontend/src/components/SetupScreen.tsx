@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useSettings, type AnimationMode } from './SettingsContext';
+import CardBrowser from './CardBrowser';
 
 interface SetupScreenProps {
   onStart: (config: {
@@ -17,23 +18,22 @@ const ARCHETYPES = [
 ];
 
 const GRID_SIZES = [
-  { id: 'small', name: 'Small (37 tiles)', players: '2-3', tiles: 37 },
-  { id: 'medium', name: 'Medium (61 tiles)', players: '3-4', tiles: 61 },
-  { id: 'large', name: 'Large (91 tiles)', players: '4-6', tiles: 91 },
+  { id: 'small', name: 'Small (61 tiles)', players: '2-3', tiles: 61, radius: 4 },
+  { id: 'medium', name: 'Medium (91 tiles)', players: '3-4', tiles: 91, radius: 5 },
+  { id: 'large', name: 'Large (127 tiles)', players: '4-6', tiles: 127, radius: 6 },
 ];
 
 const SPEEDS = [
-  { id: 'fast', name: 'Fast', mult: 1.0 },
-  { id: 'normal', name: 'Normal', mult: 1.25 },
-  { id: 'slow', name: 'Slow', mult: 1.5 },
+  { id: 'fast', name: 'Fast', mult: 0.66 },
+  { id: 'normal', name: 'Normal', mult: 1.0 },
+  { id: 'slow', name: 'Slow', mult: 1.33 },
 ];
-
-const TILES_PER_VP = 3;
 
 function computeVpTarget(gridId: string, playerCount: number, speedId: string): number {
   const grid = GRID_SIZES.find(g => g.id === gridId) || GRID_SIZES[0];
   const speed = SPEEDS.find(s => s.id === speedId) || SPEEDS[1];
-  const divisor = Math.max(1, Math.floor(TILES_PER_VP * playerCount * 0.5));
+  const tilesPerVp = grid.radius - 1; // Small=3, Medium=4, Large=5
+  const divisor = Math.max(1, Math.floor(tilesPerVp * playerCount * 0.75));
   const base = Math.floor(grid.tiles / divisor);
   return Math.max(3, Math.round(base * speed.mult));
 }
@@ -49,6 +49,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
   ]);
   const [testMode, setTestMode] = useState(false);
   const [speed, setSpeed] = useState('normal');
+  const [showCardBrowser, setShowCardBrowser] = useState(false);
   const vpTarget = computeVpTarget(gridSize, playerCount, speed);
 
   const updatePlayerCount = (count: number) => {
@@ -277,22 +278,44 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
         </div>
       </div>
 
-      <button
-        onClick={handleStart}
-        style={{
-          width: '100%',
-          padding: 16,
-          background: testMode ? '#ffaa4a' : '#4a9eff',
-          border: 'none',
-          borderRadius: 8,
-          color: '#fff',
-          fontSize: 18,
-          fontWeight: 'bold',
-          cursor: 'pointer',
-        }}
-      >
-        {testMode ? 'Start Test Game' : 'Start Game'}
-      </button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
+        <button
+          onClick={() => setShowCardBrowser(true)}
+          style={{
+            flex: 1,
+            padding: 16,
+            background: '#2a2a3e',
+            border: '1px solid #555',
+            borderRadius: 8,
+            color: '#fff',
+            fontSize: 15,
+            fontWeight: 'bold',
+            cursor: 'pointer',
+          }}
+        >
+          Card Browser
+        </button>
+        <button
+          onClick={handleStart}
+          style={{
+            flex: 2,
+            padding: 16,
+            background: testMode ? '#ffaa4a' : '#4a9eff',
+            border: 'none',
+            borderRadius: 8,
+            color: '#fff',
+            fontSize: 18,
+            fontWeight: 'bold',
+            cursor: 'pointer',
+          }}
+        >
+          {testMode ? 'Start Test Game' : 'Start Game'}
+        </button>
+      </div>
+
+      {showCardBrowser && (
+        <CardBrowser onClose={() => setShowCardBrowser(false)} />
+      )}
     </div>
   );
 }

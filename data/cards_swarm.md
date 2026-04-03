@@ -18,10 +18,12 @@ cards:
     buy_cost: 1
     action_return: 0
     power: 1
+    resource_gain: 1
+    upgraded_resource_gain: 2
     unoccupied_only: true
     upgraded_unoccupied_only: false
-    effect: "Claim: Power 1 on any adjacent unoccupied tile."
-    effect_upgraded: "Claim: Power 2."
+    effect: "Claim: Power 1 on any adjacent unoccupied tile. Gain 1 resource."
+    effect_upgraded: "Claim: Power 2. Gain 2 resources."
     secondary_effect: null
     secondary_timing: null
 
@@ -263,14 +265,14 @@ cards:
   - id: swarm_war_trophies
     name: War Trophies
     name_upgraded: War Trophies+
-    type: Engine
+    type: Passive
     buy_cost: 3
     action_return: 0
     power: 0
     unplayable: true
     vp_formula: trash_div_5
-    effect: "Passive: Worth 1 VP for every 5 cards in your trash pile."
-    effect_upgraded: "Passive: Worth 1 VP for every 4 cards in your trash pile."
+    effect: "+1 VP for every 5 cards in your trash pile."
+    effect_upgraded: "+1 VP for every 4 cards in your trash pile."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards aggressive deck thinning. Synergizes with Thin the Herd and trash effects. Takes up a hand slot when drawn."

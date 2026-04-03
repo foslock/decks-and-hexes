@@ -64,7 +64,7 @@ class TestCardLoading:
 
     def test_cards_have_valid_types(self, card_registry: dict[str, Card]) -> None:
         for card in card_registry.values():
-            assert card.card_type in (CardType.CLAIM, CardType.DEFENSE, CardType.ENGINE)
+            assert card.card_type in (CardType.CLAIM, CardType.DEFENSE, CardType.ENGINE, CardType.PASSIVE)
 
     def test_blitz_properties(self, card_registry: dict[str, Card]) -> None:
         blitz = card_registry.get("vanguard_blitz")

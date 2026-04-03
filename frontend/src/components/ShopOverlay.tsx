@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Card, MarketStack } from '../types/game';
-import { IrreversibleButton } from './Tooltip';
+import Tooltip, { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
 import { useAnimationMode } from './SettingsContext';
 import CardFull, { CARD_FULL_WIDTH } from './CardFull';
@@ -35,6 +35,7 @@ interface ShopOverlayProps {
   playerResources: number;
   playerArchetype: string;
   effectiveBuyCosts?: Record<string, number>;
+  currentUpkeep: number;
   onBuyArchetype: (cardId: string) => void;
   onBuyNeutral: (cardId: string) => void;
   onBuyUpgrade: () => void;
@@ -68,6 +69,7 @@ function FullShopCard({
   remaining,
   canAfford,
   effectiveCost,
+  upkeepWarning,
   onBuy,
   onHover,
   onLeave,
@@ -78,6 +80,7 @@ function FullShopCard({
   remaining: number | null;
   canAfford: boolean;
   effectiveCost?: number | null;
+  upkeepWarning: boolean;
   onBuy: () => void;
   onHover: (e: React.MouseEvent, card: Card) => void;
   onLeave: () => void;
@@ -87,6 +90,10 @@ function FullShopCard({
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
+  const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
+  const buyTooltip = upkeepWarning
+    ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
+    : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`;
   return (
     <div
       data-card-id={card.id}
@@ -108,11 +115,11 @@ function FullShopCard({
       <IrreversibleButton
         onClick={onBuy}
         disabled={disabled || !canAfford}
-        tooltip={`Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`}
+        tooltip={buyTooltip}
         style={{
           width: CARD_FULL_WIDTH,
           padding: '4px 0',
-          background: canAfford && !disabled ? '#4a9eff' : '#333',
+          background: buyColor,
           border: 'none',
           borderRadius: 5,
           color: '#fff',
@@ -132,6 +139,7 @@ function CompactShopCard({
   remaining,
   canAfford,
   effectiveCost,
+  upkeepWarning,
   onBuy,
   onHover,
   onLeave,
@@ -141,6 +149,7 @@ function CompactShopCard({
   remaining: number | null;
   canAfford: boolean;
   effectiveCost?: number | null;
+  upkeepWarning: boolean;
   onBuy: () => void;
   onHover: (e: React.MouseEvent, card: Card) => void;
   onLeave: () => void;
@@ -148,6 +157,10 @@ function CompactShopCard({
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
+  const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
+  const buyTooltip = upkeepWarning
+    ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
+    : `Purchasing ${card.name} spends ${card.buy_cost} resources and adds it to your discard pile.`;
   return (
     <div
       data-card-id={card.id}
@@ -177,11 +190,11 @@ function CompactShopCard({
       <IrreversibleButton
         onClick={onBuy}
         disabled={disabled || !canAfford}
-        tooltip={`Purchasing ${card.name} spends ${card.buy_cost} resources and adds it to your discard pile.`}
+        tooltip={buyTooltip}
         style={{
           width: '100%',
           padding: '3px 0',
-          background: canAfford && !disabled ? '#4a9eff' : '#333',
+          background: buyColor,
           border: 'none',
           borderRadius: 4,
           color: '#fff',
@@ -202,6 +215,7 @@ export default function ShopOverlay({
   playerResources,
   playerArchetype,
   effectiveBuyCosts,
+  currentUpkeep,
   onBuyArchetype,
   onBuyNeutral,
   onBuyUpgrade,
@@ -403,22 +417,23 @@ export default function ShopOverlay({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
-                <IrreversibleButton
-                  onClick={onReroll}
-                  disabled={disabled || (!testMode && playerResources < 2)}
-                  tooltip="Re-rolling replaces your market cards and spends 2 resources."
-                  style={{
-                    fontSize: 11,
-                    padding: '2px 8px',
-                    background: '#2a2a3e',
-                    border: '1px solid #555',
-                    borderRadius: 4,
-                    color: (testMode || playerResources >= 2) && !disabled ? '#fff' : '#555',
-                    cursor: disabled || (!testMode && playerResources < 2) ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  Re-roll (2💰)
-                </IrreversibleButton>
+                <Tooltip content="Re-rolling replaces your market cards and spends 2 resources.">
+                  <button
+                    onClick={onReroll}
+                    disabled={disabled || (!testMode && playerResources < 2)}
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 8px',
+                      background: '#2a2a3e',
+                      border: '1px solid #555',
+                      borderRadius: 4,
+                      color: (testMode || playerResources >= 2) && !disabled ? '#fff' : '#555',
+                      cursor: disabled || (!testMode && playerResources < 2) ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Re-roll (2💰)
+                  </button>
+                </Tooltip>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
                 {archetypeMarket.length === 0 && (
@@ -427,6 +442,7 @@ export default function ShopOverlay({
                 {[...archetypeMarket].sort((a, b) => (a.buy_cost ?? 0) - (b.buy_cost ?? 0)).map((card) => {
                   const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
                   const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
+                  const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
                   return fullView ? (
                     <FullShopCard
                       key={card.id}
@@ -434,6 +450,7 @@ export default function ShopOverlay({
                       remaining={null}
                       canAfford={canAfford}
                       effectiveCost={effCost}
+                      upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyArchetype(card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
@@ -447,6 +464,7 @@ export default function ShopOverlay({
                       remaining={null}
                       canAfford={canAfford}
                       effectiveCost={effCost}
+                      upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyArchetype(card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
@@ -461,27 +479,29 @@ export default function ShopOverlay({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>Neutral Market</span>
-                <IrreversibleButton
-                  onClick={onBuyUpgrade}
-                  disabled={disabled || (!testMode && playerResources < 5)}
-                  tooltip="Buying an upgrade credit spends 5 resources."
-                  style={{
-                    fontSize: 11,
-                    padding: '2px 8px',
-                    background: '#2a2a3e',
-                    border: '1px solid #555',
-                    borderRadius: 4,
-                    color: (testMode || playerResources >= 5) && !disabled ? '#fff' : '#555',
-                    cursor: disabled || (!testMode && playerResources < 5) ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  Buy Upgrade (5💰)
-                </IrreversibleButton>
+                <Tooltip content="Upgrade credits can be spent during the Plan phase to upgrade a card in your hand.">
+                  <button
+                    onClick={onBuyUpgrade}
+                    disabled={disabled || (!testMode && playerResources < 5)}
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 8px',
+                      background: '#2a2a3e',
+                      border: '1px solid #555',
+                      borderRadius: 4,
+                      color: (testMode || playerResources >= 5) && !disabled ? '#fff' : '#555',
+                      cursor: disabled || (!testMode && playerResources < 5) ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Buy Upgrade (5💰)
+                  </button>
+                </Tooltip>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
                 {[...neutralMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
                   const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
+                  const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
                   return fullView ? (
                     <FullShopCard
                       key={stack.card.id}
@@ -489,6 +509,7 @@ export default function ShopOverlay({
                       remaining={stack.remaining}
                       canAfford={canAfford}
                       effectiveCost={effCost}
+                      upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
@@ -502,6 +523,7 @@ export default function ShopOverlay({
                       remaining={stack.remaining}
                       canAfford={canAfford}
                       effectiveCost={effCost}
+                      upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
@@ -522,7 +544,7 @@ export default function ShopOverlay({
           opacity: hoverVisible ? 1 : 0,
           transition: animMode === 'normal' ? 'opacity 0.15s ease' : 'none',
         }}>
-          <CardFull card={shiftHeld ? getUpgradedPreview(hoverState.card) : hoverState.card} />
+          <CardFull card={shiftHeld ? getUpgradedPreview(hoverState.card) : hoverState.card} showKeywordHints />
           {shiftHeld && hasUpgradePreview(hoverState.card) && (
             <div style={{
               textAlign: 'center',

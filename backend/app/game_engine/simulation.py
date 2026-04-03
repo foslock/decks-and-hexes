@@ -18,6 +18,7 @@ from .game_state import (
     compute_player_vp,
     create_game,
     execute_start_of_turn,
+    execute_upkeep,
     play_card,
     submit_plan,
     buy_card,
@@ -40,6 +41,7 @@ class SimConfig:
     max_rounds: int = 50
     verbose: bool = False
     vp_target: Optional[int] = None  # None = use game default
+    speed: str = "normal"  # "fast", "normal", "slow"
 
 
 @dataclass
@@ -59,6 +61,7 @@ class PlayerResult:
     actions_per_turn: list[int] = field(default_factory=list)
     vp_over_time: list[int] = field(default_factory=list)
     resources_over_time: list[int] = field(default_factory=list)
+    tiles_over_time: list[int] = field(default_factory=list)
     rubble_received: int = 0
 
 
@@ -86,6 +89,7 @@ class BatchConfig:
     max_rounds: int = 50
     verbose: bool = False
     vp_target: Optional[int] = None
+    speed: str = "normal"
 
 
 @dataclass
@@ -117,7 +121,8 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
 
     try:
         game = create_game(config.grid_size, player_configs, card_registry,
-                           seed=config.seed, vp_target=config.vp_target)
+                           seed=config.seed, vp_target=config.vp_target,
+                           speed=config.speed)
 
         # Create CPU players
         cpus: dict[str, CPUPlayer] = {}
@@ -149,12 +154,19 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
                 _run_plan_phase(game, cpus, tracking, config.verbose)
             elif game.current_phase == Phase.BUY:
                 _run_buy_phase(game, cpus, tracking, config.verbose)
+            elif game.current_phase == Phase.UPKEEP:
+                execute_upkeep(game)
             elif game.current_phase == Phase.START_OF_TURN:
                 # Record VP/resources at start of each turn
                 for pid in game.player_order:
                     p = game.players[pid]
                     tracking[pid].vp_over_time.append(compute_player_vp(game, pid))
                     tracking[pid].resources_over_time.append(p.resources)
+                    if game.grid:
+                        tile_count = sum(1 for t in game.grid.tiles.values() if t.owner == pid)
+                        tracking[pid].tiles_over_time.append(tile_count)
+                    else:
+                        tracking[pid].tiles_over_time.append(0)
                 # This shouldn't happen in normal flow since execute_end_of_turn
                 # calls execute_start_of_turn, but handle it just in case
                 execute_start_of_turn(game)
@@ -327,6 +339,7 @@ def run_batch(config: BatchConfig,
             max_rounds=config.max_rounds,
             verbose=config.verbose,
             vp_target=config.vp_target,
+            speed=config.speed,
         )
         result = run_game(sim_config, card_registry=card_registry)
         batch_result.results.append(result)

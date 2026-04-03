@@ -21,11 +21,11 @@ cards:
     power: 0
     defense_bonus: 2
     upgraded_defense_bonus: 3
-    effect: "Defense: One tile you own gains +2 defense this round. Gain 1 resource."
-    effect_upgraded: "Defense: One tile you own gains +3 defense this round. Gain 2 resources."
-    resource_gain: 1
-    upgraded_resource_gain: 2
-    note: "Fortress starter. Defensive positioning plus economy in one card."
+    effect: "Defense: One tile you own gains +2 defense this round."
+    effect_upgraded: "Defense: One tile you own gains +3 defense this round. Gain 1 resource."
+    resource_gain: 0
+    upgraded_resource_gain: 1
+    note: "Fortress starter. Pure defensive positioning; upgrade adds economy."
 
   - id: fortress_fortify
     name: Fortify
@@ -273,14 +273,14 @@ cards:
   - id: fortress_fortified_position
     name: Fortified Position
     name_upgraded: Fortified Position+
-    type: Engine
+    type: Passive
     buy_cost: 3
     action_return: 0
     power: 0
     unplayable: true
     vp_formula: fortified_tiles_3
-    effect: "Passive: Worth 1 VP for every non-base tile you own with a permanent defense bonus of 3 or higher."
-    effect_upgraded: "Passive: Worth 1 VP for every non-base tile you own with a permanent defense bonus of 2 or higher."
+    effect: "+1 VP for every non-base tile you own with a permanent defense bonus of 3 or higher."
+    effect_upgraded: "+1 VP for every non-base tile you own with a permanent defense bonus of 2 or higher."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards Entrench investment. Fluctuates as tiles are lost or captured. Takes up a hand slot when drawn."

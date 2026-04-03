@@ -53,6 +53,21 @@ export interface ClaimChevron {
   alpha: number;
 }
 
+export interface VpPath {
+  /** Hex coords from VP tile (index 0) to base tile (last index) */
+  points: [number, number][];
+  /** Player color (will be lightened for the line) */
+  color: number;
+  /** Overall opacity 0–1 (for fade in/out) */
+  alpha: number;
+  /** Player who owns this path */
+  playerId: string;
+  /** If true, this path's connection is broken and it's fading out quickly */
+  breaking?: boolean;
+  /** If true, render at steady alpha/width without breathing pulse */
+  noPulse?: boolean;
+}
+
 interface HexGridProps {
   tiles: Record<string, HexTile>;
   onTileClick: (q: number, r: number) => void;
@@ -69,6 +84,12 @@ interface HexGridProps {
   previewValidTiles?: Set<string>;
   /** Claim direction chevrons shown during plan/reveal phases */
   claimChevrons?: ClaimChevron[];
+  /** VP connection paths shown during resolve phase */
+  vpPaths?: VpPath[];
+  /** VP tile keys that are owned AND connected to the owner's base (filled star) */
+  connectedVpTiles?: Set<string>;
+  /** When true, suppress hover effects (highlight, tooltips) — e.g. when a full-screen overlay is open */
+  disableHover?: boolean;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -176,7 +197,19 @@ function PlannedCardTooltip({ card, x, y }: { card: Card; x: number; y: number }
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons }: HexGridProps) {
+/** Blend a hex color toward white by `amount` (0=no change, 1=white). */
+function lightenColor(color: number, amount: number): number {
+  const r = (color >> 16) & 0xFF;
+  const g = (color >> 8) & 0xFF;
+  const b = color & 0xFF;
+  return (
+    (Math.min(255, Math.round(r + (255 - r) * amount)) << 16) |
+    (Math.min(255, Math.round(g + (255 - g) * amount)) << 8) |
+    Math.min(255, Math.round(b + (255 - b) * amount))
+  );
+}
+
+export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -191,7 +224,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const previewCardRef = useRef(previewCard);
   const previewValidTilesRef = useRef(previewValidTiles);
   const claimChevronsRef = useRef(claimChevrons);
+  const vpPathsRef = useRef(vpPaths);
+  const connectedVpRef = useRef(connectedVpTiles);
   const hexContainerRef = useRef<Container | null>(null);
+  const vpPathGraphicsRef = useRef<Graphics | null>(null);
   const hoveredTileRef = useRef<string | null>(null);
   const hoverEdgeGraphicsRef = useRef<Graphics | null>(null);
   const previewLabelRef = useRef<Text | null>(null);
@@ -202,6 +238,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const tooltipsEnabled = useTooltips();
   const tooltipsEnabledRef = useRef(tooltipsEnabled);
   tooltipsEnabledRef.current = tooltipsEnabled;
+  const disableHoverRef = useRef(disableHover);
+  disableHoverRef.current = disableHover;
 
   tilesRef.current = tiles;
   highlightRef.current = highlightTiles;
@@ -215,6 +253,21 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   previewCardRef.current = previewCard;
   previewValidTilesRef.current = previewValidTiles;
   claimChevronsRef.current = claimChevrons;
+  vpPathsRef.current = vpPaths;
+  connectedVpRef.current = connectedVpTiles;
+
+  // Clear hover state when overlay opens
+  useEffect(() => {
+    if (disableHover) {
+      hoverEdgeGraphicsRef.current?.clear();
+      hoveredTileRef.current = null;
+      setTooltip(null);
+      if (previewLabelRef.current) {
+        previewLabelRef.current.destroy();
+        previewLabelRef.current = null;
+      }
+    }
+  }, [disableHover]);
 
   // Compute bounding box of all tiles in unscaled pixel space, then fit to canvas.
   const fitGrid = useCallback(() => {
@@ -320,6 +373,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       }};
       g.on('pointerdown', () => { if (!tile.is_blocked) onClickRef.current(tile.q, tile.r); });
       g.on('pointerover', (e) => {
+        if (disableHoverRef.current) return;
         if (!tile.is_blocked) {
           hoveredTileRef.current = key;
           const hoverEdgeG = hoverEdgeGraphicsRef.current;
@@ -360,18 +414,26 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             existingLabel.visible = false;
             hiddenLabelKeyRef.current = key;
           }
-          const isDefensive = pCard.card_type === 'defense' || isOwnTile;
-          // Defense cards show their bonus; claim/other cards show their power
-          let previewPower = pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power;
-          // For stackable cards, add power from any already-planned action on this tile
-          const existingPlanned = plannedActionsRef.current?.get(key);
-          if (pCard.stackable && existingPlanned) {
-            previewPower = existingPlanned.power + (pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power);
+          const isPlayerTarget = pCard.card_type === 'engine' && pCard.forced_discard > 0;
+          const isDefensive = !isPlayerTarget && (pCard.card_type === 'defense' || isOwnTile);
+          let previewText: string;
+          let previewColor: number;
+          if (isPlayerTarget) {
+            previewText = '🎯';
+            previewColor = 0xff6666;
+          } else {
+            // Defense cards show their bonus; claim/other cards show their power
+            let previewPower = pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power;
+            // For stackable cards, add power from any already-planned action on this tile
+            const existingPlanned = plannedActionsRef.current?.get(key);
+            if (pCard.stackable && existingPlanned) {
+              previewPower = existingPlanned.power + (pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power);
+            }
+            const icon = isDefensive ? '🛡' : '⚔';
+            const prefix = isDefensive ? '+' : '';
+            previewText = `${icon} ${prefix}${previewPower}`;
+            previewColor = isDefensive ? 0x66ff88 : 0xffaa00;
           }
-          const icon = isDefensive ? '🛡' : '⚔';
-          const prefix = isDefensive ? '+' : '';
-          const previewText = `${icon} ${prefix}${previewPower}`;
-          const previewColor = isDefensive ? 0x66ff88 : 0xffaa00;
           const textY = tile.is_vp ? y + 8 : y;
           const lbl = new Text({
             text: previewText,
@@ -421,6 +483,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         }
       });
       g.on('pointermove', (e) => {
+        if (disableHoverRef.current) return;
         setTooltip((prev) => prev ? { ...prev, x: e.global.x, y: e.global.y } : null);
       });
       g.on('pointerout', () => {
@@ -666,11 +729,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
 
       if (tile.is_vp && !tile.is_blocked) {
         const isPremium = tile.vp_value >= 2;
+        const connected = connectedVpRef.current?.has(key) ?? false;
+        const starChar = connected ? '★' : '☆';
+        const starColor = connected
+          ? (isPremium ? 0xfff066 : 0xffd700)
+          : 0x888888;
         const star = new Text({
-          text: isPremium ? '★★' : '★',
+          text: isPremium ? `${starChar}${starChar}` : starChar,
           style: new TextStyle({
             fontSize: isPremium ? 11 : 14,
-            fill: isPremium ? 0xfff066 : 0xffd700,
+            fill: starColor,
             letterSpacing: isPremium ? 1 : 0,
             fontWeight: 'bold',
           }),
@@ -714,12 +782,15 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       const plannedAction = planned?.get(key);
 
       if (plannedAction) {
-        // Determine icon: shield if playing on own tile (defense/reinforce), sword if attacking
-        const isDefensivePlay = plannedAction.type === 'defense' || tile.owner === activePlayer;
-        const label = isDefensivePlay
-          ? `🛡 +${plannedAction.power}`
-          : `⚔ ${plannedAction.power}`;
-        const labelColor = isDefensivePlay ? 0x66ff88 : 0xffaa00;
+        // Determine icon: target for player-targeting, shield for defense, sword for attack
+        const isPlayerTarget = plannedAction.type === 'engine' && plannedAction.card.forced_discard > 0;
+        const isDefensivePlay = !isPlayerTarget && (plannedAction.type === 'defense' || tile.owner === activePlayer);
+        const label = isPlayerTarget
+          ? '🎯'
+          : isDefensivePlay
+            ? `🛡 +${plannedAction.power}`
+            : `⚔ ${plannedAction.power}`;
+        const labelColor = isPlayerTarget ? 0xff6666 : isDefensivePlay ? 0x66ff88 : 0xffaa00;
         const textY = tile.is_vp ? y + 8 : y;
 
         const actionLabel = new Text({
@@ -784,6 +855,63 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
 
       renderTiles();
 
+      // Create VP path graphics layer (managed outside renderTiles)
+      const vpPathG = new Graphics();
+      vpPathGraphicsRef.current = vpPathG;
+      hexContainer.addChild(vpPathG);
+
+      // Pixi ticker for smooth VP path pulse animation
+      const vpTickerFn = () => {
+        const g = vpPathGraphicsRef.current;
+        const paths = vpPathsRef.current;
+        if (!g) return;
+        g.clear();
+        if (!paths || paths.length === 0) return;
+
+        const time = performance.now();
+        const PULSE_PERIOD = 2000; // ms per full breathing cycle
+
+        for (const path of paths) {
+          if (path.alpha <= 0 || path.points.length < 2) continue;
+          const lightColor = lightenColor(path.color, 0.45);
+
+          // Breathing pulse (or steady if noPulse)
+          const breathe = path.noPulse ? 0.7 : 0.5 + 0.5 * Math.sin((time / PULSE_PERIOD) * Math.PI * 2);
+          const pulseAlpha = path.noPulse ? path.alpha * 0.75 : path.alpha * (0.20 + 0.80 * breathe);
+          const pulseWidth = path.noPulse ? 3 : 2.5 + 1.5 * breathe;
+
+          // Convert hex coords to pixel positions
+          const pts = path.points.map(([q, r]) => axialToPixel(q, r));
+
+          g.setStrokeStyle({ width: pulseWidth, color: lightColor, alpha: pulseAlpha, cap: 'round', join: 'round' });
+          g.moveTo(pts[0].x, pts[0].y);
+
+          if (pts.length === 2) {
+            // Simple straight line
+            g.lineTo(pts[1].x, pts[1].y);
+          } else {
+            // Smooth bezier curve with rounded corners at each intermediate point
+            for (let i = 1; i < pts.length - 1; i++) {
+              const prev = pts[i - 1];
+              const curr = pts[i];
+              const next = pts[i + 1];
+              const bmX = (prev.x + curr.x) / 2;
+              const bmY = (prev.y + curr.y) / 2;
+              const amX = (curr.x + next.x) / 2;
+              const amY = (curr.y + next.y) / 2;
+
+              if (i === 1) {
+                g.lineTo(bmX, bmY);
+              }
+              g.quadraticCurveTo(curr.x, curr.y, amX, amY);
+            }
+            g.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+          }
+          g.stroke();
+        }
+      };
+      app.ticker.add(vpTickerFn);
+
       // Re-fit whenever the canvas is resized
       app.renderer.on('resize', fitGrid);
     });
@@ -795,13 +923,19 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         appRef.current.destroy(true);
         appRef.current = null;
       }
+      vpPathGraphicsRef.current = null;
     };
   }, []);
 
   // Re-render tiles when data changes
   useEffect(() => {
     renderTiles();
-  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, claimChevrons, renderTiles]);
+    // Re-add VP path graphics layer (removed by renderTiles → removeChildren)
+    const vpG = vpPathGraphicsRef.current;
+    if (vpG && hexContainerRef.current) {
+      hexContainerRef.current.addChild(vpG);
+    }
+  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, claimChevrons, connectedVpTiles, renderTiles]);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>

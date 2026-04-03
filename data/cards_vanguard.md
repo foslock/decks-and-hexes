@@ -295,14 +295,14 @@ cards:
   - id: vanguard_arsenal
     name: Arsenal
     name_upgraded: Arsenal+
-    type: Engine
+    type: Passive
     buy_cost: 4
     action_return: 0
     power: 0
     unplayable: true
     vp_formula: deck_div_10
-    effect: "Passive: Worth 1 VP for every 10 cards in your deck."
-    effect_upgraded: "Passive: Worth 1 VP for every 8 cards in your deck."
+    effect: "+1 VP for every 10 cards in your deck."
+    effect_upgraded: "+1 VP for every 8 cards in your deck."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards aggressive card purchasing. Creates a strategic fork: thin for efficiency or bulk up for VP. Takes up a hand slot when drawn."
