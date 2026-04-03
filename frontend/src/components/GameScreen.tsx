@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import type { GameState, Card, ResolutionStep, PlayerEffect } from '../types/game';
 import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS } from './HexGrid';
 import PlayerHud from './PlayerHud';
@@ -13,7 +14,7 @@ import PhaseBanner from './PhaseBanner';
 import ResolveOverlay from './ResolveOverlay';
 import GameIntroOverlay from './GameIntroOverlay';
 import { useAnimated, useAnimationMode, useAnimationOff } from './SettingsContext';
-import Tooltip, { IrreversibleButton, HoldToSubmitButton } from './Tooltip';
+import { IrreversibleButton, HoldToSubmitButton } from './Tooltip';
 import * as api from '../api/client';
 import CardFull from './CardFull';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
@@ -190,6 +191,8 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [resolveLogEntries, setResolveLogEntries] = useState<string[]>([]);
   // Player effect popups (shown over base tiles after resolve steps)
   const [activePlayerEffects, setActivePlayerEffects] = useState<PlayerEffect[]>([]);
+  // Upkeep indicator tooltip
+  const [upkeepTooltip, setUpkeepTooltip] = useState<{ x: number; y: number } | null>(null);
 
   // Auto-dismiss error toast after 4 seconds
   useEffect(() => {
@@ -472,10 +475,10 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   // Auto-open shop when entering buy phase.
   // During resolve flow, shop opening is handled explicitly by handleBannerComplete.
   useEffect(() => {
-    if (phase === 'buy' && !resolving && !phaseBanner) {
+    if (phase === 'buy' && !resolving && !phaseBanner && activePlayerEffects.length === 0) {
       setShowShopOverlay(true);
     }
-  }, [phase, resolving, phaseBanner]);
+  }, [phase, resolving, phaseBanner, activePlayerEffects]);
 
   // Compute which tiles are adjacent to the active player's territory
   const adjacentTiles = useMemo(() => {
@@ -962,8 +965,12 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   }, [introSequence, animated, activePlayer, gameState]);
 
   // Transition from resolve to buy phase (called after effects popup or directly)
-  const finishResolveAndShowBuy = useCallback(() => {
+  // If deferredState is provided, apply it now (was held back during effects popup)
+  const finishResolveAndShowBuy = useCallback((deferredState?: GameState | null) => {
     setActivePlayerEffects([]);
+    if (deferredState) {
+      onStateUpdate(deferredState);
+    }
     if (!animationOff) {
       setBannerSubtitle('Grow Your Deck');
       setPhaseBanner('buy');
@@ -972,7 +979,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       setInteractionBlocked(false);
       setShowShopOverlay(true);
     }
-  }, [animationOff]);
+  }, [animationOff, onStateUpdate]);
 
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
@@ -997,24 +1004,32 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       // Reveal banner finished but no resolution steps to animate —
       // apply the held-back state and show player effects or buy banner.
       const finishedState = resolveFinishedStateRef.current;
-      if (finishedState) {
-        onStateUpdate(finishedState);
-        resolveFinishedStateRef.current = null;
-      }
+      resolveFinishedStateRef.current = null;
       setActivePlayerIndex(0);
 
       // Show player effect popups if any (e.g. Sabotage forced discards)
       const effects = finishedState?.player_effects;
       if (effects && effects.length > 0 && !animationOff) {
+        // DON'T call onStateUpdate yet — defer until effects popup completes
+        // to prevent the phase-change useEffect from triggering a second buy banner
         setPhaseBanner(null);
         setInteractionBlocked(true);
         setActivePlayerEffects(effects);
+        // Compute max stagger: count per-target duplicates
+        const targetCounts: Record<string, number> = {};
+        for (const e of effects) targetCounts[e.target_player_id] = (targetCounts[e.target_player_id] ?? 0) + 1;
+        const maxStack = Math.max(...Object.values(targetCounts));
+        const totalDuration = 2500 + (maxStack - 1) * 300;
         setTimeout(() => {
-          finishResolveAndShowBuy();
-        }, 2500);
+          finishResolveAndShowBuy(finishedState);
+        }, totalDuration);
         return;
       }
 
+      // No effects — apply state now and show buy banner
+      if (finishedState) {
+        onStateUpdate(finishedState);
+      }
       // Switch directly to buy banner (bump key to force remount)
       setBannerSubtitle('Grow Your Deck');
       setPhaseBanner('buy');
@@ -1049,10 +1064,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     setCurrentStepFade(1);
     resolveChevronCacheRef.current = [];
     const finishedState = resolveFinishedStateRef.current;
-    if (finishedState) {
-      onStateUpdate(finishedState);
-      resolveFinishedStateRef.current = null;
-    }
+    resolveFinishedStateRef.current = null;
     setActivePlayerIndex(0);
     // Fade out VP paths and clear resolve log
     if (vpPaths.length > 0) {
@@ -1064,13 +1076,23 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     // Show player effect popups if any (e.g. Sabotage forced discards)
     const effects = finishedState?.player_effects;
     if (effects && effects.length > 0 && !animationOff) {
+      // DON'T call onStateUpdate yet — defer until effects popup completes
+      // to prevent the phase-change useEffect from triggering a second buy banner
       setInteractionBlocked(true);
       setActivePlayerEffects(effects);
-      // Auto-dismiss after 2.5 seconds, then show buy banner
+      // Compute max stagger: count per-target duplicates
+      const targetCounts: Record<string, number> = {};
+      for (const e of effects) targetCounts[e.target_player_id] = (targetCounts[e.target_player_id] ?? 0) + 1;
+      const maxStack = Math.max(...Object.values(targetCounts));
+      const totalDuration = 2500 + (maxStack - 1) * 300;
       setTimeout(() => {
-        finishResolveAndShowBuy();
-      }, 2500);
+        finishResolveAndShowBuy(finishedState);
+      }, totalDuration);
     } else {
+      // No effects — apply state now and show buy
+      if (finishedState) {
+        onStateUpdate(finishedState);
+      }
       finishResolveAndShowBuy();
     }
   }, [onStateUpdate, animationOff, vpPaths, finishResolveAndShowBuy]);
@@ -1818,7 +1840,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 fontSize: 13,
                 fontWeight: 'bold',
                 cursor: 'pointer',
-                ...(phase === 'buy' && !showShopOverlay && !activePlayer?.has_ended_turn ? {
+                ...(phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? {
                   animation: animationMode !== 'off' ? 'shopPulse 2s ease-in-out infinite' : undefined,
                   boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
                   borderColor: '#4a9eff',
@@ -1881,9 +1903,20 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           </div>
 
           {/* Upkeep indicator — top-left of grid view */}
-          {(phase === 'plan' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (
-            <div style={{ position: 'absolute', top: 10, left: 12, zIndex: 20 }}>
-              <Tooltip content={`To maintain your ${playerTileCount} occupied tile${playerTileCount !== 1 ? 's' : ''}, you must pay ${currentUpkeep} resource${currentUpkeep !== 1 ? 's' : ''} before your next Plan phase.`}>
+          {(phase === 'plan' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (() => {
+            const cantAfford = activePlayer.resources < currentUpkeep;
+            const tooltipText = cantAfford
+              ? `⚠ You can't afford ${currentUpkeep} 💰 upkeep! Tiles will be lost next round.`
+              : `Upkeep: ${currentUpkeep} 💰 paid before each Plan phase for ${playerTileCount} tile${playerTileCount !== 1 ? 's' : ''}. If you can't pay, your most distant tiles are lost.`;
+            return (
+              <div
+                style={{ position: 'absolute', top: 10, left: 12, zIndex: 20 }}
+                onPointerEnter={(e) => {
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  setUpkeepTooltip({ x: rect.left + rect.width / 2, y: rect.bottom });
+                }}
+                onPointerLeave={() => setUpkeepTooltip(null)}
+              >
                 <div
                   style={{
                     fontSize: 13,
@@ -1916,9 +1949,32 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                     </span>
                   )}
                 </div>
-              </Tooltip>
-            </div>
-          )}
+                {upkeepTooltip && createPortal(
+                  <div style={{
+                    position: 'fixed',
+                    left: upkeepTooltip.x,
+                    top: upkeepTooltip.y + 8,
+                    transform: 'translateX(-50%)',
+                    background: cantAfford ? '#332200' : '#111122',
+                    border: `1px solid ${cantAfford ? '#aa7722' : '#555'}`,
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                    color: cantAfford ? '#ffcc66' : '#ddd',
+                    maxWidth: 260,
+                    zIndex: 20000,
+                    pointerEvents: 'none',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                    whiteSpace: 'normal',
+                  }}>
+                    {tooltipText}
+                  </div>,
+                  document.body
+                )}
+              </div>
+            );
+          })()}
 
           {/* Bottom bar: action counter (left) + buttons (right) */}
           <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: 20 }}>
@@ -1947,7 +2003,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
             {/* Upgrade button — shown when a card is selected during plan phase */}
             {phase === 'plan' && activePlayer && !resolving && selectedCard && selectedCardIndex !== null &&
               !selectedCard.is_upgraded && hasUpgradePreview(selectedCard) &&
-              (activePlayer.upgrade_credits > 0 || gameState.test_mode) && surgeCardIndex === null && (
+              activePlayer.upgrade_credits > 0 && surgeCardIndex === null && (
               <div
                 style={{ position: 'relative', display: 'inline-block' }}
                 onMouseEnter={() => setShowUpgradePreview(true)}
@@ -1968,13 +2024,14 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 )}
                 <button
                   onClick={() => handleUpgradeCard(selectedCardIndex)}
+                  disabled={activePlayer.upgrade_credits < 1}
                   style={{
                     padding: '6px 14px',
-                    background: '#7a4acc',
+                    background: activePlayer.upgrade_credits > 0 ? '#7a4acc' : '#555',
                     border: 'none',
                     borderRadius: 6,
                     color: '#fff',
-                    cursor: 'pointer',
+                    cursor: activePlayer.upgrade_credits > 0 ? 'pointer' : 'not-allowed',
                     fontSize: 13,
                     boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                   }}
@@ -2047,7 +2104,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 </>
               );
             })()}
-            {phase === 'plan' && activePlayer && !resolving && surgeCardIndex === null && (
+            {phase === 'plan' && activePlayer && !resolving && activePlayerEffects.length === 0 && surgeCardIndex === null && (
               <HoldToSubmitButton
                 key={activePlayerId}
                 onConfirm={handleSubmitPlan}
@@ -2085,7 +2142,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 Resolving...
               </button>
             )}
-            {phase === 'buy' && activePlayer && !resolving && !activePlayer.has_ended_turn && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !activePlayer.has_ended_turn && (
               <IrreversibleButton
                 onClick={handleEndTurn}
                 tooltip="Ending the turn advances to the next round. Any unspent resources carry over."
@@ -2103,7 +2160,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 End Turn →
               </IrreversibleButton>
             )}
-            {phase === 'buy' && activePlayer && !resolving && activePlayer.has_ended_turn && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && (
               <button
                 disabled
                 style={{
@@ -2192,10 +2249,17 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         const transform = gridTransformRef.current;
         const rect = gridContainerRef.current?.getBoundingClientRect();
         if (!transform || !rect) return null;
-        // Find base tiles for targets
         const tiles = gameState.grid?.tiles ?? {};
+        // Compute per-target stacking index (how many effects already shown for this target)
+        const targetCounts: Record<string, number> = {};
+        const stackIndices = activePlayerEffects.map(e => {
+          const idx = targetCounts[e.target_player_id] ?? 0;
+          targetCounts[e.target_player_id] = idx + 1;
+          return idx;
+        });
+        const STACK_OFFSET = 50; // px between stacked popups
+        const STAGGER_DELAY = 300; // ms between each popup on same target
         return activePlayerEffects.map((effect, i) => {
-          // Find target player's base tile
           const baseTile = Object.values(tiles).find(t => t.is_base && t.base_owner === effect.target_player_id);
           if (!baseTile) return null;
           const local = axialToPixel(baseTile.q, baseTile.r);
@@ -2205,17 +2269,21 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           const colorStr = sourceColor !== undefined
             ? `#${sourceColor.toString(16).padStart(6, '0')}`
             : '#fff';
+          const stackIdx = stackIndices[i];
+          const yOffset = stackIdx * STACK_OFFSET;
+          const delay = stackIdx * STAGGER_DELAY;
           return (
             <div
               key={i}
               style={{
                 position: 'fixed',
                 left: screenX,
-                top: screenY - 40,
+                top: screenY - 40 - yOffset,
                 transform: 'translateX(-50%)',
-                zIndex: 15000,
+                zIndex: 15000 + stackIdx,
                 pointerEvents: 'none',
-                animation: 'playerEffectPopup 2.5s ease-out forwards',
+                opacity: 0,
+                animation: `playerEffectPopup 2.5s ease-out ${delay}ms forwards`,
               }}
             >
               <div style={{

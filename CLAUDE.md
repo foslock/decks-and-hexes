@@ -51,7 +51,7 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 
 ### Action Slot System
 - Every card costs exactly 1 action to play
-- Vanguard: 4 slots, Swarm: 4 slots, Fortress: 3 slots
+- All archetypes: 3 action slots
 - Cards marked ↺ return 1 action (net 0), ↑ return 2 actions (net +1)
 - Hard cap: 6 total actions per turn regardless of chaining
 - Immediate effects (↺ ↑, card draws) resolve during Plan Phase as cards are played
@@ -85,15 +85,15 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 - Active player must name target opponent when card is played
 - Never from current hand
 
-### Starting Decks (2 × hand size — cycles once before first purchase appears)
-| Archetype | Archetype Cards | Advance | Gather | Total | Hand Size |
-|---|---|---|---|---|---|
-| Vanguard | 2× Blitz | 4 | 2 | 8 | 4 |
-| Swarm | 2× Scout, 1× Swarm Tactics | 5 | 2 | 10 | 5 |
-| Fortress | 1× Garrison, 1× Fortify | 2 | 2 | 6 | 3 |
+### Starting Decks (10 cards each, cycles once before first purchase appears)
+| Archetype | Archetype Cards | Explore | Gather | Total | Hand Size | Action Slots |
+|---|---|---|---|---|---|---|
+| Vanguard | 2× War Chest | 4 | 4 | 10 | 5 | 3 |
+| Swarm | 2× Scout | 5 | 3 | 10 | 5 | 3 |
+| Fortress | 2× Bunker | 3 | 5 | 10 | 5 | 3 |
 
-### Advance & Gather (starter cards — NOT purchasable from market)
-- **Advance:** Claim: Power 1 on any adjacent tile
+### Explore & Gather (starter cards — NOT purchasable from market)
+- **Explore:** Claim: Power 1 on any adjacent tile
 - **Gather:** Gain 2 resources
 
 ### Objectives

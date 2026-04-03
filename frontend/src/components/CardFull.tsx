@@ -89,7 +89,6 @@ const CARD_ART: Record<string, string> = {
   neutral_forced_march: '🥁',
   neutral_rally_cry: '📣',
   neutral_war_bonds: '💰',
-  neutral_upgrade_credit: '⬆️',
 };
 
 const ARCHETYPE_LABEL: Record<string, string> = {

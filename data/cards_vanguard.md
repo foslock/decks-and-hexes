@@ -160,8 +160,10 @@ cards:
     buy_cost: 2
     action_return: 0
     power: 2
+    unoccupied_only: true
+    upgraded_unoccupied_only: false
     effect: "Claim: Power 2 on any adjacent neutral tile."
-    effect_upgraded: "Claim: Power 3 on any adjacent neutral tile."
+    effect_upgraded: "Claim: Power 3 on any adjacent tile."
     secondary_effect: "If successful, draw 1 card next turn."
     secondary_timing: on_resolution
 

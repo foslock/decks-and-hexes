@@ -118,19 +118,25 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         if match:
             forced_discard = int(match.group(1))
 
-    # Parse adjacency and range from effect text
-    adjacency_required = True
+    # Parse adjacency and range from effect text (explicit YAML field takes priority)
+    if "adjacency_required" in entry:
+        adjacency_required = bool(entry["adjacency_required"])
+    else:
+        adjacency_required = True
     claim_range = _safe_int(entry.get("claim_range", 1)) or 1
     # "up to N steps" → extended range (still adjacency-checked via claim_range)
     range_match = re.search(r'up to\s+(\d+)\s+steps', effect.lower())
     if range_match:
         claim_range = int(range_match.group(1))
-    elif "any tile" in effect.lower() and "adjacent" not in effect.lower():
-        # Truly unrestricted targeting (no adjacency at all)
+    elif "adjacency_required" not in entry and "any tile" in effect.lower() and "adjacent" not in effect.lower():
+        # Truly unrestricted targeting (no adjacency at all) — auto-detected from text
         adjacency_required = False
 
     # Unoccupied only (e.g. Explore can only claim neutral tiles)
     unoccupied_only = bool(entry.get("unoccupied_only", False))
+    upgraded_unoccupied_only = None
+    if "upgraded_unoccupied_only" in entry:
+        upgraded_unoccupied_only = bool(entry["upgraded_unoccupied_only"])
 
     # Multi-target (Surge: up to N extra targets beyond the first)
     multi_target_count = _safe_int(entry.get("multi_target_count", 0))
@@ -226,6 +232,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         adjacency_required=adjacency_required,
         claim_range=claim_range,
         unoccupied_only=unoccupied_only,
+        upgraded_unoccupied_only=upgraded_unoccupied_only,
         multi_target_count=multi_target_count,
         upgraded_multi_target_count=upgraded_multi_target_count,
         defense_target_count=defense_target_count,

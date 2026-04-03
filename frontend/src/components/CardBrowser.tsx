@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
-import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
+import { getUpgradedPreview } from '../hooks/upgradePreview';
 import { useShiftKey } from '../hooks/useShiftKey';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -34,23 +34,34 @@ const TYPE_ORDER: Record<string, number> = {
   engine: 2,
 };
 
-function sortCards(cards: Card[]): Card[] {
+type SortMode = 'cost' | 'type';
+
+function sortCards(cards: Card[], mode: SortMode): Card[] {
   return [...cards].sort((a, b) => {
-    // Cost (nulls/starters first)
-    const costA = a.buy_cost ?? -1;
-    const costB = b.buy_cost ?? -1;
-    if (costA !== costB) return costA - costB;
-    // Card type
-    const typeA = TYPE_ORDER[a.card_type] ?? 9;
-    const typeB = TYPE_ORDER[b.card_type] ?? 9;
-    if (typeA !== typeB) return typeA - typeB;
-    // Alphabetical
+    if (mode === 'cost') {
+      // Cost first (nulls/starters first), then type, then name
+      const costA = a.buy_cost ?? -1;
+      const costB = b.buy_cost ?? -1;
+      if (costA !== costB) return costA - costB;
+      const typeA = TYPE_ORDER[a.card_type] ?? 9;
+      const typeB = TYPE_ORDER[b.card_type] ?? 9;
+      if (typeA !== typeB) return typeA - typeB;
+    } else {
+      // Type first, then cost, then name
+      const typeA = TYPE_ORDER[a.card_type] ?? 9;
+      const typeB = TYPE_ORDER[b.card_type] ?? 9;
+      if (typeA !== typeB) return typeA - typeB;
+      const costA = a.buy_cost ?? -1;
+      const costB = b.buy_cost ?? -1;
+      if (costA !== costB) return costA - costB;
+    }
     return a.name.localeCompare(b.name);
   });
 }
 
-// Persists view mode across opens
+// Persists view mode and sort mode across opens
 let browserViewMemory: boolean = false;
+let browserSortMemory: SortMode = 'cost';
 
 function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolean }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
@@ -117,11 +128,6 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
           })()}
         </div>
       </div>
-      {shiftHeld && hasUpgradePreview(card) && (
-        <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 2 }}>
-          Upgraded
-        </div>
-      )}
       {hoverRect && createPortal(
         <div style={{
           position: 'fixed',
@@ -145,11 +151,6 @@ function BrowserCardFull({ card, shiftHeld }: { card: Card; shiftHeld: boolean }
   return (
     <div style={{ flexShrink: 0 }}>
       <CardFull card={displayCard} style={{ flexShrink: 0 }} />
-      {shiftHeld && hasUpgradePreview(card) && (
-        <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 4 }}>
-          Upgraded
-        </div>
-      )}
     </div>
   );
 }
@@ -162,6 +163,7 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullView, setFullViewRaw] = useState(() => browserViewMemory);
+  const [sortMode, setSortModeRaw] = useState<SortMode>(() => browserSortMemory);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const shiftHeld = useShiftKey();
@@ -169,6 +171,11 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
   const setFullView = useCallback((v: boolean) => {
     setFullViewRaw(v);
     browserViewMemory = v;
+  }, []);
+
+  const setSortMode = useCallback((v: SortMode) => {
+    setSortModeRaw(v);
+    browserSortMemory = v;
   }, []);
 
   useEffect(() => {
@@ -202,7 +209,7 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
   const groups = ARCHETYPE_ORDER.map(arch => ({
     archetype: arch,
     label: ARCHETYPE_LABELS[arch] || arch,
-    cards: sortCards(filteredCards.filter(c => c.archetype === arch)),
+    cards: sortCards(filteredCards.filter(c => c.archetype === arch), sortMode),
   })).filter(g => g.cards.length > 0);
 
   const totalCount = cards?.length ?? 0;
@@ -267,6 +274,20 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
                 outline: 'none',
               }}
             />
+            <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
+              <button
+                onClick={() => setSortMode('cost')}
+                style={{ padding: '3px 10px', background: sortMode === 'cost' ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
+              >
+                Cost
+              </button>
+              <button
+                onClick={() => setSortMode('type')}
+                style={{ padding: '3px 10px', background: sortMode === 'type' ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
+              >
+                Type
+              </button>
+            </div>
             <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
               <button
                 onClick={() => setFullView(false)}
