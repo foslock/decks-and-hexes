@@ -148,6 +148,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     # Unplayable flag (e.g. Land Grant — passive VP, can't be played from hand)
     unplayable = bool(entry.get("unplayable", False))
     passive_vp = _safe_int(entry.get("passive_vp", 0))
+    vp_formula = str(entry.get("vp_formula", ""))
 
     # Parse structured effects list from YAML
     effects_data = entry.get("effects", [])
@@ -231,6 +232,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         target_own_tile=target_own_tile,
         unplayable=unplayable,
         passive_vp=passive_vp,
+        vp_formula=vp_formula,
         description=description,
         upgrade_description=upgrade_description,
         name_upgraded=name_upgraded,

@@ -281,33 +281,28 @@ cards:
     buy_cost: 4
     action_return: 0
     power: 0
-    trash_on_use: true
-    effect: "Engine: At resolution, if you won 4 or more contested non-neutral tiles this turn, gain 2 VP. Trash this card."
-    effect_upgraded: "Engine: At resolution, if you won 4 or more contested non-neutral tiles this turn, gain 3 VP. Trash this card."
+    effect: "Engine: At resolution, if you won 2 or more contested tiles this turn, this card permanently gains +1 VP (starts at 0)."
+    effect_upgraded: "Engine: At resolution, if you won 2 or more contested tiles this turn, this card permanently gains +1 VP (starts at 0). Draw 1 card."
     secondary_effect: null
     secondary_timing: null
+    note: "Escalating VP engine — grows each round you hit the threshold. Stays in your deck permanently, occupying a hand slot."
 
     effects:
       - type: vp_from_contested_wins
-        value: 2
         timing: on_resolution
-        metadata: {required_wins: 4, upgraded_value: 3}
+        metadata: {required_wins: 2}
 
-  - id: vanguard_sacrifice_for_glory
-    name: Sacrifice for Glory
-    name_upgraded: Sacrifice for Glory+
+  - id: vanguard_arsenal
+    name: Arsenal
+    name_upgraded: Arsenal+
     type: Engine
     buy_cost: 4
     action_return: 0
     power: 0
-    trash_on_use: true
-    effect: "Engine: Trash any number of Claim cards from your hand. Gain VP equal to the total power of trashed cards divided by 3 (rounded down). Trash this card."
-    effect_upgraded: "Engine: Trash any number of Claim cards from your hand. Gain VP equal to the total power of trashed cards divided by 2 (rounded down). Trash this card."
+    unplayable: true
+    vp_formula: deck_div_10
+    effect: "Passive: Worth 1 VP for every 10 cards in your deck."
+    effect_upgraded: "Passive: Worth 1 VP for every 8 cards in your deck."
     secondary_effect: null
     secondary_timing: null
-
-    effects:
-      - type: vp_from_trash_claims
-        timing: immediate
-        requires_choice: true
-        metadata: {divisor: 3, upgraded_divisor: 2}
+    note: "Rewards aggressive card purchasing. Creates a strategic fork: thin for efficiency or bulk up for VP. Takes up a hand slot when drawn."

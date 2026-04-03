@@ -276,7 +276,8 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
     VP = (total_owned_tiles // TILES_PER_VP)
        + sum(vp_value for connected VP hexes)
        + sum(passive_vp for all cards in deck/hand/discard)
-       + player.vp (bonus VP from card effects like Scorched Earth, objectives, etc.)
+       + sum(dynamic VP from cards with vp_formula)
+       + player.vp (bonus VP from objectives, etc.)
     """
     player = game.players[player_id]
     if not game.grid:
@@ -295,14 +296,51 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
         if game.grid.tiles[f"{q},{r}"].is_vp and (q, r) in connected
     )
 
-    # Card VP: Land Grant (+1), Rubble (-1), etc.
+    # Card VP: Land Grant (+1), Rubble (-1), Battle Glory (accumulated), etc.
     all_cards = player.deck.cards + player.hand + player.deck.discard
     card_vp = sum(c.passive_vp for c in all_cards)
 
-    # Bonus VP from card effects (Scorched Earth, Fortified Position, objectives, etc.)
+    # Dynamic VP from cards with vp_formula
+    formula_vp = 0
+    for card in all_cards:
+        if not card.vp_formula:
+            continue
+        formula_vp += _compute_formula_vp(card, player, game)
+
+    # Bonus VP from objectives, etc.
     bonus_vp = player.vp
 
-    return max(0, tile_vp + vp_hex_bonus + card_vp + bonus_vp)
+    return max(0, tile_vp + vp_hex_bonus + card_vp + formula_vp + bonus_vp)
+
+
+def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> int:
+    """Compute dynamic VP for a card with a vp_formula."""
+    formula = card.vp_formula
+    is_upgraded = card.is_upgraded
+
+    if formula == "trash_div_5":
+        # Scorched Earth: 1 VP per 5 trashed cards (4 upgraded)
+        divisor = 4 if is_upgraded else 5
+        return len(player.trash) // divisor
+
+    elif formula == "fortified_tiles_3":
+        # Fortified Position: 1 VP per non-base tile with permanent defense >= 3 (>= 2 upgraded)
+        if not game.grid:
+            return 0
+        threshold = 2 if is_upgraded else 3
+        return sum(
+            1 for t in game.grid.tiles.values()
+            if t.owner == player.id and not t.is_base
+            and t.permanent_defense_bonus >= threshold
+        )
+
+    elif formula == "deck_div_10":
+        # Arsenal: 1 VP per 10 cards in deck (8 upgraded)
+        all_cards = player.deck.cards + player.hand + player.deck.discard
+        divisor = 8 if is_upgraded else 10
+        return len(all_cards) // divisor
+
+    return 0
 
 
 def create_game(

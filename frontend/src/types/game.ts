@@ -35,6 +35,7 @@ export interface Card {
   defense_target_count: number;
   flood: boolean;
   target_own_tile: boolean;
+  vp_formula?: string;
   description: string;
   upgrade_description?: string;
   name_upgraded?: string;

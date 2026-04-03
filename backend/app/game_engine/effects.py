@@ -79,13 +79,10 @@ class EffectType(str, Enum):
     # Dynamic buy cost (resolved at purchase time, not play time)
     DYNAMIC_BUY_COST = "dynamic_buy_cost"
 
-    # VP-generating effects (archetype-specific VP cards)
-    VP_FROM_TILES = "vp_from_tiles"                    # Territorial Dominance
-    VP_FROM_TILE_SACRIFICE = "vp_from_tile_sacrifice"  # Scorched Earth
-    VP_FROM_DEFENSE = "vp_from_defense"                # Fortified Position
-    VP_FOR_ALL = "vp_for_all"                          # Diplomacy
-    VP_FROM_CONTESTED_WINS = "vp_from_contested_wins"  # Battle Glory
-    VP_FROM_TRASH_CLAIMS = "vp_from_trash_claims"      # Sacrifice for Glory
+    # VP-related effects (derived VP system)
+    ENHANCE_VP_TILE = "enhance_vp_tile"                # Consecrate: +1 vp_value on a VP tile
+    GRANT_LAND_GRANTS = "grant_land_grants"            # Diplomacy: all players get a Land Grant
+    VP_FROM_CONTESTED_WINS = "vp_from_contested_wins"  # Battle Glory: +1 passive_vp on card per trigger
 
 
 class ConditionType(str, Enum):

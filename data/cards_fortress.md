@@ -277,17 +277,13 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 0
-    trash_on_use: true
-    effect: "Engine: Gain 2 VP for each tile you own with 2 or more defense. Trash this card."
-    effect_upgraded: "Engine: Gain 2 VP for each tile you own with 1 or more defense. Trash this card."
+    unplayable: true
+    vp_formula: fortified_tiles_3
+    effect: "Passive: Worth 1 VP for every non-base tile you own with a permanent defense bonus of 3 or higher."
+    effect_upgraded: "Passive: Worth 1 VP for every non-base tile you own with a permanent defense bonus of 2 or higher."
     secondary_effect: null
     secondary_timing: null
-
-    effects:
-      - type: vp_from_defense
-        value: 2
-        timing: immediate
-        metadata: {min_defense: 2, upgraded_min_defense: 1}
+    note: "Rewards Entrench investment. Fluctuates as tiles are lost or captured. Takes up a hand slot when drawn."
 
   - id: fortress_diplomacy
     name: Diplomacy
@@ -297,14 +293,13 @@ cards:
     action_return: 0
     power: 0
     trash_on_use: true
-    effect: "Engine: You gain 2 VP. All other players each gain 1 VP. Trash this card."
-    effect_upgraded: "Engine: You gain 3 VP. All other players each gain 1 VP. Trash this card."
+    effect: "Engine: All players (including you) receive a Land Grant card in their discard pile. Trash this card."
+    effect_upgraded: "Engine: All players (including you) receive a Land Grant card in their discard pile. You receive an additional Land Grant. Trash this card."
     secondary_effect: null
     secondary_timing: null
+    note: "Shared benefit — everyone gets +1 VP from the Land Grant. The upgraded version gives you a second one for a net +1 advantage."
 
     effects:
-      - type: vp_for_all
-        value: 1
+      - type: grant_land_grants
         timing: immediate
-        metadata: {self_bonus: 1, self_bonus_upgraded: 2}
 

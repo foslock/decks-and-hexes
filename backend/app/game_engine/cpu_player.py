@@ -184,8 +184,25 @@ class CPUPlayer:
         if not player_tiles and not card.flood:
             return results
 
-        # Flood cards target own tiles
+        # Cards that target own tiles (Flood, Consecrate, etc.)
         if card.target_own_tile:
+            # Consecrate: specifically target connected VP tiles
+            has_enhance = any(
+                hasattr(e, 'type') and e.type == EffectType.ENHANCE_VP_TILE
+                for e in card.effects
+            )
+            if has_enhance:
+                connected = game.grid.get_connected_tiles(self.player_id)
+                for pt in player_tiles:
+                    if pt.is_vp and (pt.q, pt.r) in connected:
+                        score = 10.0  # high priority — permanent board improvement
+                        results.append((score, {
+                            "card_index": card_index,
+                            "target_q": pt.q, "target_r": pt.r,
+                        }))
+                return results
+
+            # Flood cards: target own tiles with many claimable adjacent
             for pt in player_tiles:
                 adj = game.grid.get_adjacent(pt.q, pt.r)
                 claimable_adj = [t for t in adj if not t.is_blocked and t.owner != self.player_id]
@@ -427,56 +444,31 @@ class CPUPlayer:
             if effect.type == EffectType.GAIN_VP:
                 score += effect.value * 10.0
 
-        # VP-generating archetype cards
+        # VP-related effect cards
         for effect in card.effects:
-            if effect.type == EffectType.VP_FROM_TILES:
-                # Territorial Dominance: estimate VP from current tile count
+            if effect.type == EffectType.ENHANCE_VP_TILE:
+                # Consecrate: play on a connected VP tile to increase its value
                 if game.grid:
-                    tiles = len(game.grid.get_player_tiles(self.player_id))
-                    divisor = effect.metadata.get("divisor", 5)
-                    if card.is_upgraded:
-                        divisor = effect.metadata.get("upgraded_divisor", divisor)
-                    estimated_vp = tiles // divisor
-                    score += estimated_vp * 10.0
+                    connected = game.grid.get_connected_tiles(self.player_id)
+                    vp_tiles = [
+                        t for t in game.grid.tiles.values()
+                        if t.is_vp and t.owner == self.player_id
+                        and (t.q, t.r) in connected
+                    ]
+                    if vp_tiles:
+                        score += 8.0  # permanent board improvement
+                    else:
+                        score -= 5.0  # can't use it — no valid targets
 
-            elif effect.type == EffectType.VP_FROM_TILE_SACRIFICE:
-                # Scorched Earth: estimate VP from sacrificeable tiles
-                if game.grid:
-                    non_vp_tiles = sum(
-                        1 for t in game.grid.tiles.values()
-                        if t.owner == self.player_id and not t.is_vp
-                    )
-                    tiles_per_vp = effect.metadata.get("tiles_per_vp", 3)
-                    if card.is_upgraded:
-                        tiles_per_vp = effect.metadata.get("upgraded_tiles_per_vp", tiles_per_vp)
-                    estimated_vp = non_vp_tiles // tiles_per_vp
-                    score += estimated_vp * 10.0
-
-            elif effect.type == EffectType.VP_FROM_DEFENSE:
-                # Fortified Position: count tiles meeting defense threshold
-                if game.grid:
-                    min_def = effect.metadata.get("min_defense", 3)
-                    if card.is_upgraded:
-                        min_def = effect.metadata.get("upgraded_min_defense", min_def)
-                    qualifying = sum(
-                        1 for t in game.grid.tiles.values()
-                        if t.owner == self.player_id and t.defense_power >= min_def
-                    )
-                    score += qualifying * effect.value * 10.0
-
-            elif effect.type == EffectType.VP_FOR_ALL:
-                # Diplomacy: net VP = self_vp - (opponents * their_vp)
-                # Play when behind in VP or when 1 VP matters
-                self_vp = effect.value
-                if card.is_upgraded:
-                    self_vp += effect.metadata.get("self_bonus_upgraded", 0)
+            elif effect.type == EffectType.GRANT_LAND_GRANTS:
+                # Diplomacy: everyone gets a Land Grant (+1 VP each)
                 num_opponents = len(game.players) - 1
-                # Net advantage: we gain self_vp, each opponent gains base_vp
-                net = self_vp - (effect.value * num_opponents * 0.5)  # discount opponent VP
-                score += max(net, 0.5) * 10.0
+                # Net advantage is small (everyone benefits equally, unless upgraded)
+                net_advantage = 1.0 if card.is_upgraded else 0.0
+                score += max(net_advantage + 1.0, 2.0) * 5.0
 
             elif effect.type == EffectType.VP_FROM_CONTESTED_WINS:
-                # Battle Glory: speculative — play if we have enough claims planned
+                # Battle Glory: play when we have claims planned against enemies
                 claim_count = sum(
                     1 for c in player.hand if c.card_type == CardType.CLAIM
                 )
@@ -484,26 +476,11 @@ class CPUPlayer:
                     1 for a in player.planned_actions
                     if a.card.card_type == CardType.CLAIM
                 )
-                required = effect.metadata.get("required_wins", 4)
+                required = effect.metadata.get("required_wins", 2)
                 if claim_count + already_planned >= required:
-                    vp_award = effect.value
-                    if card.is_upgraded:
-                        vp_award = effect.metadata.get("upgraded_value", vp_award)
-                    score += vp_award * 8.0  # slightly less than certain VP
+                    score += 8.0  # good chance to trigger
                 else:
-                    score += 0.5  # unlikely to trigger
-
-            elif effect.type == EffectType.VP_FROM_TRASH_CLAIMS:
-                # Sacrifice for Glory: calculate VP from claim cards in hand
-                total_power = sum(
-                    c.effective_power for c in player.hand
-                    if c.card_type == CardType.CLAIM
-                )
-                divisor = effect.metadata.get("divisor", 3)
-                if card.is_upgraded:
-                    divisor = effect.metadata.get("upgraded_divisor", divisor)
-                estimated_vp = total_power // divisor
-                score += estimated_vp * 10.0
+                    score += 1.0  # unlikely but still has long-term value
 
         # Cost reduction
         for effect in card.effects:
@@ -541,14 +518,6 @@ class CPUPlayer:
             if effect.type == EffectType.SELF_TRASH and effect.requires_choice:
                 trash_indices = self._pick_cards_to_trash(player, effect.value, card_index)
                 action_dict["trash_card_indices"] = trash_indices
-            if effect.type == EffectType.VP_FROM_TRASH_CLAIMS:
-                # Sacrifice for Glory: select all claim cards in hand to trash
-                claim_indices = [
-                    j for j, c in enumerate(player.hand)
-                    if c.card_type == CardType.CLAIM and j != card_index
-                ]
-                action_dict["trash_card_indices"] = claim_indices
-
         return (score, action_dict)
 
     def _pick_forced_discard_target(self, game: Any, player: Any) -> Optional[str]:
@@ -714,12 +683,15 @@ class CPUPlayer:
         if card.passive_vp > 0:
             score += card.passive_vp * 8.0
 
-        # VP-generating archetype cards
+        # VP-related cards are high priority purchases
         for effect in card.effects:
-            if effect.type in (EffectType.VP_FROM_TILES, EffectType.VP_FROM_TILE_SACRIFICE,
-                               EffectType.VP_FROM_DEFENSE, EffectType.VP_FOR_ALL,
-                               EffectType.VP_FROM_CONTESTED_WINS, EffectType.VP_FROM_TRASH_CLAIMS):
-                score += 6.0  # VP cards are high priority purchases
+            if effect.type in (EffectType.ENHANCE_VP_TILE, EffectType.GRANT_LAND_GRANTS,
+                               EffectType.VP_FROM_CONTESTED_WINS):
+                score += 6.0
+
+        # Dynamic VP formula cards (passive VP generators)
+        if card.vp_formula:
+            score += 5.0
 
         # Cost efficiency: penalize expensive cards
         if cost > 0:
