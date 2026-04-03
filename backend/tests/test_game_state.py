@@ -488,13 +488,15 @@ class TestEndOfTurn:
 
 
 class TestVPScoring:
-    def test_vp_hex_scores_on_capture(self, small_2p_game: GameState) -> None:
-        """VP hexes award VP once when captured during reveal."""
+    def test_vp_hex_increases_derived_vp_when_connected(self, small_2p_game: GameState) -> None:
+        """Capturing a VP hex connected to base increases derived VP via the bonus."""
+        from app.game_engine.game_state import compute_player_vp
         game = small_2p_game
         assert game.grid is not None
 
+        vp_before = compute_player_vp(game, "p0")
+
         p0 = game.players["p0"]
-        vp_before = p0.vp
 
         # Find a VP tile and give p0 a claim card with enough power
         vp_tile = next(t for t in game.grid.tiles.values()
@@ -530,29 +532,42 @@ class TestVPScoring:
         for pid in game.player_order:
             submit_plan(game, pid)
 
-        # After reveal, p0 should have scored VP from capturing the VP hex
-        assert p0.vp > vp_before
+        # After reveal, derived VP should be higher (from tile count + VP hex bonus)
+        vp_after = compute_player_vp(game, "p0")
+        assert vp_after > vp_before
 
-    def test_holding_vp_hex_does_not_score_per_turn(self, small_2p_game: GameState) -> None:
-        """VP hexes no longer score passively each turn."""
+    def test_disconnected_vp_hex_does_not_add_bonus(self, small_2p_game: GameState) -> None:
+        """VP hexes not connected to base don't contribute bonus VP."""
+        from app.game_engine.game_state import compute_player_vp
         game = small_2p_game
         assert game.grid is not None
 
-        # Give p0 a VP hex that was held since before round 1
+        # Find a VP tile far from p0's base
         vp_tile = next(t for t in game.grid.tiles.values()
-                       if t.is_vp and not t.is_blocked)
+                       if t.is_vp and not t.is_blocked and t.owner is None)
+
+        # Assign it to p0 but make sure there's no path back to base
+        # (clear any owned tiles that might connect)
+        p0_base = next(t for t in game.grid.tiles.values()
+                       if t.is_base and t.base_owner == "p0")
+        # Only keep the base tile owned by p0
+        for t in game.grid.tiles.values():
+            if t.owner == "p0" and not t.is_base:
+                t.owner = None
         vp_tile.owner = "p0"
-        vp_tile.held_since_turn = 0
 
-        vp_before = game.players["p0"].vp
-
-        # Advance through a full round (no cards played)
-        for pid in game.player_order:
-            submit_plan(game, pid)
-        execute_end_of_turn(game)
-
-        # VP should NOT have increased from passive holding
-        assert game.players["p0"].vp == vp_before
+        # VP hex is not connected to base — should not add vp_value bonus
+        connected = game.grid.get_connected_tiles("p0")
+        # The VP tile should NOT be in the connected set (unless it's adjacent to base)
+        if (vp_tile.q, vp_tile.r) not in connected:
+            vp_with_disconnected = compute_player_vp(game, "p0")
+            # Now connect it by building a path
+            vp_tile.owner = None
+            vp_before = compute_player_vp(game, "p0")
+            vp_tile.owner = "p0"
+            # The bonus should only be from tile count, not vp_value
+            # (tile_vp increases by at most 1 from the extra tile, but no vp_value bonus)
+            assert vp_with_disconnected <= vp_before + 1  # at most +1 from tile count
 
 
 class TestForcedDiscards:

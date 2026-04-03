@@ -17,6 +17,7 @@ from .cards import (
     Deck,
     Timing,
     build_starting_deck,
+    make_rubble_card,
     _copy_card,
 )
 from .effects import ConditionType, EffectType, TurnModifiers
@@ -25,7 +26,7 @@ from .effect_resolver import (
     resolve_immediate_effects,
     resolve_on_resolution_effects,
 )
-from .hex_grid import GridSize, HexGrid, generate_hex_grid
+from .hex_grid import BASE_DEFENSE, GridSize, HexGrid, generate_hex_grid
 
 
 class Phase(str, Enum):
@@ -40,10 +41,21 @@ class Phase(str, Enum):
 
 STARTING_RESOURCES = 3
 UPKEEP_COST = 1
-VP_TARGET = 10
+VP_TARGET = 10  # legacy default; use compute_vp_target() for new games
+TILES_PER_VP = 3
+SPEED_MULTIPLIERS: dict[str, float] = {"fast": 1.0, "normal": 1.25, "slow": 1.5}
 REROLL_COST = 2
 RETAIN_COST = 1
 UPGRADE_CREDIT_COST = 5
+
+
+def compute_vp_target(total_tiles: int, player_count: int, speed: str = "normal") -> int:
+    """Compute the VP target based on grid size, player count, and game speed."""
+    divisor = int(TILES_PER_VP * player_count * 0.5)
+    if divisor == 0:
+        divisor = 1
+    base = total_tiles // divisor
+    return max(3, round(base * SPEED_MULTIPLIERS.get(speed, 1.25)))
 
 
 @dataclass
@@ -98,7 +110,18 @@ class Player:
     def action_slots(self) -> int:
         return ARCHETYPE_SLOTS[self.archetype]
 
-    def to_dict(self, hide_hand: bool = False) -> dict[str, Any]:
+    @property
+    def rubble_count(self) -> int:
+        """Count Rubble cards across deck, hand, and discard."""
+        return sum(
+            1 for c in self.deck.cards + self.hand + self.deck.discard
+            if c.name == "Rubble"
+        )
+
+    def to_dict(self, hide_hand: bool = False, game: Any = None) -> dict[str, Any]:
+        # VP is derived — needs game context; falls back to stored vp if no game
+        from . import game_state as _gs
+        vp = _gs.compute_player_vp(game, self.id) if game else self.vp
         return {
             "id": self.id,
             "name": self.name,
@@ -106,7 +129,7 @@ class Player:
             "hand": [] if hide_hand else [c.to_dict() for c in self.hand],
             "hand_count": len(self.hand),
             "resources": self.resources,
-            "vp": self.vp,
+            "vp": vp,
             "actions_used": self.actions_used,
             "actions_available": self.actions_available,
             "archetype_market": [c.to_dict() for c in self.archetype_market],
@@ -122,6 +145,7 @@ class Player:
             "has_ended_turn": self.has_ended_turn,
             "trash": [c.to_dict() for c in self.trash],
             "last_upkeep_paid": self.last_upkeep_paid,
+            "rubble_count": self.rubble_count,
         }
 
 
@@ -216,7 +240,7 @@ class GameState:
     def to_dict(self, for_player_id: Optional[str] = None) -> dict[str, Any]:
         players_dict: dict[str, Any] = {}
         for pid, p in self.players.items():
-            pdata = p.to_dict(hide_hand=(for_player_id is not None and pid != for_player_id))
+            pdata = p.to_dict(hide_hand=(for_player_id is not None and pid != for_player_id), game=self)
             # Add effective buy costs for all market cards visible to this player
             effective_costs: dict[str, int] = {}
             for card in p.archetype_market:
@@ -246,6 +270,41 @@ class GameState:
         return result
 
 
+def compute_player_vp(game: GameState, player_id: str) -> int:
+    """Derive VP from current game state — tiles, connectivity, cards, and bonus VP.
+
+    VP = (total_owned_tiles // TILES_PER_VP)
+       + sum(vp_value for connected VP hexes)
+       + sum(passive_vp for all cards in deck/hand/discard)
+       + player.vp (bonus VP from card effects like Scorched Earth, objectives, etc.)
+    """
+    player = game.players[player_id]
+    if not game.grid:
+        return max(0, player.vp)
+
+    player_tiles = [
+        (t.q, t.r) for t in game.grid.tiles.values() if t.owner == player_id
+    ]
+    tile_vp = len(player_tiles) // TILES_PER_VP
+
+    # Connected VP hexes add their vp_value as a bonus
+    connected = game.grid.get_connected_tiles(player_id)
+    vp_hex_bonus = sum(
+        game.grid.tiles[f"{q},{r}"].vp_value
+        for q, r in player_tiles
+        if game.grid.tiles[f"{q},{r}"].is_vp and (q, r) in connected
+    )
+
+    # Card VP: Land Grant (+1), Rubble (-1), etc.
+    all_cards = player.deck.cards + player.hand + player.deck.discard
+    card_vp = sum(c.passive_vp for c in all_cards)
+
+    # Bonus VP from card effects (Scorched Earth, Fortified Position, objectives, etc.)
+    bonus_vp = player.vp
+
+    return max(0, tile_vp + vp_hex_bonus + card_vp + bonus_vp)
+
+
 def create_game(
     grid_size: GridSize,
     player_configs: list[dict[str, Any]],
@@ -253,15 +312,21 @@ def create_game(
     seed: Optional[int] = None,
     test_mode: bool = False,
     vp_target: Optional[int] = None,
+    speed: str = "normal",
 ) -> GameState:
     """Create a new game with the given configuration."""
     rng = random.Random(seed)
     num_players = len(player_configs)
 
     game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode)
+    game.grid = generate_hex_grid(grid_size, num_players, rng)
+
+    # Set VP target: explicit override > dynamic computation
     if vp_target is not None:
         game.vp_target = vp_target
-    game.grid = generate_hex_grid(grid_size, num_players, rng)
+    else:
+        total_tiles = sum(1 for t in game.grid.tiles.values() if not t.is_blocked)
+        game.vp_target = compute_vp_target(total_tiles, num_players, speed)
 
     # Create players and assign starting positions
     for i, config in enumerate(player_configs):
@@ -289,14 +354,21 @@ def create_game(
         game.players[player_id] = player
         game.player_order.append(player_id)
 
-        # Assign starting tiles
+        # Assign starting tiles — first tile in each cluster is the base
         if i < len(game.grid.starting_positions):
             cluster = game.grid.starting_positions[i]
-            for q, r in cluster:
+            for j, (q, r) in enumerate(cluster):
                 tile = game.grid.get_tile(q, r)
                 if tile:
                     tile.owner = player_id
                     tile.held_since_turn = 0
+                    # First tile in the cluster is the base tile
+                    if j == 0:
+                        tile.is_base = True
+                        tile.base_owner = player_id
+                        base_def = BASE_DEFENSE.get(archetype.value, 3)
+                        tile.base_defense = base_def
+                        tile.defense_power = base_def
 
     # Random first player
     game.first_player_index = rng.randint(0, num_players - 1)
@@ -347,14 +419,12 @@ def execute_start_of_turn(game: GameState) -> GameState:
         else:
             player.last_upkeep_paid = 0
 
-        # VP from held tiles removed — VP hexes now score once on capture
-        # (see execute_reveal for the one-time VP award)
-
-        # Check win condition
-        if player.vp >= game.vp_target:
+        # Check win condition (VP is derived from territory + cards)
+        current_vp = compute_player_vp(game, pid)
+        if current_vp >= game.vp_target:
             game.winner = pid
             game.current_phase = Phase.GAME_OVER
-            game._log(f"{player.name} wins with {player.vp} VP!")
+            game._log(f"{player.name} wins with {current_vp} VP!")
             return game
 
         # Draw hand (minus forced discards, plus extra draws from effects)
@@ -783,17 +853,28 @@ def execute_reveal(game: GameState) -> GameState:
         })
 
         if winner_id != tile.owner:
-            old_owner = tile.owner
-            tile.owner = winner_id
-            tile.held_since_turn = game.current_round
-            tile.defense_power = tile.base_defense  # reset to intrinsic defense, not 0
-            tile.permanent_defense_bonus = 0  # Entrench bonuses lost on capture
-            game._log(f"{game.players[winner_id].name} claims tile {tile_key} (power {max_power})")
-            # VP hexes award VP once on capture
-            if tile.is_vp:
-                winner = game.players[winner_id]
-                winner.vp += tile.vp_value
-                game._log(f"{winner.name} scores {tile.vp_value} VP from capturing VP hex {tile_key} (total: {winner.vp})")
+            if tile.is_base:
+                # Base raid: generate Rubble cards instead of capturing
+                defender = game.players[tile.base_owner]  # type: ignore[arg-type]
+                attacker_power = power_by_player.get(winner_id, 0)
+                total_defense = power_by_player.get(tile.base_owner, 0) if tile.base_owner in power_by_player else current_defense
+                rubble_count = max(0, attacker_power - total_defense)
+                if rubble_count > 0:
+                    for _ in range(rubble_count):
+                        defender.deck.discard.append(make_rubble_card())
+                    game._log(
+                        f"{game.players[winner_id].name} raids {defender.name}'s base! "
+                        f"{rubble_count} Rubble card(s) added to {defender.name}'s deck."
+                    )
+                else:
+                    game._log(f"{game.players[winner_id].name} fails to raid {defender.name}'s base")
+            else:
+                old_owner = tile.owner
+                tile.owner = winner_id
+                tile.held_since_turn = game.current_round
+                tile.defense_power = tile.base_defense  # reset to intrinsic defense, not 0
+                tile.permanent_defense_bonus = 0  # Entrench bonuses lost on capture
+                game._log(f"{game.players[winner_id].name} claims tile {tile_key} (power {max_power})")
         else:
             game._log(f"{tile.owner and game.players[tile.owner].name} defends tile {tile_key}")
 
@@ -978,10 +1059,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             if effective_cost > 0:
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
-        # Award passive VP (e.g. Land Grant)
-        if purchased.passive_vp > 0:
-            player.vp += purchased.passive_vp
-            game._log(f"{player.name} gains {purchased.passive_vp} VP from purchasing {purchased.name}")
+        # Note: passive_vp cards (e.g. Land Grant) contribute to derived VP automatically
         game._log(f"{player.name} buys {purchased.name} from neutral market")
         return True, f"Bought {purchased.name}"
 

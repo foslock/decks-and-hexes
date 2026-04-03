@@ -29,6 +29,10 @@ class ArchetypeStats:
     total_tiles: int = 0
     total_vp_hexes: int = 0
     total_rounds_when_won: int = 0
+    total_rubble_received: int = 0
+    total_claims_made: int = 0
+    total_claims_won: int = 0
+    total_claims_lost: int = 0
 
     @property
     def win_rate(self) -> float:
@@ -41,6 +45,10 @@ class ArchetypeStats:
     @property
     def avg_tiles(self) -> float:
         return self.total_tiles / self.games if self.games > 0 else 0.0
+
+    @property
+    def avg_rubble(self) -> float:
+        return self.total_rubble_received / self.games if self.games > 0 else 0.0
 
     @property
     def avg_rounds_to_win(self) -> float:
@@ -165,6 +173,10 @@ def _archetype_win_rates(results: list[GameResult]) -> dict[str, Any]:
             s.total_vp += pr.final_vp
             s.total_tiles += pr.tiles_controlled
             s.total_vp_hexes += pr.vp_hexes_controlled
+            s.total_rubble_received += pr.rubble_received
+            s.total_claims_made += pr.total_claims_made
+            s.total_claims_won += pr.total_claims_won
+            s.total_claims_lost += pr.total_claims_lost
             if pr.player_id == game.winner_id:
                 s.wins += 1
                 s.total_rounds_when_won += game.rounds_played
@@ -181,6 +193,10 @@ def _archetype_win_rates(results: list[GameResult]) -> dict[str, Any]:
             "avg_vp": round(s.avg_vp, 1),
             "avg_tiles": round(s.avg_tiles, 1),
             "avg_vp_hexes": round(s.total_vp_hexes / s.games if s.games > 0 else 0, 1),
+            "avg_rubble": round(s.avg_rubble, 1),
+            "avg_claims_made": round(s.total_claims_made / s.games if s.games > 0 else 0, 1),
+            "avg_claims_won": round(s.total_claims_won / s.games if s.games > 0 else 0, 1),
+            "avg_claims_lost": round(s.total_claims_lost / s.games if s.games > 0 else 0, 1),
             "avg_rounds_to_win": round(s.avg_rounds_to_win, 1),
         }
 
@@ -406,7 +422,9 @@ def print_report(report: dict[str, Any]) -> None:
         delta_str = f"+{stats['delta']:.1%}" if stats['delta'] > 0 else f"{stats['delta']:.1%}"
         print(f"  {arch:10s} {stats['win_rate']:6.1%} ({delta_str}) "
               f"[{bar:40s}] "
-              f"avg_vp={stats['avg_vp']:.0f} avg_tiles={stats['avg_tiles']:.0f}")
+              f"avg_vp={stats['avg_vp']:.0f} avg_tiles={stats['avg_tiles']:.0f} "
+              f"rubble={stats['avg_rubble']:.1f} "
+              f"claims={stats['avg_claims_won']:.0f}W/{stats['avg_claims_lost']:.0f}L")
 
     # Passive win rates
     print("\n--- PASSIVE WIN RATES (top 10) ---")

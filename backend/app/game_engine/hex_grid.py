@@ -20,6 +20,13 @@ class GridSize(str, Enum):
     LARGE = "large"
 
 
+# Base tile defense per archetype (used when assigning starting tiles)
+BASE_DEFENSE: dict[str, int] = {
+    "vanguard": 3,
+    "swarm": 2,
+    "fortress": 4,
+}
+
 # radius = number of rings around center (0-indexed)
 GRID_CONFIG: dict[GridSize, dict[str, Any]] = {
     GridSize.SMALL: {"radius": 3, "tiles": 37, "vp_hexes": 4, "blocked": (3, 4), "players": (2, 3)},
@@ -40,6 +47,8 @@ class HexTile:
     base_defense: int = 0  # intrinsic defense set at generation; defense resets to this on capture
     permanent_defense_bonus: int = 0  # Entrench: persists until tile is captured
     held_since_turn: Optional[int] = None  # track when ownership started
+    is_base: bool = False  # True for starting corner tiles (permanently owned)
+    base_owner: Optional[str] = None  # player_id of the base's permanent owner
 
     @property
     def s(self) -> int:
@@ -80,6 +89,40 @@ class HexGrid:
     def get_player_tiles(self, player_id: str) -> list[HexTile]:
         return [t for t in self.tiles.values() if t.owner == player_id]
 
+    def get_connected_tiles(self, player_id: str) -> set[tuple[int, int]]:
+        """BFS from player's base tile across owned tiles.
+
+        Returns the set of (q, r) coordinates reachable from the player's base
+        via a continuous path of tiles owned by that player.
+        """
+        # Find the base tile for this player
+        base_tile = None
+        for tile in self.tiles.values():
+            if tile.is_base and tile.base_owner == player_id:
+                base_tile = tile
+                break
+        if not base_tile:
+            return set()
+
+        visited: set[tuple[int, int]] = set()
+        queue = deque([(base_tile.q, base_tile.r)])
+        visited.add((base_tile.q, base_tile.r))
+
+        while queue:
+            q, r = queue.popleft()
+            tile = self.get_tile(q, r)
+            if not tile:
+                continue
+            for nq, nr in tile.neighbors():
+                if (nq, nr) in visited:
+                    continue
+                neighbor = self.get_tile(nq, nr)
+                if neighbor and not neighbor.is_blocked and neighbor.owner == player_id:
+                    visited.add((nq, nr))
+                    queue.append((nq, nr))
+
+        return visited
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "size": self.size.value,
@@ -99,6 +142,8 @@ def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
         "defense_power": tile.defense_power,
         "base_defense": tile.base_defense,
         "held_since_turn": tile.held_since_turn,
+        "is_base": tile.is_base,
+        "base_owner": tile.base_owner,
     }
 
 

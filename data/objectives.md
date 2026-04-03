@@ -17,9 +17,9 @@ objectives:
     name: Blitzkrieg
     archetype: vanguard
     vp_reward: 2
-    condition: "Be the first player to control 2 VP hex tiles simultaneously at the end of any round."
-    verification: "Check tile control after resolve phase. Player must own both VP hexes at the same time."
-    notes: "Natural for Vanguard who pushes center. Achievable by others with deliberate effort."
+    condition: "Be the first player to control 2 VP hex tiles that are both connected to your base simultaneously at the end of any round."
+    verification: "Check tile control and connectivity after resolve phase. Both VP hexes must be connected to the player's base via owned tiles."
+    notes: "Natural for Vanguard who pushes center. Connectivity requirement rewards contiguous expansion, not scattered grabs."
 
   - id: obj_overwhelming_force
     name: Overwhelming Force
@@ -215,9 +215,9 @@ objectives:
     name: Kingmaker
     archetype: wildcard
     vp_reward: 2
-    condition: "Have the fewest VP of all active players at the objective reveal round, but earn more VP than any other player in the rounds after the reveal."
-    verification: "Record VP standings at reveal. Track VP earned per player from reveal onward. Award at game end."
-    notes: "Comeback mechanic. Hard to game since it requires being behind at reveal. Award at game end."
+    condition: "Have the fewest derived VP of all active players at the objective reveal round, but have the highest derived VP (excluding this objective's reward) at the end of any subsequent round."
+    verification: "Record derived VP standings at reveal. Check derived VP (excluding objective bonuses) at end of each subsequent round."
+    notes: "Comeback mechanic. Hard to game since it requires being behind at reveal. With derived VP, being behind means fewer tiles — a real deficit to overcome."
 
   - id: obj_veteran
     name: Veteran

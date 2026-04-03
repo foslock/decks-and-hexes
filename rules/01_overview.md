@@ -1,7 +1,7 @@
 # HexDraft – Game Overview
 
 ## Summary
-HexDraft is a 2–6 player simultaneous deck-building territory control game. Players start in corners of a hexagonal grid, grow their deck of cards over the course of the game, and compete to be the first player to reach **20 Victory Points (VP)**.
+HexDraft is a 2–6 player simultaneous deck-building territory control game. Players start in corners of a hexagonal grid, grow their deck of cards over the course of the game, and compete to be the first player to reach the **VP target** (determined by grid size, player count, and game speed).
 
 ## Core Design Pillars
 - **Simultaneous play** – all players plan and reveal actions at the same time to keep turns fast
@@ -15,12 +15,20 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Pl
 - CPU players count toward archetype weighting for objective selection and **will attempt to complete objectives**, competing with human players for the 2 VP reward
 
 ## Win Condition
-The **first player to reach 20 VP wins immediately.**
+The **first player whose derived VP reaches the VP target wins.** VP is checked at the start of each turn after upkeep.
 
-VP is earned by:
-1. Controlling VP Hex tiles on the board (1 VP per tile per full turn held — earned at the start of each turn for tiles claimed in a previous turn, not the turn they were claimed)
-2. Completing mid-game Objectives (2 VP each)
-3. Purchasing Land Grant neutral cards (1 VP immediately, card trashed)
+VP is derived instantaneously from the game state:
+1. **Territory:** +1 VP for every 3 tiles owned (rounded down)
+2. **Connected VP hexes:** VP hex tiles connected back to your base via owned tiles add their bonus VP (+1 or +2)
+3. **Card VP:** Land Grant cards in deck add +1 VP each; Rubble cards subtract -1 VP each
+4. **Objectives:** Completing mid-game objectives awards +2 VP each
+5. **Card effects:** Some cards grant or remove bonus VP
+
+### Base Tiles
+Each player's starting corner tile is their **base** — permanently owned, with passive defense (Swarm: 2, Vanguard: 3, Fortress: 4). Bases cannot be captured but can be **raided** to inflict Rubble cards on the defender.
+
+### Dynamic VP Target
+The VP target scales with grid size, player count, and game speed (Fast/Normal/Slow). Default speed is Normal (1.25× multiplier). Formula: `total_tiles // (3 × player_count × 0.5) × speed_multiplier`, minimum 3.
 
 ---
 
@@ -40,9 +48,9 @@ Each archetype is defined by two of three traits: **Fast**, **Cheap**, **Strong*
 
 | Size | Hex Count | VP Hexes | Recommended Players | Target Length |
 |---|---|---|---|---|
-| Small | 37 | 8 | 2–3 | 20–30 min |
-| Medium | 61 | 13 | 3–4 | 30–45 min |
-| Large | 91 | 20 | 4–6 | 45–60 min |
+| Small | 37 | 4 | 2–3 | 20–30 min |
+| Medium | 61 | 6 | 3–4 | 30–45 min |
+| Large | 91 | 10 | 4–6 | 45–60 min |
 
 VP hexes are distributed evenly across the board (not clustered at center), similar to double-word-score tiles in Scrabble.
 

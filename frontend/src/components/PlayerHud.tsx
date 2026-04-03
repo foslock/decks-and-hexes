@@ -102,6 +102,11 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
         <span title="Unspent Resources">💰 {player.resources}</span>
         <span title="Tiles owned">🔷 {tileCount}</span>
         <span title="Total cards in deck (hand + draw + discard + in play)">🃏 {totalCards}</span>
+        {player.rubble_count > 0 && (
+          <span title={`${player.rubble_count} Rubble card(s) — each reduces VP by 1`} style={{ color: '#ff6666' }}>
+            🪨 {player.rubble_count}
+          </span>
+        )}
       </div>
     </div>
   );
