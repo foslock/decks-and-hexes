@@ -46,6 +46,7 @@ class CreateGameRequest(BaseModel):
     players: list[dict[str, Any]]
     seed: Optional[int] = None
     test_mode: bool = False
+    speed: str = "normal"
 
 
 class PlayCardRequest(BaseModel):
@@ -106,7 +107,7 @@ async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
             "archetype": p["archetype"],
         })
 
-    game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode)
+    game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode, speed=req.speed)
     # Auto-execute start of turn for round 1
     execute_start_of_turn(game)
     _games[game.id] = game

@@ -1088,7 +1088,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       <div style={{ width: 260, padding: 12, borderRight: '1px solid #333', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         <div style={{ marginBottom: 12 }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>
-            Round {gameState.current_round} · Phase: {phase.replace(/_/g, ' ').toUpperCase()}
+            Round {gameState.current_round} · {phase.replace(/_/g, ' ').toUpperCase()} · ★ {gameState.vp_target} VP
           </div>
           {gameState.winner && (
             <div style={{
@@ -1121,7 +1121,6 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   phase={phase}
                   totalCards={pTotal}
                   tileCount={pTiles}
-                  vpTarget={gameState.vp_target}
                 />
               </div>
             );
