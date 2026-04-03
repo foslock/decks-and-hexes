@@ -1007,6 +1007,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       const effects = finishedState?.player_effects;
       if (effects && effects.length > 0 && !animationOff) {
         setPhaseBanner(null);
+        setInteractionBlocked(true);
         setActivePlayerEffects(effects);
         setTimeout(() => {
           finishResolveAndShowBuy();
@@ -1063,6 +1064,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     // Show player effect popups if any (e.g. Sabotage forced discards)
     const effects = finishedState?.player_effects;
     if (effects && effects.length > 0 && !animationOff) {
+      setInteractionBlocked(true);
       setActivePlayerEffects(effects);
       // Auto-dismiss after 2.5 seconds, then show buy banner
       setTimeout(() => {
