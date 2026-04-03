@@ -893,9 +893,10 @@ def execute_reveal(game: GameState) -> GameState:
         if winner_id != tile.owner:
             if tile.is_base:
                 # Base raid: generate Rubble cards instead of capturing
-                defender = game.players[tile.base_owner]  # type: ignore[arg-type]
+                base_owner_id = tile.base_owner or ""
+                defender = game.players[base_owner_id]
                 attacker_power = power_by_player.get(winner_id, 0)
-                total_defense = power_by_player.get(tile.base_owner, 0) if tile.base_owner in power_by_player else current_defense
+                total_defense = power_by_player.get(base_owner_id, 0) if base_owner_id in power_by_player else current_defense
                 rubble_count = max(0, attacker_power - total_defense)
                 if rubble_count > 0:
                     for _ in range(rubble_count):

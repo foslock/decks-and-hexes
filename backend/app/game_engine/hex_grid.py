@@ -110,10 +110,10 @@ class HexGrid:
 
         while queue:
             q, r = queue.popleft()
-            tile = self.get_tile(q, r)
-            if not tile:
+            current = self.get_tile(q, r)
+            if not current:
                 continue
-            for nq, nr in tile.neighbors():
+            for nq, nr in current.neighbors():
                 if (nq, nr) in visited:
                     continue
                 neighbor = self.get_tile(nq, nr)
