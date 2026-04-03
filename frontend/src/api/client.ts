@@ -19,10 +19,11 @@ export async function createGame(
   players: { id: string; name: string; archetype: string }[],
   seed?: number,
   testMode?: boolean,
+  speed?: string,
 ): Promise<{ game_id: string; state: GameState }> {
   return request('/games', {
     method: 'POST',
-    body: JSON.stringify({ grid_size: gridSize, players, seed, test_mode: testMode }),
+    body: JSON.stringify({ grid_size: gridSize, players, seed, test_mode: testMode, speed }),
   });
 }
 

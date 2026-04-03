@@ -15,7 +15,7 @@ function WithSettings({ children }: { children: ReactNode }) {
 }
 
 describe('PlayerHud', () => {
-  const hudProps = { phase: 'plan', totalCards: 8, tileCount: 2, vpTarget: 10 };
+  const hudProps = { phase: 'plan', totalCards: 8, tileCount: 2 };
 
   it('renders player name and archetype', () => {
     const player = makePlayer({ name: 'Alice', archetype: 'vanguard' });
