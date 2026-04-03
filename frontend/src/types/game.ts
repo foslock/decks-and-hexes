@@ -8,6 +8,8 @@ export interface HexTile {
   defense_power: number;
   base_defense: number;
   held_since_turn: number | null;
+  is_base: boolean;
+  base_owner: string | null;
 }
 
 export interface Card {
@@ -82,6 +84,7 @@ export interface Player {
   effective_buy_costs?: Record<string, number>;
   trash: Card[];
   last_upkeep_paid: number;
+  rubble_count: number;
 }
 
 export interface MarketStack {

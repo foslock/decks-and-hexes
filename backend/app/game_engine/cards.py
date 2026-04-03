@@ -15,6 +15,7 @@ class CardType(str, Enum):
     CLAIM = "claim"
     DEFENSE = "defense"
     ENGINE = "engine"
+    CURSE = "curse"  # Rubble — dead card that reduces VP
 
 
 class Timing(str, Enum):
@@ -192,6 +193,24 @@ class Card:
         if upgraded:
             return {"upgraded_stats": upgraded}
         return {}
+
+
+_rubble_counter = 0
+
+
+def make_rubble_card() -> Card:
+    """Create a Rubble card (generated when a base is raided)."""
+    global _rubble_counter
+    _rubble_counter += 1
+    return Card(
+        id=f"rubble_{_rubble_counter}",
+        name="Rubble",
+        archetype=Archetype.NEUTRAL,
+        card_type=CardType.CURSE,
+        passive_vp=-1,
+        unplayable=True,
+        description="Dead weight from a base raid. Reduces your VP by 1.",
+    )
 
 
 @dataclass

@@ -401,8 +401,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           if (tile.is_blocked) {
             lines.push('This tile cannot be claimed.');
           } else {
-            if (tile.is_vp) {
-              lines.push(`Claiming this tile awards ${tile.vp_value} VP.`);
+            if (tile.is_base) {
+              lines.push(`Base tile — Defense ${tile.defense_power}. Cannot be captured, but can be raided for Rubble.`);
+            } else if (tile.is_vp) {
+              lines.push(`VP hex — adds ${tile.vp_value} bonus VP when connected to your base.`);
             }
             if (tile.defense_power > 0) {
               lines.push(`Claiming this tile requires at least ${tile.defense_power} power.`);
@@ -678,6 +680,20 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         star.position.set(x, y - 8);
         star.alpha = 1;
         hexContainer.addChild(star);
+      }
+
+      if (tile.is_base) {
+        const home = new Text({
+          text: '🏠',
+          style: new TextStyle({
+            fontSize: 14,
+          }),
+          resolution: Math.ceil(window.devicePixelRatio || 2),
+        });
+        home.anchor.set(0.5);
+        home.position.set(x, y - 8);
+        home.alpha = 0.8;
+        hexContainer.addChild(home);
       }
 
       if (tile.is_blocked) {

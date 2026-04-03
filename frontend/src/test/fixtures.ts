@@ -61,6 +61,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     has_ended_turn: false,
     trash: [],
     last_upkeep_paid: 0,
+    rubble_count: 0,
     ...overrides,
   };
 }
@@ -76,6 +77,8 @@ export function makeTile(q: number, r: number, overrides: Partial<HexTile> = {})
     defense_power: 0,
     base_defense: 0,
     held_since_turn: null,
+    is_base: false,
+    base_owner: null,
     ...overrides,
   };
 }

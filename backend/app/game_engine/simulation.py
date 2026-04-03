@@ -15,6 +15,7 @@ from .cpu_player import CPUPlayer
 from .game_state import (
     GameState,
     Phase,
+    compute_player_vp,
     create_game,
     execute_start_of_turn,
     play_card,
@@ -58,6 +59,7 @@ class PlayerResult:
     actions_per_turn: list[int] = field(default_factory=list)
     vp_over_time: list[int] = field(default_factory=list)
     resources_over_time: list[int] = field(default_factory=list)
+    rubble_received: int = 0
 
 
 @dataclass
@@ -151,7 +153,7 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
                 # Record VP/resources at start of each turn
                 for pid in game.player_order:
                     p = game.players[pid]
-                    tracking[pid].vp_over_time.append(p.vp)
+                    tracking[pid].vp_over_time.append(compute_player_vp(game, pid))
                     tracking[pid].resources_over_time.append(p.resources)
                 # This shouldn't happen in normal flow since execute_end_of_turn
                 # calls execute_start_of_turn, but handle it just in case
@@ -171,14 +173,15 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
         for pid in game.player_order:
             p = game.players[pid]
             tr = tracking[pid]
-            tr.final_vp = p.vp
+            tr.final_vp = compute_player_vp(game, pid)
             tr.final_resources = p.resources
+            tr.rubble_received = p.rubble_count
             if game.grid:
                 player_tiles = game.grid.get_player_tiles(pid)
                 tr.tiles_controlled = len(player_tiles)
                 tr.vp_hexes_controlled = sum(1 for t in player_tiles if t.is_vp)
             # Record final VP/resources
-            tr.vp_over_time.append(p.vp)
+            tr.vp_over_time.append(compute_player_vp(game, pid))
             tr.resources_over_time.append(p.resources)
             result.player_results.append(tr)
 

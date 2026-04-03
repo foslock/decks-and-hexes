@@ -6,6 +6,7 @@ interface SetupScreenProps {
     gridSize: string;
     players: { id: string; name: string; archetype: string }[];
     testMode?: boolean;
+    speed?: string;
   }) => void;
 }
 
@@ -16,10 +17,26 @@ const ARCHETYPES = [
 ];
 
 const GRID_SIZES = [
-  { id: 'small', name: 'Small (37 tiles)', players: '2-3' },
-  { id: 'medium', name: 'Medium (61 tiles)', players: '3-4' },
-  { id: 'large', name: 'Large (91 tiles)', players: '4-6' },
+  { id: 'small', name: 'Small (37 tiles)', players: '2-3', tiles: 37 },
+  { id: 'medium', name: 'Medium (61 tiles)', players: '3-4', tiles: 61 },
+  { id: 'large', name: 'Large (91 tiles)', players: '4-6', tiles: 91 },
 ];
+
+const SPEEDS = [
+  { id: 'fast', name: 'Fast', mult: 1.0 },
+  { id: 'normal', name: 'Normal', mult: 1.25 },
+  { id: 'slow', name: 'Slow', mult: 1.5 },
+];
+
+const TILES_PER_VP = 3;
+
+function computeVpTarget(gridId: string, playerCount: number, speedId: string): number {
+  const grid = GRID_SIZES.find(g => g.id === gridId) || GRID_SIZES[0];
+  const speed = SPEEDS.find(s => s.id === speedId) || SPEEDS[1];
+  const divisor = Math.max(1, Math.floor(TILES_PER_VP * playerCount * 0.5));
+  const base = Math.floor(grid.tiles / divisor);
+  return Math.max(3, Math.round(base * speed.mult));
+}
 
 export default function SetupScreen({ onStart }: SetupScreenProps) {
   const { settings, setAnimationMode, setTooltips } = useSettings();
@@ -31,6 +48,8 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
     { name: 'Player 3', archetype: 'fortress' },
   ]);
   const [testMode, setTestMode] = useState(false);
+  const [speed, setSpeed] = useState('normal');
+  const vpTarget = computeVpTarget(gridSize, playerCount, speed);
 
   const updatePlayerCount = (count: number) => {
     setPlayerCount(count);
@@ -61,6 +80,7 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
         archetype: p.archetype,
       })),
       testMode: testMode || undefined,
+      speed,
     });
   };
 
@@ -89,6 +109,30 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
             >
               <div style={{ fontWeight: 'bold' }}>{size.name}</div>
               <div style={{ fontSize: 12, color: '#aaa' }}>{size.players} players</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 24 }}>
+        <h3>Game Speed <span style={{ fontSize: 13, fontWeight: 'normal', color: '#aaa', marginLeft: 8 }}>VP Target: {vpTarget}</span></h3>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {SPEEDS.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setSpeed(s.id)}
+              style={{
+                flex: 1,
+                padding: '10px 8px',
+                background: speed === s.id ? '#3a3a6e' : '#2a2a3e',
+                border: speed === s.id ? '2px solid #4a9eff' : '1px solid #444',
+                borderRadius: 8,
+                color: '#fff',
+                cursor: 'pointer',
+                fontWeight: speed === s.id ? 'bold' : 'normal',
+              }}
+            >
+              {s.name}
             </button>
           ))}
         </div>
