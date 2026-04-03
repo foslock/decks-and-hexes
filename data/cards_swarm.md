@@ -240,38 +240,37 @@ cards:
       - type: buy_restriction
         timing: immediate
 
-  - id: swarm_territorial_dominance
-    name: Territorial Dominance
-    name_upgraded: Territorial Dominance+
+  - id: swarm_consecrate
+    name: Consecrate
+    name_upgraded: Consecrate+
     type: Engine
     buy_cost: 4
     action_return: 0
     power: 0
     trash_on_use: true
-    effect: "Engine: Gain VP equal to the number of tiles you control divided by 5 (rounded down). Trash this card."
-    effect_upgraded: "Engine: Gain VP equal to the number of tiles you control divided by 4 (rounded down). Trash this card."
+    target_own_tile: true
+    effect: "Engine: Play on a connected VP tile you own. Permanently increase that tile's VP value by 1. Trash this card."
+    effect_upgraded: "Engine: Play on a connected VP tile you own. Permanently increase that tile's VP value by 2. Trash this card."
     secondary_effect: null
     secondary_timing: null
+    note: "Permanent board modification — any future owner of the tile benefits from the increased VP value."
 
     effects:
-      - type: vp_from_tiles
+      - type: enhance_vp_tile
         timing: immediate
-        metadata: {divisor: 5, upgraded_divisor: 4}
+        metadata: {upgraded_bonus: 2}
 
-  - id: swarm_scorched_earth
-    name: Scorched Earth
-    name_upgraded: Scorched Earth+
+  - id: swarm_war_trophies
+    name: War Trophies
+    name_upgraded: War Trophies+
     type: Engine
     buy_cost: 3
     action_return: 0
     power: 0
-    trash_on_use: true
-    effect: "Engine: Sacrifice any number of tiles you own (not VP hexes). Gain 1 VP per 3 tiles sacrificed. Trash this card."
-    effect_upgraded: "Engine: Sacrifice any number of tiles you own (not VP hexes). Gain 1 VP per 2 tiles sacrificed. Trash this card."
+    unplayable: true
+    vp_formula: trash_div_5
+    effect: "Passive: Worth 1 VP for every 5 cards in your trash pile."
+    effect_upgraded: "Passive: Worth 1 VP for every 4 cards in your trash pile."
     secondary_effect: null
     secondary_timing: null
-
-    effects:
-      - type: vp_from_tile_sacrifice
-        timing: immediate
-        metadata: {tiles_per_vp: 3, upgraded_tiles_per_vp: 2}
+    note: "Rewards aggressive deck thinning. Synergizes with Thin the Herd and trash effects. Takes up a hand slot when drawn."

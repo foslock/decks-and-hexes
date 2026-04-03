@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from .cards import Card, CardType, Timing
+from .cards import Card, CardType, Timing, make_land_grant_card
 from .effects import ConditionType, Effect, EffectType
 
 if TYPE_CHECKING:
@@ -570,123 +570,74 @@ def _handle_cease_fire(effect: Effect, ctx: EffectContext) -> None:
         visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
-# ── VP-generating effect handlers ────────────────────────────────
+# ── VP-related effect handlers (derived VP system) ──────────────
 
 
-def _handle_vp_from_tiles(effect: Effect, ctx: EffectContext) -> None:
-    """Territorial Dominance: gain VP = tiles owned / divisor."""
-    if not ctx.game.grid:
+def _handle_enhance_vp_tile(effect: Effect, ctx: EffectContext) -> None:
+    """Consecrate: increase a connected VP tile's vp_value by 1."""
+    if not ctx.target_tile_key or not ctx.game.grid:
         return
-    tiles_owned = len(ctx.game.grid.get_player_tiles(ctx.player.id))
-    divisor = effect.metadata.get("divisor", 5)
-    if ctx.card.is_upgraded:
-        divisor = effect.metadata.get("upgraded_divisor", divisor)
-    vp = tiles_owned // divisor
-    if vp > 0:
-        ctx.player.vp += vp
-        ctx.game._log(
-            f"{ctx.player.name} gains {vp} VP from {ctx.card.name} "
-            f"({tiles_owned} tiles / {divisor})",
-            actor=ctx.player.id)
-
-
-def _handle_vp_from_tile_sacrifice(effect: Effect, ctx: EffectContext) -> None:
-    """Scorched Earth: sacrifice non-VP tiles for VP."""
-    if not ctx.game.grid:
+    parts = ctx.target_tile_key.split(",")
+    if len(parts) != 2:
         return
-    tiles_per_vp = effect.metadata.get("tiles_per_vp", 3)
-    if ctx.card.is_upgraded:
-        tiles_per_vp = effect.metadata.get("upgraded_tiles_per_vp", tiles_per_vp)
-
-    # Find all non-VP tiles owned by the player, sorted by strategic value (lowest first)
-    sacrificeable = []
-    for tile in ctx.game.grid.tiles.values():
-        if tile.owner == ctx.player.id and not tile.is_vp:
-            # Score: fewer enemy neighbors = less strategic = sacrifice first
-            adj = ctx.game.grid.get_adjacent(tile.q, tile.r)
-            enemy_adj = sum(1 for a in adj if a.owner and a.owner != ctx.player.id)
-            vp_adj = sum(1 for a in adj if a.is_vp)
-            score = enemy_adj + vp_adj * 2  # higher = more valuable = sacrifice last
-            sacrificeable.append((score, tile))
-    sacrificeable.sort(key=lambda x: x[0])
-
-    # Sacrifice in multiples of tiles_per_vp to maximize VP
-    max_sacrifice = (len(sacrificeable) // tiles_per_vp) * tiles_per_vp
-    sacrificed = 0
-    for _, tile in sacrificeable[:max_sacrifice]:
-        tile.owner = None
-        tile.held_since_turn = None
-        tile.defense_power = tile.base_defense
-        sacrificed += 1
-
-    vp = sacrificed // tiles_per_vp
-    if vp > 0:
-        ctx.player.vp += vp
-        ctx.game._log(
-            f"{ctx.player.name} sacrifices {sacrificed} tiles for {vp} VP from {ctx.card.name}",
-            actor=ctx.player.id)
-
-
-def _handle_vp_from_defense(effect: Effect, ctx: EffectContext) -> None:
-    """Fortified Position: gain VP for each tile with N+ defense."""
-    if not ctx.game.grid:
+    tile = ctx.game.grid.get_tile(int(parts[0]), int(parts[1]))
+    if not tile:
         return
-    min_defense = effect.metadata.get("min_defense", 3)
-    if ctx.card.is_upgraded:
-        min_defense = effect.metadata.get("upgraded_min_defense", min_defense)
-
-    qualifying = sum(
-        1 for tile in ctx.game.grid.tiles.values()
-        if tile.owner == ctx.player.id and tile.defense_power >= min_defense
-    )
-    vp = qualifying * effect.value
-    if vp > 0:
-        ctx.player.vp += vp
+    # Must be a VP tile owned by the player and connected to their base
+    if not tile.is_vp or tile.owner != ctx.player.id:
         ctx.game._log(
-            f"{ctx.player.name} gains {vp} VP from {ctx.card.name} "
-            f"({qualifying} tiles with {min_defense}+ defense)",
+            f"{ctx.player.name} cannot consecrate {ctx.target_tile_key} — "
+            f"must be a VP tile you own",
             actor=ctx.player.id)
-
-
-def _handle_vp_for_all(effect: Effect, ctx: EffectContext) -> None:
-    """Diplomacy: all players (including self) gain VP."""
-    base_vp = effect.value
-    self_bonus = effect.metadata.get("self_bonus", 0)
+        return
+    connected = ctx.game.grid.get_connected_tiles(ctx.player.id)
+    if (tile.q, tile.r) not in connected:
+        ctx.game._log(
+            f"{ctx.player.name} cannot consecrate {ctx.target_tile_key} — "
+            f"tile not connected to base",
+            actor=ctx.player.id)
+        return
+    bonus = 1
     if ctx.card.is_upgraded:
-        self_bonus = effect.metadata.get("self_bonus_upgraded", self_bonus)
-    self_vp = base_vp + self_bonus
-
-    ctx.player.vp += self_vp
+        bonus = effect.metadata.get("upgraded_bonus", 2)
+    tile.vp_value += bonus
     ctx.game._log(
-        f"{ctx.player.name} gains {self_vp} VP from {ctx.card.name}",
+        f"{ctx.player.name} consecrates VP tile {ctx.target_tile_key} "
+        f"(+{bonus}, now worth {tile.vp_value} VP)",
         actor=ctx.player.id)
 
+
+def _handle_grant_land_grants(effect: Effect, ctx: EffectContext) -> None:
+    """Diplomacy: all players (including self) receive a Land Grant in their discard.
+    Upgraded: self receives an additional Land Grant."""
     for pid, other in ctx.game.players.items():
-        if pid != ctx.player.id:
-            other.vp += base_vp
-            ctx.game._log(
-                f"{other.name} gains {base_vp} VP from {ctx.player.name}'s {ctx.card.name}",
-                actor=ctx.player.id)
+        grant = make_land_grant_card()
+        other.deck.discard.append(grant)
+        ctx.game._log(
+            f"{other.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
+            actor=ctx.player.id)
+    if ctx.card.is_upgraded:
+        bonus = make_land_grant_card()
+        ctx.player.deck.discard.append(bonus)
+        ctx.game._log(
+            f"{ctx.player.name} receives a bonus Land Grant (upgraded {ctx.card.name})",
+            actor=ctx.player.id)
 
 
 def _handle_vp_from_contested_wins(effect: Effect, ctx: EffectContext) -> None:
-    """Battle Glory: gain VP if player won N+ contested non-neutral tiles this turn."""
+    """Battle Glory: if won 2+ contested tiles this turn, increase card's passive_vp by 1."""
     if not ctx.claim_results or not ctx.game.grid:
         return
-    required = effect.metadata.get("required_wins", 4)
-    vp_award = effect.value
-    if ctx.card.is_upgraded:
-        vp_award = effect.metadata.get("upgraded_value", vp_award)
+    required = effect.metadata.get("required_wins", 2)
 
-    # Count contested wins against non-neutral tiles
+    # Count contested wins (tiles where another player also had a claim or was the owner)
     contested_wins = 0
     for tile_key, results in ctx.claim_results.items():
         if ctx.player.id not in results:
             continue
         if not results[ctx.player.id]:
             continue  # didn't win this tile
-        # Check if the tile was previously owned by another player (not neutral)
-        # Look at resolution steps for previous_owner info
+        # Check if the tile was previously owned by another player (contested)
         for step in ctx.game.resolution_steps:
             if step.get("tile_key") == tile_key:
                 prev = step.get("previous_owner")
@@ -695,48 +646,12 @@ def _handle_vp_from_contested_wins(effect: Effect, ctx: EffectContext) -> None:
                 break
 
     if contested_wins >= required:
-        ctx.player.vp += vp_award
+        # Increase the card's own passive_vp by 1 (permanent, accumulates)
+        ctx.card.passive_vp += 1
         ctx.game._log(
-            f"{ctx.player.name} gains {vp_award} VP from {ctx.card.name} "
-            f"({contested_wins} contested wins >= {required} required)",
-            actor=ctx.player.id)
-
-
-def _handle_vp_from_trash_claims(effect: Effect, ctx: EffectContext) -> None:
-    """Sacrifice for Glory: trash claim cards from hand, gain VP = total power / divisor."""
-    divisor = effect.metadata.get("divisor", 3)
-    if ctx.card.is_upgraded:
-        divisor = effect.metadata.get("upgraded_divisor", divisor)
-
-    # Find all claim cards in hand at provided indices (or all claims if no indices)
-    indices = ctx.trash_card_indices
-    if not indices:
-        # Default: trash all claim cards in hand
-        indices = [i for i, c in enumerate(ctx.player.hand)
-                   if c.card_type == CardType.CLAIM]
-
-    # Validate indices and collect claim cards
-    total_power = 0
-    trashed_names = []
-    trashed_cards = []
-    for idx in sorted(indices, reverse=True):
-        if 0 <= idx < len(ctx.player.hand):
-            card = ctx.player.hand[idx]
-            if card.card_type == CardType.CLAIM:
-                total_power += card.effective_power
-                trashed_names.append(card.name)
-                trashed_cards.append(ctx.player.hand.pop(idx))
-
-    if trashed_cards:
-        ctx.player.trash.extend(trashed_cards)
-
-    vp = total_power // divisor
-    if vp > 0:
-        ctx.player.vp += vp
-    if trashed_names:
-        ctx.game._log(
-            f"{ctx.player.name} trashes {', '.join(trashed_names)} (power {total_power}) "
-            f"for {vp} VP from {ctx.card.name}",
+            f"{ctx.player.name}'s {ctx.card.name} gains +1 VP "
+            f"({contested_wins} contested wins >= {required} required, "
+            f"now worth {ctx.card.passive_vp} VP)",
             actor=ctx.player.id)
 
 
@@ -761,12 +676,9 @@ def _handle_permanent_defense(effect: Effect, ctx: EffectContext) -> None:
 
 
 register_handler(EffectType.PERMANENT_DEFENSE, _handle_permanent_defense)
-register_handler(EffectType.VP_FROM_TILES, _handle_vp_from_tiles)
-register_handler(EffectType.VP_FROM_TILE_SACRIFICE, _handle_vp_from_tile_sacrifice)
-register_handler(EffectType.VP_FROM_DEFENSE, _handle_vp_from_defense)
-register_handler(EffectType.VP_FOR_ALL, _handle_vp_for_all)
+register_handler(EffectType.ENHANCE_VP_TILE, _handle_enhance_vp_tile)
+register_handler(EffectType.GRANT_LAND_GRANTS, _handle_grant_land_grants)
 register_handler(EffectType.VP_FROM_CONTESTED_WINS, _handle_vp_from_contested_wins)
-register_handler(EffectType.VP_FROM_TRASH_CLAIMS, _handle_vp_from_trash_claims)
 
 
 # Stubs for complex effects
