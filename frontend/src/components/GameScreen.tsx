@@ -961,6 +961,19 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     }
   }, [introSequence, animated, activePlayer, gameState]);
 
+  // Transition from resolve to buy phase (called after effects popup or directly)
+  const finishResolveAndShowBuy = useCallback(() => {
+    setActivePlayerEffects([]);
+    if (!animationOff) {
+      setBannerSubtitle('Grow Your Deck');
+      setPhaseBanner('buy');
+      setInteractionBlocked(true);
+    } else {
+      setInteractionBlocked(false);
+      setShowShopOverlay(true);
+    }
+  }, [animationOff]);
+
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
     const bannerPhase = phaseBanner;
@@ -982,12 +995,25 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
 
     if (bannerPhase === 'reveal' && !resolving) {
       // Reveal banner finished but no resolution steps to animate —
-      // apply the held-back state and immediately show the buy banner.
-      if (resolveFinishedStateRef.current) {
-        onStateUpdate(resolveFinishedStateRef.current);
+      // apply the held-back state and show player effects or buy banner.
+      const finishedState = resolveFinishedStateRef.current;
+      if (finishedState) {
+        onStateUpdate(finishedState);
         resolveFinishedStateRef.current = null;
       }
       setActivePlayerIndex(0);
+
+      // Show player effect popups if any (e.g. Sabotage forced discards)
+      const effects = finishedState?.player_effects;
+      if (effects && effects.length > 0 && !animationOff) {
+        setPhaseBanner(null);
+        setActivePlayerEffects(effects);
+        setTimeout(() => {
+          finishResolveAndShowBuy();
+        }, 2500);
+        return;
+      }
+
       // Switch directly to buy banner (bump key to force remount)
       setBannerSubtitle('Grow Your Deck');
       setPhaseBanner('buy');
@@ -1005,26 +1031,13 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         setShowShopOverlay(true);
       }
     }
-  }, [resolving, phaseBanner, onStateUpdate]);
+  }, [resolving, phaseBanner, onStateUpdate, animationOff, finishResolveAndShowBuy]);
 
   // Phase banner midpoint — start drawing cards if it's start_of_turn
   const handleBannerMidpoint = useCallback(() => {
     // Card drawing is handled by the state update, which has already been applied.
     // The banner just delays interaction, so nothing special at midpoint currently.
   }, []);
-
-  // Transition from resolve to buy phase (called after effects popup or directly)
-  const finishResolveAndShowBuy = useCallback(() => {
-    setActivePlayerEffects([]);
-    if (!animationOff) {
-      setBannerSubtitle('Grow Your Deck');
-      setPhaseBanner('buy');
-      setInteractionBlocked(true);
-    } else {
-      setInteractionBlocked(false);
-      setShowShopOverlay(true);
-    }
-  }, [animationOff]);
 
   // Resolve animation completed — apply final state and move to buy phase
   const handleResolveComplete = useCallback(() => {
