@@ -325,7 +325,7 @@ def create_game(
     if vp_target is not None:
         game.vp_target = vp_target
     else:
-        total_tiles = sum(1 for t in game.grid.tiles.values() if not t.is_blocked)
+        total_tiles = len(game.grid.tiles)
         game.vp_target = compute_vp_target(total_tiles, num_players, speed)
 
     # Create players and assign starting positions
