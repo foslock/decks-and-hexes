@@ -15,7 +15,7 @@ class CardType(str, Enum):
     CLAIM = "claim"
     DEFENSE = "defense"
     ENGINE = "engine"
-    CURSE = "curse"  # Rubble — dead card that reduces VP
+    PASSIVE = "passive"  # Unplayable cards that sit in deck (Rubble, Spoils, Land Grant, etc.)
 
 
 class Timing(str, Enum):
@@ -208,10 +208,10 @@ def make_land_grant_card() -> Card:
         id=f"land_grant_{_land_grant_counter}",
         name="Land Grant",
         archetype=Archetype.NEUTRAL,
-        card_type=CardType.ENGINE,
+        card_type=CardType.PASSIVE,
         passive_vp=1,
         unplayable=True,
-        description="Worth 1 VP. Cannot be played — takes up a card slot in your deck.",
+        description="Worth 1 VP.",
     )
 
 
@@ -226,10 +226,28 @@ def make_rubble_card() -> Card:
         id=f"rubble_{_rubble_counter}",
         name="Rubble",
         archetype=Archetype.NEUTRAL,
-        card_type=CardType.CURSE,
+        card_type=CardType.PASSIVE,
         passive_vp=-1,
         unplayable=True,
-        description="Dead weight from a base raid. Reduces your VP by 1.",
+        description="Dead weight from a base raid. -1 VP per copy.",
+    )
+
+
+_spoils_counter = 0
+
+
+def make_spoils_card() -> Card:
+    """Create a Spoils card (awarded to attacker on successful base raid)."""
+    global _spoils_counter
+    _spoils_counter += 1
+    return Card(
+        id=f"spoils_{_spoils_counter}",
+        name="Spoils",
+        archetype=Archetype.NEUTRAL,
+        card_type=CardType.PASSIVE,
+        passive_vp=1,
+        unplayable=True,
+        description="Spoils of a successful base raid. +1 VP per copy.",
     )
 
 

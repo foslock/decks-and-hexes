@@ -24,6 +24,7 @@ export function makeCard(overrides: Partial<Card> = {}): Card {
     defense_target_count: 1,
     flood: false,
     target_own_tile: false,
+    passive_vp: 0,
     description: 'Test card',
     starter: false,
     ...overrides,
@@ -61,6 +62,8 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     has_ended_turn: false,
     trash: [],
     last_upkeep_paid: 0,
+    upkeep_cost: 0,
+    tiles_lost_to_upkeep: 0,
     rubble_count: 0,
     ...overrides,
   };

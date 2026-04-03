@@ -1,7 +1,7 @@
 """Hex grid generation using axial coordinates (q, r).
 
 Flat-top hexagons with the center hex at (0, 0).
-Grid sizes: Small (37 tiles), Medium (61 tiles), Large (91 tiles).
+Grid sizes: Small (61 tiles), Medium (91 tiles), Large (127 tiles).
 """
 
 from __future__ import annotations
@@ -29,9 +29,9 @@ BASE_DEFENSE: dict[str, int] = {
 
 # radius = number of rings around center (0-indexed)
 GRID_CONFIG: dict[GridSize, dict[str, Any]] = {
-    GridSize.SMALL: {"radius": 3, "tiles": 37, "vp_hexes": 4, "blocked": (3, 4), "players": (2, 3)},
-    GridSize.MEDIUM: {"radius": 4, "tiles": 61, "vp_hexes": 6, "blocked": (5, 7), "players": (3, 4)},
-    GridSize.LARGE: {"radius": 5, "tiles": 91, "vp_hexes": 10, "blocked": (8, 10), "players": (4, 6)},
+    GridSize.SMALL: {"radius": 4, "tiles": 61, "vp_hexes": 6, "blocked": (5, 7), "players": (2, 3)},
+    GridSize.MEDIUM: {"radius": 5, "tiles": 91, "vp_hexes": 8, "blocked": (8, 10), "players": (3, 4)},
+    GridSize.LARGE: {"radius": 6, "tiles": 127, "vp_hexes": 12, "blocked": (10, 14), "players": (4, 6)},
 }
 
 
@@ -122,6 +122,44 @@ class HexGrid:
                     queue.append((nq, nr))
 
         return visited
+
+    def get_tiles_by_bfs_depth(self, player_id: str) -> list[tuple[int, "HexTile"]]:
+        """BFS from player's base, returning (depth, tile) pairs for owned tiles.
+
+        Tiles are ordered by depth (farthest first), then by most recently
+        acquired (highest held_since_turn first) for tie-breaking.
+        """
+        base_tile = None
+        for tile in self.tiles.values():
+            if tile.is_base and tile.base_owner == player_id:
+                base_tile = tile
+                break
+        if not base_tile:
+            return []
+
+        result: list[tuple[int, HexTile]] = []
+        visited: set[tuple[int, int]] = set()
+        queue: deque[tuple[int, int, int]] = deque()  # (q, r, depth)
+        queue.append((base_tile.q, base_tile.r, 0))
+        visited.add((base_tile.q, base_tile.r))
+
+        while queue:
+            q, r, depth = queue.popleft()
+            current = self.get_tile(q, r)
+            if not current:
+                continue
+            result.append((depth, current))
+            for nq, nr in current.neighbors():
+                if (nq, nr) in visited:
+                    continue
+                neighbor = self.get_tile(nq, nr)
+                if neighbor and not neighbor.is_blocked and neighbor.owner == player_id:
+                    visited.add((nq, nr))
+                    queue.append((nq, nr, depth + 1))
+
+        # Sort: farthest first (descending depth), then most recently acquired first
+        result.sort(key=lambda x: (-x[0], -(x[1].held_since_turn or 0)))
+        return result
 
     def to_dict(self) -> dict[str, Any]:
         return {

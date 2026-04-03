@@ -18,6 +18,7 @@ from .cards import (
     Timing,
     build_starting_deck,
     make_rubble_card,
+    make_spoils_card,
     _copy_card,
 )
 from .effects import ConditionType, EffectType, TurnModifiers
@@ -26,12 +27,13 @@ from .effect_resolver import (
     resolve_immediate_effects,
     resolve_on_resolution_effects,
 )
-from .hex_grid import BASE_DEFENSE, GridSize, HexGrid, generate_hex_grid
+from .hex_grid import BASE_DEFENSE, GRID_CONFIG, GridSize, HexGrid, generate_hex_grid
 
 
 class Phase(str, Enum):
     SETUP = "setup"
     START_OF_TURN = "start_of_turn"
+    UPKEEP = "upkeep"
     PLAN = "plan"
     REVEAL = "reveal"
     BUY = "buy"
@@ -40,22 +42,41 @@ class Phase(str, Enum):
 
 
 STARTING_RESOURCES = 3
-UPKEEP_COST = 1
+UPKEEP_FREE_TILES = 4
 VP_TARGET = 10  # legacy default; use compute_vp_target() for new games
-TILES_PER_VP = 3
-SPEED_MULTIPLIERS: dict[str, float] = {"fast": 1.0, "normal": 1.25, "slow": 1.5}
+SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33}
 REROLL_COST = 2
 RETAIN_COST = 1
 UPGRADE_CREDIT_COST = 5
 
 
-def compute_vp_target(total_tiles: int, player_count: int, speed: str = "normal") -> int:
+def tiles_per_vp(grid_size: GridSize) -> int:
+    """Tiles required per 1 VP — scales with grid radius (radius - 1).
+
+    Small (r=4) → 3, Medium (r=5) → 4, Large (r=6) → 5.
+    """
+    return int(GRID_CONFIG[grid_size]["radius"]) - 1
+
+
+def compute_vp_target(grid_size: GridSize, player_count: int, speed: str = "normal") -> int:
     """Compute the VP target based on grid size, player count, and game speed."""
-    divisor = int(TILES_PER_VP * player_count * 0.5)
+    total_tiles: int = int(GRID_CONFIG[grid_size]["tiles"])
+    tpv = tiles_per_vp(grid_size)
+    divisor = int(tpv * player_count * 0.75)
     if divisor == 0:
         divisor = 1
     base = total_tiles // divisor
     return max(3, round(base * SPEED_MULTIPLIERS.get(speed, 1.25)))
+
+
+def compute_upkeep_cost(tile_count: int, grid_size: GridSize = GridSize.SMALL) -> int:
+    """Compute dynamic upkeep cost based on number of tiles controlled.
+
+    Formula: max(0, (tiles - FREE_TILES) // tiles_per_vp)
+    First 4 tiles are free; then 1 resource per tiles_per_vp additional tiles.
+    tiles_per_vp scales with grid radius (Small=3, Medium=4, Large=5).
+    """
+    return max(0, (tile_count - UPKEEP_FREE_TILES) // tiles_per_vp(grid_size))
 
 
 @dataclass
@@ -101,6 +122,8 @@ class Player:
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
     trash: list[Card] = field(default_factory=list)
     last_upkeep_paid: int = 0  # resources actually deducted at start of this turn
+    upkeep_cost: int = 0  # computed upkeep for this turn (before payment)
+    tiles_lost_to_upkeep: int = 0  # tiles forfeited this turn due to unpaid upkeep
 
     @property
     def hand_size(self) -> int:
@@ -122,11 +145,22 @@ class Player:
         # VP is derived — needs game context; falls back to stored vp if no game
         from . import game_state as _gs
         vp = _gs.compute_player_vp(game, self.id) if game else self.vp
+
+        def _card_dict(card: Card) -> dict[str, Any]:
+            """Serialize a card, enriching with current_vp when game context exists."""
+            d = card.to_dict()
+            if game and (card.passive_vp or card.vp_formula):
+                if card.vp_formula:
+                    d["current_vp"] = _gs._compute_formula_vp(card, self, game)
+                else:
+                    d["current_vp"] = card.passive_vp
+            return d
+
         return {
             "id": self.id,
             "name": self.name,
             "archetype": self.archetype.value,
-            "hand": [] if hide_hand else [c.to_dict() for c in self.hand],
+            "hand": [] if hide_hand else [_card_dict(c) for c in self.hand],
             "hand_count": len(self.hand),
             "resources": self.resources,
             "vp": vp,
@@ -137,14 +171,16 @@ class Player:
             "passive": self.passive,
             "deck_size": len(self.deck.cards),
             "discard_count": len(self.deck.discard),
-            "discard": [c.to_dict() for c in self.deck.discard],
-            "deck_cards": [c.to_dict() for c in self.deck.cards],
+            "discard": [_card_dict(c) for c in self.deck.discard],
+            "deck_cards": [_card_dict(c) for c in self.deck.cards],
             "planned_action_count": len(self.planned_actions),
             "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
             "has_submitted_plan": self.has_submitted_plan,
             "has_ended_turn": self.has_ended_turn,
             "trash": [c.to_dict() for c in self.trash],
             "last_upkeep_paid": self.last_upkeep_paid,
+            "upkeep_cost": self.upkeep_cost,
+            "tiles_lost_to_upkeep": self.tiles_lost_to_upkeep,
             "rubble_count": self.rubble_count,
         }
 
@@ -236,6 +272,8 @@ class GameState:
 
     # Structured resolution data for frontend animations (populated by execute_reveal)
     resolution_steps: list[dict[str, Any]] = field(default_factory=list)
+    # Player-targeting effects resolved during reveal (e.g. Sabotage forced discards)
+    player_effects: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self, for_player_id: Optional[str] = None) -> dict[str, Any]:
         players_dict: dict[str, Any] = {}
@@ -267,13 +305,15 @@ class GameState:
         }
         if self.resolution_steps:
             result["resolution_steps"] = self.resolution_steps
+        if self.player_effects:
+            result["player_effects"] = self.player_effects
         return result
 
 
 def compute_player_vp(game: GameState, player_id: str) -> int:
     """Derive VP from current game state — tiles, connectivity, cards, and bonus VP.
 
-    VP = (total_owned_tiles // TILES_PER_VP)
+    VP = (total_owned_tiles // tiles_per_vp(game.grid.size))
        + sum(vp_value for connected VP hexes)
        + sum(passive_vp for all cards in deck/hand/discard)
        + sum(dynamic VP from cards with vp_formula)
@@ -286,7 +326,7 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
     player_tiles = [
         (t.q, t.r) for t in game.grid.tiles.values() if t.owner == player_id
     ]
-    tile_vp = len(player_tiles) // TILES_PER_VP
+    tile_vp = len(player_tiles) // tiles_per_vp(game.grid.size)
 
     # Connected VP hexes add their vp_value as a bonus
     connected = game.grid.get_connected_tiles(player_id)
@@ -363,8 +403,7 @@ def create_game(
     if vp_target is not None:
         game.vp_target = vp_target
     else:
-        total_tiles = len(game.grid.tiles)
-        game.vp_target = compute_vp_target(total_tiles, num_players, speed)
+        game.vp_target = compute_vp_target(grid_size, num_players, speed)
 
     # Create players and assign starting positions
     for i, config in enumerate(player_configs):
@@ -445,17 +484,10 @@ def execute_start_of_turn(game: GameState) -> GameState:
     for pid in game.player_order:
         player = game.players[pid]
 
-        # Pay upkeep (skip round 1)
-        if game.current_round > 1:
-            actual_cost = min(UPKEEP_COST, player.resources)
-            player.resources -= actual_cost
-            player.last_upkeep_paid = actual_cost
-            if actual_cost > 0:
-                game._log(f"{player.name} pays {actual_cost} upkeep ({player.resources} remaining)")
-            else:
-                game._log(f"{player.name} has no resources for upkeep")
-        else:
-            player.last_upkeep_paid = 0
+        # Reset upkeep tracking (actual payment happens in UPKEEP phase)
+        player.last_upkeep_paid = 0
+        player.upkeep_cost = 0
+        player.tiles_lost_to_upkeep = 0
 
         # Check win condition (VP is derived from territory + cards)
         current_vp = compute_player_vp(game, pid)
@@ -503,6 +535,128 @@ def execute_start_of_turn(game: GameState) -> GameState:
                 market_draw = min(3, len(player.archetype_deck))
                 player.archetype_market = player.archetype_deck[:market_draw]
 
+    # Round 1 skips upkeep; round 2+ computes and applies upkeep, then pauses
+    # at UPKEEP phase so the frontend can display the banner before advancing to PLAN
+    if game.current_round > 1:
+        _apply_upkeep(game)
+        game.current_phase = Phase.UPKEEP
+    else:
+        game.current_phase = Phase.PLAN
+        game._log("Plan phase begins — place cards face-down on tiles")
+    return game
+
+
+def forfeit_tiles_for_unpaid_upkeep(
+    game: GameState, player_id: str, deficit: int
+) -> list[Any]:
+    """Remove tiles from a player who can't pay upkeep.
+
+    Priority: disconnected tiles first (farthest from base by hex distance),
+    then connected tiles by BFS depth (farthest first, tie-break by most recent).
+    Base tiles are immune.
+
+    Returns list of forfeited HexTile objects.
+    """
+    assert game.grid is not None
+    player_tiles = game.grid.get_player_tiles(player_id)
+    connected_coords = game.grid.get_connected_tiles(player_id)
+
+    # Find base tile for distance calculations
+    base_tile = None
+    for tile in player_tiles:
+        if tile.is_base and tile.base_owner == player_id:
+            base_tile = tile
+            break
+    if not base_tile:
+        return []
+
+    forfeited: list[Any] = []
+
+    # 1. Disconnected tiles first (not in connected set, not base)
+    disconnected = [
+        t for t in player_tiles
+        if (t.q, t.r) not in connected_coords and not t.is_base
+    ]
+    # Sort by hex distance from base, farthest first
+    disconnected.sort(key=lambda t: -base_tile.distance_to(t))
+
+    for tile in disconnected:
+        if len(forfeited) >= deficit:
+            break
+        tile.owner = None
+        tile.defense_power = tile.base_defense
+        tile.permanent_defense_bonus = 0
+        tile.held_since_turn = None
+        forfeited.append(tile)
+
+    # 2. Connected tiles by BFS depth (farthest first), excluding base
+    if len(forfeited) < deficit:
+        bfs_tiles = game.grid.get_tiles_by_bfs_depth(player_id)
+        for _depth, tile in bfs_tiles:
+            if len(forfeited) >= deficit:
+                break
+            if tile.is_base:
+                continue
+            tile.owner = None
+            tile.defense_power = tile.base_defense
+            tile.permanent_defense_bonus = 0
+            tile.held_since_turn = None
+            forfeited.append(tile)
+
+    return forfeited
+
+
+def _apply_upkeep(game: GameState) -> None:
+    """Internal: compute and apply dynamic upkeep for all players.
+
+    Called during execute_start_of_turn before transitioning to UPKEEP phase.
+    Results are stored on player fields so the frontend can display them.
+    """
+    game._log("=== Upkeep ===")
+
+    for pid in game.player_order:
+        player = game.players[pid]
+        assert game.grid is not None
+        tile_count = len(game.grid.get_player_tiles(pid))
+        upkeep = compute_upkeep_cost(tile_count, game.grid.size)
+        player.upkeep_cost = upkeep
+
+        if upkeep == 0:
+            player.last_upkeep_paid = 0
+            player.tiles_lost_to_upkeep = 0
+            game._log(f"{player.name} owes no upkeep ({tile_count} tiles)")
+            continue
+
+        actual_cost = min(upkeep, player.resources)
+        player.resources -= actual_cost
+        player.last_upkeep_paid = actual_cost
+
+        deficit = upkeep - actual_cost
+        if deficit > 0:
+            forfeited = forfeit_tiles_for_unpaid_upkeep(game, pid, deficit)
+            player.tiles_lost_to_upkeep = len(forfeited)
+            for tile in forfeited:
+                game._log(
+                    f"{player.name} loses tile ({tile.q},{tile.r}) — unpaid upkeep"
+                )
+            game._log(
+                f"{player.name} paid {actual_cost}/{upkeep} upkeep, "
+                f"lost {len(forfeited)} tile(s) ({player.resources} remaining)"
+            )
+        else:
+            player.tiles_lost_to_upkeep = 0
+            game._log(
+                f"{player.name} pays {actual_cost} upkeep for {tile_count} tiles "
+                f"({player.resources} remaining)"
+            )
+
+
+def execute_upkeep(game: GameState) -> GameState:
+    """Advance from UPKEEP phase to PLAN phase.
+
+    Upkeep has already been computed and applied during execute_start_of_turn.
+    This just transitions the phase so the frontend can move on.
+    """
     game.current_phase = Phase.PLAN
     game._log("Plan phase begins — place cards face-down on tiles")
     return game
@@ -713,6 +867,7 @@ def execute_reveal(game: GameState) -> GameState:
     """Phase 3: Reveal & Resolve — flip all cards and resolve claims."""
     game.current_phase = Phase.REVEAL
     game.resolution_steps = []
+    game.player_effects = []
     game._log("=== Reveal & Resolve ===")
 
     assert game.grid is not None
@@ -892,18 +1047,21 @@ def execute_reveal(game: GameState) -> GameState:
 
         if winner_id != tile.owner:
             if tile.is_base:
-                # Base raid: generate Rubble cards instead of capturing
+                # Base raid: generate Rubble cards for defender and Spoils for attacker
                 base_owner_id = tile.base_owner or ""
                 defender = game.players[base_owner_id]
+                attacker = game.players[winner_id]
                 attacker_power = power_by_player.get(winner_id, 0)
                 total_defense = power_by_player.get(base_owner_id, 0) if base_owner_id in power_by_player else current_defense
                 rubble_count = max(0, attacker_power - total_defense)
                 if rubble_count > 0:
                     for _ in range(rubble_count):
                         defender.deck.discard.append(make_rubble_card())
+                    attacker.deck.discard.append(make_spoils_card())
                     game._log(
-                        f"{game.players[winner_id].name} raids {defender.name}'s base! "
-                        f"{rubble_count} Rubble card(s) added to {defender.name}'s deck."
+                        f"{attacker.name} raids {defender.name}'s base! "
+                        f"{rubble_count} Rubble added to {defender.name}'s deck, "
+                        f"Spoils added to {attacker.name}'s deck."
                     )
                 else:
                     game._log(f"{game.players[winner_id].name} fails to raid {defender.name}'s base")
@@ -964,6 +1122,14 @@ def execute_reveal(game: GameState) -> GameState:
             if target:
                 target.forced_discard_next_turn += card.forced_discard
                 game._log(f"{player.name} forces {target.name} to discard {card.forced_discard} next turn")
+                game.player_effects.append({
+                    "source_player_id": pid,
+                    "target_player_id": action.target_player_id,
+                    "card_name": card.name,
+                    "effect": f"-{card.forced_discard} card{'s' if card.forced_discard > 1 else ''} next turn",
+                    "effect_type": "forced_discard",
+                    "value": card.forced_discard,
+                })
 
         # Resolve structured on_resolution effects for non-claim cards
         if card.effects:
@@ -1103,6 +1269,40 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         return True, f"Bought {purchased.name}"
 
     return False, "Invalid source"
+
+
+def spend_upgrade_credit(
+    game: GameState, player_id: str, card_index: int
+) -> tuple[bool, str]:
+    """Spend an upgrade credit to permanently upgrade a card in hand.
+
+    Can be done during the Plan phase, multiple times per turn.
+    """
+    if game.current_phase != Phase.PLAN:
+        return False, "Can only upgrade cards during the Plan phase"
+    player = game.players.get(player_id)
+    if not player:
+        return False, "Player not found"
+    if player.upgrade_credits <= 0 and not game.test_mode:
+        return False, "No upgrade credits available"
+    if card_index < 0 or card_index >= len(player.hand):
+        return False, "Invalid card index"
+    card = player.hand[card_index]
+    if card.is_upgraded:
+        return False, f"{card.name} is already upgraded"
+    # Apply upgrade
+    card.is_upgraded = True
+    if card.name_upgraded:
+        card.name = card.name_upgraded
+    if card.upgrade_description:
+        card.description = card.upgrade_description
+    if not game.test_mode:
+        player.upgrade_credits -= 1
+    game._log(
+        f"{player.name} upgrades {card.name} "
+        f"({player.upgrade_credits} credits remaining)"
+    )
+    return True, f"Upgraded to {card.name}"
 
 
 def calculate_dynamic_buy_cost(game: GameState, player: Player, card: Card) -> int:

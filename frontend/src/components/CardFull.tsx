@@ -1,11 +1,14 @@
+import { useState, useEffect, useMemo, useRef } from 'react';
 import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
-import { renderWithKeywords } from './Keywords';
+import { renderWithKeywords, KEYWORDS } from './Keywords';
+import { useTooltips } from './SettingsContext';
 
 const TYPE_COLORS: Record<string, string> = {
   claim: '#4a9eff',
   defense: '#4aff6a',
   engine: '#ffaa4a',
+  passive: '#aa88cc',
 };
 
 /** Fallback emoji per card type (used when no per-card art is defined) */
@@ -13,6 +16,7 @@ const TYPE_EMOJI: Record<string, string> = {
   claim: '⚔️',
   defense: '🛡️',
   engine: '⚙️',
+  passive: '📜',
 };
 
 /**
@@ -99,6 +103,7 @@ const TYPE_LABEL: Record<string, string> = {
   claim: 'Claim',
   defense: 'Defense',
   engine: 'Engine',
+  passive: 'Passive',
 };
 
 /** Resolve the art emoji for a card, handling instance ID suffixes. */
@@ -125,6 +130,8 @@ interface CardFullProps {
   /** Show remaining copies badge */
   remaining?: number | null;
   style?: React.CSSProperties;
+  /** Show keyword definitions next to the card after a delay */
+  showKeywordHints?: boolean;
 }
 
 /**
@@ -134,9 +141,52 @@ interface CardFullProps {
  * Matches the CardDetail modal design: title top-center, cost top-right,
  * art placeholder, archetype-type line, abilities box.
  */
-export default function CardFull({ card, effectiveCost, remaining, style }: CardFullProps) {
+/** Extract unique keywords present in a card's description text. */
+function extractKeywords(card: Card): { keyword: string; definition: string }[] {
+  const text = card.description || '';
+  const sorted = Object.keys(KEYWORDS).sort((a, b) => b.length - a.length);
+  const pattern = new RegExp(`\\b(${sorted.join('|')})\\b`, 'gi');
+  const seen = new Set<string>();
+  const result: { keyword: string; definition: string }[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) !== null) {
+    const canonical = sorted.find(k => k.toLowerCase() === match![0].toLowerCase());
+    if (canonical && !seen.has(canonical)) {
+      seen.add(canonical);
+      result.push({ keyword: canonical, definition: KEYWORDS[canonical] });
+    }
+  }
+  return result;
+}
+
+export default function CardFull({ card, effectiveCost, remaining, style, showKeywordHints }: CardFullProps) {
   const typeColor = TYPE_COLORS[card.card_type] || '#555';
   const displayCost = effectiveCost ?? card.buy_cost;
+  const tooltipsEnabled = useTooltips();
+
+  // Keyword hints state — fade in after delay
+  const keywords = useMemo(() => extractKeywords(card), [card]);
+  const [hintsVisible, setHintsVisible] = useState(false);
+  const [hintsOnLeft, setHintsOnLeft] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
+
+  const shouldShowHints = showKeywordHints && tooltipsEnabled;
+
+  useEffect(() => {
+    if (!shouldShowHints || keywords.length === 0) {
+      setHintsVisible(false);
+      return;
+    }
+    // Measure whether hints fit on the right; if not, place on left
+    if (cardRef.current) {
+      const rect = cardRef.current.getBoundingClientRect();
+      const hintWidth = 180 + 8; // width + gap
+      const spaceRight = window.innerWidth - rect.right;
+      setHintsOnLeft(spaceRight < hintWidth);
+    }
+    const timer = setTimeout(() => setHintsVisible(true), 1000);
+    return () => clearTimeout(timer);
+  }, [shouldShowHints, keywords]);
   const hasCost = displayCost !== null && displayCost !== undefined;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
 
@@ -152,8 +202,9 @@ export default function CardFull({ card, effectiveCost, remaining, style }: Card
   if (!card.adjacency_required) statNotes.push('No adjacency required.');
 
   return (
-    <div style={{
+    <div ref={cardRef} style={{
       width: CARD_FULL_WIDTH,
+      position: 'relative',
       background: '#1e1e3a',
       border: `2px solid ${typeColor}`,
       borderRadius: 12,
@@ -165,9 +216,33 @@ export default function CardFull({ card, effectiveCost, remaining, style }: Card
       boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
       ...style,
     }}>
-      {/* Top row: title centered, cost top-right */}
+      {/* Top row: VP badge top-left, title centered, cost top-right */}
       <div style={{ position: 'relative', textAlign: 'center', minHeight: 22 }}>
-        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingRight: hasCost ? 36 : 0 }}>
+        {card.current_vp !== undefined && (
+          <Tooltip content={
+            card.current_vp >= 0
+              ? `This card is currently worth ${card.current_vp} VP`
+              : `This card costs you ${Math.abs(card.current_vp)} VP`
+          }>
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              cursor: 'help',
+              fontSize: 12,
+              fontWeight: 'bold',
+              color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
+              background: '#2a2a4e',
+              borderRadius: 5,
+              padding: '1px 6px',
+              border: `1px solid ${card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#555'}`,
+              lineHeight: 1.3,
+            }}>
+              {card.current_vp > 0 ? '+' : ''}{card.current_vp} ★
+            </div>
+          </Tooltip>
+        )}
+        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingLeft: card.current_vp !== undefined ? 36 : 0, paddingRight: hasCost ? 36 : 0 }}>
           {card.name}
           {card.is_upgraded && !card.name.endsWith('+') && <span style={{ color: '#ffd700' }}> +</span>}
         </div>
@@ -277,6 +352,38 @@ export default function CardFull({ card, effectiveCost, remaining, style }: Card
           </div>
         )}
       </div>
+      {/* Keyword hint panel — fades in next to card */}
+      {shouldShowHints && keywords.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          ...(hintsOnLeft
+            ? { right: CARD_FULL_WIDTH + 8 }
+            : { left: CARD_FULL_WIDTH + 8 }),
+          width: 180,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          opacity: hintsVisible ? 1 : 0,
+          transition: 'opacity 0.4s ease',
+          pointerEvents: 'none',
+        }}>
+          {keywords.map(({ keyword, definition }) => (
+            <div key={keyword} style={{
+              background: 'rgba(15, 15, 35, 0.95)',
+              border: '1px solid #3a3a5e',
+              borderRadius: 6,
+              padding: '4px 8px',
+              fontSize: 10,
+              lineHeight: 1.4,
+              color: '#bbb',
+            }}>
+              <span style={{ color: '#fff', fontWeight: 'bold' }}>{keyword}:</span>{' '}
+              {definition}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -75,6 +75,8 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         card_type = CardType.CLAIM
     elif "defense" in type_str:
         card_type = CardType.DEFENSE
+    elif "passive" in type_str:
+        card_type = CardType.PASSIVE
     else:
         card_type = CardType.ENGINE
 

@@ -227,7 +227,8 @@ class TestBuyAndEndTurn:
         assert resp.status_code == 200
         state = resp.json()["state"]
         assert state["current_round"] == 2
-        assert state["current_phase"] == "plan"
+        # Round 2+ enters UPKEEP phase (upkeep already applied, awaiting advance)
+        assert state["current_phase"] == "upkeep"
 
     def test_end_turn_wrong_phase(self, client: TestClient) -> None:
         resp = client.post("/api/games", json={

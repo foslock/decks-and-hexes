@@ -13,12 +13,15 @@ from app.data_loader.loader import load_all_cards
 from app.game_engine.cards import Archetype
 from app.game_engine.game_state import (
     GameState,
+    Phase,
     buy_card,
     create_game,
     end_buy_phase,
     execute_start_of_turn,
+    execute_upkeep,
     play_card,
     reroll_market,
+    spend_upgrade_credit,
     submit_plan,
 )
 from app.game_engine.hex_grid import GridSize
@@ -68,6 +71,11 @@ class BuyCardRequest(BaseModel):
     player_id: str
     source: str  # "archetype", "neutral", "upgrade"
     card_id: Optional[str] = None
+
+
+class UpgradeCardRequest(BaseModel):
+    player_id: str
+    card_index: int
 
 
 class RerollRequest(BaseModel):
@@ -176,6 +184,20 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
     return {"message": msg, "state": game.to_dict()}
 
 
+@router.post("/games/{game_id}/upgrade-card")
+async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str, Any]:
+    """Spend an upgrade credit to upgrade a card in hand during Plan phase."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    success, msg = spend_upgrade_credit(game, req.player_id, req.card_index)
+    if not success:
+        raise HTTPException(400, msg)
+
+    return {"message": msg, "state": game.to_dict()}
+
+
 @router.post("/games/{game_id}/reroll")
 async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
     """Re-roll archetype market."""
@@ -202,6 +224,20 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
         raise HTTPException(400, msg)
 
     return {"message": msg, "state": game.to_dict()}
+
+
+@router.post("/games/{game_id}/advance-upkeep")
+async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
+    """Advance past the Upkeep phase to Plan phase."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    if game.current_phase != Phase.UPKEEP:
+        raise HTTPException(400, f"Not in Upkeep phase (current: {game.current_phase.value})")
+
+    execute_upkeep(game)
+    return {"message": "Upkeep complete", "state": game.to_dict()}
 
 
 @router.post("/games/{game_id}/end-turn")

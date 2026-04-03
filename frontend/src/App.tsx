@@ -3,7 +3,12 @@ import type { GameState } from './types/game';
 import { SettingsProvider } from './components/SettingsContext';
 import SetupScreen from './components/SetupScreen';
 import GameScreen from './components/GameScreen';
+import VpPathPreview from './components/VpPathPreview';
 import * as api from './api/client';
+
+// Check for ?preview= query parameter
+const urlParams = new URLSearchParams(window.location.search);
+const previewMode = urlParams.get('preview');
 
 export default function App() {
   const [gameState, setGameState] = useState<GameState | null>(null);
@@ -27,6 +32,15 @@ export default function App() {
       setLoading(false);
     }
   };
+
+  // Preview modes (accessible via ?preview=vp-paths)
+  if (previewMode === 'vp-paths') {
+    return (
+      <SettingsProvider>
+        <VpPathPreview />
+      </SettingsProvider>
+    );
+  }
 
   return (
     <SettingsProvider>

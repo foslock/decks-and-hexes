@@ -46,7 +46,7 @@ export default function Tooltip({ content, delay = 0, children }: TooltipProps) 
         ref={triggerRef}
         onPointerEnter={show}
         onPointerLeave={hide}
-        style={{ display: 'inline' }}
+        style={{ display: 'inline-block' }}
       >
         {children}
       </span>

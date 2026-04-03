@@ -110,9 +110,9 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 ### Grid Sizes
 | Size | Tiles | VP Hexes | Blocked Terrain | Players |
 |---|---|---|---|---|
-| Small | 37 | 4 | 3–4 | 2–3 |
-| Medium | 61 | 6 | 5–7 | 3–4 |
-| Large | 91 | 10 | 8–10 | 4–6 |
+| Small | 61 | 6 | 5–7 | 2–3 |
+| Medium | 91 | 8 | 8–10 | 3–4 |
+| Large | 127 | 12 | 10–14 | 4–6 |
 
 - VP hexes distributed evenly (not center-clustered)
 - Blocked terrain placed randomly at setup
@@ -166,8 +166,9 @@ Card data files use YAML-style fields within markdown. Key fields:
 ---
 
 ## Frequently Changing Values (expect these to shift during playtesting)
-- VP target: **20**
-- Upkeep cost: **1 resource per turn**
+- VP target: **dynamic** (see `compute_vp_target`)
+- Tiles per VP: **grid radius - 1** (Small=3, Medium=4, Large=5)
+- Upkeep cost: **dynamic** — 1 resource per 3 tiles beyond first 4
 - Re-roll cost: **2 resources**
 - Retain cost: **1 resource**
 - Upgrade credit cost: **5 resources**

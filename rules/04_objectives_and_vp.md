@@ -16,7 +16,7 @@ player_vp     = max(0, tile_vp + vp_hex_bonus + card_vp + bonus_vp)
 
 | Component | Source | Amount |
 |-----------|--------|--------|
-| Territory | Every 3 tiles owned (rounded down) | +1 VP per 3 tiles |
+| Territory | Every N tiles owned (N = grid radius - 1: Small=3, Med=4, Lg=5) | +1 VP per N tiles |
 | Connected VP hexes | VP hex tiles connected to your base via owned tiles | +1 or +2 VP per hex |
 | Land Grant cards | In deck (passive, not played) | +1 VP each |
 | Rubble cards | In deck (from base raids) | -1 VP each |
@@ -24,7 +24,7 @@ player_vp     = max(0, tile_vp + vp_hex_bonus + card_vp + bonus_vp)
 
 ### Connectivity Rule
 
-A VP hex adds its bonus VP only when **connected to your base** — there must be an unbroken path of adjacent tiles all owned by you leading from the VP hex back to your base tile. VP hexes always count toward the `// 3` tile division regardless of connectivity, but disconnected VP hexes do **not** add their bonus.
+A VP hex adds its bonus VP only when **connected to your base** — there must be an unbroken path of adjacent tiles all owned by you leading from the VP hex back to your base tile. VP hexes always count toward the tile division regardless of connectivity, but disconnected VP hexes do **not** add their bonus.
 
 ### Win Condition
 
@@ -37,15 +37,16 @@ If multiple players reach the target simultaneously, the player with the highest
 The VP target scales with grid size, player count, and game speed:
 
 ```
-base_vp = total_tiles // (TILES_PER_VP × player_count × 0.5)
+tiles_per_vp = grid_radius - 1    # Small=3, Medium=4, Large=5
+base_vp = total_tiles // (tiles_per_vp × player_count × 0.75)
 vp_target = max(3, round(base_vp × speed_multiplier))
 ```
 
 | Speed | Multiplier | Description |
 |-------|-----------|-------------|
-| Fast | 1.0× | Quick games, lower target |
-| Normal (default) | 1.25× | Standard experience |
-| Slow | 1.5× | Longer, more strategic games |
+| Fast | 0.66× | Quick games, lower target |
+| Normal (default) | 1.0× | Standard experience |
+| Slow | 1.33× | Longer, more strategic games |
 
 The setup screen displays the computed VP target based on selected grid size, player count, and speed.
 

@@ -29,9 +29,9 @@ const PLAYER_COLORS: Record<string, string> = {
 };
 
 const GRID_SIZE_LABELS: Record<string, string> = {
-  small: 'Small (37 tiles)',
-  medium: 'Medium (61 tiles)',
-  large: 'Large (91 tiles)',
+  small: 'Small (61 tiles)',
+  medium: 'Medium (91 tiles)',
+  large: 'Large (127 tiles)',
 };
 
 // Pool of placeholder passive emojis
@@ -121,6 +121,8 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
   });
 
   const vpTiles = Object.values(gameState.grid.tiles).filter(t => t.is_vp).length;
+  const GRID_RADIUS: Record<string, number> = { small: 4, medium: 5, large: 6 };
+  const tilesPerVp = (GRID_RADIUS[gameState.grid.size] ?? 4) - 1;
 
   return (
     <div style={{
@@ -244,9 +246,9 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
         }}>
           <span>{GRID_SIZE_LABELS[gameState.grid.size] || gameState.grid.size}</span>
           <span>·</span>
-          <span>{vpTiles} VP tiles</span>
+          <span>{vpTiles} Bonus VP tiles</span>
           <span>·</span>
-          <span>{playerCount} players</span>
+          <span>{tilesPerVp} tiles per VP</span>
         </div>
       </div>
 

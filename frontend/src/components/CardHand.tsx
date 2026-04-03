@@ -2,8 +2,7 @@ import { useRef, useCallback, useState, useEffect, useLayoutEffect, type Pointer
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import { useAnimated, useAnimationOff, useAnimationMode } from './SettingsContext';
-import { renderWithKeywords } from './Keywords';
-import CardFull, { CARD_FULL_WIDTH } from './CardFull';
+import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 
@@ -44,27 +43,22 @@ const TYPE_COLORS: Record<string, string> = {
   claim: '#4a9eff',
   defense: '#4aff6a',
   engine: '#ffaa4a',
+  passive: '#aa88cc',
 };
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
   defense: '🛡️',
   engine: '⚙️',
-};
-
-const ARCHETYPE_EMOJI: Record<string, string> = {
-  vanguard: '🗡️',
-  swarm: '🐝',
-  fortress: '🏰',
-  neutral: '⬜',
+  passive: '📜',
 };
 
 const DRAG_THRESHOLD = 12;
-const CARD_WIDTH = 150;
+const CARD_WIDTH = 134;
 const CARD_GAP = 6;
 // Approximate rendered height of a hand card (padding + border + content)
 // so the hand area stays consistent when empty
-const CARD_MIN_HEIGHT = 62;
+const CARD_MIN_HEIGHT = 52;
 
 function ActionReturnBadge({ value }: { value: number }) {
   if (value === 0) return null;
@@ -80,16 +74,6 @@ function ActionReturnBadge({ value }: { value: number }) {
       {value === 1 ? '↺' : '↑'}
     </span>
   );
-}
-
-function CardStats({ card }: { card: Card }) {
-  const parts: string[] = [];
-  if (card.power > 0) parts.push(`Power ${card.power}`);
-  if (card.resource_gain > 0) parts.push(`+${card.resource_gain} Resource${card.resource_gain !== 1 ? 's' : ''}`);
-  if (card.draw_cards > 0) parts.push(`+${card.draw_cards} Card${card.draw_cards !== 1 ? 's' : ''}`);
-  if (card.defense_bonus > 0) parts.push(`+${card.defense_bonus} Defense`);
-  if (card.forced_discard > 0) parts.push(`-${card.forced_discard} Card${card.forced_discard !== 1 ? 's' : ''}`);
-  return <span>{parts.length > 0 ? parts.join(', ') : '\u00a0'}</span>;
 }
 
 // Floating card preview shown above/below a hovered hand card
@@ -113,7 +97,7 @@ function CardPreview({ card, anchorRect }: { card: Card; anchorRect: DOMRect }) 
       opacity: visible ? 1 : 0,
       transition: animMode === 'normal' ? 'opacity 0.15s ease' : 'none',
     }}>
-      <CardFull card={card} />
+      <CardFull card={card} showKeywordHints />
     </div>
   );
 }
@@ -131,33 +115,89 @@ function Flag({ text, color }: { text: string; color: string }) {
 function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; shiftHeld: boolean }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = TYPE_COLORS[displayCard.card_type] || '#555';
+  const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const upgradeLabel = shiftHeld && hasUpgradePreview(card) ? (
     <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 4 }}>
       Upgraded
     </div>
   ) : null;
+  const vpBadge = displayCard.current_vp !== undefined ? (
+    <span style={{
+      fontSize: 10,
+      fontWeight: 'bold',
+      color: displayCard.current_vp > 0 ? '#ffd700' : displayCard.current_vp < 0 ? '#ff6666' : '#888',
+      marginLeft: 4,
+    }}>
+      {displayCard.current_vp > 0 ? '+' : ''}{displayCard.current_vp}★
+    </span>
+  ) : null;
   if (!full) {
     return (
-      <div style={{
-        width: 130,
-        padding: 6,
-        background: '#2a2a3e',
-        border: `1px solid ${color}`,
-        borderRadius: 6,
-        color: '#fff',
-        flexShrink: 0,
-      }}>
+      <div
+        onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
+        onPointerLeave={() => setHoverRect(null)}
+        style={{
+          width: 134,
+          padding: 6,
+          background: '#2a2a3e',
+          border: `1px solid ${color}`,
+          borderRadius: 6,
+          color: '#fff',
+          flexShrink: 0,
+        }}
+      >
         <div style={{ marginBottom: 4 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 12 }}>
-            {CARD_EMOJI[displayCard.card_type]} {displayCard.name}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+              <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+                if (el) {
+                  const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                  el.style.setProperty('--title-scale', String(scale));
+                }
+              }}>
+                {displayCard.name}{vpBadge}
+              </span>
+            </div>
+            <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[displayCard.card_type]}</span>
           </div>
           <div style={{ fontSize: 11, color: '#aaa' }}>
-            {displayCard.buy_cost !== null ? `💰 ${displayCard.buy_cost}` : 'Starter'}
-            {(displayCard.power > 0 || displayCard.card_type === 'claim') && ` · Pow ${displayCard.power}`}
-            {displayCard.resource_gain > 0 && ` · +${displayCard.resource_gain}`}
+            {(() => {
+              const parts: React.ReactNode[] = [];
+              if (displayCard.buy_cost !== null) {
+                parts.push(`💰 ${displayCard.buy_cost}`);
+              } else if (displayCard.starter) {
+                parts.push('Starter');
+              }
+              if (displayCard.passive_vp !== 0) {
+                parts.push(<span key="vp" style={{ color: displayCard.passive_vp > 0 ? '#ffd700' : '#ff6666' }}>{displayCard.passive_vp > 0 ? '+' : ''}{displayCard.passive_vp}★</span>);
+              } else if (displayCard.vp_formula) {
+                parts.push(<span key="vp" style={{ color: '#ffd700' }}>+★</span>);
+              }
+              if (displayCard.power > 0 || displayCard.card_type === 'claim') {
+                parts.push(`Pow ${displayCard.power}`);
+              }
+              if (displayCard.resource_gain > 0) {
+                parts.push(`+${displayCard.resource_gain}`);
+              }
+              return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
+            })()}
           </div>
         </div>
         {upgradeLabel}
+        {hoverRect && createPortal(
+          <div style={{
+            position: 'fixed',
+            left: Math.max(8, Math.min(hoverRect.left + hoverRect.width / 2 - CARD_FULL_WIDTH / 2, window.innerWidth - CARD_FULL_WIDTH - 8)),
+            ...(hoverRect.top > CARD_FULL_MIN_HEIGHT + 16
+              ? { bottom: window.innerHeight - hoverRect.top + 8 }
+              : { top: hoverRect.bottom + 8 }),
+            pointerEvents: 'none',
+            zIndex: 20000,
+          }}>
+            <CardFull card={displayCard} showKeywordHints />
+          </div>,
+          document.body
+        )}
       </div>
     );
   }
@@ -961,13 +1001,12 @@ export default function CardHand({
                   width: CARD_WIDTH,
                   flexShrink: 0,
                   marginLeft: localIdx === 0 ? 0 : cardMarginLeft,
-                  padding: '6px 8px',
+                  padding: 6,
                   background: isSelected ? '#3a3a6e' : '#2a2a3e',
                   border: `2px solid ${isSelected ? '#fff' : typeColor}`,
                   borderRadius: 6,
                   color: '#fff',
                   cursor: disabled ? 'not-allowed' : 'grab',
-                  textAlign: 'center' as const,
                   opacity: cardOpacity,
                   transition: cardTransition,
                   transform: cardTransform,
@@ -982,14 +1021,51 @@ export default function CardHand({
                       : 'none',
                 }}
               >
-                <div style={{ fontSize: 9, color: typeColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 3 }}>
-                  {card.card_type}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+                    <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+                      if (el) {
+                        const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                        el.style.setProperty('--title-scale', String(scale));
+                      }
+                    }}>
+                      {card.name}
+                      {card.action_return > 0 && <>{' '}<ActionReturnBadge value={card.action_return} /></>}
+                      {card.current_vp !== undefined && (
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 'bold',
+                          color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
+                          marginLeft: 4,
+                        }}>
+                          {card.current_vp > 0 ? '+' : ''}{card.current_vp}★
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[card.card_type]}</span>
                 </div>
-                <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 2, lineHeight: 1.2 }}>
-                  {card.name} <ActionReturnBadge value={card.action_return} />
-                </div>
-                <div style={{ fontSize: 9, color: '#aaa', lineHeight: 1.3 }}>
-                  <CardStats card={card} />
+                <div style={{ fontSize: 11, color: '#aaa' }}>
+                  {(() => {
+                    const parts: React.ReactNode[] = [];
+                    if (card.buy_cost !== null) {
+                      parts.push(`💰 ${card.buy_cost}`);
+                    } else if (card.starter) {
+                      parts.push('Starter');
+                    }
+                    if (card.passive_vp !== 0) {
+                      parts.push(<span key="vp" style={{ color: card.passive_vp > 0 ? '#ffd700' : '#ff6666' }}>{card.passive_vp > 0 ? '+' : ''}{card.passive_vp}★</span>);
+                    } else if (card.vp_formula) {
+                      parts.push(<span key="vp" style={{ color: '#ffd700' }}>+★</span>);
+                    }
+                    if (card.power > 0 || card.card_type === 'claim') {
+                      parts.push(`Pow ${card.power}`);
+                    }
+                    if (card.resource_gain > 0) {
+                      parts.push(`+${card.resource_gain}`);
+                    }
+                    return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
+                  })()}
                 </div>
                 <div style={{
                   position: 'absolute',
@@ -1023,31 +1099,34 @@ export default function CardHand({
       )}
 
       {/* Drag ghost */}
-      {draggingIndex !== null && dragPos && cards[localOrder[draggingIndex]] && (
-        <div style={{
-          position: 'fixed',
-          left: dragPos.x - 75,
-          top: dragPos.y - 40,
-          width: CARD_WIDTH,
-          padding: 6,
-          background: '#3a3a6ecc',
-          border: `2px solid ${TYPE_COLORS[cards[localOrder[draggingIndex]].card_type] || '#fff'}`,
-          borderRadius: 6,
-          color: '#fff',
-          pointerEvents: 'none',
-          zIndex: 9999,
-          transform: 'rotate(3deg) scale(1.05)',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-          textAlign: 'center',
-        }}>
-          <div style={{ fontSize: 9, color: TYPE_COLORS[cards[localOrder[draggingIndex]].card_type] || '#aaa', textTransform: 'uppercase', letterSpacing: 1 }}>
-            {cards[localOrder[draggingIndex]].card_type}
+      {draggingIndex !== null && dragPos && cards[localOrder[draggingIndex]] && (() => {
+        const dragCard = cards[localOrder[draggingIndex]];
+        const dragColor = TYPE_COLORS[dragCard.card_type] || '#fff';
+        return (
+          <div style={{
+            position: 'fixed',
+            left: dragPos.x - CARD_WIDTH / 2,
+            top: dragPos.y - 28,
+            width: CARD_WIDTH,
+            padding: 6,
+            background: '#3a3a6ecc',
+            border: `2px solid ${dragColor}`,
+            borderRadius: 6,
+            color: '#fff',
+            pointerEvents: 'none',
+            zIndex: 9999,
+            transform: 'rotate(3deg) scale(1.05)',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                {dragCard.name}
+              </div>
+              <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[dragCard.card_type]}</span>
+            </div>
           </div>
-          <div style={{ fontWeight: 'bold', fontSize: 11 }}>
-            {cards[localOrder[draggingIndex]].name}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Draw pile viewer popup */}
       {showDeckPopup && (
@@ -1096,20 +1175,19 @@ export default function CardHand({
                     : 'none',
                   pointerEvents: 'none',
                   zIndex: 9990,
-                  padding: '6px 8px',
+                  padding: 6,
                   background: '#2a2a3e',
                   border: `2px solid ${typeColor}`,
                   borderRadius: 6,
                   color: '#fff',
-                  textAlign: 'center',
                   boxSizing: 'border-box',
                 }}
               >
-                <div style={{ fontSize: 9, color: typeColor, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 3 }}>
-                  {d.card.card_type}
-                </div>
-                <div style={{ fontWeight: 'bold', fontSize: 12, lineHeight: 1.2 }}>
-                  {d.card.name}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    {d.card.name}
+                  </div>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[d.card.card_type]}</span>
                 </div>
               </div>
             );

@@ -55,9 +55,9 @@ class TestHexTile:
 
 class TestHexGridGeneration:
     @pytest.mark.parametrize("size,expected_tiles", [
-        (GridSize.SMALL, 37),
-        (GridSize.MEDIUM, 61),
-        (GridSize.LARGE, 91),
+        (GridSize.SMALL, 61),
+        (GridSize.MEDIUM, 91),
+        (GridSize.LARGE, 127),
     ])
     def test_grid_tile_count(self, size: GridSize, expected_tiles: int) -> None:
         config = GRID_CONFIG[size]
@@ -190,4 +190,4 @@ class TestHexGridOperations:
         assert d["size"] == "small"
         assert "tiles" in d
         assert "starting_positions" in d
-        assert len(d["tiles"]) == 37
+        assert len(d["tiles"]) == 61

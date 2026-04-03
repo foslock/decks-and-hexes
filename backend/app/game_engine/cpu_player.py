@@ -305,6 +305,10 @@ class CPUPlayer:
             effective_power = card.effective_power
             if effective_power > defense:
                 score += 5.0 * weights.aggression
+                # Base raid bonus: raiding generates Rubble (-1 VP each) in opponent's deck
+                if tile.is_base:
+                    rubble_count = effective_power - defense
+                    score += rubble_count * 3.0 * weights.aggression
             elif effective_power == defense:
                 score += 1.0 * weights.aggression  # tie goes to defender, risky
             else:
@@ -502,11 +506,18 @@ class CPUPlayer:
 
         action_dict: dict[str, Any] = {"card_index": card_index}
 
-        # Engine cards that need targets
+        # Engine cards that need targets (e.g. Sabotage — pick opponent tile for visual)
         if card.forced_discard > 0:
             target_pid = self._pick_forced_discard_target(game, player)
-            if target_pid:
+            if target_pid and game.grid:
                 action_dict["target_player_id"] = target_pid
+                # Pick any tile owned by target for visual targeting
+                target_tiles = game.grid.get_player_tiles(target_pid)
+                if target_tiles:
+                    # Prefer base tile if available
+                    base = next((t for t in target_tiles if t.is_base), target_tiles[0])
+                    action_dict["target_q"] = base.q
+                    action_dict["target_r"] = base.r
 
         # Handle self-discard/trash choices
         discard_indices = None
@@ -599,9 +610,17 @@ class CPUPlayer:
 
     def pick_next_purchase(self, game: Any) -> Optional[dict[str, Any]]:
         """Pick the single best purchase to make. Returns None if done buying."""
+        from .game_state import compute_upkeep_cost
         player = game.players[self.player_id]
         if player.turn_modifiers.buy_locked or player.resources <= 0:
             return None
+
+        # Reserve resources for next turn's upkeep
+        if game.grid:
+            tile_count = len(game.grid.get_player_tiles(self.player_id))
+            anticipated_upkeep = compute_upkeep_cost(tile_count, game.grid.size)
+            if player.resources <= anticipated_upkeep:
+                return None  # save resources for upkeep
 
         weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
         return self._pick_best_purchase(game, player, weights)

@@ -11,7 +11,7 @@ const KEYWORDS: Record<string, string> = {
   'Power': 'Determines the strength of a claim; highest power wins the contested tile.',
   'Draw': 'Take additional cards from your deck into your hand.',
   'Discard': 'Forces the targeted opponent to draw fewer cards on their next turn.',
-  'Upkeep': 'A cost of 1 resource paid at the start of each turn (skipped on round 1).',
+  'Upkeep': 'Costs 1 💰 per group of tiles beyond your first 4 (scales with grid size). Skipped round 1. If you can\'t pay, your most distant tiles are lost.',
   'Adjacent': 'A hex tile directly neighboring one you already own (6 possible directions).',
   'Stackable': 'This card can be played on a tile where you already have a claim this turn. Powers stack additively.',
   'Trash': 'Remove this card from the game permanently after it is played.',

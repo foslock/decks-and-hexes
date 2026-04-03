@@ -362,31 +362,44 @@ def _vp_curves(results: list[GameResult]) -> dict[str, list[float]]:
 
 
 def _snowball_indicator(results: list[GameResult]) -> dict[str, Any]:
-    """Detect snowball patterns: does early tile lead predict winning?"""
-    early_round = 3  # check tile count at round 3
+    """Detect snowball patterns: does early tile lead predict winning?
+
+    Uses actual tile counts at round 3 (not VP, which can have many ties).
+    Only counts games where there's a clear sole tile leader (no ties).
+    """
+    early_round = 3
     leader_wins = 0
     total_checked = 0
+    ties_skipped = 0
 
     for game in results:
         if game.timed_out or not game.winner_id:
             continue
 
-        # Find who had the most tiles at round 3 (approximated by VP curve length)
-        # We don't have per-round tile counts, so use VP as a proxy
-        round_3_vp: dict[str, int] = {}
+        # Use actual tile counts if available, fall back to VP
+        round_3_tiles: dict[str, int] = {}
         for pr in game.player_results:
-            if len(pr.vp_over_time) > early_round:
-                round_3_vp[pr.player_id] = pr.vp_over_time[early_round]
+            if pr.tiles_over_time and len(pr.tiles_over_time) > early_round:
+                round_3_tiles[pr.player_id] = pr.tiles_over_time[early_round]
+            elif pr.tiles_over_time:
+                round_3_tiles[pr.player_id] = pr.tiles_over_time[-1] if pr.tiles_over_time else 0
+            elif len(pr.vp_over_time) > early_round:
+                round_3_tiles[pr.player_id] = pr.vp_over_time[early_round]
             elif pr.vp_over_time:
-                round_3_vp[pr.player_id] = pr.vp_over_time[-1]
+                round_3_tiles[pr.player_id] = pr.vp_over_time[-1]
             else:
-                round_3_vp[pr.player_id] = 0
+                round_3_tiles[pr.player_id] = 0
 
-        if not round_3_vp:
+        if not round_3_tiles:
             continue
 
-        max_vp = max(round_3_vp.values())
-        leaders = [pid for pid, vp in round_3_vp.items() if vp == max_vp]
+        max_tiles = max(round_3_tiles.values())
+        leaders = [pid for pid, t in round_3_tiles.items() if t == max_tiles]
+
+        # Skip ties — they don't tell us about snowball
+        if len(leaders) > 1:
+            ties_skipped += 1
+            continue
 
         total_checked += 1
         if game.winner_id in leaders:
@@ -395,6 +408,7 @@ def _snowball_indicator(results: list[GameResult]) -> dict[str, Any]:
     return {
         "round_3_leader_win_rate": round(leader_wins / total_checked, 4) if total_checked > 0 else 0.0,
         "games_checked": total_checked,
+        "ties_skipped": ties_skipped,
         "interpretation": "High values (>0.7) suggest snowball problem — early advantages compound too strongly."
     }
 

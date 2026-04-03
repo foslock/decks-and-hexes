@@ -8,16 +8,18 @@ from app.game_engine.cards import Archetype, Card, CardType, Timing
 from app.game_engine.game_state import (
     REROLL_COST,
     STARTING_RESOURCES,
-    UPKEEP_COST,
+    UPKEEP_FREE_TILES,
     UPGRADE_CREDIT_COST,
     VP_TARGET,
     GameState,
     Phase,
     buy_card,
+    compute_upkeep_cost,
     create_game,
     execute_end_of_turn,
     execute_reveal,
     execute_start_of_turn,
+    execute_upkeep,
     play_card,
     reroll_market,
     submit_plan,
@@ -40,7 +42,7 @@ class TestGameCreation:
         assert len(game.player_order) == 2
         assert game.current_round == 1
         assert game.grid is not None
-        assert len(game.grid.tiles) == 37
+        assert len(game.grid.tiles) == 61
 
     def test_players_have_starting_resources(self, card_registry: dict[str, Card]) -> None:
         game = create_game(
@@ -109,7 +111,7 @@ class TestGameCreation:
         )
         assert len(game.players) == 3
         assert game.grid is not None
-        assert len(game.grid.tiles) == 61
+        assert len(game.grid.tiles) == 91
 
 
 class TestStartOfTurn:
@@ -134,17 +136,23 @@ class TestStartOfTurn:
             assert p.actions_used == 0
             assert p.actions_available == p.action_slots
 
-    def test_round_2_charges_upkeep(self, small_2p_game: GameState) -> None:
-        """After advancing to round 2, upkeep should be charged."""
+    def test_round_2_enters_upkeep_phase(self, small_2p_game: GameState) -> None:
+        """After advancing to round 2, game should enter UPKEEP phase with data populated."""
         game = small_2p_game
         # Submit plans for all players (play nothing)
         for pid in game.player_order:
             submit_plan(game, pid)
-        # End turn to advance
+        # End turn to advance — round 2 start_of_turn computes upkeep, then enters UPKEEP
         execute_end_of_turn(game)
-        # Now in round 2 after start_of_turn
+        assert game.current_phase == Phase.UPKEEP
+        # With only 2 starting tiles, upkeep is 0 (below free threshold of 4)
         for p in game.players.values():
-            assert p.resources == STARTING_RESOURCES - UPKEEP_COST
+            assert p.upkeep_cost == 0
+            assert p.last_upkeep_paid == 0
+            assert p.resources == STARTING_RESOURCES  # no upkeep charged
+        # Advance to PLAN
+        execute_upkeep(game)
+        assert game.current_phase == Phase.PLAN
 
 
 class TestPlanPhase:
@@ -484,6 +492,8 @@ class TestEndOfTurn:
         # Buy phase — end turn
         execute_end_of_turn(game)
         assert game.current_round == 2
+        assert game.current_phase == Phase.UPKEEP  # round 2+ enters UPKEEP
+        execute_upkeep(game)
         assert game.current_phase == Phase.PLAN
 
 
