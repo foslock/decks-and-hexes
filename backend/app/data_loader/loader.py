@@ -111,9 +111,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         if match:
             defense_bonus = int(match.group(1))
 
-    # Parse forced_discard from effect text
+    # Parse forced_discard from effect text (skip if card has self_discard effect)
+    has_self_discard_effect = any(
+        e.get("type") == "self_discard" for e in entry.get("effects", [])
+    )
     forced_discard = _safe_int(entry.get("forced_discard", 0))
-    if forced_discard == 0 and "discard" in effect.lower():
+    if forced_discard == 0 and "discard" in effect.lower() and not has_self_discard_effect:
         match = re.search(r'[Dd]iscard\w*\s+(\d+)', effect)
         if match:
             forced_discard = int(match.group(1))
@@ -276,57 +279,7 @@ def _safe_optional_int(value: Any) -> Optional[int]:
         return None
 
 
-def load_objectives() -> list[dict[str, Any]]:
-    """Load objectives from data file."""
-    filepath = DATA_DIR / "objectives.md"
-    if not filepath.exists():
-        return []
 
-    text = filepath.read_text()
-    try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError:
-        return []
-
-    if not isinstance(data, dict) or "objectives" not in data:
-        return []
-
-    objectives = []
-    for entry in data["objectives"]:
-        if not isinstance(entry, dict):
-            continue
-        objectives.append({
-            "name": entry.get("name", ""),
-            "pool": entry.get("pool", "wildcard"),
-            "condition": entry.get("condition", ""),
-            "vp_reward": 2,
-        })
-
-    return objectives
-
-
-def load_passives() -> list[dict[str, Any]]:
-    """Load passive abilities from data file."""
-    filepath = DATA_DIR / "passives.md"
-    if not filepath.exists():
-        return []
-
-    text = filepath.read_text()
-    try:
-        data = yaml.safe_load(text)
-    except yaml.YAMLError:
-        return []
-
-    if not isinstance(data, dict) or "passives" not in data:
-        return []
-
-    passives = []
-    for entry in data["passives"]:
-        if not isinstance(entry, dict):
-            continue
-        passives.append({
-            "name": entry.get("name", ""),
-            "description": entry.get("effect", entry.get("description", "")),
-        })
-
-    return passives
+# NOTE: Objectives (data/objectives.md) and Passives (data/passives.md)
+# are candidate features preserved in the data files for future reference,
+# but are not currently part of the active game implementation.

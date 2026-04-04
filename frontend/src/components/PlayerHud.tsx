@@ -8,6 +8,7 @@ interface PlayerHudProps {
   phase: string;
   totalCards: number;
   tileCount: number;
+  cpuBadge?: string;
 }
 
 const ARCHETYPE_ICONS: Record<string, string> = {
@@ -38,7 +39,7 @@ function getStatus(player: Player, phase: string): { label: string; color: strin
   return { label: phase.replace(/_/g, ' '), color: '#888' };
 }
 
-export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, phase, totalCards, tileCount }: PlayerHudProps) {
+export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, phase, totalCards, tileCount, cpuBadge }: PlayerHudProps) {
   const status = getStatus(player, phase);
 
   return (
@@ -78,6 +79,24 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
             }}
           >
             1st
+          </span>
+        )}
+        {cpuBadge && (
+          <span
+            title="CPU opponent"
+            style={{
+              fontSize: 9,
+              padding: '1px 5px',
+              borderRadius: 6,
+              background: '#555',
+              color: '#ccc',
+              fontWeight: 'bold',
+              letterSpacing: 0.5,
+              marginLeft: 2,
+              lineHeight: 1.4,
+            }}
+          >
+            {cpuBadge}
           </span>
         )}
         {/* Status badge, right-aligned */}

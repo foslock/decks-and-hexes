@@ -51,7 +51,6 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
       makeCard({ id: 'arch_1', name: 'Overrun', buy_cost: 5, power: 5 }),
     ],
     upgrade_credits: 0,
-    passive: null,
     deck_size: 4,
     discard_count: 0,
     discard: [],
@@ -65,6 +64,9 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     upkeep_cost: 0,
     tiles_lost_to_upkeep: 0,
     rubble_count: 0,
+    neutral_bought_this_turn: false,
+    is_cpu: false,
+    cpu_difficulty: null,
     ...overrides,
   };
 }

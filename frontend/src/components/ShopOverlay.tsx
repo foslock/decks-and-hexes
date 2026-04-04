@@ -36,6 +36,7 @@ interface ShopOverlayProps {
   playerArchetype: string;
   effectiveBuyCosts?: Record<string, number>;
   currentUpkeep: number;
+  neutralBoughtThisTurn: boolean;
   onBuyArchetype: (cardId: string) => void;
   onBuyNeutral: (cardId: string) => void;
   onBuyUpgrade: () => void;
@@ -75,6 +76,7 @@ function FullShopCard({
   onLeave,
   disabled,
   shiftHeld,
+  disabledTooltip,
 }: {
   card: Card;
   remaining: number | null;
@@ -86,14 +88,17 @@ function FullShopCard({
   onLeave: () => void;
   disabled: boolean;
   shiftHeld: boolean;
+  disabledTooltip?: string;
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
-  const buyTooltip = upkeepWarning
-    ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
-    : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`;
+  const buyTooltip = disabledTooltip
+    ? disabledTooltip
+    : upkeepWarning
+      ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
+      : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`;
   return (
     <div
       data-card-id={card.id}
@@ -134,6 +139,11 @@ function FullShopCard({
   );
 }
 
+/** Compact card width — matches CardHand CARD_WIDTH */
+const COMPACT_CARD_WIDTH = 134;
+/** Compact card height — matches CardHand CARD_MIN_HEIGHT */
+const COMPACT_CARD_HEIGHT = 52;
+
 function CompactShopCard({
   card,
   remaining,
@@ -144,6 +154,7 @@ function CompactShopCard({
   onHover,
   onLeave,
   disabled,
+  disabledTooltip,
 }: {
   card: Card;
   remaining: number | null;
@@ -154,45 +165,68 @@ function CompactShopCard({
   onHover: (e: React.MouseEvent, card: Card) => void;
   onLeave: () => void;
   disabled: boolean;
+  disabledTooltip?: string;
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
+  const typeColor = TYPE_COLORS[card.card_type] || '#4a9eff';
   const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
-  const buyTooltip = upkeepWarning
-    ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
-    : `Purchasing ${card.name} spends ${card.buy_cost} resources and adds it to your discard pile.`;
+  const buyTooltip = disabledTooltip
+    ? disabledTooltip
+    : upkeepWarning
+      ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
+      : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`;
+  const buyLabel = remaining !== null ? `Buy (${remaining} left)` : 'Buy';
   return (
     <div
       data-card-id={card.id}
       onMouseEnter={(e) => onHover(e, card)}
       onMouseLeave={onLeave}
       style={{
-        width: 130,
-        padding: 6,
-        background: '#2a2a3e',
-        border: `1px solid ${canAfford && !disabled ? TYPE_COLORS[card.card_type] || '#4a9eff' : '#333'}`,
-        borderRadius: 6,
-        color: '#fff',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
         opacity: disabled || !canAfford ? 0.5 : 1,
       }}
     >
-      <div style={{ marginBottom: 4 }}>
-        <div style={{ fontWeight: 'bold', fontSize: 12 }}>
-          {CARD_EMOJI[card.card_type]} {card.name}
+      {/* Card element — same dimensions as CardHand compact cards */}
+      <div style={{
+        width: COMPACT_CARD_WIDTH,
+        height: COMPACT_CARD_HEIGHT,
+        padding: 6,
+        background: '#2a2a3e',
+        border: `2px solid ${canAfford && !disabled ? typeColor : '#333'}`,
+        borderRadius: 6,
+        color: '#fff',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+              if (el) {
+                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                el.style.setProperty('--title-scale', String(scale));
+              }
+            }}>
+              {card.name}
+            </span>
+          </div>
+          <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[card.card_type]}</span>
         </div>
         <div style={{ fontSize: 11, color: '#aaa' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
           {displayCost !== null ? `💰 ${displayCost}${isDiscounted ? '*' : ''}` : 'Free'}
           {card.power > 0 && ` · Pow ${card.power}`}
           {card.resource_gain > 0 && ` · +${card.resource_gain}`}
-          {remaining !== null && ` · ×${remaining}`}
         </div>
       </div>
+      {/* Buy button below card */}
       <IrreversibleButton
         onClick={onBuy}
         disabled={disabled || !canAfford}
         tooltip={buyTooltip}
         style={{
-          width: '100%',
+          width: COMPACT_CARD_WIDTH,
           padding: '3px 0',
           background: buyColor,
           border: 'none',
@@ -203,7 +237,7 @@ function CompactShopCard({
           cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
         }}
       >
-        Buy
+        {buyLabel}
       </IrreversibleButton>
     </div>
   );
@@ -216,6 +250,7 @@ export default function ShopOverlay({
   playerArchetype,
   effectiveBuyCosts,
   currentUpkeep,
+  neutralBoughtThisTurn,
   onBuyArchetype,
   onBuyNeutral,
   onBuyUpgrade,
@@ -502,32 +537,35 @@ export default function ShopOverlay({
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
                   const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
                   const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
+                  const neutralLimitReached = neutralBoughtThisTurn && !testMode;
                   return fullView ? (
                     <FullShopCard
                       key={stack.card.id}
                       card={stack.card}
                       remaining={stack.remaining}
-                      canAfford={canAfford}
+                      canAfford={canAfford && !neutralLimitReached}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled}
+                      disabled={disabled || neutralLimitReached}
                       shiftHeld={shiftHeld}
+                      disabledTooltip={neutralLimitReached ? 'You can only buy 1 neutral card per round.' : undefined}
                     />
                   ) : (
                     <CompactShopCard
                       key={stack.card.id}
                       card={stack.card}
                       remaining={stack.remaining}
-                      canAfford={canAfford}
+                      canAfford={canAfford && !neutralLimitReached}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled}
+                      disabled={disabled || neutralLimitReached}
+                      disabledTooltip={neutralLimitReached ? 'You can only buy 1 neutral card per round.' : undefined}
                     />
                   );
                 })}

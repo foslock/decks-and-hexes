@@ -7,7 +7,6 @@ import copy
 import pytest
 
 from app.game_engine.cards import (
-    ACTION_HARD_CAP,
     Archetype,
     Card,
     CardType,
@@ -271,11 +270,12 @@ class TestSelfDiscard:
         player.hand = [frenzy, _make_card("dummy1"), _make_card("dummy2")]
         initial = len(player.hand)
 
-        # Play without providing discard indices
+        # Play without providing discard indices — should be rejected
         success, msg = play_card(game, "p0", 0)
-        assert success
-        # Should still work — card played, but no discard happened
-        assert len(player.hand) == initial - 1  # just the card played
+        assert not success
+        assert "requires" in msg.lower()
+        # Hand unchanged — card not played
+        assert len(player.hand) == initial
 
 
 # ── Self-Trash Effect Tests ───────────────────────────────────────
@@ -302,8 +302,28 @@ class TestSelfTrash:
         all_cards = player.hand + player.deck.cards + player.deck.discard
         assert not any(c.name == "Trash Target" for c in all_cards)
 
+    def test_thin_the_herd_no_trash_no_draw(self, small_2p_game, card_registry):
+        """Thin the Herd played without trashing: card plays but no draw (gates_draw)."""
+        game = small_2p_game
+        player = game.players["p1"]  # Swarm player
+
+        thin = _copy_card(card_registry["swarm_thin_the_herd"], "test_thin_skip")
+        dummy = _make_card("keep_me", "Keep Me", buy_cost=3)
+        player.hand = [thin, dummy]
+        initial_deck_size = player.deck.total_cards
+
+        # Play without trashing — should succeed (trash is optional)
+        success, msg = play_card(game, "p1", 0)
+        assert success, msg
+        # Keep Me should still be in hand (not trashed)
+        assert any(c.name == "Keep Me" for c in player.hand)
+        # No draw should have happened (gated behind trash)
+        # Thin the Herd has draw_cards=1, but gates_draw means it only draws if trashed
+        # Hand should just have Keep Me (no new draws)
+        assert len(player.hand) == 1
+
     def test_consolidate_trashes_and_refunds(self, small_2p_game, card_registry):
-        """Consolidate: trash a card, gain resources = buy cost."""
+        """Consolidate: trash a card, gain resources = half buy cost (rounded down)."""
         game = small_2p_game
         # Use a fortress player for this test
         game2 = create_game(
@@ -326,9 +346,8 @@ class TestSelfTrash:
         success, msg = play_card(game2, "f0", 0, trash_card_indices=[0])
         assert success, msg
 
-        # Should have gained 5 resources from trashing the expensive card
-        # Plus 2 from consolidate's flat resource_gain (if any) + buy cost refund
-        assert player.resources == initial_resources + 5
+        # Should have gained 2 resources (half of 5, rounded down)
+        assert player.resources == initial_resources + 2
 
 
 # ── VP Gain Tests ─────────────────────────────────────────────────
@@ -676,8 +695,8 @@ class TestCostReduction:
 
 
 class TestGrantActions:
-    def test_forced_march_grants_actions_to_others(self, small_2p_game, card_registry):
-        """Forced March: all other players gain 1 action."""
+    def test_forced_march_grants_actions_next_turn(self, small_2p_game, card_registry):
+        """Forced March: all other players gain 1 extra action next turn."""
         game = small_2p_game
         player = game.players["p0"]
         other = game.players["p1"]
@@ -690,7 +709,10 @@ class TestGrantActions:
         success, _ = play_card(game, "p0", 0)
         assert success
 
-        assert other.actions_available == initial_actions + 1
+        # Actions don't increase this turn
+        assert other.actions_available == initial_actions
+        # But extra actions are queued for next turn
+        assert other.turn_modifiers.extra_actions_next_turn == 1
 
 
 # ── Ignore Defense Tests ──────────────────────────────────────────

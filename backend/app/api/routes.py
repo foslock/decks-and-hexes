@@ -14,6 +14,8 @@ from app.game_engine.cards import Archetype
 from app.game_engine.game_state import (
     GameState,
     Phase,
+    auto_play_cpu_buys,
+    auto_play_cpu_plans,
     buy_card,
     create_game,
     end_buy_phase,
@@ -113,6 +115,8 @@ async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
             "id": p.get("id", f"player_{i}"),
             "name": p.get("name", f"Player {i + 1}"),
             "archetype": p["archetype"],
+            "is_cpu": p.get("is_cpu", False),
+            "cpu_noise": p.get("cpu_noise", 0.15),
         })
 
     game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode, speed=req.speed)
@@ -166,6 +170,10 @@ async def submit_plan_route(game_id: str, req: SubmitPlanRequest) -> dict[str, A
     success, msg = submit_plan(game, req.player_id)
     if not success:
         raise HTTPException(400, msg)
+
+    # Auto-play CPU plans if any CPU players haven't submitted yet
+    if any(p.is_cpu and not p.has_submitted_plan for p in game.players.values()):
+        auto_play_cpu_plans(game)
 
     return {"message": msg, "state": game.to_dict()}
 
@@ -223,6 +231,10 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
+    # Auto-play CPU buys if any CPU players haven't ended yet
+    if any(p.is_cpu and not p.has_ended_turn for p in game.players.values()):
+        auto_play_cpu_buys(game)
+
     return {"message": msg, "state": game.to_dict()}
 
 
@@ -250,6 +262,10 @@ async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
     success, msg = end_buy_phase(game, req.player_id)
     if not success:
         raise HTTPException(400, msg)
+
+    # Auto-play CPU buys if any CPU players haven't ended yet
+    if any(p.is_cpu and not p.has_ended_turn for p in game.players.values()):
+        auto_play_cpu_buys(game)
 
     return {"message": msg, "state": game.to_dict()}
 
@@ -343,3 +359,59 @@ async def test_set_stats(game_id: str, req: TestSetStatsRequest) -> dict[str, An
         game._log(f"[TEST] {player.name}: {', '.join(changes)}", actor=req.player_id)
 
     return {"message": f"Updated {player.name}: {', '.join(changes)}", "state": game.to_dict()}
+
+
+class TestTrashCardRequest(BaseModel):
+    player_id: str
+    card_index: int
+
+
+@router.post("/games/{game_id}/test/trash-card")
+async def test_trash_card(game_id: str, req: TestTrashCardRequest) -> dict[str, Any]:
+    """Test mode: trash (permanently remove) a card from a player's hand."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+
+    player = game.players.get(req.player_id)
+    if not player:
+        raise HTTPException(404, "Player not found")
+
+    if req.card_index < 0 or req.card_index >= len(player.hand):
+        raise HTTPException(400, "Invalid card index")
+
+    card = player.hand.pop(req.card_index)
+    player.trash.append(card)
+    game._log(f"[TEST] {player.name} trashes {card.name}", actor=req.player_id)
+
+    return {"message": f"Trashed {card.name}", "state": game.to_dict()}
+
+
+class TestDiscardCardRequest(BaseModel):
+    player_id: str
+    card_index: int
+
+
+@router.post("/games/{game_id}/test/discard-card")
+async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[str, Any]:
+    """Test mode: discard a card from a player's hand to their discard pile."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+
+    player = game.players.get(req.player_id)
+    if not player:
+        raise HTTPException(404, "Player not found")
+
+    if req.card_index < 0 or req.card_index >= len(player.hand):
+        raise HTTPException(400, "Invalid card index")
+
+    card = player.hand.pop(req.card_index)
+    player.deck.add_to_discard([card])
+    game._log(f"[TEST] {player.name} discards {card.name}", actor=req.player_id)
+
+    return {"message": f"Discarded {card.name}", "state": game.to_dict()}

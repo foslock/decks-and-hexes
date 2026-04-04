@@ -34,13 +34,6 @@ const GRID_SIZE_LABELS: Record<string, string> = {
   large: 'Large (127 tiles)',
 };
 
-// Pool of placeholder passive emojis
-const PASSIVE_EMOJIS = ['🔮', '🛡️', '⚡', '🎯', '💎', '🔥', '🌊', '🌟', '🗡️', '🏹'];
-
-function getPassiveEmoji(index: number): string {
-  return PASSIVE_EMOJIS[index % PASSIVE_EMOJIS.length];
-}
-
 /**
  * Full-screen intro overlay shown when a new game starts.
  * Animates in: VP target → player rows → game settings → "I'm Ready" button.
@@ -172,8 +165,6 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
           const color = PLAYER_COLORS[pid] || '#888';
           const archIcon = ARCHETYPE_ICONS[player.archetype] || '?';
           const archLabel = ARCHETYPE_LABELS[player.archetype] || player.archetype;
-          const passiveEmoji = getPassiveEmoji(i);
-
           return (
             <div
               key={pid}
@@ -206,17 +197,6 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
                 </div>
               </div>
 
-              {/* Passive placeholder */}
-              <span
-                title="Passive ability (coming soon)"
-                style={{
-                  fontSize: 22,
-                  cursor: 'help',
-                  opacity: 0.6,
-                }}
-              >
-                {passiveEmoji}
-              </span>
             </div>
           );
         })}

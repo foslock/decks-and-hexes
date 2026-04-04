@@ -118,8 +118,50 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
             } else if (displayCard.vp_formula) {
               parts.push(<span key="vp" style={{ color: '#ffd700' }}>+★</span>);
             }
-            if (displayCard.power > 0 || displayCard.card_type === 'claim') {
-              parts.push(`Pow ${displayCard.power}`);
+            if (displayCard.card_type === 'defense') {
+              // Defense cards: show "Def X" using defense_bonus or power
+              const isUpgraded = displayCard.is_upgraded;
+              const defBase = displayCard.defense_bonus > 0 ? displayCard.defense_bonus : displayCard.power;
+              const hasPerAdj = displayCard.effects?.some(e => e.type === 'defense_per_adjacent');
+              const hasPermanent = displayCard.effects?.some(e => e.type === 'permanent_defense');
+              const hasImmunity = displayCard.effects?.some(e => e.type === 'tile_immunity');
+              if (hasImmunity) {
+                parts.push('Immune');
+              } else if (hasPerAdj) {
+                const mod = displayCard.effects?.find(e => e.type === 'defense_per_adjacent');
+                const perVal = mod ? (isUpgraded ? (mod.upgraded_value ?? mod.value) : mod.value) : 1;
+                parts.push(`Def ${perVal}+`);
+              } else if (hasPermanent) {
+                const mod = displayCard.effects?.find(e => e.type === 'permanent_defense');
+                const permVal = mod
+                  ? (isUpgraded ? (mod.metadata?.upgraded_value as number ?? mod.value) : mod.value)
+                  : defBase;
+                parts.push(`Def ${permVal}`);
+              } else if (defBase > 0) {
+                parts.push(`Def ${defBase}`);
+              }
+            } else if (displayCard.power > 0 || displayCard.card_type === 'claim') {
+              const isUpgraded = displayCard.is_upgraded;
+              const powerMods = displayCard.effects?.filter(e => e.type === 'power_modifier') ?? [];
+              const hasTileScaling = displayCard.effects?.some(e => e.type === 'power_per_tiles_owned');
+              const isUnbounded = hasTileScaling || powerMods.some(e =>
+                e.condition === 'cards_in_hand' || e.metadata?.per_tile
+              );
+              const fixedBonus = powerMods.find(e =>
+                !isUnbounded && ((isUpgraded ? (e.upgraded_value ?? e.value) : e.value) > 0)
+              );
+              if (isUnbounded) {
+                const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
+                const minPow = handMod
+                  ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
+                  : displayCard.power;
+                parts.push(`Pow ${minPow}+`);
+              } else if (fixedBonus) {
+                const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
+                parts.push(`Pow ${displayCard.power}/${displayCard.power + bonusVal}`);
+              } else {
+                parts.push(`Pow ${displayCard.power}`);
+              }
             }
             if (displayCard.resource_gain > 0) {
               parts.push(`+${displayCard.resource_gain}`);

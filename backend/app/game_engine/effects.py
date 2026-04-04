@@ -39,7 +39,8 @@ class EffectType(str, Enum):
 
     # Action manipulation
     ACTION_RETURN = "action_return"
-    GRANT_ACTIONS = "grant_actions"        # Forced March, Surge Protocol
+    GRANT_ACTIONS = "grant_actions"        # Surge Protocol
+    GRANT_ACTIONS_NEXT_TURN = "grant_actions_next_turn"  # Forced March
 
     # On-success effects (after claim resolution)
     AUTO_CLAIM_ADJACENT_NEUTRAL = "auto_claim_adjacent_neutral"  # Breakthrough
@@ -76,8 +77,23 @@ class EffectType(str, Enum):
     # Permanent defense (Entrench — persists until tile is captured)
     PERMANENT_DEFENSE = "permanent_defense"
 
+    # Free archetype market re-rolls
+    FREE_REROLL = "free_reroll"              # Surveyor: free market re-rolls this turn
+
+    # Resource drain (opponent loses resources)
+    RESOURCE_DRAIN = "resource_drain"        # Rapid Assault: opponent loses resources on success
+
     # Dynamic buy cost (resolved at purchase time, not play time)
     DYNAMIC_BUY_COST = "dynamic_buy_cost"
+
+    # Defense scaled by adjacent owned tiles (Nest)
+    DEFENSE_PER_ADJACENT = "defense_per_adjacent"
+
+    # Power scaled by total tiles owned (Mob Rule, Locust Swarm)
+    POWER_PER_TILES_OWNED = "power_per_tiles_owned"
+
+    # Override ignore-defense effects on a tile (Citadel)
+    IGNORE_DEFENSE_OVERRIDE = "ignore_defense_override"
 
     # VP-related effects (derived VP system)
     ENHANCE_VP_TILE = "enhance_vp_tile"                # Consecrate: +1 vp_value on a VP tile
@@ -99,6 +115,9 @@ class ConditionType(str, Enum):
     IF_PLAYED_SAME_NAME = "if_played_same_name"
     TILES_MORE_THAN_DEFENDER = "tiles_more_than_defender"
     VP_HEXES_CONTROLLED = "vp_hexes_controlled"
+    FEWEST_TILES = "fewest_tiles"
+    ZERO_ACTIONS = "zero_actions"
+    IF_TARGET_HAS_DEFENSE = "if_target_has_defense"
 
 
 @dataclass
@@ -111,6 +130,7 @@ class Effect:
 
     type: EffectType
     value: int = 0
+    upgraded_value: Optional[int] = None  # if set, used when card is upgraded
     timing: Timing = Timing.IMMEDIATE
     condition: ConditionType = ConditionType.ALWAYS
     condition_threshold: int = 0
@@ -119,8 +139,14 @@ class Effect:
     requires_choice: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def effective_value(self, is_upgraded: bool) -> int:
+        """Return upgraded_value when card is upgraded and value is overridden."""
+        if is_upgraded and self.upgraded_value is not None:
+            return self.upgraded_value
+        return self.value
+
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "type": self.type.value,
             "value": self.value,
             "timing": self.timing.value,
@@ -131,6 +157,9 @@ class Effect:
             "requires_choice": self.requires_choice,
             "metadata": self.metadata,
         }
+        if self.upgraded_value is not None:
+            d["upgraded_value"] = self.upgraded_value
+        return d
 
 
 @dataclass
@@ -147,12 +176,16 @@ class TurnModifiers:
     # tile_key -> resource cost for opponents to contest next round
     contest_costs: dict[str, int] = field(default_factory=dict)
     extra_draws_next_turn: int = 0
+    extra_actions_next_turn: int = 0
+    free_rerolls: int = 0
     # Track cards with ignore_defense flag (tile_key set)
     ignore_defense_tiles: set[str] = field(default_factory=set)
     # Track claims that resolve immediately (tile_key set)
     immediate_resolve_tiles: set[str] = field(default_factory=set)
     # Cease Fire: pending bonus draws (granted if no opponent tiles claimed)
     cease_fire_bonus: int = 0
+    # Citadel: tiles where ignore-defense is overridden (tile_key set)
+    ignore_defense_override_tiles: set[str] = field(default_factory=set)
 
     def reset_for_new_turn(self) -> None:
         """Clear single-round modifiers. Decrement multi-round ones."""
@@ -160,6 +193,7 @@ class TurnModifiers:
         self.cost_reductions.clear()
         self.ignore_defense_tiles.clear()
         self.immediate_resolve_tiles.clear()
+        self.ignore_defense_override_tiles.clear()
         # Decrement immune tiles; remove expired
         expired = []
         for tile_key, rounds in self.immune_tiles.items():
@@ -200,9 +234,13 @@ def parse_effect(data: dict[str, Any]) -> Optional[Effect]:
     except ValueError:
         condition = ConditionType.ALWAYS
 
+    raw_upgraded = data.get("upgraded_value")
+    upgraded_value = int(raw_upgraded) if raw_upgraded is not None else None
+
     return Effect(
         type=effect_type,
         value=int(data.get("value", 0)),
+        upgraded_value=upgraded_value,
         timing=timing,
         condition=condition,
         condition_threshold=int(data.get("condition_threshold", 0)),

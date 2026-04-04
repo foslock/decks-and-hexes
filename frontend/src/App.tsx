@@ -17,7 +17,7 @@ export default function App() {
 
   const handleStart = async (config: {
     gridSize: string;
-    players: { id: string; name: string; archetype: string }[];
+    players: { id: string; name: string; archetype: string; is_cpu?: boolean; cpu_noise?: number }[];
     testMode?: boolean;
     speed?: string;
   }) => {

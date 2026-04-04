@@ -216,8 +216,8 @@ class TestNeutralMercenary:
 
 
 class TestNeutralProspector:
-    def test_prospector_gain_3(self, card_registry):
-        """Prospector: gain 3 resources immediately."""
+    def test_prospector_gain_2(self, card_registry):
+        """Prospector: gain 2 resources immediately."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         prosp = _copy_card(card_registry["neutral_prospector"], "test_prosp")
@@ -226,7 +226,7 @@ class TestNeutralProspector:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial + 3
+        assert player.resources == initial + 2
 
 
 class TestNeutralSabotage:
@@ -465,6 +465,90 @@ class TestRubble:
         assert vp_after == vp_before  # no penalty from trash
 
 
+class TestNeutralRecruit:
+    def test_recruit_power_and_action(self, card_registry):
+        """Recruit: Power 1, gain 1 action."""
+        card = card_registry["neutral_recruit"]
+        assert card.power == 1
+        assert card.action_return == 1
+        assert card.buy_cost == 1
+
+
+class TestNeutralConscription:
+    def test_conscription_draw(self, card_registry):
+        """Conscription: draw 2 cards."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        con = _copy_card(card_registry["neutral_conscription"], "test_con")
+        player.hand = [con] + player.hand[1:]
+        initial_hand = len(player.hand)
+
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        # draw_cards 2, minus the played card
+        assert len(player.hand) >= initial_hand
+
+
+class TestNeutralWatchtower:
+    def test_watchtower_defense_and_cost(self, card_registry):
+        """Watchtower: +3 defense, draw 1."""
+        card = card_registry["neutral_watchtower"]
+        assert card.defense_bonus == 3
+        assert card.buy_cost == 4
+
+
+class TestNeutralSiegeTower:
+    def test_siege_tower_high_power(self, card_registry):
+        """Siege Tower: Power 6, cost 6."""
+        card = card_registry["neutral_siege_tower"]
+        assert card.power == 6
+        assert card.buy_cost == 6
+
+
+class TestNeutralReclaim:
+    def test_consolidate_stats(self, card_registry):
+        """Consolidate: cost 3."""
+        card = card_registry["neutral_reclaim"]
+        assert card.buy_cost == 3
+
+    def test_consolidate_trash_for_resources(self, card_registry):
+        """Consolidate: trash a card and gain half its buy cost (rounded down)."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        con = _copy_card(card_registry["neutral_reclaim"], "test_ncon")
+        # Add a card with known buy cost to trash (buy_cost=5 → half=2)
+        target_card = _make_card("trash_me", "Trash Me", buy_cost=5)
+        player.hand = [con, target_card] + player.hand[2:]
+        initial_res = player.resources
+
+        success, _ = play_card(game, "p0", 0, trash_card_indices=[0])
+        assert success
+        # Should have gained 2 resources (half of 5, rounded down)
+        assert player.resources == initial_res + 2
+        assert any(c.name == "Trash Me" for c in player.trash)
+
+    def test_consolidate_even_cost(self, card_registry):
+        """Consolidate: even buy cost divides cleanly."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        con = _copy_card(card_registry["neutral_reclaim"], "test_ncon2")
+        target_card = _make_card("trash_me2", "Trash Me 2", buy_cost=4)
+        player.hand = [con, target_card] + player.hand[2:]
+        initial_res = player.resources
+
+        success, _ = play_card(game, "p0", 0, trash_card_indices=[0])
+        assert success
+        assert player.resources == initial_res + 2  # half of 4
+
+
+class TestNeutralDiplomat:
+    def test_diplomat_stats(self, card_registry):
+        """Diplomat: cost 4, trash on use."""
+        card = card_registry["neutral_diplomat"]
+        assert card.buy_cost == 4
+        assert card.trash_on_use is True
+
+
 # ══════════════════════════════════════════════════════════════════
 # VANGUARD CARDS
 # ══════════════════════════════════════════════════════════════════
@@ -525,43 +609,26 @@ class TestVanguardOverrun:
 
 
 class TestVanguardRapidAssault:
-    def test_rapid_assault_contest_cost(self, card_registry):
-        """Rapid Assault: on success, opponent must spend resources to contest."""
+    def test_rapid_assault_resource_drain(self, card_registry):
+        """Rapid Assault: on success against opponent's tile, they lose 1 resource."""
         game = _make_2p_game(card_registry)
-        player = game.players["p0"]
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
         ra = _copy_card(card_registry["vanguard_rapid_assault"], "test_ra")
-        player.hand = [ra] + player.hand[1:]
-
-        q, r = _find_adjacent_neutral(game, "p0")
-        assert q is not None
-        success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
-        assert success
-
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
-
-        # If claim succeeded, contest_cost should be set
-        tile = game.grid.get_tile(q, r)
-        if tile.owner == "p0":
-            tile_key = f"{q},{r}"
-            assert tile_key in player.turn_modifiers.contest_costs
+        assert ra.power == 3
+        # Has resource_drain effect
+        from app.game_engine.effects import EffectType
+        drain_fx = [e for e in ra.effects if e.type == EffectType.RESOURCE_DRAIN]
+        assert len(drain_fx) == 1
+        assert drain_fx[0].value == 1
 
 
 class TestVanguardSpearhead:
-    def test_spearhead_immediate_resolve(self, card_registry):
-        """Spearhead: sets immediate_resolve flag."""
-        game = _make_2p_game(card_registry)
-        player = game.players["p0"]
-        sp = _copy_card(card_registry["vanguard_spearhead"], "test_sp")
-        player.hand = [sp] + player.hand[1:]
-
-        q, r = _find_adjacent_neutral(game, "p0")
-        assert q is not None
-        success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
-        assert success
-
-        tile_key = f"{q},{r}"
-        assert tile_key in player.turn_modifiers.immediate_resolve_tiles
+    def test_spearhead_high_power(self, card_registry):
+        """Spearhead: Power 5, no special effects."""
+        card = card_registry["vanguard_spearhead"]
+        assert card.power == 5
+        assert card.effects == []  # no immediate_resolve anymore
 
 
 class TestVanguardCoordinatedPush:
@@ -673,8 +740,8 @@ class TestVanguardFlanking:
 
 
 class TestVanguardSurgeProtocol:
-    def test_surge_protocol_grants_actions_to_chosen(self, card_registry):
-        """Surge Protocol: gain 2 actions back, chosen player gains 1."""
+    def test_surge_protocol_grants_actions_next_turn(self, card_registry):
+        """Surge Protocol: gain 2 actions, chosen player gains 1 extra action next turn."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         sp = _copy_card(card_registry["vanguard_surge_protocol"], "test_sp")
@@ -685,7 +752,10 @@ class TestVanguardSurgeProtocol:
 
         success, _ = play_card(game, "p0", 0, target_player_id="p1")
         assert success
-        assert other.actions_available == initial_other_actions + 1
+        # Actions don't increase this turn
+        assert other.actions_available == initial_other_actions
+        # But extra actions are queued for next turn
+        assert other.turn_modifiers.extra_actions_next_turn == 1
 
 
 class TestVanguardSpoilsOfWar:
@@ -750,11 +820,20 @@ class TestVanguardEliteVanguard:
 
 
 class TestVanguardBattleGlory:
+    def test_battle_glory_is_passive(self, card_registry):
+        """Battle Glory: is a passive card, unplayable, triggers from hand."""
+        card = card_registry["vanguard_battle_glory"]
+        assert card.card_type == CardType.PASSIVE
+        assert card.unplayable is True
+        assert card.vp_formula == "contested_wins"
+
     def test_battle_glory_has_effect(self, card_registry):
-        """Battle Glory: has VP_FROM_CONTESTED_WINS effect."""
+        """Battle Glory: has VP_FROM_CONTESTED_WINS effect with value 1."""
         card = card_registry["vanguard_battle_glory"]
         vp_effects = [e for e in card.effects if e.type == EffectType.VP_FROM_CONTESTED_WINS]
         assert len(vp_effects) >= 1
+        assert vp_effects[0].value == 1
+        assert vp_effects[0].upgraded_value == 2
         assert vp_effects[0].metadata.get("required_wins") == 2
 
     def test_battle_glory_starts_at_0_vp(self, card_registry):
@@ -883,20 +962,6 @@ class TestSwarmOverwhelm:
         expected = overwhelm.power + adj_owned  # +1 per owned adjacent
         power = calculate_effective_power(game, player, overwhelm, action)
         assert power == expected
-
-
-class TestSwarmCheapShot:
-    def test_cheap_shot_base_power(self, card_registry):
-        """Cheap Shot: power 2."""
-        card = card_registry["swarm_cheap_shot"]
-        assert card.power == 2
-
-    def test_cheap_shot_has_dynamic_buy_cost(self, card_registry):
-        """Cheap Shot: has dynamic buy cost effect (costs 1 less if most tiles)."""
-        card = card_registry["swarm_cheap_shot"]
-        dynamic_fx = [e for e in card.effects if e.type == EffectType.DYNAMIC_BUY_COST]
-        assert len(dynamic_fx) == 1
-        assert dynamic_fx[0].value == -1
 
 
 class TestSwarmProliferate:
@@ -1056,10 +1121,11 @@ class TestSwarmSwarmTactics:
 class TestSwarmThinTheHerd:
     """Already tested in test_effects.py — TestSelfTrash."""
 
-    def test_thin_the_herd_net_positive(self, card_registry):
+    def test_thin_the_herd_stats(self, card_registry):
         card = card_registry["swarm_thin_the_herd"]
-        assert card.action_return == 2
-        assert card.draw_cards == 2
+        assert card.action_return == 1
+        assert card.draw_cards == 1
+        assert card.buy_cost == 3
 
 
 class TestSwarmFrenzy:
@@ -1081,22 +1147,49 @@ class TestSwarmBlitzRush:
 
 
 class TestSwarmScavenge:
-    def test_scavenge_resources_and_draw(self, card_registry):
-        """Scavenge: gain 2 resources, draw 1, gain 1 action back."""
+    def test_scavenge_resource_gain(self, card_registry):
+        """Scavenge: gain 1 resource, no draw, no unconditional action return."""
         game = _make_2p_game(card_registry)
         player = game.players["p1"]
         scav = _copy_card(card_registry["swarm_scavenge"], "test_scav")
-        assert scav.resource_gain == 2
-        assert scav.draw_cards == 1
-        assert scav.action_return == 1
+        assert scav.resource_gain == 1
+        assert scav.draw_cards == 0
+        assert scav.action_return == 0
         player.hand = [scav] + player.hand[1:]
         initial_res = player.resources
-        initial_hand = len(player.hand)
 
         success, _ = play_card(game, "p1", 0)
         assert success
-        assert player.resources == initial_res + 2
-        assert len(player.hand) == initial_hand - 1 + 1
+        assert player.resources == initial_res + 1
+
+    def test_scavenge_grants_action_at_zero(self, card_registry):
+        """Scavenge: grants 1 action if player has 0 actions remaining."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p1"]
+        scav = _copy_card(card_registry["swarm_scavenge"], "test_scav")
+        player.hand = [scav] + player.hand[1:]
+        # Set player to exactly 1 action so playing scavenge leaves 0
+        player.actions_available = 1
+        player.actions_used = 0
+
+        success, _ = play_card(game, "p1", 0)
+        assert success
+        # After playing (uses 1), was at 0, so conditional grants 1 back
+        assert player.actions_available - player.actions_used == 1
+
+    def test_scavenge_no_action_when_actions_remain(self, card_registry):
+        """Scavenge: does NOT grant action if player has actions remaining."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p1"]
+        scav = _copy_card(card_registry["swarm_scavenge"], "test_scav")
+        player.hand = [scav] + player.hand[1:]
+        player.actions_available = 3
+        player.actions_used = 0
+
+        success, _ = play_card(game, "p1", 0)
+        assert success
+        # Used 1 of 3, still has 2 remaining — no bonus action
+        assert player.actions_available - player.actions_used == 2
 
 
 class TestSwarmConsecrate:
@@ -1324,7 +1417,7 @@ class TestFortressSiegeEngine:
 
     def test_siege_engine_power(self, card_registry):
         card = card_registry["fortress_siege_engine"]
-        assert card.power == 5
+        assert card.power == 3
 
 
 class TestFortressWarOfAttrition:
@@ -1379,28 +1472,83 @@ class TestFortressSupplyLine:
 class TestFortressConsolidate:
     """Already tested in test_effects.py — TestSelfTrash."""
 
-    def test_consolidate_action_return(self, card_registry):
+    def test_consolidate_stats(self, card_registry):
         card = card_registry["fortress_consolidate"]
+        assert card.buy_cost == 3
         assert card.action_return == 1
 
 
-class TestFortressTacticalReserve:
-    def test_tactical_reserve_net_positive(self, card_registry):
-        """Tactical Reserve: gain 2 actions back."""
-        card = card_registry["fortress_tactical_reserve"]
-        assert card.action_return == 2
+class TestFortressBatteringRam:
+    def test_battering_ram_base_power(self, card_registry):
+        """Battering Ram: base power 5."""
+        card = card_registry["fortress_battering_ram"]
+        assert card.power == 5
+        assert card.buy_cost == 6
 
-    def test_tactical_reserve_cost_reduction(self, card_registry):
-        """Tactical Reserve: next defense card(s) cost 0."""
+    def test_battering_ram_bonus_vs_defense(self, card_registry):
+        """Battering Ram: +2 power if target has defense bonuses."""
+        game = _make_2p_game(card_registry, arch0="fortress", arch1="fortress")
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+        ram = _copy_card(card_registry["fortress_battering_ram"], "test_ram")
+
+        # Find a tile owned by p1
+        assert game.grid is not None
+        p1_tiles = game.grid.get_player_tiles("p1")
+        assert len(p1_tiles) > 0
+        target_tile = p1_tiles[0]
+        # Give it permanent defense
+        target_tile.permanent_defense_bonus = 2
+        target_tile.defense_power = 2
+
+        action = PlannedAction(card=ram, target_q=target_tile.q, target_r=target_tile.r)
+        power = calculate_effective_power(game, p0, ram, action)
+        # Base 5 + 2 bonus for defense = 7
+        assert power == 7
+
+
+class TestFortressCitadel:
+    def test_citadel_permanent_defense(self, card_registry):
+        """Citadel: grants permanent +3 defense."""
+        card = card_registry["fortress_citadel"]
+        assert card.buy_cost == 7
+
+    def test_citadel_ignore_defense_override(self, card_registry):
+        """Citadel: sets ignore_defense_override on tile."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
-        tr = _copy_card(card_registry["fortress_tactical_reserve"], "test_tr")
-        player.hand = [tr] + player.hand[1:]
+        citadel = _copy_card(card_registry["fortress_citadel"], "test_citadel")
+
+        assert game.grid is not None
+        own_tiles = game.grid.get_player_tiles("p0")
+        assert len(own_tiles) > 0
+        target = own_tiles[0]
+        player.hand = [citadel] + player.hand[1:]
+
+        action = PlannedAction(card=citadel, target_q=target.q, target_r=target.r)
+        resolve_immediate_effects(game, player, citadel, action)
+
+        tile_key = f"{target.q},{target.r}"
+        assert tile_key in player.turn_modifiers.ignore_defense_override_tiles
+
+
+class TestFortressWarCouncil:
+    def test_war_council_draw_and_buy_lock(self, card_registry):
+        """War Council: draw 2, gain 1 action, buy locked."""
+        card = card_registry["fortress_war_council"]
+        assert card.action_return == 1
+        assert card.buy_cost == 3
+
+    def test_war_council_buy_restriction(self, card_registry):
+        """War Council: sets buy_locked on player."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        wc = _copy_card(card_registry["fortress_war_council"], "test_wc")
+        player.hand = [wc] + player.hand[1:]
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        # Should have cost reduction for defense cards
-        assert len(player.turn_modifiers.cost_reductions) >= 1
+        assert player.turn_modifiers.buy_locked
 
 
 class TestFortressIronDiscipline:
@@ -1422,31 +1570,28 @@ class TestFortressIronDiscipline:
 
 class TestFortressDiplomacy:
     def test_diplomacy_gives_land_grants(self, card_registry):
-        """Diplomacy: all players receive a Land Grant."""
+        """Diplomacy: self and target opponent each receive a Land Grant."""
         game = _make_3p_game(card_registry)
         p2 = game.players["p2"]  # Fortress
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
         diplo = _copy_card(card_registry["fortress_diplomacy"], "test_diplo")
         p2.hand = [diplo] + p2.hand[1:]
 
-        discard_counts_before = {
-            pid: len(p.deck.discard) for pid, p in game.players.items()
-        }
+        p2_discard_before = len(p2.deck.discard)
+        p0_discard_before = len(p0.deck.discard)
+        p1_discard_before = len(p1.deck.discard)
 
-        success, _ = play_card(game, "p2", 0)
+        # Target p0 as the opponent
+        success, _ = play_card(game, "p2", 0, target_player_id="p0")
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
-        submit_plan(game, "p2")
-
-        # Each player should have 1 more card in discard (Land Grant)
-        for pid, player in game.players.items():
-            land_grants = [c for c in player.deck.discard
-                          if c.name == "Land Grant"
-                          and c.id not in [d.id for d in player.deck.discard[:discard_counts_before[pid]]]]
-            # At least one new land grant
-            assert len(player.deck.discard) > discard_counts_before[pid], \
-                f"{player.name} should have received a Land Grant"
+        # p2 (self) should have 1 Land Grant
+        assert len(p2.deck.discard) > p2_discard_before
+        # p0 (target) should have 1 Land Grant
+        assert len(p0.deck.discard) > p0_discard_before
+        # p1 (not targeted) should NOT have received anything
+        assert len(p1.deck.discard) == p1_discard_before
 
 
 class TestFortressFortifiedPosition:
@@ -1663,3 +1808,133 @@ class TestContestResolution:
         # p0 defense: 2 (base) + 4 (fortified post) = 6 > 5 attack
         tile = game.grid.get_tile(target.q, target.r)
         assert tile.owner == "p0"  # defense held
+
+
+# ══════════════════════════════════════════════════════════════════
+# NEW VANGUARD CARDS
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestVanguardCounterattack:
+    def test_counterattack_stats(self, card_registry):
+        """Counterattack: cost 3, defense type."""
+        card = card_registry["vanguard_counterattack"]
+        assert card.buy_cost == 3
+        assert card.card_type == CardType.DEFENSE
+
+
+class TestVanguardRearguard:
+    def test_rearguard_stats(self, card_registry):
+        """Rearguard: cost 4, defense type."""
+        card = card_registry["vanguard_rearguard"]
+        assert card.buy_cost == 4
+        assert card.card_type == CardType.DEFENSE
+
+
+# ══════════════════════════════════════════════════════════════════
+# NEW SWARM CARDS
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestSwarmNest:
+    def test_nest_stats(self, card_registry):
+        """Nest: cost 2, defense type."""
+        card = card_registry["swarm_nest"]
+        assert card.buy_cost == 2
+        assert card.card_type == CardType.DEFENSE
+
+    def test_nest_defense_per_adjacent(self, card_registry):
+        """Nest: grants defense based on adjacent owned tiles."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+        nest = _copy_card(card_registry["swarm_nest"], "test_nest")
+
+        assert game.grid is not None
+        own_tiles = game.grid.get_player_tiles("p0")
+        # Find a tile with at least 1 adjacent owned tile
+        target = None
+        adj_owned_count = 0
+        for t in own_tiles:
+            adj = game.grid.get_adjacent(t.q, t.r)
+            count = sum(1 for a in adj if a.owner == "p0")
+            if count > 0:
+                target = t
+                adj_owned_count = count
+                break
+        assert target is not None
+
+        player.hand = [nest] + player.hand[1:]
+        initial_defense = target.defense_power
+
+        action = PlannedAction(card=nest, target_q=target.q, target_r=target.r)
+        resolve_on_resolution_effects(game, player, nest, action)
+
+        # Each adjacent owned tile should add +1 defense
+        assert target.defense_power == initial_defense + adj_owned_count
+
+
+class TestSwarmSafetyInNumbers:
+    def test_safety_in_numbers_stats(self, card_registry):
+        """Safety in Numbers: cost 3, defense type."""
+        card = card_registry["swarm_safety_in_numbers"]
+        assert card.buy_cost == 3
+        assert card.card_type == CardType.DEFENSE
+
+
+class TestSwarmMobRule:
+    def test_mob_rule_power_scaling(self, card_registry):
+        """Mob Rule: base power 2, +1 per 3 tiles owned."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+        mob = _copy_card(card_registry["swarm_mob_rule"], "test_mob")
+
+        assert game.grid is not None
+        # Give player some extra tiles
+        neutrals = [t for t in game.grid.tiles.values()
+                     if t.owner is None and not t.is_blocked]
+        for i, t in enumerate(neutrals[:7]):
+            t.owner = "p0"
+
+        total_tiles = len(game.grid.get_player_tiles("p0"))
+
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        action = PlannedAction(card=mob, target_q=q, target_r=r)
+        power = calculate_effective_power(game, player, mob, action)
+        # base 2 + (total_tiles // 3)
+        expected = 2 + (total_tiles // 3)
+        assert power == expected
+
+
+class TestSwarmHiveMind:
+    def test_hive_mind_stats(self, card_registry):
+        """Hive Mind: cost 6, trash on use."""
+        card = card_registry["swarm_hive_mind"]
+        assert card.buy_cost == 6
+        assert card.trash_on_use is True
+        assert card.power == 1
+
+
+class TestSwarmLocustSwarm:
+    def test_locust_swarm_power_from_tiles(self, card_registry):
+        """Locust Swarm: power = tiles / 3 (replaces base)."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+        locust = _copy_card(card_registry["swarm_locust_swarm"], "test_locust")
+
+        assert game.grid is not None
+        # Give player 9 tiles total
+        neutrals = [t for t in game.grid.tiles.values()
+                     if t.owner is None and not t.is_blocked]
+        current = len(game.grid.get_player_tiles("p0"))
+        needed = 9 - current
+        for t in neutrals[:needed]:
+            t.owner = "p0"
+
+        total_tiles = len(game.grid.get_player_tiles("p0"))
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        action = PlannedAction(card=locust, target_q=q, target_r=r)
+        power = calculate_effective_power(game, player, locust, action)
+        # tiles / 3 = 9 / 3 = 3 (replaces base power of 0)
+        assert power == total_tiles // 3

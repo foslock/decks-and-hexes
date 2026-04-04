@@ -90,6 +90,9 @@ def resolve_immediate_effects(
 
     for effect in card.effects:
         if effect.timing == Timing.IMMEDIATE:
+            if effect.condition != ConditionType.ALWAYS:
+                if not check_condition(effect.condition, game, player, card, action):
+                    continue
             _dispatch(effect, ctx)
 
 
@@ -106,15 +109,35 @@ def calculate_effective_power(
     target_q = action.target_q
     target_r = action.target_r if action.target_r is not None else 0
 
+    is_upgraded = card.is_upgraded
+
     for effect in card.effects:
+        if effect.type == EffectType.POWER_PER_TILES_OWNED:
+            # Mob Rule / Locust Swarm: power based on total tiles owned
+            divisor = effect.effective_value(is_upgraded)
+            if divisor <= 0:
+                divisor = 3
+            if game.grid:
+                tile_count = len(game.grid.get_player_tiles(player.id))
+                tile_bonus: int = tile_count // divisor
+                if effect.metadata.get("replaces_base_power"):
+                    # Locust Swarm: power = tiles / divisor (replaces base)
+                    return tile_bonus
+                else:
+                    # Mob Rule: adds to base power
+                    bonus += tile_bonus
+            continue
+
         if effect.type != EffectType.POWER_MODIFIER:
             continue
         if not check_condition(effect.condition, game, player, card, action):
             continue
 
+        ev = effect.effective_value(is_upgraded)
+
         if effect.condition == ConditionType.CARDS_IN_HAND:
             # Numbers Game: power = hand size (replaces base power)
-            return int(len(player.hand) + effect.value)
+            return int(len(player.hand) + ev)
 
         if effect.condition == ConditionType.IF_ADJACENT_OWNED_GTE:
             if effect.metadata.get("per_tile"):
@@ -122,13 +145,13 @@ def calculate_effective_power(
                 if game.grid and target_q is not None:
                     adj_tiles = game.grid.get_adjacent(target_q, target_r)
                     owned_adj = sum(1 for t in adj_tiles if t.owner == player.id)
-                    bonus += effect.value * owned_adj
+                    bonus += ev * owned_adj
             else:
                 # Militia: flat bonus if threshold met
-                bonus += effect.value
+                bonus += ev
         else:
-            # Generic conditional bonus (Strike Team, Garrison, etc.)
-            bonus += effect.value
+            # Generic conditional bonus (Strike Team, Garrison, Battering Ram, etc.)
+            bonus += ev
 
     return base_power + bonus
 
@@ -253,10 +276,46 @@ def check_condition(
         # Elite Vanguard: always true (value scaled by VP hex count)
         return True
 
+    if condition == ConditionType.FEWEST_TILES:
+        # Catch Up: true if player controls fewest (or tied for fewest) tiles
+        if game.grid:
+            player_count = len(game.grid.get_player_tiles(player.id))
+            for pid, other in game.players.items():
+                if pid != player.id:
+                    other_count = len(game.grid.get_player_tiles(pid))
+                    if other_count < player_count:
+                        return False
+            return True
+        return False
+
+    if condition == ConditionType.IF_TARGET_HAS_DEFENSE:
+        # Battering Ram: true if target tile has any defense bonuses (permanent or round-based)
+        if game.grid and action.target_q is not None:
+            target_r = action.target_r if action.target_r is not None else 0
+            tile = game.grid.get_tile(action.target_q, target_r)
+            if tile:
+                has_defense = tile.permanent_defense_bonus > 0 or tile.defense_power > 0
+                return has_defense
+        return False
+
+    if condition == ConditionType.ZERO_ACTIONS:
+        # Scavenge: true if player has 0 actions remaining after playing this card
+        remaining = player.actions_available - player.actions_used
+        return remaining <= 0
+
     return False
 
 
 # ── Effect handlers ───────────────────────────────────────────────
+
+
+def _handle_gain_resources(effect: Effect, ctx: EffectContext) -> None:
+    """Catch Up: gain resources (conditionally)."""
+    amount = effect.effective_value(ctx.card.is_upgraded)
+    ctx.player.resources += amount
+    ctx.game._log(
+        f"{ctx.player.name} gains {amount} resource(s) from {ctx.card.name}",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
 def _handle_self_discard(effect: Effect, ctx: EffectContext) -> None:
@@ -320,7 +379,7 @@ def _handle_self_trash(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_trash_gain_buy_cost(effect: Effect, ctx: EffectContext) -> None:
-    """Consolidate: trash a card from hand, gain resources equal to its buy cost."""
+    """Consolidate: trash a card from hand, gain resources equal to half its buy cost."""
     if not ctx.player.hand:
         ctx.game._log(f"{ctx.player.name}: no cards to trash, skipping",
                       visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -338,7 +397,12 @@ def _handle_trash_gain_buy_cost(effect: Effect, ctx: EffectContext) -> None:
     if 0 <= idx < len(ctx.player.hand):
         trashed_card = ctx.player.hand.pop(idx)
         ctx.player.trash.append(trashed_card)
-        refund = trashed_card.buy_cost or 0
+        base_cost = trashed_card.buy_cost or 0
+        refund = base_cost // 2  # half buy cost, rounded down
+        # Upgraded bonus (e.g. Fortress Consolidate+ gives +2, Neutral Consolidate+ gives +1)
+        if ctx.card.is_upgraded:
+            upgrade_bonus = int(effect.metadata.get("upgrade_bonus", 0))
+            refund += upgrade_bonus
         ctx.player.resources += refund
         ctx.game._log(
             f"{ctx.player.name} trashes {trashed_card.name} and gains {refund} resources",
@@ -389,8 +453,13 @@ def _handle_cost_reduction(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
-    """Forced March / Surge Protocol: give other players actions."""
-    if effect.target == "all_others":
+    """Grant actions to self or other players this turn."""
+    if effect.target == "self":
+        ctx.player.actions_available += effect.value
+        ctx.game._log(
+            f"{ctx.player.name} gains {effect.value} action(s) from {ctx.card.name}",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+    elif effect.target == "all_others":
         for pid, other in ctx.game.players.items():
             if pid != ctx.player.id:
                 other.actions_available += effect.value
@@ -402,6 +471,25 @@ def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
             other_player.actions_available += effect.value
             ctx.game._log(
                 f"{ctx.player.name} grants {effect.value} action(s) to {other_player.name}",
+                actor=ctx.player.id)
+
+
+def _handle_grant_actions_next_turn(effect: Effect, ctx: EffectContext) -> None:
+    """Forced March: give other players extra actions next turn."""
+    ev = effect.effective_value(ctx.card.is_upgraded)
+    if effect.target == "all_others":
+        for pid, other in ctx.game.players.items():
+            if pid != ctx.player.id:
+                other.turn_modifiers.extra_actions_next_turn += ev
+        ctx.game._log(
+            f"{ctx.player.name} grants {ev} extra action(s) to all other players next turn",
+            actor=ctx.player.id)
+    elif effect.target == "chosen_player" and ctx.action.target_player_id:
+        other_player = ctx.game.players.get(ctx.action.target_player_id)
+        if other_player:
+            other_player.turn_modifiers.extra_actions_next_turn += ev
+            ctx.game._log(
+                f"{ctx.player.name} grants {ev} extra action(s) to {other_player.name} next turn",
                 actor=ctx.player.id)
 
 
@@ -496,6 +584,7 @@ def _handle_stub(effect: Effect, ctx: EffectContext) -> None:
 
 # ── Register all handlers ─────────────────────────────────────────
 
+register_handler(EffectType.GAIN_RESOURCES, _handle_gain_resources)
 register_handler(EffectType.SELF_DISCARD, _handle_self_discard)
 register_handler(EffectType.SELF_TRASH, _handle_self_trash)
 register_handler(EffectType.TRASH_GAIN_BUY_COST, _handle_trash_gain_buy_cost)
@@ -505,6 +594,7 @@ register_handler(EffectType.IGNORE_DEFENSE, _handle_ignore_defense)
 register_handler(EffectType.BUY_RESTRICTION, _handle_buy_restriction)
 register_handler(EffectType.COST_REDUCTION, _handle_cost_reduction)
 register_handler(EffectType.GRANT_ACTIONS, _handle_grant_actions)
+register_handler(EffectType.GRANT_ACTIONS_NEXT_TURN, _handle_grant_actions_next_turn)
 register_handler(EffectType.DRAW_NEXT_TURN, _handle_draw_next_turn)
 register_handler(EffectType.AUTO_CLAIM_ADJACENT_NEUTRAL, _handle_auto_claim_adjacent_neutral)
 register_handler(EffectType.CONTEST_COST, _handle_contest_cost)
@@ -608,24 +698,48 @@ def _handle_enhance_vp_tile(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_grant_land_grants(effect: Effect, ctx: EffectContext) -> None:
-    """Diplomacy: all players (including self) receive a Land Grant in their discard.
-    Upgraded: self receives an additional Land Grant."""
-    for pid, other in ctx.game.players.items():
+    """Grant Land Grants. Supports two modes:
+    - chosen_player (Fortress Diplomacy): self + target opponent
+    - all_players (Neutral Diplomat): self first, then all others
+    """
+    # Self first (always)
+    self_count = 2 if ctx.card.is_upgraded else 1
+    for _ in range(self_count):
         grant = make_land_grant_card()
-        other.deck.discard.append(grant)
-        ctx.game._log(
-            f"{other.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
-            actor=ctx.player.id)
-    if ctx.card.is_upgraded:
-        bonus = make_land_grant_card()
-        ctx.player.deck.discard.append(bonus)
-        ctx.game._log(
-            f"{ctx.player.name} receives a bonus Land Grant (upgraded {ctx.card.name})",
-            actor=ctx.player.id)
+        ctx.player.deck.discard.append(grant)
+    ctx.game._log(
+        f"{ctx.player.name} receives {self_count} Land Grant(s) from {ctx.card.name}",
+        actor=ctx.player.id)
+
+    if effect.target == "chosen_player":
+        # Fortress Diplomacy: target one opponent
+        target_id = ctx.action.target_player_id
+        if target_id:
+            target_player = ctx.game.players.get(target_id)
+            if target_player:
+                target_grant = make_land_grant_card()
+                target_player.deck.discard.append(target_grant)
+                ctx.game._log(
+                    f"{target_player.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
+                    actor=ctx.player.id)
+    else:
+        # Neutral Diplomat: all other players
+        for pid, other in ctx.game.players.items():
+            if pid == ctx.player.id:
+                continue
+            other_grant = make_land_grant_card()
+            other.deck.discard.append(other_grant)
+            ctx.game._log(
+                f"{other.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
+                actor=ctx.player.id)
 
 
 def _handle_vp_from_contested_wins(effect: Effect, ctx: EffectContext) -> None:
-    """Battle Glory: if won 2+ contested tiles this turn, increase card's passive_vp by 1."""
+    """Battle Glory: if won 2+ contested tiles this turn, increase card's passive_vp.
+
+    Now a Passive card — triggers for all copies in the player's hand during
+    resolve_on_resolution_effects, not played as an action.
+    """
     if not ctx.claim_results or not ctx.game.grid:
         return
     required = effect.metadata.get("required_wins", 2)
@@ -646,10 +760,10 @@ def _handle_vp_from_contested_wins(effect: Effect, ctx: EffectContext) -> None:
                 break
 
     if contested_wins >= required:
-        # Increase the card's own passive_vp by 1 (permanent, accumulates)
-        ctx.card.passive_vp += 1
+        vp_gain = effect.effective_value(ctx.card.is_upgraded)
+        ctx.card.passive_vp += vp_gain
         ctx.game._log(
-            f"{ctx.player.name}'s {ctx.card.name} gains +1 VP "
+            f"{ctx.player.name}'s {ctx.card.name} gains +{vp_gain} VP "
             f"({contested_wins} contested wins >= {required} required, "
             f"now worth {ctx.card.passive_vp} VP)",
             actor=ctx.player.id)
@@ -681,9 +795,76 @@ register_handler(EffectType.GRANT_LAND_GRANTS, _handle_grant_land_grants)
 register_handler(EffectType.VP_FROM_CONTESTED_WINS, _handle_vp_from_contested_wins)
 
 
+def _handle_free_reroll(effect: Effect, ctx: EffectContext) -> None:
+    """Surveyor: grant free archetype market re-rolls this turn."""
+    count = effect.effective_value(ctx.card.is_upgraded)
+    ctx.player.turn_modifiers.free_rerolls += count
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} grants {count} free market re-roll(s)",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_resource_drain(effect: Effect, ctx: EffectContext) -> None:
+    """Rapid Assault: if successful against an opponent's tile, they lose resources."""
+    if not ctx.claim_succeeded or not ctx.defender_id:
+        return
+    defender = ctx.game.players.get(ctx.defender_id)
+    if not defender:
+        return
+    drain = effect.effective_value(ctx.card.is_upgraded)
+    actual = min(drain, defender.resources)
+    if actual > 0:
+        defender.resources -= actual
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name} drains {actual} resource(s) from {defender.name}",
+            actor=ctx.player.id)
+
+
 # Stubs for complex effects
+def _handle_defense_per_adjacent(effect: Effect, ctx: EffectContext) -> None:
+    """Nest: grant defense bonus per adjacent owned tile."""
+    if not ctx.target_tile_key or not ctx.game.grid:
+        return
+    parts = ctx.target_tile_key.split(",")
+    if len(parts) != 2:
+        return
+    tile = ctx.game.grid.get_tile(int(parts[0]), int(parts[1]))
+    if not tile or tile.owner != ctx.player.id:
+        return
+    adj_tiles = ctx.game.grid.get_adjacent(tile.q, tile.r)
+    owned_adj = sum(1 for t in adj_tiles if t.owner == ctx.player.id)
+    bonus_per = effect.effective_value(ctx.card.is_upgraded)
+    total_bonus = bonus_per * owned_adj
+    if total_bonus > 0:
+        tile.defense_power += total_bonus
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name} grants +{total_bonus} defense "
+            f"to tile {ctx.target_tile_key} ({owned_adj} adjacent owned tiles)",
+            actor=ctx.player.id)
+
+
+def _handle_power_per_tiles_owned(effect: Effect, ctx: EffectContext) -> None:
+    """Mob Rule / Locust Swarm: power calc handled in calculate_effective_power."""
+    pass
+
+
+def _handle_ignore_defense_override(effect: Effect, ctx: EffectContext) -> None:
+    """Citadel: tile's defense cannot be ignored this round."""
+    if ctx.target_tile_key:
+        ctx.player.turn_modifiers.ignore_defense_override_tiles.add(ctx.target_tile_key)
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name} protects tile {ctx.target_tile_key} "
+            f"from defense-ignoring effects",
+            actor=ctx.player.id)
+
+
+register_handler(EffectType.DEFENSE_PER_ADJACENT, _handle_defense_per_adjacent)
+register_handler(EffectType.POWER_PER_TILES_OWNED, _handle_power_per_tiles_owned)
+register_handler(EffectType.IGNORE_DEFENSE_OVERRIDE, _handle_ignore_defense_override)
+
 register_handler(EffectType.CEASE_FIRE, _handle_cease_fire)
 register_handler(EffectType.ADJACENCY_BRIDGE, _handle_stub)
-register_handler(EffectType.DECK_PEEK, _handle_stub)
+register_handler(EffectType.FREE_REROLL, _handle_free_reroll)
+register_handler(EffectType.RESOURCE_DRAIN, _handle_resource_drain)
 register_handler(EffectType.DYNAMIC_BUY_COST, _handle_dynamic_buy_cost)
 register_handler(EffectType.TRASH_OPPONENT_CARD, _handle_trash_opponent_card)

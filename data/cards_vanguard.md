@@ -4,7 +4,7 @@
 # Identity: High power, expensive to buy, aggressive expansion
 #
 # EDITING NOTES:
-# - action_return: 0 = standard, 1 = net-neutral (↺), 2 = net-positive (↑)
+# - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - timing: "immediate" | "on_resolution" | "next_turn"
 # - stackable: true = this card can be played on a tile where you already have a claim this turn
 # - upgraded: the "+" version of the card after spending an upgrade credit
@@ -19,8 +19,8 @@ cards:
     starter: true
     action_return: 0
     power: 0
-    effect: "Engine: Gain 2 resources."
-    effect_upgraded: "Engine: Gain 3 resources."
+    effect: "Gain 2 resources."
+    effect_upgraded: "Gain 3 resources."
     resource_gain: 2
     upgraded_resource_gain: 3
     note: "Vanguard starter economy card. Fuels purchases of expensive high-power claim cards."
@@ -72,6 +72,7 @@ cards:
     effects:
       - type: power_modifier
         value: 2
+        upgraded_value: 3
         timing: on_resolution
         condition: if_played_claim_this_turn
 
@@ -82,16 +83,17 @@ cards:
     buy_cost: 5
     action_return: 0
     power: 3
-    effect: "Claim: Power 3."
-    effect_upgraded: "Claim: Power 4."
-    secondary_effect: "If successful, opponent must spend 1 resource to contest this tile next round."
-    secondary_timing: on_resolution
+    effect: "Claim: Power 3. If successful against an opponent's tile, they lose 1 resource."
+    effect_upgraded: "Claim: Power 4. If successful against an opponent's tile, they lose 1 resource."
+    secondary_effect: null
+    secondary_timing: null
 
     effects:
-      - type: contest_cost
+      - type: resource_drain
         value: 1
         timing: on_resolution
         condition: if_successful
+        target: defender
 
   - id: vanguard_spearhead
     name: Spearhead
@@ -100,14 +102,10 @@ cards:
     buy_cost: 7
     action_return: 0
     power: 5
-    effect: "Claim: Power 5. Resolve immediately — skip the reveal phase for this tile."
-    effect_upgraded: "Claim: Power 7. Resolve immediately — skip the reveal phase for this tile. If successful, gain 2 resources."
+    effect: "Claim: Power 5."
+    effect_upgraded: "Claim: Power 7."
     secondary_effect: null
     secondary_timing: null
-
-    effects:
-      - type: immediate_resolve
-        timing: immediate
 
   - id: vanguard_coordinated_push
     name: Coordinated Push
@@ -129,8 +127,8 @@ cards:
     buy_cost: 4
     action_return: 2
     power: 0
-    effect: "Engine: Draw 1 card immediately. Gain 2 actions back."
-    effect_upgraded: "Engine: Draw 2 cards immediately. Gain 2 actions back."
+    effect: "Draw 1 card. Gain 2 actions."
+    effect_upgraded: "Draw 2 cards. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
 
@@ -142,8 +140,8 @@ cards:
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Engine: Draw 2 cards immediately. Discard 1. Gain 1 action back."
-    effect_upgraded: "Engine: Draw 3 cards immediately. Discard 1. Gain 1 action back."
+    effect: "Draw 2 cards. Discard 1 card. Gain 1 action."
+    effect_upgraded: "Draw 3 cards. Discard 1 card. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -180,8 +178,8 @@ cards:
     buy_cost: 4
     action_return: 1
     power: 0
-    effect: "Engine: Gain 3 resources. Draw 1 card next turn. Gain 1 action back."
-    effect_upgraded: "Engine: Gain 4 resources. Draw 1 card next turn. Gain 1 action back."
+    effect: "Gain 3 resources. Draw 1 card next turn. Gain 1 action."
+    effect_upgraded: "Gain 4 resources. Draw 1 card next turn. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -229,13 +227,13 @@ cards:
     buy_cost: 3
     action_return: 2
     power: 0
-    effect: "Engine: Gain 2 actions back. One other player of your choice also gains 1 action this turn."
-    effect_upgraded: "Engine: Gain 2 actions back. Two other players of your choice each gain 1 action this turn."
+    effect: "Gain 2 actions. One other player of your choice gains 1 extra action next turn."
+    effect_upgraded: "Gain 2 actions. Two other players of your choice each gain 1 extra action next turn."
     secondary_effect: null
     secondary_timing: null
 
     effects:
-      - type: grant_actions
+      - type: grant_actions_next_turn
         value: 1
         timing: immediate
         target: chosen_player
@@ -279,20 +277,63 @@ cards:
   - id: vanguard_battle_glory
     name: Battle Glory
     name_upgraded: Battle Glory+
-    type: Engine
+    type: Passive
     buy_cost: 4
     action_return: 0
     power: 0
-    effect: "Engine: At resolution, if you won 2 or more contested tiles this turn, this card permanently gains +1 VP (starts at 0)."
-    effect_upgraded: "Engine: At resolution, if you won 2 or more contested tiles this turn, this card permanently gains +1 VP (starts at 0). Draw 1 card."
+    unplayable: true
+    vp_formula: contested_wins
+    effect: "Passive: While in your hand, if you win 2 or more contested tiles this turn, this card permanently gains +1 VP."
+    effect_upgraded: "Passive: While in your hand, if you win 2 or more contested tiles this turn, this card permanently gains +2 VP."
     secondary_effect: null
     secondary_timing: null
-    note: "Escalating VP engine — grows each round you hit the threshold. Stays in your deck permanently, occupying a hand slot."
+    note: "Escalating VP engine — grows each round you hit the threshold while in hand. Takes up a hand slot when drawn."
 
     effects:
       - type: vp_from_contested_wins
+        value: 1
+        upgraded_value: 2
         timing: on_resolution
         metadata: {required_wins: 2}
+
+  - id: vanguard_counterattack
+    name: Counterattack
+    name_upgraded: Counterattack+
+    type: Defense
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    defense_bonus: 2
+    upgraded_defense_bonus: 3
+    effect: "One tile you own gains +2 defense this round. If an opponent's claim on this tile fails, gain 1 resource."
+    effect_upgraded: "One tile you own gains +3 defense this round. If an opponent's claim on this tile fails, gain 2 resources."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: defense_bonus
+        value: 2
+        upgraded_value: 3
+        timing: on_resolution
+      - type: gain_resources
+        value: 1
+        upgraded_value: 2
+        timing: on_resolution
+        condition: if_defender_holds
+
+  - id: vanguard_rearguard
+    name: Rearguard
+    name_upgraded: Rearguard+
+    type: Defense
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    defense_bonus: 3
+    upgraded_defense_bonus: 4
+    effect: "One tile you own gains +3 defense this round."
+    effect_upgraded: "One tile you own gains +4 defense this round."
+    secondary_effect: null
+    secondary_timing: null
 
   - id: vanguard_arsenal
     name: Arsenal

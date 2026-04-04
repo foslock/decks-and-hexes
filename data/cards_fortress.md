@@ -4,7 +4,7 @@
 # Identity: High power, deliberate cycle, defensive turtling
 #
 # EDITING NOTES:
-# - action_return: 0 = standard, 1 = net-neutral (↺), 2 = net-positive (↑)
+# - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - timing: "immediate" | "on_resolution" | "next_turn"
 # - stackable: true = this card can be played on a tile where you already have a claim this turn
 # - upgraded: the "+" version of the card after spending an upgrade credit
@@ -21,8 +21,8 @@ cards:
     power: 0
     defense_bonus: 2
     upgraded_defense_bonus: 3
-    effect: "Defense: One tile you own gains +2 defense this round."
-    effect_upgraded: "Defense: One tile you own gains +3 defense this round. Gain 1 resource."
+    effect: "One tile you own gains +2 defense this round."
+    effect_upgraded: "One tile you own gains +3 defense this round. Gain 1 resource."
     resource_gain: 0
     upgraded_resource_gain: 1
     note: "Fortress starter. Pure defensive positioning; upgrade adds economy."
@@ -33,11 +33,12 @@ cards:
     type: Defense
     buy_cost: 2
     action_return: 1
-    power: 3
+    power: 0
+    defense_bonus: 3
     defense_target_count: 1
     upgraded_defense_target_count: 2
-    effect: "Defense: One tile you own gains +3 defense power when defending this round."
-    effect_upgraded: "Defense: Two tiles you own each gain +3 defense power when defending this round."
+    effect: "One tile you own gains +3 defense this round."
+    effect_upgraded: "Two tiles you own each gain +3 defense this round."
     secondary_effect: null
     secondary_timing: null
 
@@ -48,11 +49,12 @@ cards:
     type: Defense
     buy_cost: 3
     action_return: 0
-    power: 2
+    power: 0
+    defense_bonus: 2
     defense_target_count: 2
     upgraded_defense_target_count: 3
-    effect: "Defense: Two tiles you own each gain +2 defense power when defending this round."
-    effect_upgraded: "Defense: Three tiles you own each gain +2 defense power when defending this round."
+    effect: "Two tiles you own each gain +2 defense this round."
+    effect_upgraded: "Three tiles you own each gain +2 defense this round."
     secondary_effect: null
     secondary_timing: null
 
@@ -63,9 +65,10 @@ cards:
     type: Claim
     buy_cost: 4
     action_return: 0
-    power: 5
-    effect: "Claim: Power 5. Cannot be countered by Defense cards this round."
-    effect_upgraded: "Claim: Power 6. Cannot be countered by Defense cards this round."
+    power: 3
+    upgraded_power: 4
+    effect: "Claim: Power 3. Ignores all defense bonuses on targeted tile."
+    effect_upgraded: "Claim: Power 4. Ignores all defense bonuses on targeted tile."
     secondary_effect: null
     secondary_timing: null
 
@@ -82,8 +85,8 @@ cards:
     power: 0
     defense_target_count: 1
     upgraded_defense_target_count: 2
-    effect: "Defense: One tile you own cannot be claimed this round."
-    effect_upgraded: "Defense: Two tiles you own cannot be claimed this round."
+    effect: "One tile you own cannot be claimed this round."
+    effect_upgraded: "Two tiles you own cannot be claimed this round."
     secondary_effect: null
     secondary_timing: null
 
@@ -107,6 +110,7 @@ cards:
     effects:
       - type: power_modifier
         value: 2
+        upgraded_value: 3
         timing: on_resolution
         condition: if_defending_owned
 
@@ -134,8 +138,8 @@ cards:
     buy_cost: 2
     action_return: 1
     power: 0
-    effect: "Engine: Gain 2 resources. One card in your hand costs 2 less resources to purchase this turn. Gain 1 action back."
-    effect_upgraded: "Engine: Gain 3 resources. One card in your hand costs 2 less resources to purchase this turn. Gain 1 action back."
+    effect: "Gain 2 resources. One card in your hand costs 2 less resources to purchase this turn. Gain 1 action."
+    effect_upgraded: "Gain 3 resources. One card in your hand costs 2 less resources to purchase this turn. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -153,8 +157,8 @@ cards:
     action_return: 0
     power: 0
     defense_bonus: 0
-    effect: "Defense: Target tile you own permanently gains +1 defense power until it is captured."
-    effect_upgraded: "Defense: Target tile you own permanently gains +2 defense power until it is captured."
+    effect: "Target tile you own permanently gains +1 defense until it is captured."
+    effect_upgraded: "Target tile you own permanently gains +2 defense until it is captured."
     secondary_effect: null
     secondary_timing: null
 
@@ -173,8 +177,8 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 2
-    effect: "Claim: Power 2."
-    effect_upgraded: "Claim: Power 3."
+    effect: "Claim: Power 2. If the defender holds, they draw 1 fewer card next turn."
+    effect_upgraded: "Claim: Power 3. If the defender holds, they draw 1 fewer card next turn."
     secondary_effect: "If the defender successfully holds the tile, that defending player draws 1 fewer card at the start of their next turn."
     secondary_timing: on_resolution
 
@@ -193,8 +197,8 @@ cards:
     power: 0
     defense_target_count: 1
     upgraded_defense_target_count: 2
-    effect: "Defense: One tile you own cannot be claimed this round or next round."
-    effect_upgraded: "Defense: Two tiles you own cannot be claimed this round or next round."
+    effect: "One tile you own cannot be claimed this round or next round."
+    effect_upgraded: "Two tiles you own cannot be claimed this round or next round."
     secondary_effect: null
     secondary_timing: null
 
@@ -210,8 +214,8 @@ cards:
     buy_cost: 4
     action_return: 0
     power: 3
-    effect: "Claim: Power 3. Stackable. If the target tile is neutral, gain 1 resource refund."
-    effect_upgraded: "Claim: Power 4. Stackable. If the target tile is neutral, gain 2 resource refund."
+    effect: "Claim: Power 3. Stackable. If the target tile is neutral, gain 1 resource."
+    effect_upgraded: "Claim: Power 4. Stackable. If the target tile is neutral, gain 2 resources."
     secondary_effect: null
     secondary_timing: null
     stackable: true
@@ -225,11 +229,11 @@ cards:
     name: Consolidate
     name_upgraded: Consolidate+
     type: Engine
-    buy_cost: 2
+    buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Engine: Trash 1 card from your hand. Gain resources equal to that card's buy cost. Draw 1 card immediately. Gain 1 action back."
-    effect_upgraded: "Engine: Trash 1 card from your hand. Gain resources equal to that card's buy cost +2. Draw 1 card immediately. Gain 1 action back."
+    effect: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down). Draw 1 card. Gain 1 action."
+    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) +2. Draw 1 card. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -238,24 +242,64 @@ cards:
         value: 1
         timing: immediate
         requires_choice: true
+        metadata: {optional: true, upgrade_bonus: 2, gates_draw: true}
 
-  - id: fortress_tactical_reserve
-    name: Tactical Reserve
-    name_upgraded: Tactical Reserve+
-    type: Engine
-    buy_cost: 3
-    action_return: 2
-    power: 0
-    effect: "Engine: Gain 2 actions back. The next Defense card you play this turn costs 0 resources to purchase (retroactive discount on future copies)."
-    effect_upgraded: "Engine: Gain 2 actions back. The next two Defense cards you play this turn each cost 0 resources to purchase."
+  - id: fortress_battering_ram
+    name: Battering Ram
+    name_upgraded: Battering Ram+
+    type: Claim
+    buy_cost: 6
+    action_return: 0
+    power: 5
+    effect: "Claim: Power 5. If the target tile has any defense bonuses, gain +2 power."
+    effect_upgraded: "Claim: Power 7. If the target tile has any defense bonuses, gain +3 power."
     secondary_effect: null
     secondary_timing: null
 
     effects:
-      - type: cost_reduction
-        value: 0
+      - type: power_modifier
+        value: 2
+        upgraded_value: 3
+        timing: on_resolution
+        condition: if_target_has_defense
+
+  - id: fortress_citadel
+    name: Citadel
+    name_upgraded: Citadel+
+    type: Defense
+    buy_cost: 7
+    action_return: 0
+    power: 0
+    effect: "One tile you own gains permanent +3 defense. That tile's defense cannot be ignored this round."
+    effect_upgraded: "Permanent +4 defense. Cannot be ignored. Adjacent tiles gain +1 defense this round."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: permanent_defense
+        value: 3
         timing: immediate
-        metadata: {scope: "next_defense", remaining: 1}
+        metadata: {upgraded_value: 4}
+      - type: ignore_defense_override
+        timing: immediate
+
+  - id: fortress_war_council
+    name: War Council
+    name_upgraded: War Council+
+    type: Engine
+    buy_cost: 3
+    action_return: 1
+    power: 0
+    draw_cards: 2
+    upgraded_draw_cards: 3
+    effect: "Draw 2 cards. Gain 1 action. You cannot buy any cards this turn."
+    effect_upgraded: "Draw 3 cards. Gain 1 action. You cannot buy any cards this turn."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: buy_restriction
+        timing: immediate
 
   - id: fortress_iron_discipline
     name: Iron Discipline
@@ -264,8 +308,8 @@ cards:
     buy_cost: 2
     action_return: 1
     power: 0
-    effect: "Engine: Gain 1 resource. Draw 1 card immediately. Gain 1 action back."
-    effect_upgraded: "Engine: Gain 2 resources. Draw 1 card immediately. Gain 1 action back."
+    effect: "Gain 1 resource. Draw 1 card. Gain 1 action."
+    effect_upgraded: "Gain 2 resources. Draw 1 card. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -293,13 +337,34 @@ cards:
     action_return: 0
     power: 0
     trash_on_use: true
-    effect: "Engine: All players (including you) receive a Land Grant card in their discard pile. Trash this card."
-    effect_upgraded: "Engine: All players (including you) receive a Land Grant card in their discard pile. You receive an additional Land Grant. Trash this card."
+    effect: "You receive a Land Grant in your discard pile. Then, target opponent receives a Land Grant in their discard pile. Trash this card."
+    effect_upgraded: "You receive 2 Land Grants in your discard pile. Then, target opponent receives a Land Grant in their discard pile. Trash this card."
     secondary_effect: null
     secondary_timing: null
-    note: "Shared benefit — everyone gets +1 VP from the Land Grant. The upgraded version gives you a second one for a net +1 advantage."
+    note: "You get VP, but must give one to an opponent too. Upgraded version nets +1 VP advantage."
 
     effects:
       - type: grant_land_grants
         timing: immediate
+        target: chosen_player
+
+  - id: fortress_catch_up
+    name: Catch Up
+    name_upgraded: Catch Up+
+    type: Engine
+    buy_cost: 2
+    action_return: 1
+    upgraded_action_return: 2
+    power: 0
+    effect: "Gain 1 action. If you control the fewest tiles of any player, gain 2 resources."
+    effect_upgraded: "Gain 2 actions. If you control the fewest tiles of any player, gain 2 resources."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Comeback mechanic — rewards Fortress for playing slowly. The resource bonus helps fund defense or a late expansion push."
+
+    effects:
+      - type: gain_resources
+        value: 2
+        timing: immediate
+        condition: fewest_tiles
 
