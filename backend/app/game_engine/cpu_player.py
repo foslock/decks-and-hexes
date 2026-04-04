@@ -287,6 +287,51 @@ class CPUPlayer:
 
         return candidates
 
+    def _estimate_effective_power(self, game: Any, player: Any, tile: HexTile,
+                                  card: Card) -> int:
+        """Estimate effective power for a card on a target tile, accounting for effects."""
+        power = card.effective_power
+        assert game.grid is not None
+
+        for effect in card.effects:
+            if effect.type == EffectType.POWER_PER_TILES_OWNED:
+                # Mob Rule / Locust Swarm: power based on tiles owned
+                divisor = effect.effective_value(card.is_upgraded)
+                if divisor <= 0:
+                    divisor = 3
+                tile_count = len(game.grid.get_player_tiles(self.player_id))
+                tile_bonus = tile_count // divisor
+                if effect.metadata.get("replaces_base_power"):
+                    power = tile_bonus
+                else:
+                    power += tile_bonus
+
+            elif effect.type == EffectType.POWER_MODIFIER:
+                ev = effect.effective_value(card.is_upgraded)
+                if effect.condition.value == "if_adjacent_owned_gte":
+                    if effect.metadata.get("per_tile"):
+                        adj = game.grid.get_adjacent(tile.q, tile.r)
+                        owned_adj = sum(1 for t in adj if t.owner == self.player_id)
+                        power += ev * owned_adj
+                    else:
+                        adj = game.grid.get_adjacent(tile.q, tile.r)
+                        owned_adj = sum(1 for t in adj if t.owner == self.player_id)
+                        if owned_adj >= effect.condition_threshold:
+                            power += ev
+                elif effect.condition.value == "if_played_claim_this_turn":
+                    if any(a.card.card_type == CardType.CLAIM for a in player.planned_actions):
+                        power += ev
+                elif effect.condition.value == "if_defending_owned":
+                    if tile.owner == self.player_id:
+                        power += ev
+                elif effect.condition.value == "if_target_has_defense":
+                    if tile.defense_power > 0 or tile.permanent_defense_bonus > 0:
+                        power += ev
+                elif effect.condition.value == "cards_in_hand":
+                    power = len(player.hand) + ev
+
+        return power
+
     def _score_tile_for_claim(self, game: Any, player: Any, tile: HexTile,
                               card: Card, weights: StrategyWeights) -> float:
         """Score a tile as a claim target."""
@@ -302,7 +347,7 @@ class CPUPlayer:
         elif tile.owner != self.player_id:
             # Enemy tile — factor in defense
             defense = tile.defense_power
-            effective_power = card.effective_power
+            effective_power = self._estimate_effective_power(game, player, tile, card)
             if effective_power > defense:
                 score += 5.0 * weights.aggression
                 # Base raid bonus: raiding generates Rubble (-1 VP each) in opponent's deck
@@ -334,7 +379,8 @@ class CPUPlayer:
 
         # Card power bonus (prefer using high power cards on contested tiles)
         if tile.owner and tile.owner != self.player_id:
-            power_margin = card.effective_power - tile.defense_power
+            est_power = self._estimate_effective_power(game, player, tile, card)
+            power_margin = est_power - tile.defense_power
             score += power_margin * 0.5
 
         return score
@@ -374,6 +420,17 @@ class CPUPlayer:
         results: list[tuple[float, dict[str, Any]]] = []
         player_tiles = game.grid.get_player_tiles(self.player_id)
 
+        # Check for special defense effect types
+        has_defense_per_adjacent = any(
+            e.type == EffectType.DEFENSE_PER_ADJACENT for e in card.effects
+        )
+        has_ignore_defense_override = any(
+            e.type == EffectType.IGNORE_DEFENSE_OVERRIDE for e in card.effects
+        )
+        has_permanent_defense = any(
+            e.type == EffectType.PERMANENT_DEFENSE for e in card.effects
+        )
+
         # Score each tile for defense priority
         tile_scores: list[tuple[float, Any]] = []
         for tile in player_tiles:
@@ -389,11 +446,33 @@ class CPUPlayer:
                 1 for adj in adj_tiles
                 if adj.owner is not None and adj.owner != self.player_id
             )
+            owned_neighbors = sum(
+                1 for adj in adj_tiles if adj.owner == self.player_id
+            )
             score += enemy_neighbors * 2.0
 
             # Tiles with no enemy neighbors don't need defense as much
             if enemy_neighbors == 0:
                 score *= 0.3
+
+            # Nest (DEFENSE_PER_ADJACENT): bonus scales with adjacent owned tiles
+            if has_defense_per_adjacent:
+                score += owned_neighbors * 2.5  # more adjacent owned = much stronger defense
+
+            # Citadel (IGNORE_DEFENSE_OVERRIDE): prioritize high-value tiles
+            if has_ignore_defense_override:
+                score += 3.0  # extra value for the "cannot be ignored" protection
+                if tile.is_vp:
+                    score += 4.0  # strongly prefer VP tiles for this premium effect
+
+            # Permanent defense (Entrench, Citadel): prefer tiles you expect to hold long-term
+            if has_permanent_defense:
+                score += 2.0  # permanent effects are intrinsically valuable
+                # Prefer tiles deeper in own territory (more owned neighbors = safer)
+                score += owned_neighbors * 1.0
+                # Less value on frontier tiles that might be lost
+                if enemy_neighbors > owned_neighbors:
+                    score -= 2.0
 
             tile_scores.append((score, tile))
 
@@ -465,11 +544,18 @@ class CPUPlayer:
                         score -= 5.0  # can't use it — no valid targets
 
             elif effect.type == EffectType.GRANT_LAND_GRANTS:
-                # Diplomacy: everyone gets a Land Grant (+1 VP each)
-                num_opponents = len(game.players) - 1
-                # Net advantage is small (everyone benefits equally, unless upgraded)
-                net_advantage = 1.0 if card.is_upgraded else 0.0
-                score += max(net_advantage + 1.0, 2.0) * 5.0
+                if effect.target == "chosen_player":
+                    # Fortress Diplomacy: you get 1/2, target opponent gets 1
+                    self_grants = 2 if card.is_upgraded else 1
+                    net_advantage = self_grants - 1  # 0 base, +1 upgraded
+                    score += (net_advantage + 1.5) * 5.0
+                else:
+                    # Neutral Diplomat: you get 1/2, ALL opponents get 1
+                    num_opponents = len(game.players) - 1
+                    self_grants = 2 if card.is_upgraded else 1
+                    # Net is worse with more opponents
+                    net_advantage = self_grants - num_opponents
+                    score += max(net_advantage + 2.0, 1.0) * 4.0
 
             elif effect.type == EffectType.VP_FROM_CONTESTED_WINS:
                 # Battle Glory: play when we have claims planned against enemies
@@ -490,6 +576,36 @@ class CPUPlayer:
         for effect in card.effects:
             if effect.type == EffectType.COST_REDUCTION:
                 score += abs(effect.value) * 1.5 * weights.resource_value
+
+        # Buy restriction (War Council) — penalize if we have resources to spend
+        for effect in card.effects:
+            if effect.type == EffectType.BUY_RESTRICTION:
+                if player.resources >= 3:
+                    score -= 3.0  # significant penalty — we'll miss buying
+                else:
+                    score += 1.0  # no resources anyway, free draw is great
+
+        # Trash for buy cost (Consolidate) — value based on trashable cards
+        for effect in card.effects:
+            if effect.type == EffectType.TRASH_GAIN_BUY_COST:
+                # Score based on having cards worth trashing for resources
+                best_trash_value = 0
+                for j, c in enumerate(player.hand):
+                    if c.buy_cost is not None and c.starter:
+                        best_trash_value = max(best_trash_value, c.buy_cost)
+                    elif c.buy_cost is not None and c.buy_cost <= 2:
+                        best_trash_value = max(best_trash_value, c.buy_cost)
+                if best_trash_value > 0:
+                    score += best_trash_value * 1.0 * weights.resource_value + 2.0  # deck thinning bonus
+                else:
+                    score -= 1.0  # nothing good to trash
+
+        # Granting actions to opponents (Forced March) — penalty
+        for effect in card.effects:
+            if effect.type == EffectType.GRANT_ACTIONS_NEXT_TURN:
+                num_opponents = len(game.players) - 1
+                penalty = effect.effective_value(card.is_upgraded) * num_opponents * 0.8
+                score -= penalty
 
         # Cards requiring self-discard/trash — lower priority unless deck thinning is valuable
         for effect in card.effects:
@@ -519,7 +635,15 @@ class CPUPlayer:
                     action_dict["target_q"] = base.q
                     action_dict["target_r"] = base.r
 
-        # Handle self-discard/trash choices
+        # Handle Diplomacy/Diplomat target selection
+        for effect in card.effects:
+            if effect.type == EffectType.GRANT_LAND_GRANTS and effect.target == "chosen_player":
+                # Fortress Diplomacy: pick the opponent with the lowest VP (help least threatening)
+                target_pid = self._pick_diplomacy_target(game, player)
+                if target_pid:
+                    action_dict["target_player_id"] = target_pid
+
+        # Handle self-discard/trash choices (including Consolidate trash-for-value)
         discard_indices = None
         trash_indices = None
         for effect in card.effects:
@@ -528,6 +652,9 @@ class CPUPlayer:
                 action_dict["discard_card_indices"] = discard_indices
             if effect.type == EffectType.SELF_TRASH and effect.requires_choice:
                 trash_indices = self._pick_cards_to_trash(player, effect.value, card_index)
+                action_dict["trash_card_indices"] = trash_indices
+            if effect.type == EffectType.TRASH_GAIN_BUY_COST and effect.requires_choice:
+                trash_indices = self._pick_cards_to_trash_for_value(player, effect.value, card_index)
                 action_dict["trash_card_indices"] = trash_indices
         return (score, action_dict)
 
@@ -560,6 +687,40 @@ class CPUPlayer:
             scored.append((score, i))
 
         scored.sort(key=lambda x: x[0])
+        return [idx for _, idx in scored[:count]]
+
+    def _pick_diplomacy_target(self, game: Any, player: Any) -> Optional[str]:
+        """Pick the opponent to target with Diplomacy (lowest VP — least threatening)."""
+        best_pid = None
+        best_vp = float("inf")
+        for pid, p in game.players.items():
+            if pid == self.player_id:
+                continue
+            if p.vp < best_vp:
+                best_vp = p.vp
+                best_pid = pid
+        return best_pid
+
+    def _pick_cards_to_trash_for_value(self, player: Any, count: int,
+                                       exclude_index: int) -> list[int]:
+        """Pick cards to trash for resource value (Consolidate). Prefer starters and cheap cards."""
+        scored = []
+        for i, card in enumerate(player.hand):
+            if i == exclude_index:
+                continue
+            if card.buy_cost is None:
+                continue  # can't gain resources from cards with no buy cost
+            # Prefer trashing: starters > cheap cards > expensive cards
+            score = 0.0
+            if card.starter:
+                score += 5.0 + (card.buy_cost or 0)  # starters are great trash targets
+            elif card.unplayable and card.passive_vp <= 0:
+                score += 4.0 + (card.buy_cost or 0)  # dead weight like Rubble
+            else:
+                score += (card.buy_cost or 0) * 0.3  # low priority for good cards
+            scored.append((score, i))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
         return [idx for _, idx in scored[:count]]
 
     def _pick_cards_to_trash(self, player: Any, count: int,
@@ -637,23 +798,24 @@ class CPUPlayer:
             cost = calculate_dynamic_buy_cost(game, player, card)
             if cost > player.resources:
                 continue
-            score = self._score_card_for_purchase(card, player, weights, cost)
+            score = self._score_card_for_purchase(card, player, weights, cost, game)
             scored.append((score, {"source": "archetype", "card_id": card.id}))
 
-        # Score neutral market cards
-        for stack_info in game.neutral_market.get_available():
-            card_dict = stack_info["card"]
-            card_id = card_dict["id"]
-            # Find the actual card object
-            for base_id, copies in game.neutral_market.stacks.items():
-                if copies and copies[0].id == card_id:
-                    card_obj = copies[0]
-                    cost = calculate_dynamic_buy_cost(game, player, card_obj)
-                    if cost > player.resources:
+        # Score neutral market cards (skip if already bought one this turn)
+        if not player.neutral_bought_this_turn:
+            for stack_info in game.neutral_market.get_available():
+                card_dict = stack_info["card"]
+                card_id = card_dict["id"]
+                # Find the actual card object
+                for base_id, copies in game.neutral_market.stacks.items():
+                    if copies and copies[0].id == card_id:
+                        card_obj = copies[0]
+                        cost = calculate_dynamic_buy_cost(game, player, card_obj)
+                        if cost > player.resources:
+                            break
+                        score = self._score_card_for_purchase(card_obj, player, weights, cost, game)
+                        scored.append((score, {"source": "neutral", "card_id": base_id}))
                         break
-                    score = self._score_card_for_purchase(card_obj, player, weights, cost)
-                    scored.append((score, {"source": "neutral", "card_id": base_id}))
-                    break
 
         # Score upgrade credits
         if player.resources >= UPGRADE_CREDIT_COST:
@@ -665,21 +827,62 @@ class CPUPlayer:
 
     def _score_card_for_purchase(self, card: Card, player: Any,
                                  weights: StrategyWeights,
-                                 cost: int) -> float:
+                                 cost: int, game: Any = None) -> float:
         """Score a card for purchase."""
         score = 0.0
 
         # Base value by card type
         if card.card_type == CardType.CLAIM:
-            score += card.effective_power * 1.5
+            base_power = card.effective_power
+            # Account for tile-scaling power (Mob Rule, Locust Swarm)
+            for effect in card.effects:
+                if effect.type == EffectType.POWER_PER_TILES_OWNED and game and game.grid:
+                    divisor = effect.effective_value(card.is_upgraded)
+                    if divisor <= 0:
+                        divisor = 3
+                    tile_count = len(game.grid.get_player_tiles(self.player_id))
+                    tile_bonus = tile_count // divisor
+                    if effect.metadata.get("replaces_base_power"):
+                        base_power = tile_bonus
+                    else:
+                        base_power += tile_bonus
+                elif effect.type == EffectType.POWER_MODIFIER:
+                    # Assume conditional power fires ~50% of the time
+                    base_power += effect.effective_value(card.is_upgraded) * 0.5
+            score += base_power * 1.5
             if card.archetype == player.archetype:
                 score += 3.0  # synergy bonus
-            score *= weights.aggression if card.effective_power >= 3 else weights.expansion
+            score *= weights.aggression if base_power >= 3 else weights.expansion
         elif card.card_type == CardType.DEFENSE:
-            score += card.effective_defense_bonus * 2.0 * weights.defense
+            defense_val = card.effective_defense_bonus
+            # Account for dynamic defense (Nest)
+            for effect in card.effects:
+                if effect.type == EffectType.DEFENSE_PER_ADJACENT:
+                    defense_val += 2  # estimate ~2 adjacent owned tiles on average
+            score += defense_val * 2.0 * weights.defense
+            # Tile immunity cards are premium
+            for effect in card.effects:
+                if effect.type == EffectType.TILE_IMMUNITY:
+                    score += effect.duration * 3.0 * weights.defense
+            # Permanent defense is extra valuable
+            for effect in card.effects:
+                if effect.type == EffectType.PERMANENT_DEFENSE:
+                    score += effect.effective_value(card.is_upgraded) * 2.0 * weights.defense
+            # Ignore defense override (Citadel)
+            for effect in card.effects:
+                if effect.type == EffectType.IGNORE_DEFENSE_OVERRIDE:
+                    score += 3.0 * weights.defense
         elif card.card_type == CardType.ENGINE:
             score += card.effective_resource_gain * 1.5 * weights.resource_value
             score += card.effective_draw_cards * 2.0 * weights.card_draw_value
+            # Trash-for-value (Consolidate) — deck thinning + resources
+            for effect in card.effects:
+                if effect.type == EffectType.TRASH_GAIN_BUY_COST:
+                    score += 3.0  # deck thinning is always valuable
+            # Buy restriction penalty
+            for effect in card.effects:
+                if effect.type == EffectType.BUY_RESTRICTION:
+                    score -= 1.5  # trade-off for the draw
 
         # Action return bonus
         if card.effective_action_return >= 1:
@@ -692,6 +895,14 @@ class CPUPlayer:
         # Range-breaking cards
         if card.claim_range > 1 or not card.adjacency_required:
             score += 2.0
+
+        # Multi-target claims
+        if card.effective_multi_target_count > 0:
+            score += card.effective_multi_target_count * 2.5
+
+        # Trash-on-use penalty (one-shot cards)
+        if card.trash_on_use:
+            score *= 0.7
 
         # VP gain effects
         for effect in card.effects:
@@ -740,7 +951,7 @@ class CPUPlayer:
             from .game_state import calculate_dynamic_buy_cost
             cost = calculate_dynamic_buy_cost(game, player, card)
             if cost <= player.resources:
-                total_score += self._score_card_for_purchase(card, player, weights, cost)
+                total_score += self._score_card_for_purchase(card, player, weights, cost, game)
                 affordable_count += 1
 
         # Reroll if nothing affordable or nothing worth buying
@@ -753,37 +964,5 @@ class CPUPlayer:
 
         return False
 
-    # ── Passive Draft ─────────────────────────────────────────────
-
-    def pick_passive(self, passives: list[dict[str, Any]],
-                     archetype: Archetype) -> Optional[dict[str, Any]]:
-        """Pick the best passive from available options."""
-        scored: list[tuple[float, dict[str, Any]]] = []
-
-        for passive in passives:
-            score = 1.0  # base score
-
-            best_for = passive.get("best_for", ["any"])
-            if archetype.value in best_for:
-                score += 5.0
-            elif "any" in best_for:
-                score += 2.0
-
-            # Category-based scoring
-            category = passive.get("category", "")
-            weights = ARCHETYPE_WEIGHTS.get(archetype, StrategyWeights())
-
-            if category == "territorial":
-                score += 2.0 * weights.expansion
-            elif category == "deck_hand":
-                score += 2.0 * weights.card_draw_value
-            elif category == "combat":
-                score += 2.0 * weights.aggression
-            elif category == "resource":
-                score += 2.0 * weights.resource_value
-            elif category == "objective_vp":
-                score += 3.0  # VP passives are universally good
-
-            scored.append((score, passive))
-
-        return self._pick(scored)
+    # NOTE: Passive draft (pick_passive) was removed — passives are a candidate
+    # feature preserved in data/passives.md but not currently in the game.

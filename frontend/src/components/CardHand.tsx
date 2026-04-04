@@ -13,6 +13,20 @@ export interface PlayTarget {
   screenY: number | null;
 }
 
+/** Trash/discard selection mode state passed from GameScreen */
+export interface TrashSelectionMode {
+  /** Index of the card being played (grayed out, not selectable) */
+  playedCardIndex: number;
+  /** Indices currently selected for trashing/discarding */
+  selectedIndices: Set<number>;
+  /** Minimum cards that must be selected (0 for "up to") */
+  minCards: number;
+  /** Maximum cards that can be selected */
+  maxCards: number;
+  /** Display label: "Trash" or "Discard" */
+  label: string;
+}
+
 interface CardHandProps {
   playerId: string;
   cards: Card[];
@@ -37,6 +51,10 @@ interface CardHandProps {
   lastPlayedTarget?: PlayTarget | null;
   /** Force the shuffle animation on the draw pile (used during intro sequence) */
   forceShuffleAnim?: boolean;
+  /** Trash/discard selection mode */
+  trashMode?: TrashSelectionMode | null;
+  /** Toggle a card's trash selection (during trash mode) */
+  onTrashToggle?: (cardIndex: number) => void;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -374,6 +392,8 @@ export default function CardHand({
   onDiscardAllComplete,
   lastPlayedTarget,
   forceShuffleAnim,
+  trashMode,
+  onTrashToggle,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -736,15 +756,17 @@ export default function CardHand({
   }, []);
 
   const handlePointerDown = useCallback((e: ReactPointerEvent, localIdx: number) => {
-    if (disabled) return;
+    if (disabled && !trashMode) return;
     e.preventDefault();
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     dragStartRef.current = { x: e.clientX, y: e.clientY, index: localIdx };
     isDraggingRef.current = false;
-  }, [disabled]);
+  }, [disabled, trashMode]);
 
   const handlePointerMove = useCallback((e: ReactPointerEvent) => {
     if (!dragStartRef.current) return;
+    // Disable dragging in trash selection mode
+    if (trashMode) return;
     const dx = e.clientX - dragStartRef.current.x;
     const dy = e.clientY - dragStartRef.current.y;
     if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
@@ -787,6 +809,16 @@ export default function CardHand({
     if (!dragStartRef.current) return;
     const localIdx = dragStartRef.current.index;
 
+    // In trash selection mode, clicks toggle trash selection
+    if (trashMode && !isDraggingRef.current) {
+      const cardIdx = localOrder[localIdx];
+      if (cardIdx !== trashMode.playedCardIndex) {
+        onTrashToggle?.(cardIdx);
+      }
+      resetDragState();
+      return;
+    }
+
     if (isDraggingRef.current) {
       onDragEnd?.();
       const handRect = handContainerRef.current?.getBoundingClientRect();
@@ -814,7 +846,7 @@ export default function CardHand({
       }
     }
     resetDragState();
-  }, [onSelect, onDragPlay, onDragEnd, onCardDetail, selectedIndex, cards, localOrder, dropTargetIndex, resetDragState]);
+  }, [onSelect, onDragPlay, onDragEnd, onCardDetail, selectedIndex, cards, localOrder, dropTargetIndex, resetDragState, trashMode, onTrashToggle]);
 
   // If pointer capture is lost (e.g. card removed from DOM mid-drag), clean up
   const handleLostPointerCapture = useCallback(() => {
@@ -950,11 +982,17 @@ export default function CardHand({
             const isDropBefore = dropTargetIndex === localIdx;
             const isDropAfter = dropTargetIndex === localOrder.length && localIdx === localOrder.length - 1;
 
+            // Trash mode states
+            const isTrashPlayed = trashMode?.playedCardIndex === cardIdx;
+            const isTrashSelected = trashMode?.selectedIndices.has(cardIdx) ?? false;
+            const isTrashSelectable = trashMode != null && !isTrashPlayed;
+
             // Compute animation overrides
             const entering = enteringAnims.get(card.id);
             const isHiddenSimplified = simplifiedHidden.has(card.id);
 
-            let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : 'none';
+            const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode;
+            let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'none';
             // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
             let cardOpacity: number = isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
@@ -999,26 +1037,31 @@ export default function CardHand({
                 tabIndex={disabled ? -1 : 0}
                 style={{
                   width: CARD_WIDTH,
+                  height: CARD_MIN_HEIGHT,
                   flexShrink: 0,
                   marginLeft: localIdx === 0 ? 0 : cardMarginLeft,
                   padding: 6,
-                  background: isSelected ? '#3a3a6e' : '#2a2a3e',
-                  border: `2px solid ${isSelected ? '#fff' : typeColor}`,
+                  background: isTrashSelected ? '#5a2020' : isTrashPlayed ? '#1a3a1a' : isSelected ? '#3a3a6e' : '#2a2a3e',
+                  border: `2px solid ${isTrashSelected ? '#ff4444' : isTrashPlayed ? '#4aff6a' : isSelected ? '#fff' : typeColor}`,
                   borderRadius: 6,
                   color: '#fff',
-                  cursor: disabled ? 'not-allowed' : 'grab',
+                  cursor: trashMode ? (isTrashPlayed ? 'default' : 'pointer') : disabled ? 'not-allowed' : 'grab',
                   opacity: cardOpacity,
                   transition: cardTransition,
-                  transform: cardTransform,
+                  transform: isTrashSelected ? 'translateY(-8px)' : cardTransform,
                   userSelect: 'none' as const,
                   WebkitUserSelect: 'none' as const,
+                  overflow: 'hidden',
+                  boxSizing: 'border-box' as const,
                   position: 'relative' as const,
                   zIndex: hoveredIndex === localIdx ? 100 : isSelected ? 10 : localIdx + 1,
-                  boxShadow: isDropBefore
-                    ? '-3px 0 0 0 #fff, -6px 0 12px rgba(255,255,255,0.3)'
-                    : isDropAfter
-                      ? '3px 0 0 0 #fff, 6px 0 12px rgba(255,255,255,0.3)'
-                      : 'none',
+                  boxShadow: isTrashSelected
+                    ? '0 0 12px rgba(255, 68, 68, 0.5)'
+                    : isDropBefore
+                      ? '-3px 0 0 0 #fff, -6px 0 12px rgba(255,255,255,0.3)'
+                      : isDropAfter
+                        ? '3px 0 0 0 #fff, 6px 0 12px rgba(255,255,255,0.3)'
+                        : 'none',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -1067,13 +1110,53 @@ export default function CardHand({
                     return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
                   })()}
                 </div>
+                {/* Icon overlay — shown when card is selected for trashing/discarding */}
+                {isTrashSelected && (
+                  <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    pointerEvents: 'none',
+                    zIndex: 5,
+                  }}>
+                    <div style={{
+                      fontSize: 28,
+                      filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.8))',
+                    }}>{trashMode?.label === 'Discard' ? '↪️' : '🗑️'}</div>
+                  </div>
+                )}
+                {/* Dark overlay + "Playing" label on the card being played */}
+                {isTrashPlayed && (
+                  <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: 'rgba(0, 0, 0, 0.55)',
+                    borderRadius: 'inherit',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    pointerEvents: 'none',
+                    zIndex: 5,
+                  }}>
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 'bold',
+                      color: '#4aff6a',
+                      background: 'rgba(0,0,0,0.5)',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                    }}>PLAYING</span>
+                  </div>
+                )}
                 <div style={{
                   position: 'absolute',
                   inset: 0,
                   background: 'rgba(10, 10, 20, 0.55)',
                   borderRadius: 'inherit',
                   pointerEvents: 'none',
-                  opacity: disabled && !isDiscardingAll ? 1 : 0,
+                  opacity: (disabled && !isDiscardingAll && !trashMode) ? 1 : 0,
                   transition: animated ? 'opacity 0.25s ease' : 'none',
                 }} />
               </div>
@@ -1108,6 +1191,7 @@ export default function CardHand({
             left: dragPos.x - CARD_WIDTH / 2,
             top: dragPos.y - 28,
             width: CARD_WIDTH,
+            height: CARD_MIN_HEIGHT,
             padding: 6,
             background: '#3a3a6ecc',
             border: `2px solid ${dragColor}`,
@@ -1117,6 +1201,8 @@ export default function CardHand({
             zIndex: 9999,
             transform: 'rotate(3deg) scale(1.05)',
             boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+            boxSizing: 'border-box',
+            overflow: 'hidden',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
               <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>

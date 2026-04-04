@@ -79,6 +79,25 @@ def compute_upkeep_cost(tile_count: int, grid_size: GridSize = GridSize.SMALL) -
     return max(0, (tile_count - UPKEEP_FREE_TILES) // tiles_per_vp(grid_size))
 
 
+
+
+def _draw_archetype_market(
+    deck: list[Card], count: int, rng: random.Random,
+) -> list[Card]:
+    """Draw up to `count` random purchasable cards from the archetype deck.
+
+    All cards with a buy_cost are eligible regardless of the player's current
+    resources — the player may gain resources during the Plan phase before
+    buying in the Buy phase.
+    """
+    eligible = [c for c in deck if c.buy_cost is not None]
+    if len(eligible) <= count:
+        result = list(eligible)
+        rng.shuffle(result)
+        return result
+    return rng.sample(eligible, count)
+
+
 @dataclass
 class PlannedAction:
     """A card placed face-down during Plan phase."""
@@ -115,15 +134,17 @@ class Player:
     archetype_market: list[Card] = field(default_factory=list)
     archetype_deck: list[Card] = field(default_factory=list)  # remaining buyable cards
     upgrade_credits: int = 0
-    passive: Optional[dict[str, Any]] = None
     forced_discard_next_turn: int = 0
     has_submitted_plan: bool = False
     has_ended_turn: bool = False
+    neutral_bought_this_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
     trash: list[Card] = field(default_factory=list)
     last_upkeep_paid: int = 0  # resources actually deducted at start of this turn
     upkeep_cost: int = 0  # computed upkeep for this turn (before payment)
     tiles_lost_to_upkeep: int = 0  # tiles forfeited this turn due to unpaid upkeep
+    is_cpu: bool = False
+    cpu_noise: float = 0.15  # default Medium difficulty
 
     @property
     def hand_size(self) -> int:
@@ -168,7 +189,7 @@ class Player:
             "actions_available": self.actions_available,
             "archetype_market": [c.to_dict() for c in self.archetype_market],
             "upgrade_credits": self.upgrade_credits,
-            "passive": self.passive,
+
             "deck_size": len(self.deck.cards),
             "discard_count": len(self.deck.discard),
             "discard": [_card_dict(c) for c in self.deck.discard],
@@ -182,6 +203,13 @@ class Player:
             "upkeep_cost": self.upkeep_cost,
             "tiles_lost_to_upkeep": self.tiles_lost_to_upkeep,
             "rubble_count": self.rubble_count,
+            "neutral_bought_this_turn": self.neutral_bought_this_turn,
+            "is_cpu": self.is_cpu,
+            "cpu_difficulty": (
+                "easy" if self.cpu_noise >= 0.25 else
+                "medium" if self.cpu_noise >= 0.10 else
+                "hard"
+            ) if self.is_cpu else None,
         }
 
 
@@ -317,7 +345,7 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
        + sum(vp_value for connected VP hexes)
        + sum(passive_vp for all cards in deck/hand/discard)
        + sum(dynamic VP from cards with vp_formula)
-       + player.vp (bonus VP from objectives, etc.)
+       + player.vp (bonus VP from card effects, etc.)
     """
     player = game.players[player_id]
     if not game.grid:
@@ -347,7 +375,7 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
             continue
         formula_vp += _compute_formula_vp(card, player, game)
 
-    # Bonus VP from objectives, etc.
+    # Bonus VP from card effects, etc.
     bonus_vp = player.vp
 
     return max(0, tile_vp + vp_hex_bonus + card_vp + formula_vp + bonus_vp)
@@ -414,6 +442,8 @@ def create_game(
             id=player_id,
             name=config.get("name", f"Player {i + 1}"),
             archetype=archetype,
+            is_cpu=bool(config.get("is_cpu", False)),
+            cpu_noise=float(config.get("cpu_noise", 0.15)),
         )
 
         # Build starting deck
@@ -450,8 +480,8 @@ def create_game(
     # Random first player
     game.first_player_index = rng.randint(0, num_players - 1)
 
-    # Set up neutral market
-    _setup_neutral_market(game, card_registry)
+    # Set up neutral market (N*2 copies per card, where N = player count)
+    _setup_neutral_market(game, card_registry, num_players)
 
     game._log(f"Game created with {num_players} players on {grid_size.value} grid")
     game.current_phase = Phase.START_OF_TURN
@@ -460,15 +490,20 @@ def create_game(
     return game
 
 
-def _setup_neutral_market(game: GameState, card_registry: dict[str, Card]) -> None:
-    """Set up the shared neutral market stacks."""
+def _setup_neutral_market(
+    game: GameState, card_registry: dict[str, Card], num_players: int,
+) -> None:
+    """Set up the shared neutral market stacks.
+
+    Each neutral card gets N*2 copies where N is the number of players.
+    """
     neutral_cards = [
         c for c in card_registry.values()
         if c.archetype == Archetype.NEUTRAL and not c.starter and c.buy_cost is not None
     ]
 
+    copies_count = num_players * 2
     for card in neutral_cards:
-        copies_count = card.copies or 6  # default 6 copies
         copies = [_copy_card(card, f"neutral_{i}") for i in range(copies_count)]
         game.neutral_market.stacks[card.id] = copies
 
@@ -505,6 +540,7 @@ def execute_start_of_turn(game: GameState) -> GameState:
         if extra_draws > 0:
             game._log(f"{player.name} draws {extra_draws} extra card(s) from effects")
         player.forced_discard_next_turn = 0
+        player.turn_modifiers.extra_draws_next_turn = 0
         player.hand = player.deck.draw(draw_count, game.rng)
 
         # Reset turn modifiers (decrement multi-round effects)
@@ -521,10 +557,16 @@ def execute_start_of_turn(game: GameState) -> GameState:
 
         # Reset action tracking
         player.actions_used = 0
-        player.actions_available = player.action_slots
+        extra_actions = player.turn_modifiers.extra_actions_next_turn
+        player.actions_available = player.action_slots + extra_actions
+        if extra_actions > 0:
+            game._log(f"{player.name} gains {extra_actions} extra action(s) from last turn",
+                      visible_to=[pid], actor=pid)
+            player.turn_modifiers.extra_actions_next_turn = 0
         player.planned_actions = []
         player.has_submitted_plan = False
         player.has_ended_turn = False
+        player.neutral_bought_this_turn = False
 
         # Reveal archetype market (3 random, or all in test mode)
         player.archetype_market = []
@@ -532,8 +574,9 @@ def execute_start_of_turn(game: GameState) -> GameState:
             if game.test_mode:
                 player.archetype_market = list(player.archetype_deck)
             else:
-                market_draw = min(3, len(player.archetype_deck))
-                player.archetype_market = player.archetype_deck[:market_draw]
+                player.archetype_market = _draw_archetype_market(
+                    player.archetype_deck, 3, game.rng,
+                )
 
     # Round 1 skips upkeep; round 2+ computes and applies upkeep, then pauses
     # at UPKEEP phase so the frontend can display the banner before advancing to PLAN
@@ -781,6 +824,19 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 continue
             validated_extra.append((et_q, et_r))
 
+    # Validate required trash/discard choices
+    # Trashing is always optional — player may decline to trash (but forfeits the bonus).
+    # Discarding is required if the player has other cards in hand.
+    from .effects import EffectType as _EffectType
+    for effect in card.effects:
+        if not effect.requires_choice:
+            continue
+        if effect.type == _EffectType.SELF_DISCARD:
+            max_discardable = len(player.hand) - 1
+            required = min(effect.effective_value(card.is_upgraded), max_discardable)
+            if required > 0 and (not discard_card_indices or len(discard_card_indices) < required):
+                return False, f"{card.name} requires discarding {required} card(s)"
+
     # Remove card from hand and create planned action
     player.hand.pop(card_index)
     has_extra = (
@@ -808,7 +864,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
                   visible_to=[player_id], actor=player_id)
 
     # Immediate card draw
-    if card.timing == Timing.IMMEDIATE and card.effective_draw_cards > 0:
+    # Check if draw is gated behind a trash choice (e.g. Thin the Herd: "Trash 1. If you did, draw 1.")
+    draw_gated = any(
+        e.metadata.get("gates_draw") and e.requires_choice
+        and e.type in (_EffectType.SELF_TRASH, _EffectType.TRASH_GAIN_BUY_COST)
+        for e in card.effects
+    )
+    should_draw = not draw_gated or bool(trash_card_indices)
+    if card.timing == Timing.IMMEDIATE and card.effective_draw_cards > 0 and should_draw:
         drawn = player.deck.draw(card.effective_draw_cards, game.rng)
         player.hand.extend(drawn)
         game._log(f"{player.name} draws {len(drawn)} cards from {card.name}",
@@ -1184,6 +1247,25 @@ def execute_reveal(game: GameState) -> GameState:
             else:
                 game._log(f"{player.name}'s Cease Fire bonus forfeited — claimed an opponent tile")
 
+    # Passive cards in hand: check for on_resolution effects (e.g. Battle Glory)
+    for pid in game.player_order:
+        player = game.players[pid]
+        for card in player.hand:
+            if not card.unplayable or not card.effects:
+                continue
+            for effect in card.effects:
+                if effect.timing != Timing.ON_RESOLUTION:
+                    continue
+                # Create a dummy action for the effect context
+                dummy_action = PlannedAction(card=card)
+                resolve_on_resolution_effects(
+                    game, player, card, dummy_action,
+                    claim_succeeded=None,
+                    defender_id=None,
+                    claim_results=claim_results,
+                )
+                break  # Only trigger once per card
+
     # Discard planned claim cards (or trash if trash_on_use)
     for pid in game.player_order:
         player = game.players[pid]
@@ -1251,6 +1333,8 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         return True, f"Bought {target.name}"
 
     if source == "neutral":
+        if player.neutral_bought_this_turn and not game.test_mode:
+            return False, "Already bought a neutral card this turn (limit 1)"
         purchased = game.neutral_market.purchase(card_id)
         if not purchased:
             return False, "Card not available in neutral market"
@@ -1264,6 +1348,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             if effective_cost > 0:
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
+        player.neutral_bought_this_turn = True
         # Note: passive_vp cards (e.g. Land Grant) contribute to derived VP automatically
         game._log(f"{player.name} buys {purchased.name} from neutral market")
         return True, f"Bought {purchased.name}"
@@ -1396,17 +1481,22 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
     if player.has_ended_turn:
         return False, "Already ended turn"
 
-    if player.resources < REROLL_COST:
-        return False, f"Need {REROLL_COST} resources"
+    # Use free rerolls first (from Surveyor), otherwise charge resources
+    if player.turn_modifiers.free_rerolls > 0:
+        player.turn_modifiers.free_rerolls -= 1
+    else:
+        if player.resources < REROLL_COST:
+            return False, f"Need {REROLL_COST} resources"
+        player.resources -= REROLL_COST
 
-    player.resources -= REROLL_COST
-
-    # Shuffle current market back, draw new 3
+    # Shuffle current market back, draw affordable 3
     remaining_deck = [c for c in player.archetype_deck if c not in player.archetype_market]
     all_available = remaining_deck + player.archetype_market
     game.rng.shuffle(all_available)
     player.archetype_deck = all_available
-    player.archetype_market = all_available[:min(3, len(all_available))]
+    player.archetype_market = _draw_archetype_market(
+        all_available, 3, game.rng,
+    )
 
     game._log(f"{player.name} re-rolls archetype market")
     return True, "Market re-rolled"
@@ -1452,3 +1542,66 @@ def execute_end_of_turn(game: GameState) -> GameState:
 
     # Start next turn
     return execute_start_of_turn(game)
+
+
+# ── CPU Auto-Play Helpers ────────────────────────────────────────
+
+
+def auto_play_cpu_plans(game: GameState) -> None:
+    """Auto-play plan phase for all CPU players who haven't submitted."""
+    from .cpu_player import CPUPlayer
+
+    for pid in game.player_order:
+        player = game.players[pid]
+        if not player.is_cpu or player.has_submitted_plan:
+            continue
+
+        cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
+
+        # Play cards (same loop pattern as simulation._run_plan_phase)
+        for _ in range(20):  # safety limit
+            action = cpu.pick_next_action(game)
+            if action is None:
+                break
+            success, _msg = play_card(
+                game, pid, action["card_index"],
+                target_q=action.get("target_q"),
+                target_r=action.get("target_r"),
+                target_player_id=action.get("target_player_id"),
+                discard_card_indices=action.get("discard_card_indices"),
+                trash_card_indices=action.get("trash_card_indices"),
+                extra_targets=action.get("extra_targets"),
+            )
+            if not success:
+                break
+
+        submit_plan(game, pid)
+
+
+def auto_play_cpu_buys(game: GameState) -> None:
+    """Auto-play buy phase for all CPU players who haven't ended turn."""
+    from .cpu_player import CPUPlayer
+
+    for pid in game.player_order:
+        player = game.players[pid]
+        if not player.is_cpu or player.has_ended_turn:
+            continue
+
+        cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
+
+        # Reroll market if desirable
+        if cpu.should_reroll_market(game):
+            reroll_market(game, pid)
+
+        # Buy cards
+        for _ in range(10):  # safety limit
+            purchase = cpu.pick_next_purchase(game)
+            if purchase is None:
+                break
+            success, _msg = buy_card(
+                game, pid, purchase["source"], purchase.get("card_id", ""),
+            )
+            if not success:
+                break
+
+        end_buy_phase(game, pid)

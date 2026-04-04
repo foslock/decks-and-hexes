@@ -16,7 +16,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export async function createGame(
   gridSize: string,
-  players: { id: string; name: string; archetype: string }[],
+  players: { id: string; name: string; archetype: string; is_cpu?: boolean; cpu_noise?: number }[],
   seed?: number,
   testMode?: boolean,
   speed?: string,
@@ -40,6 +40,8 @@ export async function playCard(
   targetR?: number,
   targetPlayerId?: string,
   extraTargets?: [number, number][],
+  trashCardIndices?: number[],
+  discardCardIndices?: number[],
 ): Promise<{ message: string; state: GameState }> {
   return request(`/games/${gameId}/play`, {
     method: 'POST',
@@ -50,6 +52,8 @@ export async function playCard(
       target_r: targetR,
       target_player_id: targetPlayerId,
       extra_targets: extraTargets,
+      trash_card_indices: trashCardIndices,
+      discard_card_indices: discardCardIndices,
     }),
   });
 }
@@ -125,6 +129,28 @@ export async function testGiveCard(
   return request(`/games/${gameId}/test/give-card`, {
     method: 'POST',
     body: JSON.stringify({ player_id: playerId, card_id: cardId }),
+  });
+}
+
+export async function testDiscardCard(
+  gameId: string,
+  playerId: string,
+  cardIndex: number,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/discard-card`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, card_index: cardIndex }),
+  });
+}
+
+export async function testTrashCard(
+  gameId: string,
+  playerId: string,
+  cardIndex: number,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/trash-card`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, card_index: cardIndex }),
   });
 }
 

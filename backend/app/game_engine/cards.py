@@ -33,9 +33,9 @@ class Archetype(str, Enum):
 
 # Action slots per archetype
 ARCHETYPE_SLOTS = {
-    Archetype.VANGUARD: 3,
-    Archetype.SWARM: 3,
-    Archetype.FORTRESS: 3,
+    Archetype.VANGUARD: 5,
+    Archetype.SWARM: 5,
+    Archetype.FORTRESS: 5,
 }
 
 HAND_SIZE = {
@@ -44,7 +44,6 @@ HAND_SIZE = {
     Archetype.FORTRESS: 5,
 }
 
-ACTION_HARD_CAP = 6
 
 
 @dataclass

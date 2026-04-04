@@ -48,6 +48,39 @@ function pixelToAxial(px: number, py: number): { q: number; r: number } {
   return { q: rq, r: rr };
 }
 
+/** Check if a card requires the player to choose cards to trash or discard from hand. */
+function getCardChoiceRequirement(card: Card): {
+  effectType: 'self_trash' | 'trash_gain_buy_cost' | 'self_discard';
+  minCards: number;
+  maxCards: number;
+  label: string;
+} | null {
+  if (!card.effects) return null;
+  for (const effect of card.effects) {
+    if (effect.type === 'self_trash' || effect.type === 'trash_gain_buy_cost') {
+      const count = card.is_upgraded && effect.upgraded_value != null ? effect.upgraded_value : effect.value;
+      // Trashing is always optional — player can decline (but forfeits the bonus)
+      return {
+        effectType: effect.type as 'self_trash' | 'trash_gain_buy_cost',
+        minCards: 0,
+        maxCards: count,
+        label: 'Trash',
+      };
+    }
+    if (effect.type === 'self_discard') {
+      const count = card.is_upgraded && effect.upgraded_value != null ? effect.upgraded_value : effect.value;
+      // Discarding is required if there are cards in hand
+      return {
+        effectType: 'self_discard',
+        minCards: count,
+        maxCards: count,
+        label: 'Discard',
+      };
+    }
+  }
+  return null;
+}
+
 const HEX_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 
 /** BFS from each VP tile owned by a player to their base, through owned territory.
@@ -129,7 +162,11 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const animated = useAnimated();
   const animationMode = useAnimationMode();
   const animationOff = useAnimationOff();
-  const [activePlayerIndex, setActivePlayerIndex] = useState(0);
+  // Helper: find the first human player index
+  const firstHumanIndex = gameState.player_order.findIndex(
+    pid => !gameState.players[pid]?.is_cpu,
+  );
+  const [activePlayerIndex, setActivePlayerIndex] = useState(Math.max(0, firstHumanIndex));
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +188,19 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
   const [surgeTargets, setSurgeTargets] = useState<[number, number][]>([]);
   const [surgeCardIndex, setSurgeCardIndex] = useState<number | null>(null);
   const [surgePrimaryTarget, setSurgePrimaryTarget] = useState<[number, number] | null>(null);
+  // Trash/discard selection mode (for cards like Thin the Herd, Consolidate, Reduce)
+  const [trashMode, setTrashMode] = useState<{
+    cardIndex: number;
+    targetQ?: number;
+    targetR?: number;
+    targetPlayerId?: string;
+    extraTargets?: [number, number][];
+    effectType: 'self_trash' | 'trash_gain_buy_cost' | 'self_discard';
+    minCards: number;
+    maxCards: number;
+    label: string;  // "Trash" or "Discard"
+  } | null>(null);
+  const [trashSelectedIndices, setTrashSelectedIndices] = useState<Set<number>>(new Set());
   // Intro overlay state
   const [showIntro, setShowIntro] = useState(true);
   // Intro sequence after overlay: 'overlay' → 'shuffle' → 'draw' → 'done'
@@ -502,50 +552,114 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     return adj;
   }, [gameState.grid, activePlayerId, activePlayer]);
 
+  /** Actually send the play-card API call (after any trash/discard selection is complete). */
+  const executePlayCard = useCallback(async (
+    cardIndex: number,
+    q?: number, r?: number,
+    extraTargets?: [number, number][],
+    targetPlayerId?: string,
+    trashIndices?: number[],
+    discardIndices?: number[],
+  ) => {
+    if (phase !== 'plan' || !activePlayer) return;
+    const card = activePlayer.hand[cardIndex];
+    if (!card) return;
+
+    // Compute screen position for card animation
+    if (q != null && r != null) {
+      const transform = gridTransformRef.current;
+      const gRect = gridContainerRef.current?.getBoundingClientRect();
+      if (transform && gRect) {
+        const local = axialToPixel(q, r);
+        const screenX = local.x * transform.scale + transform.offsetX + gRect.left;
+        const screenY = local.y * transform.scale + transform.offsetY + gRect.top;
+        setLastPlayedTarget({ cardId: card.id, screenX, screenY });
+      }
+    } else {
+      setLastPlayedTarget({ cardId: card.id, screenX: null, screenY: null });
+    }
+
+    try {
+      setError(null);
+      const result = await api.playCard(
+        gameState.id, activePlayerId, cardIndex,
+        q, r, targetPlayerId, extraTargets,
+        trashIndices, discardIndices,
+      );
+      onStateUpdate(result.state);
+      // Auto-select the next card in hand (card to the right, or left if last)
+      const newHand = result.state.players[activePlayerId]?.hand;
+      if (newHand && newHand.length > 0) {
+        setSelectedCardIndex(Math.min(cardIndex, newHand.length - 1));
+      } else {
+        setSelectedCardIndex(null);
+      }
+      setSurgeTargets([]);
+      setSurgeCardIndex(null);
+      setSurgePrimaryTarget(null);
+      setTrashMode(null);
+      setTrashSelectedIndices(new Set());
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [phase, activePlayer, gameState.id, activePlayerId, onStateUpdate]);
+
+  /** Enter trash/discard selection mode if the card requires it, otherwise play immediately. */
+  const maybeEnterTrashMode = useCallback((
+    cardIndex: number,
+    choiceReq: ReturnType<typeof getCardChoiceRequirement>,
+    targetQ?: number, targetR?: number,
+    extraTargets?: [number, number][],
+    targetPlayerId?: string,
+  ) => {
+    if (!choiceReq || !activePlayer) return false;
+    // Cap maxCards to number of other cards in hand (exclude the played card)
+    const otherCardsCount = activePlayer.hand.length - 1;
+    const maxCards = Math.min(choiceReq.maxCards, otherCardsCount);
+    const minCards = Math.min(choiceReq.minCards, otherCardsCount);
+    if (maxCards <= 0 && minCards <= 0) return false;  // no cards to choose from
+    setTrashMode({
+      cardIndex,
+      targetQ, targetR,
+      targetPlayerId,
+      extraTargets,
+      effectType: choiceReq.effectType,
+      minCards,
+      maxCards,
+      label: choiceReq.label,
+    });
+    setTrashSelectedIndices(new Set());
+    setSelectedCardIndex(null);
+    return true;
+  }, [activePlayer]);
+
   const playCardAtTile = useCallback(async (cardIndex: number, q: number, r: number, extraTargets?: [number, number][], targetPlayerId?: string) => {
     if (phase !== 'plan' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
 
-    // Compute screen position of the target tile for card animation
-    const transform = gridTransformRef.current;
-    const gridRect = gridContainerRef.current?.getBoundingClientRect();
-    if (transform && gridRect) {
-      const local = axialToPixel(q, r);
-      const screenX = local.x * transform.scale + transform.offsetX + gridRect.left;
-      const screenY = local.y * transform.scale + transform.offsetY + gridRect.top;
-      setLastPlayedTarget({ cardId: card.id, screenX, screenY });
+    // Check if card needs trash/discard choice
+    const choiceReq = getCardChoiceRequirement(card);
+    if (choiceReq && maybeEnterTrashMode(cardIndex, choiceReq, q, r, extraTargets, targetPlayerId)) {
+      return;
     }
 
-    try {
-      setError(null);
-      const result = await api.playCard(gameState.id, activePlayerId, cardIndex, q, r, targetPlayerId, extraTargets);
-      onStateUpdate(result.state);
-      setSelectedCardIndex(null);
-      // Clear surge state
-      setSurgeTargets([]);
-      setSurgeCardIndex(null);
-      setSurgePrimaryTarget(null);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [phase, activePlayer, gameState.id, activePlayerId, onStateUpdate]);
+    await executePlayCard(cardIndex, q, r, extraTargets, targetPlayerId);
+  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode]);
 
   const playCardNoTarget = useCallback(async (cardIndex: number) => {
     if (phase !== 'plan' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
-    if (card) {
-      setLastPlayedTarget({ cardId: card.id, screenX: null, screenY: null });
+    if (!card) return;
+
+    // Check if card needs trash/discard choice
+    const choiceReq = getCardChoiceRequirement(card);
+    if (choiceReq && maybeEnterTrashMode(cardIndex, choiceReq)) {
+      return;
     }
-    try {
-      setError(null);
-      const result = await api.playCard(gameState.id, activePlayerId, cardIndex);
-      onStateUpdate(result.state);
-      setSelectedCardIndex(null);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [phase, activePlayer, gameState.id, activePlayerId, onStateUpdate]);
+
+    await executePlayCard(cardIndex);
+  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode]);
 
   // Convert screen coords from card drag to hex grid coords
   const handleDragPlay = useCallback((cardIndex: number, screenX: number, screenY: number) => {
@@ -749,6 +863,41 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     setSurgeTargets([]);
   }, []);
 
+  // Confirm trash/discard selection
+  const handleConfirmTrash = useCallback(async () => {
+    if (!trashMode || !activePlayer) return;
+    const { cardIndex, targetQ, targetR, extraTargets, targetPlayerId, effectType } = trashMode;
+    // Convert selected hand indices to post-removal indices (after played card is popped)
+    const adjustedIndices = [...trashSelectedIndices]
+      .map(i => (i > cardIndex ? i - 1 : i))
+      .sort((a, b) => a - b);
+
+    const isDiscard = effectType === 'self_discard';
+    await executePlayCard(
+      cardIndex, targetQ, targetR, extraTargets, targetPlayerId,
+      isDiscard ? undefined : adjustedIndices,
+      isDiscard ? adjustedIndices : undefined,
+    );
+  }, [trashMode, trashSelectedIndices, activePlayer, executePlayCard]);
+
+  const handleCancelTrash = useCallback(() => {
+    setTrashMode(null);
+    setTrashSelectedIndices(new Set());
+  }, []);
+
+  const handleTrashToggle = useCallback((cardIndex: number) => {
+    if (!trashMode) return;
+    setTrashSelectedIndices(prev => {
+      const next = new Set(prev);
+      if (next.has(cardIndex)) {
+        next.delete(cardIndex);
+      } else if (next.size < trashMode.maxCards) {
+        next.add(cardIndex);
+      }
+      return next;
+    });
+  }, [trashMode]);
+
   const handleSubmitPlan = useCallback(async () => {
     try {
       setError(null);
@@ -820,13 +969,13 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           // Animations off — apply final state immediately
           onStateUpdate(result.state);
           resolveFinishedStateRef.current = null;
-          setActivePlayerIndex(0);
+          setActivePlayerIndex(Math.max(0, firstHumanIndex));
         }
       } else {
         // Not all plans submitted yet — just apply the updated state
         onStateUpdate(result.state);
         const nextIndex = gameState.player_order.findIndex(
-          (pid, i) => i !== activePlayerIndex && !gameState.players[pid].has_submitted_plan,
+          (pid, i) => i !== activePlayerIndex && !gameState.players[pid].has_submitted_plan && !gameState.players[pid].is_cpu,
         );
         if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
         setSelectedCardIndex(null);
@@ -834,7 +983,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationOff]);
+  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationOff, firstHumanIndex]);
 
   const handleBuyArchetype = useCallback(async (cardId: string) => {
     try {
@@ -899,14 +1048,14 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
           setDiscardingAll(true);
         } else {
           onStateUpdate(result.state);
-          setActivePlayerIndex(0);
+          setActivePlayerIndex(Math.max(0, firstHumanIndex));
           setSelectedCardIndex(null);
         }
       } else {
-        // Not all players done — switch to next unfinished player
+        // Not all players done — switch to next unfinished human player
         onStateUpdate(result.state);
         const nextIndex = gameState.player_order.findIndex(
-          (pid, i) => i !== activePlayerIndex && !result.state.players[pid].has_ended_turn,
+          (pid, i) => i !== activePlayerIndex && !result.state.players[pid].has_ended_turn && !result.state.players[pid].is_cpu,
         );
         if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
         setSelectedCardIndex(null);
@@ -914,7 +1063,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer]);
+  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer, firstHumanIndex]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -922,9 +1071,9 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       onStateUpdate(pendingStateRef.current);
       pendingStateRef.current = null;
     }
-    setActivePlayerIndex(0);
+    setActivePlayerIndex(Math.max(0, firstHumanIndex));
     setSelectedCardIndex(null);
-  }, [onStateUpdate]);
+  }, [onStateUpdate, firstHumanIndex]);
 
   // Intro overlay dismissed — start shuffle → draw → plan banner sequence
   const handleIntroReady = useCallback(() => {
@@ -1005,7 +1154,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       // apply the held-back state and show player effects or buy banner.
       const finishedState = resolveFinishedStateRef.current;
       resolveFinishedStateRef.current = null;
-      setActivePlayerIndex(0);
+      setActivePlayerIndex(Math.max(0, firstHumanIndex));
 
       // Show player effect popups if any (e.g. Sabotage forced discards)
       const effects = finishedState?.player_effects;
@@ -1047,7 +1196,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
         setShowShopOverlay(true);
       }
     }
-  }, [resolving, phaseBanner, onStateUpdate, animationOff, finishResolveAndShowBuy]);
+  }, [resolving, phaseBanner, onStateUpdate, animationOff, finishResolveAndShowBuy, firstHumanIndex]);
 
   // Phase banner midpoint — start drawing cards if it's start_of_turn
   const handleBannerMidpoint = useCallback(() => {
@@ -1065,7 +1214,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     resolveChevronCacheRef.current = [];
     const finishedState = resolveFinishedStateRef.current;
     resolveFinishedStateRef.current = null;
-    setActivePlayerIndex(0);
+    setActivePlayerIndex(Math.max(0, firstHumanIndex));
     // Fade out VP paths and clear resolve log
     if (vpPaths.length > 0) {
       vpPathFadeStartAlphaRef.current = vpPaths[0]?.alpha ?? 1;
@@ -1095,7 +1244,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
       }
       finishResolveAndShowBuy();
     }
-  }, [onStateUpdate, animationOff, vpPaths, finishResolveAndShowBuy]);
+  }, [onStateUpdate, animationOff, vpPaths, finishResolveAndShowBuy, firstHumanIndex]);
 
   // Called by ResolveOverlay as each step begins — update the displayed tile state & fade chevrons
   const applyResolveStep = useCallback((stepIdx: number) => {
@@ -1230,19 +1379,43 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
     }
   }, [gameState.id, activePlayerId, onStateUpdate]);
 
+  const handleTestDiscardCard = useCallback(async (cardIndex: number) => {
+    try {
+      setError(null);
+      const result = await api.testDiscardCard(gameState.id, activePlayerId, cardIndex);
+      onStateUpdate(result.state);
+      setSelectedCardIndex(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, activePlayerId, onStateUpdate]);
+
+  const handleTestTrashCard = useCallback(async (cardIndex: number) => {
+    try {
+      setError(null);
+      const result = await api.testTrashCard(gameState.id, activePlayerId, cardIndex);
+      onStateUpdate(result.state);
+      setSelectedCardIndex(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, activePlayerId, onStateUpdate]);
+
   const handleSwitchPlayer = useCallback((index: number) => {
+    // Don't allow switching to CPU players
+    const pid = gameState.player_order[index];
+    if (pid && gameState.players[pid]?.is_cpu) return;
     setActivePlayerIndex(index);
     setSelectedCardIndex(null);
     setError(null);
-  }, []);
+  }, [gameState.player_order, gameState.players]);
 
   const selectedCard = selectedCardIndex !== null ? activePlayer?.hand[selectedCardIndex] : null;
 
   // Submit Plan button state
   const submitHasCardsLeft = activePlayer ? activePlayer.hand.length > 0 : false;
   const submitActionsLeft = activePlayer ? activePlayer.actions_available - activePlayer.actions_used : 0;
-  const submitAtCap = activePlayer ? activePlayer.actions_used >= 6 : false;
-  const submitCanStillPlay = submitHasCardsLeft && submitActionsLeft > 0 && !submitAtCap;
+  const submitCanStillPlay = submitHasCardsLeft && submitActionsLeft > 0;
 
   // Upkeep indicator calculations — tiles_per_vp = grid radius - 1, used for both VP and upkeep
   const UPKEEP_FREE_TILES = 4;
@@ -1577,8 +1750,9 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
             const pInPlay = phase === 'plan' ? (p.planned_actions?.filter(a => a.target_q != null).length ?? 0) : 0;
             const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
             const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
+            const isCpu = p.is_cpu;
             return (
-              <div key={pid} onClick={() => handleSwitchPlayer(i)} style={{ cursor: 'pointer', marginBottom: 6 }}>
+              <div key={pid} onClick={() => handleSwitchPlayer(i)} style={{ cursor: isCpu ? 'default' : 'pointer', marginBottom: 6, opacity: isCpu ? 0.8 : 1 }}>
                 <PlayerHud
                   player={p}
                   isActive={i === activePlayerIndex}
@@ -1587,6 +1761,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                   phase={phase}
                   totalCards={pTotal}
                   tileCount={pTiles}
+                  cpuBadge={isCpu ? (p.cpu_difficulty === 'easy' ? '🤖 Easy' : p.cpu_difficulty === 'hard' ? '🤖 Hard' : '🤖 Med') : undefined}
                 />
               </div>
             );
@@ -1867,6 +2042,7 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               testMode={!!gameState.test_mode}
               effectiveBuyCosts={activePlayer?.effective_buy_costs}
               currentUpkeep={currentUpkeep}
+              neutralBoughtThisTurn={!!activePlayer?.neutral_bought_this_turn}
             />
           )}
 
@@ -1991,19 +2167,52 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 <span style={{ fontSize: 12, color: '#aaa', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
                   action{submitActionsLeft !== 1 ? 's' : ''} remaining
                 </span>
-                {submitAtCap && (
-                  <span style={{ fontSize: 10, color: '#ff6666', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
-                    (cap reached)
-                  </span>
-                )}
               </div>
             )}
             <div style={{ flex: 1 }} />
             {/* Buttons — right aligned */}
+            {/* Test-mode Discard & Trash buttons */}
+            {gameState.test_mode && phase === 'plan' && activePlayer && !resolving &&
+              selectedCard && selectedCardIndex !== null && surgeCardIndex === null && (
+              <>
+                <button
+                  onClick={() => handleTestDiscardCard(selectedCardIndex)}
+                  style={{
+                    padding: '6px 14px',
+                    background: '#666',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  }}
+                  title="Test mode: discard this card to your discard pile"
+                >
+                  Discard
+                </button>
+                <button
+                  onClick={() => handleTestTrashCard(selectedCardIndex)}
+                  style={{
+                    padding: '6px 14px',
+                    background: '#aa3333',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  }}
+                  title="Test mode: permanently trash this card"
+                >
+                  🗑 Trash
+                </button>
+              </>
+            )}
             {/* Upgrade button — shown when a card is selected during plan phase */}
             {phase === 'plan' && activePlayer && !resolving && selectedCard && selectedCardIndex !== null &&
               !selectedCard.is_upgraded && hasUpgradePreview(selectedCard) &&
-              activePlayer.upgrade_credits > 0 && surgeCardIndex === null && (
+              (activePlayer.upgrade_credits > 0 || gameState.test_mode) && surgeCardIndex === null && !trashMode && (
               <div
                 style={{ position: 'relative', display: 'inline-block' }}
                 onMouseEnter={() => setShowUpgradePreview(true)}
@@ -2024,23 +2233,23 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 )}
                 <button
                   onClick={() => handleUpgradeCard(selectedCardIndex)}
-                  disabled={activePlayer.upgrade_credits < 1}
+                  disabled={activePlayer.upgrade_credits < 1 && !gameState.test_mode}
                   style={{
                     padding: '6px 14px',
-                    background: activePlayer.upgrade_credits > 0 ? '#7a4acc' : '#555',
+                    background: (activePlayer.upgrade_credits > 0 || gameState.test_mode) ? '#7a4acc' : '#555',
                     border: 'none',
                     borderRadius: 6,
                     color: '#fff',
-                    cursor: activePlayer.upgrade_credits > 0 ? 'pointer' : 'not-allowed',
+                    cursor: (activePlayer.upgrade_credits > 0 || gameState.test_mode) ? 'pointer' : 'not-allowed',
                     fontSize: 13,
                     boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                   }}
                 >
-                  Upgrade ({activePlayer.upgrade_credits})
+                  Upgrade ({gameState.test_mode && activePlayer.upgrade_credits === 0 ? '∞' : activePlayer.upgrade_credits})
                 </button>
               </div>
             )}
-            {phase === 'plan' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && surgeCardIndex === null && (
+            {phase === 'plan' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && surgeCardIndex === null && !trashMode && (
               <IrreversibleButton
                 onClick={handlePlayEngine}
                 tooltip="Playing a card uses an action and cannot be undone."
@@ -2104,7 +2313,54 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
                 </>
               );
             })()}
-            {phase === 'plan' && activePlayer && !resolving && activePlayerEffects.length === 0 && surgeCardIndex === null && (
+            {/* Trash/Discard selection confirm/cancel */}
+            {phase === 'plan' && trashMode && (() => {
+              const card = activePlayer?.hand[trashMode.cardIndex];
+              const count = trashSelectedIndices.size;
+              const canConfirm = count >= trashMode.minCards && count <= trashMode.maxCards;
+              const isOptional = trashMode.minCards === 0;
+              return (
+                <>
+                  <span style={{ fontSize: 12, color: '#aaa' }}>
+                    {trashMode.label}: {count}/{trashMode.maxCards} card{trashMode.maxCards !== 1 ? 's' : ''} selected
+                    {isOptional && <span style={{ color: '#888' }}> (optional)</span>}
+                  </span>
+                  <button
+                    onClick={handleCancelTrash}
+                    style={{
+                      padding: '6px 12px',
+                      background: '#555',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 13,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <IrreversibleButton
+                    onClick={handleConfirmTrash}
+                    disabled={!canConfirm}
+                    tooltip={`Confirm ${trashMode.label.toLowerCase()} selection for ${card?.name ?? 'card'}.`}
+                    style={{
+                      padding: '6px 16px',
+                      background: canConfirm ? '#ff4444' : '#555',
+                      border: 'none',
+                      borderRadius: 6,
+                      color: '#fff',
+                      fontWeight: 'bold',
+                      cursor: canConfirm ? 'pointer' : 'not-allowed',
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                      opacity: canConfirm ? 1 : 0.5,
+                    }}
+                  >
+                    Confirm {trashMode.label}
+                  </IrreversibleButton>
+                </>
+              );
+            })()}
+            {phase === 'plan' && activePlayer && !resolving && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
               <HoldToSubmitButton
                 key={activePlayerId}
                 onConfirm={handleSubmitPlan}
@@ -2202,6 +2458,14 @@ export default function GameScreen({ gameState, onStateUpdate }: GameScreenProps
               onDiscardAllComplete={handleDiscardAllComplete}
               lastPlayedTarget={lastPlayedTarget}
               forceShuffleAnim={introSequence === 'shuffle'}
+              trashMode={trashMode ? {
+                playedCardIndex: trashMode.cardIndex,
+                selectedIndices: trashSelectedIndices,
+                minCards: trashMode.minCards,
+                maxCards: trashMode.maxCards,
+                label: trashMode.label,
+              } : null}
+              onTrashToggle={handleTrashToggle}
             />
           )}
         </div>

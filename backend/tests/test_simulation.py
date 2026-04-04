@@ -195,7 +195,6 @@ class TestBalanceReport:
 
         assert "summary" in report
         assert "archetype_win_rates" in report
-        assert "passive_win_rates" in report
         assert "card_purchase_stats" in report
         assert "game_length_stats" in report
         assert "action_economy" in report

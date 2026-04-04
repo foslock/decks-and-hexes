@@ -257,9 +257,9 @@ describe('SetupScreen', () => {
 
   it('shows grid size options', () => {
     render(<SetupScreen onStart={() => {}} />);
-    expect(screen.getByText(/Small/)).toBeInTheDocument();
-    expect(screen.getByText(/Medium/)).toBeInTheDocument();
-    expect(screen.getByText(/Large/)).toBeInTheDocument();
+    expect(screen.getByText(/Small \(61/)).toBeInTheDocument();
+    expect(screen.getByText(/Medium \(91/)).toBeInTheDocument();
+    expect(screen.getByText(/Large \(127/)).toBeInTheDocument();
   });
 
   it('calls onStart with config', async () => {
@@ -277,17 +277,17 @@ describe('SetupScreen', () => {
 
   it('allows changing player count', async () => {
     render(<SetupScreen onStart={() => {}} />);
-    // Click the "3" button to add a player
-    const threeBtn = screen.getByText('3');
-    await userEvent.click(threeBtn);
-    // Should now have 3 player name inputs
+    // Default is 3 players (1 human + 2 CPU). Only human players have text inputs.
     const inputs = screen.getAllByRole('textbox');
-    expect(inputs).toHaveLength(3);
+    expect(inputs).toHaveLength(1); // Only human Player 1 has a name input
+    // CPU players show difficulty buttons instead
+    expect(screen.getAllByText('CPU')).toHaveLength(2);
   });
 
   it('allows changing player name', async () => {
     const onStart = vi.fn();
     render(<SetupScreen onStart={onStart} />);
+    // Only the first player (human) has a text input
     const inputs = screen.getAllByRole('textbox');
     await userEvent.clear(inputs[0]);
     await userEvent.type(inputs[0], 'Gandalf');

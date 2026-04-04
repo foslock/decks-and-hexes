@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
-import { renderWithKeywords, KEYWORDS } from './Keywords';
+import { renderWithKeywords, extractKeywordsFromText } from './Keywords';
 import { useTooltips } from './SettingsContext';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -40,13 +40,17 @@ const CARD_ART: Record<string, string> = {
   vanguard_surge_protocol: '📡',
   vanguard_spoils_of_war: '👑',
   vanguard_elite_vanguard: '🦅',
+  vanguard_war_chest: '💰',
+  vanguard_battle_glory: '🏆',
+  vanguard_arsenal: '🗄️',
+  vanguard_counterattack: '↩️',
+  vanguard_rearguard: '🛡️',
 
   // ── Swarm ──
   swarm_scout: '👁️',
   swarm_surge: '🌊',
   swarm_overwhelm: '🐜',
   swarm_swarm_tactics: '🐝',
-  swarm_cheap_shot: '🎲',
   swarm_proliferate: '🌱',
   swarm_flood: '🌀',
   swarm_rabble: '👥',
@@ -56,6 +60,13 @@ const CARD_ART: Record<string, string> = {
   swarm_frenzy: '🔥',
   swarm_scavenge: '🦴',
   swarm_blitz_rush: '⚡',
+  swarm_nest: '🪹',
+  swarm_safety_in_numbers: '🫂',
+  swarm_mob_rule: '✊',
+  swarm_hive_mind: '🧠',
+  swarm_locust_swarm: '🦗',
+  swarm_consecrate: '⛪',
+  swarm_war_trophies: '🏅',
 
   // ── Fortress ──
   fortress_fortify: '🧱',
@@ -70,8 +81,12 @@ const CARD_ART: Record<string, string> = {
   fortress_stronghold: '🏯',
   fortress_overwhelming_force: '🔨',
   fortress_consolidate: '♻️',
-  fortress_tactical_reserve: '🎖️',
+  fortress_battering_ram: '🪓',
+  fortress_citadel: '🏛️',
+  fortress_war_council: '📋',
   fortress_iron_discipline: '⚖️',
+  fortress_fortified_position: '🏅',
+  fortress_diplomacy: '🕊️',
 
   // ── Neutral ──
   neutral_explore: '🧭',
@@ -89,6 +104,14 @@ const CARD_ART: Record<string, string> = {
   neutral_forced_march: '🥁',
   neutral_rally_cry: '📣',
   neutral_war_bonds: '💰',
+  neutral_reduce: '✂️',
+  neutral_recruit: '🙋',
+  neutral_conscription: '📖',
+  neutral_watchtower: '🗼',
+  neutral_siege_tower: '🏗️',
+  neutral_reclaim: '💱',
+  neutral_diplomat: '🤝',
+  fortress_catch_up: '🏃',
 };
 
 const ARCHETYPE_LABEL: Record<string, string> = {
@@ -142,20 +165,7 @@ interface CardFullProps {
  */
 /** Extract unique keywords present in a card's description text. */
 function extractKeywords(card: Card): { keyword: string; definition: string }[] {
-  const text = card.description || '';
-  const sorted = Object.keys(KEYWORDS).sort((a, b) => b.length - a.length);
-  const pattern = new RegExp(`\\b(${sorted.join('|')})\\b`, 'gi');
-  const seen = new Set<string>();
-  const result: { keyword: string; definition: string }[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) !== null) {
-    const canonical = sorted.find(k => k.toLowerCase() === match![0].toLowerCase());
-    if (canonical && !seen.has(canonical)) {
-      seen.add(canonical);
-      result.push({ keyword: canonical, definition: KEYWORDS[canonical] });
-    }
-  }
-  return result;
+  return extractKeywordsFromText(card.description || '');
 }
 
 export default function CardFull({ card, effectiveCost, remaining, style, showKeywordHints }: CardFullProps) {

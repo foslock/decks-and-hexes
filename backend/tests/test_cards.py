@@ -7,7 +7,6 @@ import random
 import pytest
 
 from app.game_engine.cards import (
-    ACTION_HARD_CAP,
     ARCHETYPE_SLOTS,
     HAND_SIZE,
     STARTER_DECK_COMPOSITION,
@@ -173,14 +172,12 @@ class TestStartingDecks:
 
 class TestArchetypeConstants:
     def test_action_slots(self) -> None:
-        assert ARCHETYPE_SLOTS[Archetype.VANGUARD] == 3
-        assert ARCHETYPE_SLOTS[Archetype.SWARM] == 3
-        assert ARCHETYPE_SLOTS[Archetype.FORTRESS] == 3
+        assert ARCHETYPE_SLOTS[Archetype.VANGUARD] == 5
+        assert ARCHETYPE_SLOTS[Archetype.SWARM] == 5
+        assert ARCHETYPE_SLOTS[Archetype.FORTRESS] == 5
 
     def test_hand_sizes(self) -> None:
         assert HAND_SIZE[Archetype.VANGUARD] == 5
         assert HAND_SIZE[Archetype.SWARM] == 5
         assert HAND_SIZE[Archetype.FORTRESS] == 5
 
-    def test_action_hard_cap(self) -> None:
-        assert ACTION_HARD_CAP == 6

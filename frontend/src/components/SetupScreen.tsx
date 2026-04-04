@@ -1,20 +1,27 @@
 import { useState } from 'react';
 import { useSettings, type AnimationMode } from './SettingsContext';
 import CardBrowser from './CardBrowser';
+import HowToPlay from './HowToPlay';
 
 interface SetupScreenProps {
   onStart: (config: {
     gridSize: string;
-    players: { id: string; name: string; archetype: string }[];
+    players: { id: string; name: string; archetype: string; is_cpu?: boolean; cpu_noise?: number }[];
     testMode?: boolean;
     speed?: string;
   }) => void;
 }
 
+const DIFFICULTIES = [
+  { id: 'easy', name: 'Easy', noise: 0.30 },
+  { id: 'medium', name: 'Medium', noise: 0.15 },
+  { id: 'hard', name: 'Hard', noise: 0.05 },
+];
+
 const ARCHETYPES = [
-  { id: 'vanguard', name: 'Vanguard', icon: '⚔️', desc: 'Fast & Strong — 4 slots, 4 hand' },
-  { id: 'swarm', name: 'Swarm', icon: '🐝', desc: 'Fast & Cheap — 4 slots, 5 hand' },
-  { id: 'fortress', name: 'Fortress', icon: '🏰', desc: 'Cheap & Strong — 3 slots, 3 hand' },
+  { id: 'vanguard', name: 'Vanguard', icon: '⚔️', desc: 'Fast & Strong — high power, aggressive' },
+  { id: 'swarm', name: 'Swarm', icon: '🐝', desc: 'Fast & Cheap — floods the board' },
+  { id: 'fortress', name: 'Fortress', icon: '����', desc: 'Cheap & Strong — slow, defensive' },
 ];
 
 const GRID_SIZES = [
@@ -43,42 +50,65 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
   const [gridSize, setGridSize] = useState('small');
   const [playerCount, setPlayerCount] = useState(3);
   const [players, setPlayers] = useState([
-    { name: 'Player 1', archetype: 'vanguard' },
-    { name: 'Player 2', archetype: 'swarm' },
-    { name: 'Player 3', archetype: 'fortress' },
+    { name: 'Player 1', archetype: 'vanguard', isCpu: false, difficulty: 'medium' },
+    { name: 'CPU Swarm', archetype: 'swarm', isCpu: true, difficulty: 'medium' },
+    { name: 'CPU Fortress', archetype: 'fortress', isCpu: true, difficulty: 'medium' },
   ]);
   const [testMode, setTestMode] = useState(false);
   const [speed, setSpeed] = useState('normal');
   const [showCardBrowser, setShowCardBrowser] = useState(false);
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
   const vpTarget = computeVpTarget(gridSize, playerCount, speed);
 
   const updatePlayerCount = (count: number) => {
     setPlayerCount(count);
     const newPlayers = [];
     for (let i = 0; i < count; i++) {
-      newPlayers.push(
-        players[i] || {
-          name: `Player ${i + 1}`,
-          archetype: ARCHETYPES[i % ARCHETYPES.length].id,
-        },
-      );
+      if (players[i]) {
+        newPlayers.push(players[i]);
+      } else {
+        const arch = ARCHETYPES[i % ARCHETYPES.length];
+        newPlayers.push({
+          name: `CPU ${arch.name}`,
+          archetype: arch.id,
+          isCpu: true,
+          difficulty: 'medium',
+        });
+      }
     }
     setPlayers(newPlayers);
   };
 
-  const updatePlayer = (index: number, field: string, value: string) => {
+  const updatePlayer = (index: number, field: string, value: string | boolean) => {
     const updated = [...players];
-    updated[index] = { ...updated[index], [field]: value };
+    const p = { ...updated[index], [field]: value };
+    // Auto-name CPU players based on archetype
+    if (field === 'isCpu' && value === true) {
+      const arch = ARCHETYPES.find(a => a.id === p.archetype);
+      p.name = `CPU ${arch?.name ?? p.archetype}`;
+    } else if (field === 'isCpu' && value === false) {
+      p.name = `Player ${index + 1}`;
+    } else if (field === 'archetype' && p.isCpu) {
+      const arch = ARCHETYPES.find(a => a.id === value);
+      p.name = `CPU ${arch?.name ?? value}`;
+    }
+    updated[index] = p;
     setPlayers(updated);
   };
 
+  // Ensure at least one human player
+  const humanCount = players.filter(p => !p.isCpu).length;
+
   const handleStart = () => {
+    const diffNoise: Record<string, number> = { easy: 0.30, medium: 0.15, hard: 0.05 };
     onStart({
       gridSize,
       players: players.map((p, i) => ({
         id: `player_${i}`,
         name: p.name,
         archetype: p.archetype,
+        is_cpu: p.isCpu || undefined,
+        cpu_noise: p.isCpu ? diffNoise[p.difficulty] ?? 0.15 : undefined,
       })),
       testMode: testMode || undefined,
       speed,
@@ -174,19 +204,90 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
               alignItems: 'center',
             }}
           >
-            <input
-              value={player.name}
-              onChange={(e) => updatePlayer(i, 'name', e.target.value)}
-              style={{
+            {/* Human / CPU toggle */}
+            <div style={{
+              display: 'flex',
+              border: '1px solid #444',
+              borderRadius: 6,
+              overflow: 'hidden',
+              flexShrink: 0,
+            }}>
+              <button
+                onClick={() => updatePlayer(i, 'isCpu', false)}
+                disabled={!player.isCpu && humanCount <= 1}
+                style={{
+                  padding: '6px 8px',
+                  background: !player.isCpu ? '#3a3a6e' : '#2a2a3e',
+                  border: 'none',
+                  color: '#fff',
+                  cursor: !player.isCpu && humanCount <= 1 ? 'not-allowed' : 'pointer',
+                  fontSize: 13,
+                }}
+                title="Human player"
+              >
+                🧑
+              </button>
+              <button
+                onClick={() => updatePlayer(i, 'isCpu', true)}
+                disabled={player.isCpu}
+                style={{
+                  padding: '6px 8px',
+                  background: player.isCpu ? '#3a3a6e' : '#2a2a3e',
+                  border: 'none',
+                  borderLeft: '1px solid #444',
+                  color: '#fff',
+                  cursor: player.isCpu ? 'default' : 'pointer',
+                  fontSize: 13,
+                }}
+                title="CPU player"
+              >
+                🤖
+              </button>
+            </div>
+            {/* Name input (human) or difficulty selector (CPU) */}
+            {player.isCpu ? (
+              <div style={{
                 flex: 1,
-                padding: '8px 12px',
-                background: '#2a2a3e',
-                border: '1px solid #444',
-                borderRadius: 6,
-                color: '#fff',
-                fontSize: 14,
-              }}
-            />
+                display: 'flex',
+                gap: 4,
+                alignItems: 'center',
+              }}>
+                <span style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>CPU</span>
+                {DIFFICULTIES.map((d) => (
+                  <button
+                    key={d.id}
+                    onClick={() => updatePlayer(i, 'difficulty', d.id)}
+                    style={{
+                      padding: '5px 8px',
+                      background: player.difficulty === d.id ? '#3a3a6e' : '#2a2a3e',
+                      border: player.difficulty === d.id ? '2px solid #4a9eff' : '1px solid #444',
+                      borderRadius: 4,
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      fontWeight: player.difficulty === d.id ? 'bold' : 'normal',
+                    }}
+                  >
+                    {d.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <input
+                value={player.name}
+                onChange={(e) => updatePlayer(i, 'name', e.target.value)}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  background: '#2a2a3e',
+                  border: '1px solid #444',
+                  borderRadius: 6,
+                  color: '#fff',
+                  fontSize: 14,
+                }}
+              />
+            )}
+            {/* Archetype selector */}
             <div style={{ display: 'flex', gap: 4 }}>
               {ARCHETYPES.map((arch) => (
                 <button
@@ -280,6 +381,22 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 0 }}>
         <button
+          onClick={() => setShowHowToPlay(true)}
+          style={{
+            flex: 1,
+            padding: 16,
+            background: '#2a2a3e',
+            border: '1px solid #555',
+            borderRadius: 8,
+            color: '#fff',
+            fontSize: 15,
+            fontWeight: 'bold',
+            cursor: 'pointer',
+          }}
+        >
+          How to Play
+        </button>
+        <button
           onClick={() => setShowCardBrowser(true)}
           style={{
             flex: 1,
@@ -313,6 +430,9 @@ export default function SetupScreen({ onStart }: SetupScreenProps) {
         </button>
       </div>
 
+      {showHowToPlay && (
+        <HowToPlay onClose={() => setShowHowToPlay(false)} />
+      )}
       {showCardBrowser && (
         <CardBrowser onClose={() => setShowCardBrowser(false)} />
       )}

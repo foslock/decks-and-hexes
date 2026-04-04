@@ -9,7 +9,7 @@
 #
 # EDITING NOTES:
 # - copies: number of physical copies in the shared stack (null = starter card only, not in market)
-# - action_return: 0 = standard, 1 = net-neutral (↺), 2 = net-positive (↑)
+# - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - starter: true = included in starting decks, not available in market
 
 cards:
@@ -41,8 +41,8 @@ cards:
     starter: true
     action_return: 0
     power: 0
-    effect: "Engine: Gain 1 resources."
-    effect_upgraded: "Engine: Gain 2 resources."
+    effect: "Gain 1 resources."
+    effect_upgraded: "Gain 2 resources."
     resource_gain: 1
     upgraded_resource_gain: 2
     trash_on_use: false
@@ -146,17 +146,17 @@ cards:
   - id: neutral_road_builder
     name: Road Builder
     name_upgraded: Road Builder+
-    type: Engine
+    type: Claim
     buy_cost: 3
     copies: 3
     action_return: 0
-    power: 0
-    effect: "Treat two of your non-adjacent tile groups as adjacent to each other this round for purposes of Claim card targeting."
-    effect_upgraded: "Treat all of your tile groups as fully adjacent to each other this round for purposes of Claim card targeting."
+    power: 5
+    effect: "Claim: Power 5. Must target a tile that would connect two of your disconnected territory groups."
+    effect_upgraded: "Claim: Power 6. Must target a tile that would connect two of your disconnected territory groups."
     trash_on_use: false
     effects:
       - type: adjacency_bridge
-        timing: immediate
+        timing: on_resolution
 
   - id: neutral_prospector
     name: Prospector
@@ -166,8 +166,8 @@ cards:
     copies: 5
     action_return: 0
     power: 0
-    effect: "Engine: Gain 3 resources."
-    effect_upgraded: "Engine: Gain 4 resources."
+    effect: "Gain 2 resources."
+    effect_upgraded: "Gain 3 resources."
     trash_on_use: false
 
   - id: neutral_surveyor
@@ -178,12 +178,13 @@ cards:
     copies: 4
     action_return: 0
     power: 0
-    effect: "Look at the top 3 cards of any one archetype deck (including your own). Reorder them freely."
-    effect_upgraded: "Look at the top 5 cards of any one archetype deck. Reorder them freely."
+    effect: "Gain 1 free archetype market re-roll this turn."
+    effect_upgraded: "Gain 2 free archetype market re-rolls this turn."
     trash_on_use: false
     effects:
-      - type: deck_peek
-        value: 3
+      - type: free_reroll
+        value: 1
+        upgraded_value: 2
         timing: immediate
 
   - id: neutral_militia
@@ -200,6 +201,7 @@ cards:
     effects:
       - type: power_modifier
         value: 2
+        upgraded_value: 3
         timing: on_resolution
         condition: if_adjacent_owned_gte
         condition_threshold: 3
@@ -224,9 +226,11 @@ cards:
     buy_cost: 3
     copies: 3
     action_return: 0
-    power: 4
-    effect: "Defense: Any one tile you own gains +4 defense power when defending this round."
-    effect_upgraded: "Defense: Any one tile you own gains +5 defense power when defending this round."
+    power: 0
+    defense_bonus: 4
+    upgraded_defense_bonus: 5
+    effect: "Any one tile you own gains +4 defense this round."
+    effect_upgraded: "Any one tile you own gains +5 defense this round."
     trash_on_use: false
 
   - id: neutral_forced_march
@@ -237,13 +241,14 @@ cards:
     copies: 3
     action_return: 2
     power: 0
-    effect: "Engine: Gain 2 actions back. All other active players also gain 1 action this turn."
-    effect_upgraded: "Engine: Gain 2 actions back. All other active players also gain 2 actions this turn."
+    effect: "Gain 2 actions. All other players gain 1 extra action next turn."
+    effect_upgraded: "Gain 2 actions. All other players gain 2 extra actions next turn."
     trash_on_use: false
     note: "The shared action gain creates diplomatic tension — helping opponents may be worth the tempo."
     effects:
-      - type: grant_actions
+      - type: grant_actions_next_turn
         value: 1
+        upgraded_value: 2
         timing: immediate
         target: all_others
 
@@ -255,8 +260,8 @@ cards:
     copies: 2
     action_return: 0
     power: 0
-    effect: "Engine: All Claim cards in your hand gain Stackable this turn."
-    effect_upgraded: "Engine: All Claim cards in your hand gain Stackable this turn. Draw 1 card."
+    effect: "All Claim cards in your hand gain Stackable this turn."
+    effect_upgraded: "All Claim cards in your hand gain Stackable this turn. Draw 1 card."
     trash_on_use: true
     effects:
       - type: grant_stackable
@@ -270,6 +275,114 @@ cards:
     copies: 4
     action_return: 1
     power: 0
-    effect: "Engine: Gain 2 resources. Gain 1 action back."
-    effect_upgraded: "Engine: Gain 3 resources. Gain 1 action back."
+    effect: "Gain 2 resources. Gain 1 action."
+    effect_upgraded: "Gain 3 resources. Gain 1 action."
     trash_on_use: false
+
+  - id: neutral_reduce
+    name: Reduce
+    name_upgraded: Reduce+
+    type: Engine
+    buy_cost: 1
+    copies: 4
+    action_return: 0
+    power: 0
+    effect: "Trash up to 1 card from your hand."
+    effect_upgraded: "Trash up to 2 cards from your hand."
+    trash_on_use: false
+    effects:
+      - type: self_trash
+        value: 1
+        upgraded_value: 2
+        timing: immediate
+        requires_choice: true
+        metadata: {optional: true}
+
+  - id: neutral_recruit
+    name: Recruit
+    name_upgraded: Recruit+
+    type: Claim
+    buy_cost: 1
+    copies: 5
+    action_return: 1
+    power: 1
+    effect: "Claim: Power 1. Gain 1 action."
+    effect_upgraded: "Claim: Power 2. Gain 1 action."
+    trash_on_use: false
+
+  - id: neutral_conscription
+    name: Conscription
+    name_upgraded: Conscription+
+    type: Engine
+    buy_cost: 3
+    copies: 4
+    action_return: 0
+    power: 0
+    draw_cards: 2
+    upgraded_draw_cards: 3
+    effect: "Draw 2 cards."
+    effect_upgraded: "Draw 3 cards."
+    trash_on_use: false
+
+  - id: neutral_watchtower
+    name: Watchtower
+    name_upgraded: Watchtower+
+    type: Defense
+    buy_cost: 4
+    copies: 3
+    action_return: 0
+    power: 0
+    defense_bonus: 3
+    upgraded_defense_bonus: 4
+    draw_cards: 1
+    upgraded_draw_cards: 1
+    effect: "One tile you own gains +3 defense this round. Draw 1 card."
+    effect_upgraded: "One tile you own gains +4 defense this round. Draw 1 card."
+    trash_on_use: false
+
+  - id: neutral_siege_tower
+    name: Siege Tower
+    name_upgraded: Siege Tower+
+    type: Claim
+    buy_cost: 6
+    copies: 3
+    action_return: 0
+    power: 6
+    effect: "Claim: Power 6."
+    effect_upgraded: "Claim: Power 8."
+    trash_on_use: false
+
+  - id: neutral_reclaim
+    name: Reclaim
+    name_upgraded: Reclaim+
+    type: Engine
+    buy_cost: 3
+    copies: 4
+    action_return: 0
+    power: 0
+    effect: "Trash 1 card from your hand. If you did, gain resources equal to half its buy cost (rounded down)."
+    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half its buy cost (rounded down) +1."
+    trash_on_use: false
+    effects:
+      - type: trash_gain_buy_cost
+        value: 1
+        timing: immediate
+        requires_choice: true
+        metadata: {optional: true, upgrade_bonus: 1}
+
+  - id: neutral_diplomat
+    name: Diplomat
+    name_upgraded: Diplomat+
+    type: Engine
+    buy_cost: 4
+    copies: 3
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "You receive a Land Grant in your discard pile. All opponents also receive a Land Grant. Trash this card."
+    effect_upgraded: "You receive 2 Land Grants in your discard pile. All opponents also receive a Land Grant. Trash this card."
+    trash_on_use: true
+    effects:
+      - type: grant_land_grants
+        timing: immediate
+        target: all_players

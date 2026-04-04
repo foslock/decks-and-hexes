@@ -8,6 +8,7 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 ### Backend (Python)
 - Use `uv` to run Python commands and manage dependencies: `uv run python ...`, `uv run pytest ...`
 - Backend tests: `cd backend && uv run pytest tests/ -x -q`
+- Backend typecheck: `cd backend && uv run mypy app/`
 - Start backend: `cd backend && uv run uvicorn app.main:app --reload`
 
 ### Frontend (Node/React)
@@ -44,17 +45,17 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 
 ### Turn Structure (5 phases, all simultaneous)
 1. **Start of Turn** — Pay upkeep (skip round 1), score VP hexes held since last turn, check win (20 VP), draw hand, reveal archetype market (3 random cards from player's archetype deck)
-2. **Plan Phase** — Players simultaneously place cards face-down on target tiles. Immediate effects (↺ ↑ action returns, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining. Max 6 actions per turn.
+2. **Plan Phase** — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
 4. **Buy Phase** — Spend resources. Re-roll (2 resources, once per turn) or Retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards, or upgrade credits (5 resources).
 5. **End of Turn** — Discard hand. Check objective reveal threshold. Rotate first player token clockwise.
 
 ### Action Slot System
 - Every card costs exactly 1 action to play
-- All archetypes: 3 action slots
-- Cards marked ↺ return 1 action (net 0), ↑ return 2 actions (net +1)
-- Hard cap: 6 total actions per turn regardless of chaining
-- Immediate effects (↺ ↑, card draws) resolve during Plan Phase as cards are played
+- All archetypes: 3 starting actions per turn
+- Some cards grant extra actions when played (e.g. "Gain 1 action" or "Gain 2 actions")
+- No hard cap on actions — chaining action-granting cards can exceed 3
+- Immediate effects (action gains, card draws) resolve during Plan Phase as cards are played
 
 ### Claiming Tiles
 - All board interaction uses unified Claim cards — neutral tiles have implicit defense 0
@@ -156,7 +157,7 @@ HexDraft is a 2–6 player simultaneous deck-building territory control game. Th
 
 ## Data Format Notes
 Card data files use YAML-style fields within markdown. Key fields:
-- `action_return: 0/1/2` — 0=standard, 1=net-neutral(↺), 2=net-positive(↑)
+- `action_return: 0/1/2` — 0=standard, 1=gain 1 action (net neutral), 2=gain 2 actions (net +1)
 - `timing: immediate/on_resolution/next_turn`
 - `stackable: true` — card can be played on a tile where you already have a claim this turn
 - `starter: true` — starting deck card, not in market

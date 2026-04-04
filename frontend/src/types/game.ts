@@ -42,7 +42,7 @@ export interface Card {
   upgrade_description?: string;
   name_upgraded?: string;
   starter: boolean;
-  effects?: { type: string; condition: string; value: number; metadata?: Record<string, unknown> }[];
+  effects?: { type: string; condition: string; value: number; upgraded_value?: number; metadata?: Record<string, unknown> }[];
   upgraded_stats?: {
     power?: number;
     resource_gain?: number;
@@ -75,7 +75,6 @@ export interface Player {
   actions_available: number;
   archetype_market: Card[];
   upgrade_credits: number;
-  passive: Record<string, string> | null;
   deck_size: number;
   discard_count: number;
   discard: Card[];
@@ -90,6 +89,9 @@ export interface Player {
   upkeep_cost: number;
   tiles_lost_to_upkeep: number;
   rubble_count: number;
+  neutral_bought_this_turn: boolean;
+  is_cpu: boolean;
+  cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
 }
 
 export interface MarketStack {

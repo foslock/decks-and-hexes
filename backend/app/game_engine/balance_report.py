@@ -2,9 +2,8 @@
 
 Aggregates game results into actionable balance metrics:
 1. Win rates by archetype
-2. Win rates by passive
-3. Card purchase frequency & win correlation
-4. Game length, VP curves & action economy
+2. Card purchase frequency & win correlation
+3. Game length, VP curves & action economy
 """
 
 from __future__ import annotations
@@ -53,17 +52,6 @@ class ArchetypeStats:
     @property
     def avg_rounds_to_win(self) -> float:
         return self.total_rounds_when_won / self.wins if self.wins > 0 else 0.0
-
-
-@dataclass
-class PassiveStats:
-    passive_name: str
-    wins: int = 0
-    games: int = 0
-
-    @property
-    def win_rate(self) -> float:
-        return self.wins / self.games if self.games > 0 else 0.0
 
 
 @dataclass
@@ -150,7 +138,7 @@ def generate_report(batch: BatchResult) -> dict[str, Any]:
     }
 
     report["archetype_win_rates"] = _archetype_win_rates(valid_results)
-    report["passive_win_rates"] = _passive_win_rates(valid_results)
+    # NOTE: Passive win rates removed — passives are not in the current game
     report["card_purchase_stats"] = _card_purchase_stats(valid_results)
     report["game_length_stats"] = _game_length_stats(valid_results)
     report["action_economy"] = _action_economy_stats(valid_results)
@@ -203,34 +191,8 @@ def _archetype_win_rates(results: list[GameResult]) -> dict[str, Any]:
     return output
 
 
-def _passive_win_rates(results: list[GameResult]) -> list[dict[str, Any]]:
-    """Compute win rates per passive ability."""
-    stats: dict[str, PassiveStats] = {}
 
-    for game in results:
-        for pr in game.player_results:
-            passive_name = pr.passive or "none"
-            if passive_name not in stats:
-                stats[passive_name] = PassiveStats(passive_name=passive_name)
-            s = stats[passive_name]
-            s.games += 1
-            if pr.player_id == game.winner_id:
-                s.wins += 1
-
-    total_games = len(results)
-    num_players = len(results[0].player_results) if results else 2
-    expected_wr = 1.0 / num_players if num_players > 0 else 0
-
-    output = []
-    for name, s in sorted(stats.items(), key=lambda x: x[1].win_rate, reverse=True):
-        output.append({
-            "passive": name,
-            "wins": s.wins,
-            "games": s.games,
-            "win_rate": round(s.win_rate, 4),
-            "delta_from_expected": round(s.win_rate - expected_wr, 4),
-            "sample_size_warning": s.games < 30,
-        })
+# NOTE: _passive_win_rates() removed — passives are not in the current game
 
     return output
 
@@ -440,15 +402,6 @@ def print_report(report: dict[str, Any]) -> None:
               f"rubble={stats['avg_rubble']:.1f} "
               f"claims={stats['avg_claims_won']:.0f}W/{stats['avg_claims_lost']:.0f}L")
 
-    # Passive win rates
-    print("\n--- PASSIVE WIN RATES (top 10) ---")
-    passives = report["passive_win_rates"][:10]
-    for p in passives:
-        warn = " *low sample" if p["sample_size_warning"] else ""
-        delta_str = f"+{p['delta_from_expected']:.1%}" if p['delta_from_expected'] > 0 else f"{p['delta_from_expected']:.1%}"
-        print(f"  {p['passive']:25s} {p['win_rate']:6.1%} ({delta_str}) "
-              f"n={p['games']}{warn}")
-
     # Card purchase stats
     print("\n--- CARD PURCHASE STATS (top 15) ---")
     cards = report["card_purchase_stats"][:15]
@@ -515,14 +468,6 @@ def export_csv(report: dict[str, Any], path: str) -> None:
             writer.writerow([arch, stats["wins"], stats["games"],
                             stats["win_rate"], stats["delta"],
                             stats["avg_vp"], stats["avg_tiles"]])
-        writer.writerow([])
-
-        # Passive win rates
-        writer.writerow(["=== Passive Win Rates ==="])
-        writer.writerow(["passive", "wins", "games", "win_rate", "delta"])
-        for p in report["passive_win_rates"]:
-            writer.writerow([p["passive"], p["wins"], p["games"],
-                            p["win_rate"], p["delta_from_expected"]])
         writer.writerow([])
 
         # Card stats

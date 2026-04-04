@@ -77,7 +77,7 @@ objectives:
     vp_reward: 2
     condition: "Play 5 or more Claim cards in a single round."
     verification: "Count Claim cards played during the plan/reveal phase of a single round."
-    notes: "Requires action engine setup. Net-positive cards (↑) are key to achieving this."
+    notes: "Requires action engine setup. Cards that grant 2+ actions are key to achieving this."
 
   - id: obj_encirclement
     name: Encirclement

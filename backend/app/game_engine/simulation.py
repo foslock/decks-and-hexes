@@ -49,7 +49,6 @@ class PlayerResult:
     player_id: str
     name: str
     archetype: str
-    passive: Optional[str] = None
     final_vp: int = 0
     final_resources: int = 0
     tiles_controlled: int = 0
@@ -71,7 +70,6 @@ class GameResult:
     grid_size: str = ""
     winner_id: Optional[str] = None
     winner_archetype: Optional[str] = None
-    winner_passive: Optional[str] = None
     rounds_played: int = 0
     player_results: list[PlayerResult] = field(default_factory=list)
     timed_out: bool = False
@@ -180,7 +178,6 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
         if game.winner:
             winner = game.players[game.winner]
             result.winner_archetype = winner.archetype.value
-            result.winner_passive = winner.passive.get("name") if winner.passive else None
 
         for pid in game.player_order:
             p = game.players[pid]
@@ -299,7 +296,10 @@ def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
                 tracking[pid].cards_purchased[bought_name] = \
                     tracking[pid].cards_purchased.get(bought_name, 0) + 1
             else:
-                break
+                # Don't break entirely on failure — the CPU might have tried
+                # a neutral buy (limit 1/turn) but still have archetype buys available.
+                # Only break after consecutive failures to avoid infinite loops.
+                purchases += 1  # count toward safety limit to prevent infinite loop
 
         # End buy phase
         end_buy_phase(game, pid)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.data_loader.loader import load_all_cards, load_objectives, load_passives
+from app.data_loader.loader import load_all_cards
 from app.game_engine.cards import Archetype, Card, CardType
 
 
@@ -91,25 +91,7 @@ class TestCardLoading:
             assert len(card.name) > 0
 
 
-class TestObjectiveLoading:
-    def test_loads_objectives(self) -> None:
-        objectives = load_objectives()
-        # May or may not load depending on file format
-        # At minimum, verify it doesn't crash
-        assert isinstance(objectives, list)
 
-    def test_objectives_have_names(self) -> None:
-        objectives = load_objectives()
-        for obj in objectives:
-            assert "name" in obj
-
-
-class TestPassiveLoading:
-    def test_loads_passives(self) -> None:
-        passives = load_passives()
-        assert isinstance(passives, list)
-
-    def test_passives_have_names(self) -> None:
-        passives = load_passives()
-        for p in passives:
-            assert "name" in p
+# NOTE: Objectives (load_objectives) and Passives (load_passives) loaders were
+# removed as part of the objectives/passives feature removal. The data files
+# are preserved in /data/ for future reference.

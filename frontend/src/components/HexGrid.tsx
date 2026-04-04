@@ -751,17 +751,35 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       }
 
       if (tile.is_base) {
-        const home = new Text({
-          text: '🏠',
+        const castle = new Text({
+          text: '🏰',
           style: new TextStyle({
             fontSize: 14,
           }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
-        home.anchor.set(0.5);
-        home.position.set(x, y - 8);
-        home.alpha = 0.8;
-        hexContainer.addChild(home);
+        castle.anchor.set(0.5);
+        castle.position.set(x, y - 8);
+        castle.alpha = 0.8;
+        hexContainer.addChild(castle);
+
+        // Defense value below the castle (same layout as VP tiles)
+        if (tile.defense_power > 0) {
+          const baseDef = new Text({
+            text: `🛡${tile.defense_power}`,
+            style: new TextStyle({
+              fontSize: 13,
+              fill: 0xffffff,
+              fontWeight: 'bold',
+              stroke: { color: 0x000000, width: 2 },
+            }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          baseDef.anchor.set(0.5);
+          baseDef.position.set(x, y + 8);
+          baseDef.alpha = 1;
+          hexContainer.addChild(baseDef);
+        }
       }
 
       if (tile.is_blocked) {
@@ -808,7 +826,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         actionLabel.alpha = 1;
         hexContainer.addChild(actionLabel);
         tileLabelRef.current.set(key, actionLabel);
-      } else if (tile.defense_power > 0) {
+      } else if (tile.defense_power > 0 && !tile.is_base) {
         const defColor = 0xffffff;
         const def = new Text({
           text: `🛡${tile.defense_power}`,

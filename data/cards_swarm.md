@@ -4,7 +4,7 @@
 # Identity: Low power, cheap to buy, floods the board with many tiles
 #
 # EDITING NOTES:
-# - action_return: 0 = standard, 1 = net-neutral (↺), 2 = net-positive (↑)
+# - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - timing: "immediate" | "on_resolution" | "next_turn"
 # - stackable: true = this card can be played on a tile where you already have a claim this turn
 # - upgraded: the "+" version of the card after spending an upgrade credit
@@ -68,34 +68,17 @@ cards:
     name: Swarm Tactics
     name_upgraded: Swarm Tactics+
     type: Engine
-    buy_cost: 1
+    buy_cost: 2
     action_return: 1
     power: 0
     draw_cards: 1
     upgraded_draw_cards: 2
     upgraded_action_return: 1
-    effect: "Engine: Draw 1 card immediately. Gain 1 action back (↺)."
-    effect_upgraded: "Engine: Draw 2 cards immediately. Gain 1 action back (↺)."
+    effect: "Draw 1 card. Gain 1 action."
+    effect_upgraded: "Draw 2 cards. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
-
-  - id: swarm_cheap_shot
-    name: Cheap Shot
-    name_upgraded: Cheap Shot+
-    type: Claim
-    buy_cost: 2
-    action_return: 0
-    power: 2
-    effect: "Claim: Power 2. Costs 1 less resource to purchase if you control the most tiles."
-    effect_upgraded: "Claim: Power 3. Costs 1 less resource to purchase if you control the most tiles."
-    secondary_effect: null
-    secondary_timing: null
-
-    effects:
-      - type: dynamic_buy_cost
-        condition: tiles_more_than_defender
-        value: -1
 
   - id: swarm_proliferate
     name: Proliferate
@@ -133,8 +116,8 @@ cards:
     buy_cost: 1
     action_return: 0
     power: 1
-    effect: "Claim: Power 1. If you play another Rabble card this turn, gain 1 action back after playing this one (↺)."
-    effect_upgraded: "Claim: Power 1. If you play another Rabble+ card this turn, gain 1 action back. Additionally, +1 power per Rabble+ played this turn."
+    effect: "Claim: Power 1. If you play another Rabble card this turn, gain 1 action."
+    effect_upgraded: "Claim: Power 1. If you play another Rabble+ card this turn, gain 1 action. Additionally, +1 power per Rabble+ played this turn."
     secondary_effect: null
     secondary_timing: null
 
@@ -159,17 +142,18 @@ cards:
     effects:
       - type: stacking_power_bonus
         value: 1
+        upgraded_value: 2
         timing: on_resolution
 
   - id: swarm_thin_the_herd
     name: Thin the Herd
     name_upgraded: Thin the Herd+
     type: Engine
-    buy_cost: 2
-    action_return: 2
+    buy_cost: 3
+    action_return: 1
     power: 0
-    effect: "Engine: Trash 1 card from your hand. Draw 2 cards immediately. Gain 2 actions back."
-    effect_upgraded: "Engine: Trash 1 card from your hand. Draw 3 cards immediately. Gain 2 actions back."
+    effect: "Trash 1 card from your hand. If you did, draw 1 card. Gain 1 action."
+    effect_upgraded: "Trash 1 card from your hand. If you did, draw 2 cards. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -178,6 +162,7 @@ cards:
         value: 1
         timing: immediate
         requires_choice: true
+        metadata: {optional: true, gates_draw: true}
 
   - id: swarm_numbers_game
     name: Numbers Game
@@ -194,6 +179,7 @@ cards:
     effects:
       - type: power_modifier
         value: 0
+        upgraded_value: 2
         timing: on_resolution
         condition: cards_in_hand
 
@@ -204,8 +190,8 @@ cards:
     buy_cost: 3
     action_return: 2
     power: 0
-    effect: "Engine: Gain 2 actions back. Discard 1 card."
-    effect_upgraded: "Engine: Gain 2 actions back. Discard 1 card. Gain 1 resource."
+    effect: "Gain 2 actions. Discard 1 card."
+    effect_upgraded: "Gain 2 actions. Discard 1 card. Gain 1 resource."
     secondary_effect: null
     secondary_timing: null
 
@@ -220,12 +206,18 @@ cards:
     name_upgraded: Scavenge+
     type: Engine
     buy_cost: 1
-    action_return: 1
+    action_return: 0
     power: 0
-    effect: "Engine: Gain 2 resources. Draw 1 card immediately. Gain 1 action back."
-    effect_upgraded: "Engine: Gain 3 resources. Draw 1 card immediately. Gain 1 action back."
+    effect: "Gain 1 resource. If you have 0 actions, gain 1 action."
+    effect_upgraded: "Gain 2 resources. If you have 0 actions, gain 1 action."
     secondary_effect: null
     secondary_timing: null
+
+    effects:
+      - type: grant_actions
+        value: 1
+        timing: immediate
+        condition: zero_actions
 
 
   - id: swarm_blitz_rush
@@ -235,8 +227,8 @@ cards:
     buy_cost: 4
     action_return: 2
     power: 0
-    effect: "Engine: Gain 2 actions back. You cannot purchase any cards during the Buy Phase this round."
-    effect_upgraded: "Engine: Gain 3 actions back. You cannot purchase any cards during the Buy Phase this round."
+    effect: "Gain 2 actions. You cannot purchase any cards during the Buy Phase this round."
+    effect_upgraded: "Gain 3 actions. You cannot purchase any cards during the Buy Phase this round."
     secondary_effect: null
     secondary_timing: null
 
@@ -253,8 +245,8 @@ cards:
     power: 0
     trash_on_use: true
     target_own_tile: true
-    effect: "Engine: Play on a connected VP tile you own. Permanently increase that tile's VP value by 1. Trash this card."
-    effect_upgraded: "Engine: Play on a connected VP tile you own. Permanently increase that tile's VP value by 2. Trash this card."
+    effect: "Play on a connected VP tile you own. Permanently increase that tile's VP value by 1. Trash this card."
+    effect_upgraded: "Play on a connected VP tile you own. Permanently increase that tile's VP value by 2. Trash this card."
     secondary_effect: null
     secondary_timing: null
     note: "Permanent board modification — any future owner of the tile benefits from the increased VP value."
@@ -263,6 +255,96 @@ cards:
       - type: enhance_vp_tile
         timing: immediate
         metadata: {upgraded_bonus: 2}
+
+  - id: swarm_nest
+    name: Nest
+    name_upgraded: Nest+
+    type: Defense
+    buy_cost: 2
+    action_return: 0
+    power: 0
+    effect: "One tile you own gains +1 defense this round for each other tile you own adjacent to it."
+    effect_upgraded: "One tile you own gains +2 defense per adjacent owned tile."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: defense_per_adjacent
+        value: 1
+        upgraded_value: 2
+        timing: on_resolution
+
+  - id: swarm_safety_in_numbers
+    name: Safety in Numbers
+    name_upgraded: Safety in Numbers+
+    type: Defense
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    defense_target_count: 2
+    upgraded_defense_target_count: 2
+    defense_bonus: 1
+    upgraded_defense_bonus: 2
+    effect: "Choose up to 2 tiles you own. Each gains +1 defense this round."
+    effect_upgraded: "Choose up to 2 tiles. Each gains +2 defense this round."
+    secondary_effect: null
+    secondary_timing: null
+
+  - id: swarm_mob_rule
+    name: Mob Rule
+    name_upgraded: Mob Rule+
+    type: Claim
+    buy_cost: 5
+    action_return: 0
+    power: 2
+    effect: "Claim: Power 2. +1 power for every 3 tiles you own (rounded down)."
+    effect_upgraded: "Claim: Power 3. +1 power for every 2 tiles you own (rounded down)."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: power_per_tiles_owned
+        value: 3
+        upgraded_value: 2
+        timing: on_resolution
+        metadata: {divisor_based: true}
+
+  - id: swarm_hive_mind
+    name: Hive Mind
+    name_upgraded: Hive Mind+
+    type: Claim
+    buy_cost: 6
+    action_return: 0
+    power: 1
+    trash_on_use: true
+    multi_target_count: 3
+    upgraded_multi_target_count: 4
+    effect: "Claim: Power 1 on up to 4 adjacent tiles simultaneously. Trash this card."
+    effect_upgraded: "Claim: Power 2 on up to 5 adjacent tiles simultaneously. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+  - id: swarm_locust_swarm
+    name: Locust Swarm
+    name_upgraded: Locust Swarm+
+    type: Claim
+    buy_cost: 7
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    multi_target_count: 1
+    upgraded_multi_target_count: 2
+    effect: "Claim: Power equal to the number of tiles you own divided by 3 (rounded down). Targets up to 2 tiles. Trash this card."
+    effect_upgraded: "Claim: Power equal to the number of tiles you own divided by 2 (rounded down). Targets up to 3 tiles. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+
+    effects:
+      - type: power_per_tiles_owned
+        value: 3
+        upgraded_value: 2
+        timing: on_resolution
+        metadata: {divisor_based: true, replaces_base_power: true}
 
   - id: swarm_war_trophies
     name: War Trophies
