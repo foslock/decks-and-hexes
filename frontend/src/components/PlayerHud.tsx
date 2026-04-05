@@ -274,7 +274,13 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
 
       {/* Stats row */}
       <div style={{ fontSize: 12, display: 'flex', gap: 10, color: '#bbb' }}>
-        <StatTip label="Victory Points">★ {player.vp}</StatTip>
+        <StatTip label="Victory Points">
+          <span style={hasReachedVpTarget ? {
+            color: '#ffd700',
+            fontWeight: 'bold',
+            textShadow: '0 0 6px rgba(255, 255, 255, 0.6)',
+          } : undefined}>★ {player.vp}</span>
+        </StatTip>
         <StatTip label="Resources">💰 {player.resources}</StatTip>
         <StatTip label="Tiles Occupied">🔷 {tileCount}</StatTip>
         <StatTip label="Total Deck Size">🃏 {totalCards}</StatTip>
