@@ -778,7 +778,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         castle.anchor.set(0.5);
-        castle.position.set(x, y - 8);
+        castle.position.set(x, y - 11);
         castle.alpha = 0.8;
         hexContainer.addChild(castle);
 
@@ -795,7 +795,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             resolution: Math.ceil(window.devicePixelRatio || 2),
           });
           baseDef.anchor.set(0.5);
-          baseDef.position.set(x, y + 8);
+          baseDef.position.set(x, y + 9);
           baseDef.alpha = 1;
           hexContainer.addChild(baseDef);
         }
