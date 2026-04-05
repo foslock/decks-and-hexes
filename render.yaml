@@ -35,5 +35,5 @@ services:
 databases:
   - name: card-clash-db
     plan: starter
-    databaseName: card-clash
+    databaseName: card_clash
     postgresMajorVersion: "16"

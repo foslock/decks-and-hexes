@@ -444,13 +444,15 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             }
             const icon = isDefensive ? '🛡' : '⚔';
             const prefix = isDefensive ? '+' : '';
-            previewText = `${icon} ${prefix}${previewPower}`;
-            previewColor = isDefensive ? 0x66ff88 : 0xffaa00;
+            const spacing = isDefensive ? '' : ' ';
+            previewText = `${icon}${spacing}${prefix}${previewPower}`;
+            previewColor = 0xffffff;
           }
           const textY = tile.is_vp ? y + 8 : y;
+          const claimFontSize = 21;
           const lbl = new Text({
             text: previewText,
-            style: new TextStyle({ fontSize: 13, fill: previewColor, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+            style: new TextStyle({ fontSize: claimFontSize, fill: previewColor, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
             resolution: Math.ceil(window.devicePixelRatio || 2),
           });
           lbl.anchor.set(0.5);
@@ -825,15 +827,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         const label = isPlayerTarget
           ? '🎯'
           : isDefensivePlay
-            ? `🛡 +${plannedAction.power}`
+            ? `🛡+${plannedAction.power}`
             : `⚔ ${plannedAction.power}`;
-        const labelColor = isPlayerTarget ? 0xff6666 : isDefensivePlay ? 0x66ff88 : 0xffaa00;
+        const labelColor = isPlayerTarget ? 0xff6666 : 0xffffff;
+        const claimFontSize = isPlayerTarget ? 13 : 21;
         const textY = tile.is_vp ? y + 8 : y;
 
         const actionLabel = new Text({
           text: label,
           style: new TextStyle({
-            fontSize: 13,
+            fontSize: claimFontSize,
             fill: labelColor,
             fontWeight: 'bold',
             stroke: { color: 0x000000, width: 2 },

@@ -23,8 +23,8 @@ class GridSize(str, Enum):
 # Base tile defense per archetype (used when assigning starting tiles)
 BASE_DEFENSE: dict[str, int] = {
     "vanguard": 3,
-    "swarm": 2,
-    "fortress": 4,
+    "swarm": 3,
+    "fortress": 3,
 }
 
 # radius = number of rings around center (0-indexed)

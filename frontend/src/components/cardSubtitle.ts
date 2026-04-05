@@ -90,7 +90,7 @@ export function buildCardSubtitle(card: Card): string[] {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(`✂️${val}`);
         if (eff.type === 'trash_gain_buy_cost') {
-          const bonus = isUpgraded && eff.metadata?.upgrade_bonus ? eff.metadata.upgrade_bonus : 0;
+          const bonus = isUpgraded && eff.metadata?.upgrade_bonus ? Number(eff.metadata.upgrade_bonus) : 0;
           parts.push(bonus > 0 ? `${bonus}+💰` : '+💰');
         }
       }
