@@ -1910,6 +1910,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const playerTileCount = activePlayer
     ? Object.values(gameState.grid.tiles).filter(t => t.owner === activePlayerId).length
     : 0;
+  const anyPlayerReachedVp = Object.values(gameState.players).some(p => !p.has_left && p.vp >= gameState.vp_target);
   const currentUpkeep = Math.max(0, Math.floor((playerTileCount - UPKEEP_FREE_TILES) / tilesPerVp));
   const upkeepBracketHigh = currentUpkeep === 0
     ? UPKEEP_FREE_TILES + tilesPerVp - 1
@@ -2416,7 +2417,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 transition: 'all 0.2s ease',
               }}
             >
-              {(playerPanelExpanded || reviewing || phase === 'buy') ? (
+              {(playerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp) ? (
                 /* Expanded: all players */
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
