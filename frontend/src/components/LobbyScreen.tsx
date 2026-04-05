@@ -57,6 +57,7 @@ export default function LobbyScreen({
   const [countdown, setCountdown] = useState<number | null>(null);
   const [countdownStart, setCountdownStart] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
+  const [showCopied, setShowCopied] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const gameStartRef = useRef(false);
 
@@ -282,15 +283,43 @@ export default function LobbyScreen({
         {/* Header with lobby code */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <h1 style={{ marginBottom: 8 }}>Card Clash Lobby</h1>
-          <div style={{
-            fontSize: 48, fontWeight: 'bold', letterSpacing: 12,
-            fontFamily: 'monospace', color: '#4a9eff',
-            userSelect: 'all', cursor: 'pointer',
-          }}
-            title="Click to copy"
-            onClick={() => navigator.clipboard.writeText(lobbyCode)}
-          >
-            {lobbyCode}
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            <div style={{
+              fontSize: 48, fontWeight: 'bold', letterSpacing: 12,
+              fontFamily: 'monospace', color: '#4a9eff',
+              userSelect: 'all', cursor: 'pointer',
+            }}
+              title="Click to copy"
+              onClick={() => {
+                navigator.clipboard.writeText(lobbyCode);
+                setShowCopied(true);
+                setTimeout(() => setShowCopied(false), 2000);
+              }}
+            >
+              {lobbyCode}
+              {showCopied && (
+                <span style={{
+                  position: 'absolute',
+                  right: -60,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 13,
+                  color: '#4aff6a',
+                  fontFamily: 'sans-serif',
+                  letterSpacing: 0,
+                  fontWeight: 'normal',
+                  animation: 'copiedFade 2s ease-out forwards',
+                }}>
+                  Copied!
+                </span>
+              )}
+            </div>
+            <style>{`
+              @keyframes copiedFade {
+                0%, 50% { opacity: 1; }
+                100% { opacity: 0; }
+              }
+            `}</style>
           </div>
           <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
             Click code to copy &middot; Share with friends to join

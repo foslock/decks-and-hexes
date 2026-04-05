@@ -50,7 +50,8 @@ export function useWebSocket(
     setStatus('connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${protocol}//${window.location.host}/api/lobby/ws/${code}?player_id=${playerId}&token=${token}`;
+    const backendHost = import.meta.env.VITE_BACKEND_HOST || window.location.host;
+    const url = `${protocol}//${backendHost}/api/lobby/ws/${code}?player_id=${playerId}&token=${token}`;
 
     const ws = new WebSocket(url);
     wsRef.current = ws;

@@ -1,6 +1,7 @@
 import type { GameState, LobbyState } from '../types/game';
 
-const BASE = '/api';
+const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
+const BASE = BACKEND_HOST ? `${window.location.protocol}//${BACKEND_HOST}/api` : '/api';
 
 // Module-level auth token for multiplayer games
 let _authToken: string | null = null;

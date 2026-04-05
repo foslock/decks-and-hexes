@@ -27,6 +27,7 @@ app = FastAPI(title="Card Clash", version="0.1.0", lifespan=lifespan)
 origins = [
     "http://localhost:5173",
     "http://localhost:3000",
+    "https://cardclash.online",
 ]
 # Allow the Render frontend domain if configured
 frontend_url = os.environ.get("FRONTEND_URL")
