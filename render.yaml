@@ -33,6 +33,6 @@ services:
 
 databases:
   - name: card-clash-db
-    plan: starter
+    plan: basic-256mb
     databaseName: card_clash
     postgresMajorVersion: "16"
