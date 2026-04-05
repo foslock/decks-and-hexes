@@ -28,7 +28,7 @@ const PAGES = [
         }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>How you earn VP</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, color: '#bbb' }}>
-            <div>🗺️ <strong style={{ color: '#ccc' }}>Territory</strong> — own tiles to earn VP (every 3–5 tiles = 1 VP)</div>
+            <div>🗺️ <strong style={{ color: '#ccc' }}>Territory</strong> — own tiles to earn VP (every 3 tiles = 1 VP)</div>
             <div>⭐ <strong style={{ color: '#ffd700' }}>VP Hexes</strong> — special tiles worth bonus VP when connected to your base</div>
             <div>🃏 <strong style={{ color: '#ccc' }}>Cards</strong> — some cards contribute VP directly</div>
           </div>

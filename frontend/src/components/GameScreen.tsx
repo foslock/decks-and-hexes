@@ -750,12 +750,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, []);
 
   // Auto-open shop when entering buy phase (only for reconnection or animations-off).
-  // During normal flow, shop opening is handled by handleBannerComplete after the buy banner.
+  // During normal flow, shop opening is handled by handleBannerComplete or the buyer-change effect.
   // Use a ref to skip the first render after a phase change (the banner effect needs time to set up).
   const buyPhaseStableRef = useRef(phase === 'buy');
   useEffect(() => {
     if (phase === 'buy') {
-      if (buyPhaseStableRef.current && !resolving && !phaseBanner && !interactionBlocked && activePlayerEffects.length === 0) {
+      if (buyPhaseStableRef.current && !resolving && !phaseBanner && !interactionBlocked && activePlayerEffects.length === 0
+          && activePlayerId === gameState.current_buyer_id) {
         setShowShopOverlay(true);
       }
       // Mark as stable on next tick so subsequent renders can open the shop
@@ -764,7 +765,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     } else {
       buyPhaseStableRef.current = false;
     }
-  }, [phase, resolving, phaseBanner, interactionBlocked, activePlayerEffects]);
+  }, [phase, resolving, phaseBanner, interactionBlocked, activePlayerEffects, activePlayerId, gameState.current_buyer_id]);
 
   // Compute which tiles are adjacent to the active player's territory
   const adjacentTiles = useMemo(() => {
@@ -1279,7 +1280,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   // Hot-seat auto-switch: when the current buyer changes (e.g. after a CPU buys
   // or another player ends their buy turn), switch to the new buyer if they are
-  // a local player controlled by this browser.
+  // a local player controlled by this browser. Also auto-open the shop for them.
   const prevBuyerIdRef = useRef<string | null>(null);
   useEffect(() => {
     const buyerId = gameState.current_buyer_id;
@@ -1291,6 +1292,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           setActivePlayerIndex(buyerIndex);
           setSelectedCardIndex(null);
         }
+        // Auto-open shop when it becomes this player's turn to buy
+        setShowShopOverlay(true);
       }
     }
     prevBuyerIdRef.current = buyerId;
@@ -1624,8 +1627,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // If resolving, don't unblock interactions yet — resolve overlay will do that
     if (!resolving) {
       setInteractionBlocked(false);
-      // Auto-open shop after buy banner completes
-      if (bannerPhase === 'buy') {
+      // Auto-open shop after buy banner completes only if active player is the current buyer
+      if (bannerPhase === 'buy' && activePlayerId === gameState.current_buyer_id) {
         setShowShopOverlay(true);
       }
     }
