@@ -26,6 +26,7 @@ export function useWebSocket(
   const wsRef = useRef<WebSocket | null>(null);
   const retriesRef = useRef(0);
   const closedIntentionallyRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset lastMessage when connection parameters change to prevent stale messages
   // from a previous session being processed by a new one
@@ -34,6 +35,13 @@ export function useWebSocket(
     prevCodeRef.current = code;
     setLastMessage(null);
   }
+
+  const clearReconnectTimer = useCallback(() => {
+    if (reconnectTimerRef.current !== null) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
 
   const connect = useCallback(() => {
     if (!code || !playerId || !token) return;
@@ -73,7 +81,10 @@ export function useWebSocket(
         const delay = BASE_DELAY * Math.pow(2, retriesRef.current);
         retriesRef.current += 1;
         setStatus('connecting');
-        setTimeout(() => connect(), delay);
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          connect();
+        }, delay);
       } else {
         setStatus('error');
       }
@@ -86,24 +97,26 @@ export function useWebSocket(
 
   const reconnect = useCallback(() => {
     retriesRef.current = 0;
+    clearReconnectTimer();
     if (wsRef.current) {
       closedIntentionallyRef.current = true;
       wsRef.current.close();
       wsRef.current = null;
     }
     connect();
-  }, [connect]);
+  }, [connect, clearReconnectTimer]);
 
   useEffect(() => {
     connect();
     return () => {
       closedIntentionallyRef.current = true;
+      clearReconnectTimer();
       if (wsRef.current) {
         wsRef.current.close();
         wsRef.current = null;
       }
     };
-  }, [connect]);
+  }, [connect, clearReconnectTimer]);
 
   return { lastMessage, status, reconnect };
 }

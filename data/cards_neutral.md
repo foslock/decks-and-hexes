@@ -88,7 +88,7 @@ cards:
     name: Mercenary
     name_upgraded: Mercenary+
     type: Claim
-    buy_cost: 3
+    buy_cost: 4
     copies: 5
     action_return: 0
     power: 3
@@ -100,7 +100,7 @@ cards:
     name: Land Grant
     name_upgraded: Land Grant+
     type: Passive
-    buy_cost: 4
+    buy_cost: 5
     copies: 3
     action_return: 0
     power: 0
@@ -115,7 +115,7 @@ cards:
     name: Sabotage
     name_upgraded: Sabotage+
     type: Engine
-    buy_cost: 4
+    buy_cost: 5
     copies: 3
     action_return: 0
     power: 0
@@ -129,7 +129,7 @@ cards:
     name: Cease Fire
     name_upgraded: Cease Fire+
     type: Engine
-    buy_cost: 2
+    buy_cost: 3
     copies: 4
     action_return: 0
     power: 0
@@ -147,7 +147,7 @@ cards:
     name: Road Builder
     name_upgraded: Road Builder+
     type: Claim
-    buy_cost: 3
+    buy_cost: 2
     copies: 3
     action_return: 0
     power: 5
@@ -174,7 +174,7 @@ cards:
     name: Surveyor
     name_upgraded: Surveyor+
     type: Engine
-    buy_cost: 3
+    buy_cost: 2
     copies: 4
     action_return: 0
     power: 0
@@ -191,7 +191,7 @@ cards:
     name: Militia
     name_upgraded: Militia+
     type: Claim
-    buy_cost: 2
+    buy_cost: 3
     copies: 5
     action_return: 0
     power: 2
@@ -237,7 +237,7 @@ cards:
     name: Forced March
     name_upgraded: Forced March+
     type: Engine
-    buy_cost: 4
+    buy_cost: 3
     copies: 3
     action_return: 2
     power: 0
@@ -261,7 +261,7 @@ cards:
     action_return: 0
     power: 0
     effect: "All Claim cards in your hand gain Stackable this turn."
-    effect_upgraded: "All Claim cards in your hand gain Stackable this turn. Draw 1 card."
+    effect_upgraded: "All Claim cards in your hand gain Stackable and +1 power this turn. Draw 1 card."
     trash_on_use: true
     effects:
       - type: grant_stackable
@@ -302,7 +302,7 @@ cards:
     name: Recruit
     name_upgraded: Recruit+
     type: Claim
-    buy_cost: 1
+    buy_cost: 2
     copies: 5
     action_return: 1
     power: 1
@@ -314,7 +314,7 @@ cards:
     name: Conscription
     name_upgraded: Conscription+
     type: Engine
-    buy_cost: 3
+    buy_cost: 4
     copies: 4
     action_return: 0
     power: 0
@@ -328,7 +328,7 @@ cards:
     name: Watchtower
     name_upgraded: Watchtower+
     type: Defense
-    buy_cost: 4
+    buy_cost: 3
     copies: 3
     action_return: 0
     power: 0
@@ -344,7 +344,7 @@ cards:
     name: Siege Tower
     name_upgraded: Siege Tower+
     type: Claim
-    buy_cost: 6
+    buy_cost: 8
     copies: 3
     action_return: 0
     power: 6
@@ -356,7 +356,7 @@ cards:
     name: Reclaim
     name_upgraded: Reclaim+
     type: Engine
-    buy_cost: 3
+    buy_cost: 2
     copies: 4
     action_return: 0
     power: 0
@@ -374,7 +374,7 @@ cards:
     name: Diplomat
     name_upgraded: Diplomat+
     type: Engine
-    buy_cost: 4
+    buy_cost: 3
     copies: 3
     action_return: 0
     power: 0

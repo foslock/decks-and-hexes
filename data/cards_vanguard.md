@@ -29,7 +29,7 @@ cards:
     name: Blitz
     name_upgraded: Blitz+
     type: Claim
-    buy_cost: 4
+    buy_cost: 3
     action_return: 0
     power: 2
     upgraded_power: 3
@@ -101,11 +101,22 @@ cards:
     type: Claim
     buy_cost: 7
     action_return: 0
-    power: 5
-    effect: "Claim: Power 5."
-    effect_upgraded: "Claim: Power 7."
+    power: 8
+    upgraded_power: 9
+    resource_gain: 0
+    upgraded_resource_gain: 0
+    trash_on_use: true
+    effect: "Claim: Power 8. Trash this card."
+    effect_upgraded: "Claim: Power 9. If successful, gain 4 resources. Trash this card."
     secondary_effect: null
     secondary_timing: null
+
+    effects:
+      - type: gain_resources
+        value: 0
+        upgraded_value: 4
+        timing: on_resolution
+        condition: if_successful
 
   - id: vanguard_coordinated_push
     name: Coordinated Push
@@ -305,8 +316,10 @@ cards:
     power: 0
     defense_bonus: 2
     upgraded_defense_bonus: 3
-    effect: "One tile you own gains +2 defense this round. If an opponent's claim on this tile fails, gain 1 resource."
-    effect_upgraded: "One tile you own gains +3 defense this round. If an opponent's claim on this tile fails, gain 2 resources."
+    resource_gain: 0
+    upgraded_resource_gain: 0
+    effect: "One tile you own gains +2 defense this round. If an opponent's claim on this tile fails, draw 1 card next turn."
+    effect_upgraded: "One tile you own gains +3 defense this round. If an opponent's claim on this tile fails, draw 1 card next turn."
     secondary_effect: null
     secondary_timing: null
 
@@ -315,9 +328,8 @@ cards:
         value: 2
         upgraded_value: 3
         timing: on_resolution
-      - type: gain_resources
+      - type: draw_next_turn
         value: 1
-        upgraded_value: 2
         timing: on_resolution
         condition: if_defender_holds
 
@@ -325,13 +337,15 @@ cards:
     name: Rearguard
     name_upgraded: Rearguard+
     type: Defense
-    buy_cost: 4
+    buy_cost: 3
     action_return: 0
     power: 0
     defense_bonus: 3
     upgraded_defense_bonus: 4
-    effect: "One tile you own gains +3 defense this round."
-    effect_upgraded: "One tile you own gains +4 defense this round."
+    resource_gain: 2
+    upgraded_resource_gain: 2
+    effect: "One tile you own gains +3 defense this round. Gain 2 resources."
+    effect_upgraded: "One tile you own gains +4 defense this round. Gain 2 resources."
     secondary_effect: null
     secondary_timing: null
 

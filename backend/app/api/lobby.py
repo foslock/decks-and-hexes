@@ -786,8 +786,8 @@ async def handle_end_game(game_id: str, player_id: str, token: str) -> dict[str,
     if not hasattr(game, 'host_id') or game.host_id != player_id:
         raise HTTPException(403, "Only the host can end the game")
 
-    # Broadcast game_ended to all players
-    await manager.broadcast(game_id, {"type": "game_ended"})
+    # Broadcast game_ended to all players (include game_id so frontend can verify)
+    await manager.broadcast(game_id, {"type": "game_ended", "game_id": game_id})
 
     # Close all connections and clean up
     for ws in manager.close_group(game_id):

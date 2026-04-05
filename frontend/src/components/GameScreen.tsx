@@ -17,6 +17,7 @@ import { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from 
 import * as api from '../api/client';
 import CardFull from './CardFull';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
+import { buildCardSubtitle } from './cardSubtitle';
 
 // Hex geometry constants (must match HexGrid.tsx)
 const HEX_SIZE = 32;
@@ -3190,41 +3191,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               })();
               const typeColor = REVIEW_TYPE_COLORS[entry.card.card_type] || '#555';
               const c = entry.card;
-              const statParts: string[] = [];
-              if (c.card_type === 'defense') {
-                const def = c.defense_bonus > 0 ? c.defense_bonus : c.power;
-                if (def > 0) {
-                  const dtc = c.defense_target_count || 1;
-                  statParts.push(dtc >= 2 ? `🛡️${def} · ${dtc}🔷` : `🛡️${def}`);
-                }
-              } else if (c.power > 0 || c.card_type === 'claim') {
-                const mtc = 1 + (c.multi_target_count || 0);
-                statParts.push(mtc >= 2 ? `⚔️${c.power} · ${mtc}🔷` : `⚔️${c.power}`);
-              }
-              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain}💰`);
-              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards}🃏`);
-              if (c.action_return > 0) statParts.push(`+${c.action_return}⚡`);
-              if (c.forced_discard > 0) statParts.push(`🎯-${c.forced_discard}🃏`);
-              if (c.effects) {
-                for (const eff of c.effects) {
-                  if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
-                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`✂️${val}`);
-                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+💰');
-                  }
-                  if (eff.type === 'gain_resources' && eff.condition) {
-                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val}💰`);
-                  }
-                  if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
-                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val}⏰🃏`);
-                  }
-                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷+★');
-                  if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') statParts.push('⚙️');
-                }
-              }
-              if (c.trash_on_use) statParts.push('🗑️');
+              const statParts = buildCardSubtitle(c);
               return (
                 <div key={i} style={{ marginBottom: i < cards.length - 1 ? 6 : 0 }}>
                   <div style={{ fontSize: 10, color: playerColor, fontWeight: 'bold', marginBottom: 2 }}>
@@ -3293,41 +3260,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             {actions.map((action, i) => {
               const typeColor = REVIEW_TYPE_COLORS[action.card.card_type] || '#555';
               const c = action.card;
-              const statParts: string[] = [];
-              if (c.card_type === 'defense') {
-                const def = c.defense_bonus > 0 ? c.defense_bonus : c.power;
-                if (def > 0) {
-                  const dtc = c.defense_target_count || 1;
-                  statParts.push(dtc >= 2 ? `🛡️${def} · ${dtc}🔷` : `🛡️${def}`);
-                }
-              } else if (c.power > 0 || c.card_type === 'claim') {
-                const mtc = 1 + (c.multi_target_count || 0);
-                statParts.push(mtc >= 2 ? `⚔️${c.power} · ${mtc}🔷` : `⚔️${c.power}`);
-              }
-              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain}💰`);
-              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards}🃏`);
-              if (c.action_return > 0) statParts.push(`+${c.action_return}⚡`);
-              if (c.forced_discard > 0) statParts.push(`🎯-${c.forced_discard}🃏`);
-              if (c.effects) {
-                for (const eff of c.effects) {
-                  if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
-                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`✂️${val}`);
-                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+💰');
-                  }
-                  if (eff.type === 'gain_resources' && eff.condition) {
-                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val}💰`);
-                  }
-                  if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
-                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val}⏰🃏`);
-                  }
-                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷+★');
-                  if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') statParts.push('⚙️');
-                }
-              }
-              if (c.trash_on_use) statParts.push('🗑️');
+              const statParts = buildCardSubtitle(c);
               return (
                 <div key={i} style={{
                   width: 154,
