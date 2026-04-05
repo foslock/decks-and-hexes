@@ -305,8 +305,8 @@ def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
                 tracking[pid].cards_purchased[bought_name] = \
                     tracking[pid].cards_purchased.get(bought_name, 0) + 1
             else:
-                # Don't break entirely on failure — the CPU might have tried
-                # a neutral buy (limit 1/turn) but still have archetype buys available.
+                # Don't break entirely on failure — the CPU might have other
+                # purchases available (e.g. archetype cards after a neutral failure).
                 # Only break after consecutive failures to avoid infinite loops.
                 purchases += 1  # count toward safety limit to prevent infinite loop
 

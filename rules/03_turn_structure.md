@@ -48,20 +48,21 @@ All players flip their played cards face-up simultaneously.
 
 ---
 
-## Phase 4: Buy Phase (Simultaneous)
+## Phase 4: Buy Phase (Sequential)
 
-All players simultaneously spend resources to purchase cards or upgrade credits.
+Players take turns buying in **player order** (starting from the current first player). Each player gets an exclusive buy window — other players can browse the shop but cannot purchase until it is their turn.
 
 ### Archetype Market Options
-Before purchasing, players may adjust their archetype market using these options:
+Before purchasing, the active buyer may adjust their archetype market using these options:
 - **Re-roll:** Pay 2 resources to discard your three archetype market cards and draw three new ones. May only be used once per turn.
 - **Retain:** Pay 1 resource to hold one specific archetype market card over to next turn. That card is set aside and will be the first card available in your market next turn. May only retain one card per turn.
 
 ### Purchasing Cards
 - **Archetype cards:** Buy from your personal three-card archetype market. Each card has a listed buy cost in resources. Purchased cards go to your **discard pile**.
 - **Neutral cards:** Buy from the shared neutral market stacks. Costs are listed per card. Purchased cards go to your **discard pile**. When a neutral card stack is exhausted, it is gone for the game.
-- A player may buy **multiple cards per turn** if they have the resources.
+- A player may buy **multiple cards per turn** (archetype and neutral) if they have the resources. There is no limit on the number of neutral cards purchased.
 - Resources not spent are **carried over** to next turn (minus upkeep at start of next turn).
+- After each player finishes buying, their purchases are visible to all other players.
 
 ### Purchasing Upgrade Credits
 - Upgrade credits are purchased from the shared pool at a cost of **5 resources** each.
