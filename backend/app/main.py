@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     task.cancel()
 
 
-app = FastAPI(title="Card Clash", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Card Clash", version="0.1.1", lifespan=lifespan)
 
 # CORS — allow frontend origins (dev + Render)
 origins = [
@@ -53,3 +53,8 @@ init_lobby(_games, _get_card_registry)
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/version")
+async def version() -> dict[str, str]:
+    return {"version": app.version}

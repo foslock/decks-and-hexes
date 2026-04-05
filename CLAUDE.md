@@ -3,6 +3,13 @@
 ## What This Is
 Card Clash is a 2–6 player simultaneous deck-building territory control game. This repository contains the full game rules, card data, and will house the digital prototype implementation.
 
+## Versioning
+When committing changes, bump the patch version in the relevant file(s):
+- **Frontend**: `frontend/package.json` → `"version"` field
+- **Backend**: `backend/app/main.py` → `FastAPI(... version="X.Y.Z")`
+
+Bump frontend version when frontend files change, backend version when backend files change, both when both change. Use semver patch bumps (e.g. 0.1.0 → 0.1.1).
+
 ## Development Commands
 
 ### Backend (Python)

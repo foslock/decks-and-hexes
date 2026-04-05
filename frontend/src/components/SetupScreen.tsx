@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import CardBrowser from './CardBrowser';
 import HowToPlay from './HowToPlay';
 import HeroAnimation from './HeroAnimation';
+import packageJson from '../../package.json';
 
 interface SetupScreenProps {
   onCreateLobby: () => void;
@@ -14,6 +15,16 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   const [showJoinDialog, setShowJoinDialog] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [backendVersion, setBackendVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
+    const base = BACKEND_HOST ? `${window.location.protocol}//${BACKEND_HOST}` : '';
+    fetch(`${base}/api/version`)
+      .then(r => r.json())
+      .then(d => setBackendVersion(d.version))
+      .catch(() => setBackendVersion(null));
+  }, []);
 
   const attemptJoin = async () => {
     if (joinCode.length === 0) return;
@@ -172,6 +183,16 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
           Card Browser
         </button>
       </div>
+      </div>
+
+      {/* Version & copyright footer */}
+      <div style={{
+        position: 'fixed', bottom: 8, right: 12,
+        fontSize: 10, color: '#444', textAlign: 'right',
+        lineHeight: 1.5, pointerEvents: 'none',
+      }}>
+        <div>v{packageJson.version}{backendVersion ? ` / v${backendVersion}` : ''}</div>
+        <div>&copy; 2026 J. Foster Lockwood</div>
       </div>
 
       {showHowToPlay && (
