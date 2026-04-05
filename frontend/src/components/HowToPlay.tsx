@@ -87,7 +87,7 @@ const PAGES = [
         }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Tile Types</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14, color: '#bbb' }}>
-            <div>⬡ <strong style={{ color: '#ccc' }}>Neutral Tiles</strong> — unclaimed, free to take</div>
+            <div>🔷 <strong style={{ color: '#ccc' }}>Neutral Tiles</strong> — unclaimed, free to take</div>
             <div>⭐ <strong style={{ color: '#ffd700' }}>VP Hexes</strong> — earn bonus VP while connected to your base</div>
             <div>🚫 <strong style={{ color: '#666' }}>Blocked Terrain</strong> — impassable obstacles</div>
             <div>🏰 <strong style={{ color: '#4a9eff' }}>Base Tiles</strong> — your permanent starting tile, can never be captured</div>
