@@ -132,7 +132,8 @@ def _get_games() -> dict[str, GameState]:
 def _get_registry() -> dict[str, Any]:
     if _card_registry_ref is None:
         raise RuntimeError("Lobby not initialized — call init_lobby first")
-    return _card_registry_ref()
+    result: dict[str, Any] = _card_registry_ref()
+    return result
 
 
 def get_lobby_for_game(game_id: str) -> Optional[Lobby]:
