@@ -18,6 +18,7 @@ import * as api from '../api/client';
 import CardFull from './CardFull';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
+import { useSound } from '../audio/useSound';
 
 // Hex geometry constants (must match HexGrid.tsx)
 const HEX_SIZE = 32;
@@ -197,6 +198,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const animationMode = useAnimationMode();
   const animationOff = useAnimationOff();
   const animSpeed = useAnimationSpeed();
+  const sound = useSound();
   // Local player IDs this browser controls (for hotseat cycling)
   const localPlayerIds = localPlayerIdsProp ?? [];
   const shouldCycle = localPlayerIds.length > 1;
@@ -242,10 +244,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     label: string;  // "Trash" or "Discard"
   } | null>(null);
   const [trashSelectedIndices, setTrashSelectedIndices] = useState<Set<number>>(new Set());
-  // Intro overlay state — skip on reconnection
-  const [showIntro, setShowIntro] = useState(!skipIntroProp);
-  // Intro sequence after overlay: 'overlay' → 'shuffle' → 'draw' → 'done'
-  const [introSequence, setIntroSequence] = useState<'overlay' | 'shuffle' | 'draw' | 'done'>(skipIntroProp ? 'done' : 'overlay');
+  // Intro overlay state — skip on reconnection or when animations are off
+  const skipIntro = skipIntroProp || animationOff;
+  const [showIntro, setShowIntro] = useState(!skipIntro);
+  // Intro sequence after overlay: 'overlay' → 'hud_fadein' → 'grid_build' → 'shuffle' → 'draw' → 'done'
+  const [introSequence, setIntroSequence] = useState<'overlay' | 'hud_fadein' | 'grid_build' | 'shuffle' | 'draw' | 'done'>(skipIntro ? 'done' : 'overlay');
+  // HUD visibility (fades in during intro)
+  const [hudVisible, setHudVisible] = useState(skipIntro ? true : false);
+  // Grid build-from-center progress (0→1 during intro, undefined after)
+  const [gridBuildProgress, setGridBuildProgress] = useState<number | undefined>(skipIntro ? undefined : 0);
+  // Banner label override (for "Begin!" on first turn)
+  const [bannerLabelOverride, setBannerLabelOverride] = useState<string | null>(null);
   // Game over state
   const [showGameOver, setShowGameOver] = useState(false);
   const [localReplayVotes, setLocalReplayVotes] = useState<Set<string>>(new Set());
@@ -1052,6 +1061,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (surgeTargets.length >= maxExtra) return;
       }
       setSurgeTargets(prev => [...prev, [q, r]]);
+      sound.tileSelect();
       return;
     }
 
@@ -1068,6 +1078,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setError(`${card.name} must target an opponent's tile`);
         return;
       }
+      sound.tileSelect();
       await playCardAtTile(selectedCardIndex, q, r, undefined, tile.owner);
       return;
     }
@@ -1114,9 +1125,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         return;
       }
 
+      sound.tileSelect();
       await playCardAtTile(selectedCardIndex, q, r);
     }
-  }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile, surgeCardIndex, surgePrimaryTarget, surgeTargets, activePlayerId, reviewing, gameState.players, actionTileKey]);
+  }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile, surgeCardIndex, surgePrimaryTarget, surgeTargets, activePlayerId, reviewing, gameState.players, actionTileKey, sound]);
 
   const handlePlayEngine = useCallback(async () => {
     if (selectedCardIndex === null) return;
@@ -1328,8 +1340,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Keyboard shortcuts: Escape, C/D/S, 1-9, Enter (with hold support)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Disable shortcuts when intro or game-over overlay is active
-      if (showIntro || showGameOver) return;
+      // Disable shortcuts when intro sequence or game-over overlay is active
+      if (showIntro || introSequence !== 'done' || showGameOver) return;
 
       // Escape: close the topmost overlay
       if (e.key === 'Escape') {
@@ -1432,7 +1444,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, activePlayerEffects, submitCanStillPlay, handleSubmitPlan, phaseBanner, showIntro, showGameOver]);
+  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, activePlayerEffects, submitCanStillPlay, handleSubmitPlan, phaseBanner, showIntro, introSequence, showGameOver]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -1448,17 +1460,44 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const handleIntroReady = useCallback(() => {
     setShowIntro(false);
     if (animationOff) {
-      // No animations: skip straight to done
       setIntroSequence('done');
+      setHudVisible(true);
+      setGridBuildProgress(undefined);
       return;
     }
-    // Start shuffle animation on the draw pile
-    setIntroSequence('shuffle');
+    // Start HUD fade-in sequence
+    setIntroSequence('hud_fadein');
     setInteractionBlocked(true);
   }, [animationOff]);
 
-  // Intro sequence: shuffle → draw → plan banner
+  // Intro sequence: hud_fadein → grid_build → shuffle → draw → "Begin!" banner
   useEffect(() => {
+    if (introSequence === 'hud_fadein') {
+      // Fade in HUD elements over 2.5s, then start grid build
+      setHudVisible(true);
+      const duration = Math.round(2500 * animSpeed) || 1000;
+      const timer = setTimeout(() => setIntroSequence('grid_build'), duration);
+      return () => clearTimeout(timer);
+    }
+    if (introSequence === 'grid_build') {
+      // Animate grid build from center over ~1.5s, then start shuffle + draw concurrently
+      const buildDuration = Math.round(1500 * animSpeed) || 600;
+      const startTime = performance.now();
+      let raf: number;
+      const tick = () => {
+        const elapsed = performance.now() - startTime;
+        const p = Math.min(1, elapsed / buildDuration);
+        setGridBuildProgress(p);
+        if (p < 1) {
+          raf = requestAnimationFrame(tick);
+        } else {
+          setGridBuildProgress(undefined); // fully built, no more prop
+          setIntroSequence('shuffle');
+        }
+      };
+      raf = requestAnimationFrame(tick);
+      return () => cancelAnimationFrame(raf);
+    }
     if (introSequence === 'shuffle') {
       // Show shuffle animation scaled by speed
       const duration = Math.round(2000 * animSpeed) || 800;
@@ -1467,20 +1506,26 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
     if (introSequence === 'draw') {
       // Cards are now being passed to CardHand — entering animations will play.
-      // Wait for all cards to finish their staggered draw animation, then show plan banner.
+      // Wait for all cards to finish their staggered draw animation, then show "Begin!" banner.
       const handSize = activePlayer?.hand.length ?? 0;
-      // Each card takes 500ms stagger + ~500ms animation duration
       const drawDuration = handSize * 500 + 500;
       const timer = setTimeout(() => {
         setIntroSequence('done');
-        // Now trigger the plan banner (round 1 has no upkeep)
-        setBannerSubtitle('Choose Wisely');
+        setBannerSubtitle(null);
+        setBannerLabelOverride('Begin!');
         setPhaseBanner('plan');
         setBannerKey(k => k + 1);
       }, drawDuration);
       return () => clearTimeout(timer);
     }
-  }, [introSequence, animated, activePlayer, gameState]);
+  }, [introSequence, animated, activePlayer, gameState, animSpeed]);
+
+  // When intro sequence completes, unblock interaction
+  useEffect(() => {
+    if (introSequence === 'done') {
+      setInteractionBlocked(false);
+    }
+  }, [introSequence]);
 
   // Transition from resolve to buy phase (called after effects popup or directly)
   // If deferredState is provided, apply it now (was held back during effects popup)
@@ -1576,6 +1621,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
+    setBannerLabelOverride(null);
     const bannerPhase = phaseBanner;
 
     // Upkeep banner finished → advance to PLAN via API, then show PLAN banner
@@ -2333,7 +2379,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
               vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
-              disableHover={!!(showIntro || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || phaseBanner)}
+              buildProgress={gridBuildProgress}
+              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || phaseBanner)}
               reviewPulseTiles={reviewPulseTiles}
               onTileHover={reviewing ? (q, r, sx, sy) => {
                 setReviewHoveredTile(`${q},${r}`);
@@ -2344,7 +2391,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           )}
 
           {/* ── Top-left overlay: round info + upkeep + expandable player panel ── */}
-          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 210, maxWidth: 280 }}>
+          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 210, maxWidth: 280, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
             {/* Round / Phase / VP target */}
             <div style={{
               background: 'rgba(10, 10, 20, 0.85)',
@@ -2553,7 +2600,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           )}
 
           {/* ── Top-right: action buttons + gear ── */}
-          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, alignItems: 'flex-start', zIndex: 210 }}>
+          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, alignItems: 'flex-start', zIndex: 210, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
             <button
               onClick={() => { setShowCardBrowser(true); setShowDeckViewer(false); setShowShopOverlay(false); }}
               style={{
@@ -2723,6 +2770,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           >
                             {testShuffleAnim ? 'Shuffling...' : 'Play Shuffling'}
                           </button>
+                          <button
+                            onClick={() => {
+                              if (animationOff) return;
+                              setShowIntro(true);
+                              setIntroSequence('overlay');
+                              setHudVisible(false);
+                              setGridBuildProgress(0);
+                              setBannerLabelOverride(null);
+                              setPhaseBanner(null);
+                              setInteractionBlocked(true);
+                            }}
+                            disabled={showIntro || animationOff}
+                            style={{ padding: '4px 8px', background: (showIntro || animationOff) ? '#555' : '#44aa88', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: (showIntro || animationOff) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                          >
+                            Replay Intro
+                          </button>
                         </div>
                       )}
                     </div>
@@ -2773,7 +2836,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           </div>
 
           {/* Bottom bar: buttons (right) */}
-          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: 20, minHeight: 34 }}>
+          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
             <div style={{ flex: 1 }} />
             {/* Buttons — right aligned */}
             {/* Test-mode Discard & Trash buttons */}
@@ -2983,7 +3046,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </>
               );
             })()}
-            {phase === 'plan' && !resolving && !phaseBanner && !showIntro && activePlayer && !activePlayer.has_submitted_plan && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
+            {phase === 'plan' && !resolving && !phaseBanner && !showIntro && introSequence === 'done' && activePlayer && !activePlayer.has_submitted_plan && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
               <div style={{
                 opacity: submitButtonVisible ? 1 : 0,
                 transition: 'opacity 0.4s ease-in',
@@ -3137,8 +3200,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           </div>
         </div>
 
-        {/* Action counter — above hand panel */}
-        {phase === 'plan' && activePlayer && !resolving && (
+        {/* Action counter — above hand panel (only when submit button is visible) */}
+        {phase === 'plan' && activePlayer && !resolving && !phaseBanner && !showIntro && !activePlayer.has_submitted_plan && introSequence === 'done' && (
           <div style={{ position: 'relative', zIndex: 30 }}>
             <div
               className="action-counter-wrap"
@@ -3192,11 +3255,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         )}
 
         {/* Bottom panel: hand */}
-        <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30 }}>
-          {activePlayer && (
+        <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
+          {activePlayer && introSequence !== 'overlay' && introSequence !== 'hud_fadein' && introSequence !== 'grid_build' && (
             <CardHand
               playerId={activePlayerId}
-              cards={introSequence === 'overlay' || introSequence === 'shuffle' ? [] : activePlayer.hand}
+              cards={introSequence === 'shuffle' ? [] : activePlayer.hand}
               selectedIndex={selectedCardIndex}
               onSelect={(idx) => { setSelectedCardIndex(idx); }}
               onDragPlay={handleDragPlay}
@@ -3509,6 +3572,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         <PhaseBanner
           key={bannerKey}
           phase={phaseBanner}
+          labelOverride={bannerLabelOverride ?? undefined}
           subtitle={bannerSubtitle ?? undefined}
           onMidpoint={handleBannerMidpoint}
           onComplete={handleBannerComplete}

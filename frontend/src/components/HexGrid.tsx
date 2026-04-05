@@ -96,6 +96,8 @@ interface HexGridProps {
   onTileHover?: (q: number, r: number, screenX: number, screenY: number) => void;
   /** Called when tile hover ends during review */
   onTileHoverEnd?: () => void;
+  /** Build-from-center progress (0 = hidden, 1 = fully visible). Omit for instant render. */
+  buildProgress?: number;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -215,7 +217,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -253,6 +255,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const onTileHoverEndRef = useRef(onTileHoverEnd);
   onTileHoverEndRef.current = onTileHoverEnd;
   const reviewPulseGraphicsRef = useRef<Graphics | null>(null);
+  const buildProgressRef = useRef(buildProgress);
+  buildProgressRef.current = buildProgress;
 
   tilesRef.current = tiles;
   highlightRef.current = highlightTiles;
@@ -345,6 +349,30 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     const isCanonicalEdge = (tileQ: number, tileR: number, nq: number, nr: number, neighbor: HexTile | undefined) =>
       !neighbor || tileQ < nq || (tileQ === nq && tileR < nr);
 
+    // === Build-from-center progress ===
+    const bp = buildProgressRef.current;
+    const building = bp !== undefined && bp < 1;
+    let maxDist = 0;
+    if (building) {
+      for (const t of Object.values(tiles)) {
+        const d = (Math.abs(t.q) + Math.abs(t.r) + Math.abs(t.q + t.r)) / 2;
+        if (d > maxDist) maxDist = d;
+      }
+    }
+    const staggerEnd = 0.6;
+    const fadePortion = 1 - staggerEnd;
+
+    const buildAlpha = (q: number, r: number): number => {
+      if (bp === undefined) return 1;
+      if (bp <= 0) return 0;
+      if (bp >= 1) return 1;
+      const dist = (Math.abs(q) + Math.abs(r) + Math.abs(q + r)) / 2;
+      const norm = maxDist > 0 ? dist / maxDist : 0;
+      const tileStart = norm * staggerEnd;
+      const tileT = Math.min(1, Math.max(0, (bp - tileStart) / fadePortion));
+      return 1 - Math.pow(1 - tileT, 3);
+    };
+
     // === PASS 1: Glow rings for highlighted tiles (behind fills) ===
     if (highlights && highlights.size > 0) {
       const glowG = new Graphics();
@@ -352,7 +380,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         const tile = tiles[key];
         if (!tile) continue;
         const { x, y } = axialToPixel(tile.q, tile.r);
-        glowG.fill({ color: 0xffff00, alpha: 0.25 });
+        glowG.fill({ color: 0xffff00, alpha: 0.25 * buildAlpha(tile.q, tile.r) });
         drawHexagon(glowG, x, y, HEX_SIZE + 4);
         glowG.fill();
       }
@@ -370,7 +398,12 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       else if (tile.is_vp) fillColor = tile.vp_value >= 2 ? TILE_COLORS.vp_premium : TILE_COLORS.vp;
 
       const isHighlighted = highlights?.has(key) ?? false;
-      const fillAlpha = tile.is_blocked ? 0.3 : (tile.owner ? 1.0 : (isHighlighted ? 0.95 : 0.8));
+      let fillAlpha = tile.is_blocked ? 0.3 : (tile.owner ? 1.0 : (isHighlighted ? 0.95 : 0.8));
+
+      // Apply build-from-center stagger
+      if (bp !== undefined && bp < 1) {
+        fillAlpha *= buildAlpha(tile.q, tile.r);
+      }
 
       g.fill({ color: fillColor, alpha: fillAlpha });
       drawHexagon(g, x, y, HEX_SIZE);
@@ -529,62 +562,144 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
 
     // === PASS 3: Base grid edges — each edge drawn exactly once ===
     // Interior edges between same-owner tiles are skipped; solid fills tile seamlessly.
-    const edgeG = new Graphics();
-    edgeG.setStrokeStyle({ width: 1.5, color: 0x555577, cap: 'round' });
-    for (const [, tile] of Object.entries(tiles)) {
-      const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
-      for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
-        const nq = tile.q + dq; const nr = tile.r + dr;
-        const neighbor = tiles[`${nq},${nr}`];
-        if (!isCanonicalEdge(tile.q, tile.r, nq, nr, neighbor)) continue;
-        if (tile.owner && neighbor?.owner === tile.owner) continue;
-        const a = hexVertex(cx, cy, vA, HEX_SIZE);
-        const b = hexVertex(cx, cy, vB, HEX_SIZE);
-        edgeG.moveTo(a.x, a.y); edgeG.lineTo(b.x, b.y);
+    if (building) {
+      // During build animation — per-tile edge Graphics so each fades with its tile
+      const edgesByDist = new Map<number, Graphics>();
+      for (const [, tile] of Object.entries(tiles)) {
+        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+        const dist = (Math.abs(tile.q) + Math.abs(tile.r) + Math.abs(tile.q + tile.r)) / 2;
+        for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+          const nq = tile.q + dq; const nr = tile.r + dr;
+          const neighbor = tiles[`${nq},${nr}`];
+          if (!isCanonicalEdge(tile.q, tile.r, nq, nr, neighbor)) continue;
+          if (tile.owner && neighbor?.owner === tile.owner) continue;
+          // Use the closer tile's distance so the edge appears with the first tile that needs it
+          const nDist = neighbor ? (Math.abs(nq) + Math.abs(nr) + Math.abs(nq + nr)) / 2 : dist;
+          const edgeDist = Math.min(dist, nDist);
+          let g = edgesByDist.get(edgeDist);
+          if (!g) {
+            g = new Graphics();
+            g.setStrokeStyle({ width: 1.5, color: 0x555577, cap: 'round' });
+            edgesByDist.set(edgeDist, g);
+          }
+          const a = hexVertex(cx, cy, vA, HEX_SIZE);
+          const b = hexVertex(cx, cy, vB, HEX_SIZE);
+          g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
+        }
       }
+      for (const [dist, g] of edgesByDist) {
+        g.stroke();
+        // Compute alpha from distance (same logic as buildAlpha but with raw dist)
+        const norm = maxDist > 0 ? dist / maxDist : 0;
+        const tileStart = norm * staggerEnd;
+        const tileT = Math.min(1, Math.max(0, (bp! - tileStart) / fadePortion));
+        g.alpha = 1 - Math.pow(1 - tileT, 3);
+        hexContainer.addChild(g);
+      }
+    } else {
+      const edgeG = new Graphics();
+      edgeG.setStrokeStyle({ width: 1.5, color: 0x555577, cap: 'round' });
+      for (const [, tile] of Object.entries(tiles)) {
+        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+        for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+          const nq = tile.q + dq; const nr = tile.r + dr;
+          const neighbor = tiles[`${nq},${nr}`];
+          if (!isCanonicalEdge(tile.q, tile.r, nq, nr, neighbor)) continue;
+          if (tile.owner && neighbor?.owner === tile.owner) continue;
+          const a = hexVertex(cx, cy, vA, HEX_SIZE);
+          const b = hexVertex(cx, cy, vB, HEX_SIZE);
+          edgeG.moveTo(a.x, a.y); edgeG.lineTo(b.x, b.y);
+        }
+      }
+      edgeG.stroke();
+      hexContainer.addChild(edgeG);
     }
-    edgeG.stroke();
-    hexContainer.addChild(edgeG);
 
     // === PASS 4: Highlighted tile outlines ===
     if (highlights && highlights.size > 0) {
-      const hlEdgeG = new Graphics();
-      hlEdgeG.setStrokeStyle({ width: 2.5, color: 0xffff00, cap: 'round' });
-      for (const key of highlights) {
-        const tile = tiles[key];
-        if (!tile) continue;
-        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
-        for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
-          const neighborKey = `${tile.q + dq},${tile.r + dr}`;
-          // Only outline edges facing non-highlighted tiles
-          if (highlights.has(neighborKey)) continue;
-          const a = hexVertex(cx, cy, vA, HEX_SIZE);
-          const b = hexVertex(cx, cy, vB, HEX_SIZE);
-          hlEdgeG.moveTo(a.x, a.y); hlEdgeG.lineTo(b.x, b.y);
+      if (building) {
+        // Per-tile outlines during build animation
+        for (const key of highlights) {
+          const tile = tiles[key];
+          if (!tile) continue;
+          const tAlpha = buildAlpha(tile.q, tile.r);
+          if (tAlpha <= 0) continue;
+          const g = new Graphics();
+          g.setStrokeStyle({ width: 2.5, color: 0xffff00, cap: 'round' });
+          const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+          for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+            const neighborKey = `${tile.q + dq},${tile.r + dr}`;
+            if (highlights.has(neighborKey)) continue;
+            const a = hexVertex(cx, cy, vA, HEX_SIZE);
+            const b = hexVertex(cx, cy, vB, HEX_SIZE);
+            g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
+          }
+          g.stroke();
+          g.alpha = tAlpha;
+          hexContainer.addChild(g);
         }
+      } else {
+        const hlEdgeG = new Graphics();
+        hlEdgeG.setStrokeStyle({ width: 2.5, color: 0xffff00, cap: 'round' });
+        for (const key of highlights) {
+          const tile = tiles[key];
+          if (!tile) continue;
+          const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+          for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+            const neighborKey = `${tile.q + dq},${tile.r + dr}`;
+            if (highlights.has(neighborKey)) continue;
+            const a = hexVertex(cx, cy, vA, HEX_SIZE);
+            const b = hexVertex(cx, cy, vB, HEX_SIZE);
+            hlEdgeG.moveTo(a.x, a.y); hlEdgeG.lineTo(b.x, b.y);
+          }
+        }
+        hlEdgeG.stroke();
+        hexContainer.addChild(hlEdgeG);
       }
-      hlEdgeG.stroke();
-      hexContainer.addChild(hlEdgeG);
     }
 
     // === PASS 5: Active player territory outline ===
     if (activePlayer) {
-      const outlineG = new Graphics();
-      outlineG.setStrokeStyle({ width: 3, color: 0xccccdd, cap: 'round', join: 'round' });
-      for (const [, tile] of Object.entries(tiles)) {
-        if (tile.owner !== activePlayer) continue;
-        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
-        for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
-          const neighbor = tiles[`${tile.q + dq},${tile.r + dr}`];
-          if (!neighbor || neighbor.owner !== activePlayer) {
-            const a = hexVertex(cx, cy, vA, HEX_SIZE);
-            const b = hexVertex(cx, cy, vB, HEX_SIZE);
-            outlineG.moveTo(a.x, a.y); outlineG.lineTo(b.x, b.y);
+      if (!building) {
+        // No build animation — single Graphics for efficiency
+        const outlineG = new Graphics();
+        outlineG.setStrokeStyle({ width: 3, color: 0xccccdd, cap: 'round', join: 'round' });
+        for (const [, tile] of Object.entries(tiles)) {
+          if (tile.owner !== activePlayer) continue;
+          const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+          for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+            const neighbor = tiles[`${tile.q + dq},${tile.r + dr}`];
+            if (!neighbor || neighbor.owner !== activePlayer) {
+              const a = hexVertex(cx, cy, vA, HEX_SIZE);
+              const b = hexVertex(cx, cy, vB, HEX_SIZE);
+              outlineG.moveTo(a.x, a.y); outlineG.lineTo(b.x, b.y);
+            }
           }
         }
+        outlineG.stroke();
+        hexContainer.addChild(outlineG);
+      } else {
+        // Build animation — per-tile outlines so each fades with its tile
+        for (const [, tile] of Object.entries(tiles)) {
+          if (tile.owner !== activePlayer) continue;
+          const tAlpha = buildAlpha(tile.q, tile.r);
+          if (tAlpha <= 0) continue;
+          const g = new Graphics();
+          g.setStrokeStyle({ width: 3, color: 0xccccdd, cap: 'round', join: 'round' });
+          const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+          for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+            const neighbor = tiles[`${tile.q + dq},${tile.r + dr}`];
+            if (!neighbor || neighbor.owner !== activePlayer) {
+              const a = hexVertex(cx, cy, vA, HEX_SIZE);
+              const b = hexVertex(cx, cy, vB, HEX_SIZE);
+              g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
+            }
+          }
+          g.stroke();
+          g.alpha = tAlpha;
+          hexContainer.addChild(g);
+        }
       }
-      outlineG.stroke();
-      hexContainer.addChild(outlineG);
     }
 
     // === PASS 6: Claim direction chevrons ===
@@ -747,6 +862,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     hiddenLabelKeyRef.current = null;
     for (const [key, tile] of Object.entries(tiles)) {
       const { x, y } = axialToPixel(tile.q, tile.r);
+      const labelAlpha = buildAlpha(tile.q, tile.r);
 
       if (tile.is_vp && !tile.is_blocked) {
         const isPremium = tile.vp_value >= 2;
@@ -767,7 +883,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         });
         star.anchor.set(0.5);
         star.position.set(x, y - 8);
-        star.alpha = 1;
+        star.alpha = labelAlpha;
         hexContainer.addChild(star);
       }
 
@@ -781,7 +897,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         });
         castle.anchor.set(0.5);
         castle.position.set(x, y - 11);
-        castle.alpha = 0.8;
+        castle.alpha = 0.8 * labelAlpha;
         hexContainer.addChild(castle);
 
         // Defense value below the castle (same layout as VP tiles)
@@ -798,7 +914,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           });
           baseDef.anchor.set(0.5);
           baseDef.position.set(x, y + 9);
-          baseDef.alpha = 1;
+          baseDef.alpha = labelAlpha;
           hexContainer.addChild(baseDef);
         }
       }
@@ -813,6 +929,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         });
         mountain.anchor.set(0.5);
         mountain.position.set(x, y - 4);
+        mountain.alpha = labelAlpha;
         if (flipHash) mountain.scale.x = -1;
         hexContainer.addChild(mountain);
       }
@@ -845,7 +962,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         });
         actionLabel.anchor.set(0.5);
         actionLabel.position.set(x, textY);
-        actionLabel.alpha = 1;
+        actionLabel.alpha = labelAlpha;
         hexContainer.addChild(actionLabel);
         tileLabelRef.current.set(key, actionLabel);
       } else if (tile.defense_power > 0 && !tile.is_base) {
@@ -863,7 +980,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         def.anchor.set(0.5);
         // VP tiles: below the star. Non-VP tiles: vertically centered.
         def.position.set(x, tile.is_vp ? y + 8 : y);
-        def.alpha = 1;
+        def.alpha = labelAlpha;
         hexContainer.addChild(def);
         tileLabelRef.current.set(key, def);
       }
@@ -982,7 +1099,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     if (pulseG && hexContainerRef.current) {
       hexContainerRef.current.addChild(pulseG);
     }
-  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, claimChevrons, connectedVpTiles, renderTiles]);
+  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, claimChevrons, connectedVpTiles, buildProgress, renderTiles]);
 
   // Review mode: pulsing outlines on tiles that had cards played
   useEffect(() => {

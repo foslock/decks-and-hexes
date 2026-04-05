@@ -6,6 +6,7 @@ import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
+import { useSound } from '../audio/useSound';
 
 export interface PlayTarget {
   cardId: string;
@@ -410,6 +411,7 @@ export default function CardHand({
   const animationOff = useAnimationOff();
   const animMode = useAnimationMode();
   const animSpeed = useAnimationSpeed();
+  const sound = useSound();
 
   // Local display order — indices into the `cards` prop array
   const [localOrder, setLocalOrder] = useState<number[]>(() => cards.map((_, i) => i));
@@ -471,6 +473,7 @@ export default function CardHand({
     if (forceShuffleAnim) {
       setShuffling(true);
       setShuffleDisplayCount(0);
+      sound.deckShuffle();
       const duration = Math.round(2500 * (animSpeed || 0.5));
       shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
     } else if (forceShuffleAnim === false) {
@@ -602,6 +605,9 @@ export default function CardHand({
         });
 
         if (departing.size > 0) {
+          // Sound: play vs discard
+          const hasPlayTarget = [...departing.values()].some(d => d.shrink);
+          if (hasPlayTarget) sound.cardPlay(); else sound.cardDiscard();
           setDepartingAnims(p => new Map([...p, ...departing]));
           requestAnimationFrame(() => {
             setDepartingAnims(p => {
@@ -659,14 +665,19 @@ export default function CardHand({
 
     // Next frame: activate transitions — cards slide from draw pile to their slots
     requestAnimationFrame(() => {
+      let anyActivated = false;
       setEnteringAnims(p => {
         const next = new Map(p);
         for (const [id] of resolved) {
           const a = next.get(id);
-          if (a?.offsetComputed && !a.active) next.set(id, { ...a, active: true });
+          if (a?.offsetComputed && !a.active) {
+            next.set(id, { ...a, active: true });
+            anyActivated = true;
+          }
         }
         return next;
       });
+      if (anyActivated) sound.cardDraw();
     });
 
     // Clean up after all staggered animations finish
@@ -678,7 +689,7 @@ export default function CardHand({
         return next;
       });
     }, maxDelay + 600);
-  }, [localOrder, enteringAnims]);
+  }, [localOrder, enteringAnims, sound]);
 
   // Discard-all animation: triggered by parent when turn ends
   useEffect(() => {
@@ -773,6 +784,7 @@ export default function CardHand({
       deferredDrawnCardsRef.current = new Set(newCardIds);
       setShuffling(true);
       setShuffleDisplayCount(0);
+      sound.deckShuffle();
       const duration = Math.round(2500 * (animSpeed || 0.5));
       shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
       // Shuffle ends when the count-up animation completes (in the rAF tick below)

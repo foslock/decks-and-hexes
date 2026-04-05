@@ -7,6 +7,7 @@ import CardFull, { CARD_FULL_WIDTH } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
+import { useSound } from '../audio/useSound';
 
 const TYPE_COLORS: Record<string, string> = {
   claim: '#4a9eff',
@@ -310,6 +311,22 @@ export default function ShopOverlay({
   const mousePosRef = useRef<{ x: number; y: number } | null>(null);
   const animMode = useAnimationMode();
   const shiftHeld = useShiftKey();
+  const sound = useSound();
+
+  const buyArchetypeWithSound = useCallback((cardId: string) => {
+    sound.cardPurchase();
+    onBuyArchetype(cardId);
+  }, [onBuyArchetype, sound]);
+
+  const buyNeutralWithSound = useCallback((cardId: string) => {
+    sound.cardPurchase();
+    onBuyNeutral(cardId);
+  }, [onBuyNeutral, sound]);
+
+  const buyUpgradeWithSound = useCallback(() => {
+    sound.cardPurchase();
+    onBuyUpgrade();
+  }, [onBuyUpgrade, sound]);
 
   // Build lookup: neutral card_id → purchaser name (from other players last round)
   const neutralPurchaseMap = useMemo(() => {
@@ -574,7 +591,7 @@ export default function ShopOverlay({
                       canAfford={canAfford}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
-                      onBuy={() => onBuyArchetype(card.id)}
+                      onBuy={() => buyArchetypeWithSound(card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
                       disabled={disabled}
@@ -588,7 +605,7 @@ export default function ShopOverlay({
                       canAfford={canAfford}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
-                      onBuy={() => onBuyArchetype(card.id)}
+                      onBuy={() => buyArchetypeWithSound(card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
                       disabled={disabled}
@@ -604,7 +621,7 @@ export default function ShopOverlay({
                 <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>Neutral Market</span>
                 <Tooltip content="Upgrade credits can be spent during the Plan phase to upgrade a card in your hand.">
                   <button
-                    onClick={onBuyUpgrade}
+                    onClick={buyUpgradeWithSound}
                     disabled={disabled || (!testMode && playerResources < 5)}
                     style={{
                       fontSize: 11,
@@ -635,7 +652,7 @@ export default function ShopOverlay({
                       canAfford={canAfford}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
-                      onBuy={() => onBuyNeutral(stack.card.id)}
+                      onBuy={() => buyNeutralWithSound(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
                       disabled={disabled}
@@ -651,7 +668,7 @@ export default function ShopOverlay({
                       canAfford={canAfford}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
-                      onBuy={() => onBuyNeutral(stack.card.id)}
+                      onBuy={() => buyNeutralWithSound(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
                       disabled={disabled}

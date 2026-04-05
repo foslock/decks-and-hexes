@@ -5,12 +5,16 @@ export type AnimationMode = 'normal' | 'fast' | 'off';
 interface Settings {
   animationMode: AnimationMode;
   tooltips: boolean;
+  soundEnabled: boolean;
+  soundVolume: number;
 }
 
 interface SettingsContextValue {
   settings: Settings;
   setAnimationMode: (mode: AnimationMode) => void;
   setTooltips: (on: boolean) => void;
+  setSoundEnabled: (on: boolean) => void;
+  setSoundVolume: (v: number) => void;
 }
 
 const STORAGE_KEY = 'cardclash_settings';
@@ -23,10 +27,12 @@ function loadSettings(): Settings {
       return {
         animationMode: parsed.animationMode || 'normal',
         tooltips: parsed.tooltips !== false,  // default true
+        soundEnabled: parsed.soundEnabled !== false,  // default true
+        soundVolume: typeof parsed.soundVolume === 'number' ? parsed.soundVolume : 0.5,
       };
     }
   } catch { /* ignore */ }
-  return { animationMode: 'normal', tooltips: true };
+  return { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5 };
 }
 
 function saveSettings(settings: Settings) {
@@ -36,9 +42,11 @@ function saveSettings(settings: Settings) {
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
-  settings: { animationMode: 'normal', tooltips: true },
+  settings: { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5 },
   setAnimationMode: () => {},
   setTooltips: () => {},
+  setSoundEnabled: () => {},
+  setSoundVolume: () => {},
 });
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -60,8 +68,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setSoundEnabled = useCallback((on: boolean) => {
+    setSettings((prev) => {
+      const next = { ...prev, soundEnabled: on };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const setSoundVolume = useCallback((v: number) => {
+    setSettings((prev) => {
+      const next = { ...prev, soundVolume: v };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
   return (
-    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips }}>
+    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume }}>
       {children}
     </SettingsContext.Provider>
   );

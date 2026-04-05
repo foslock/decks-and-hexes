@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ResolutionStep } from '../types/game';
 import type { GridTransform } from './HexGrid';
 import { useAnimationMode, useAnimationSpeed } from './SettingsContext';
+import { useSound } from '../audio/useSound';
 
 // Must match HexGrid.tsx
 const HEX_SIZE = 32;
@@ -54,6 +55,7 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
   const animMode = useAnimationMode();
   const isOff = animMode === 'off';
   const animSpeed = useAnimationSpeed();
+  const sound = useSound();
 
   const [currentIdx, setCurrentIdx] = useState(0);
   const [stage, setStage] = useState<StepStage>('numbers_move');
@@ -152,6 +154,7 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
 
     if (stage === 'numbers_move' && numbersActive) {
       fireStepApply(currentIdx);
+      if (isContested) sound.resolveContested(); else sound.resolveTileOccupied();
       const t = setTimeout(() => setStage('winner_grow'), moveMs);
       return () => clearTimeout(t);
     }

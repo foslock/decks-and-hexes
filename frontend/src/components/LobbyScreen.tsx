@@ -4,6 +4,7 @@ import { useWebSocket } from '../hooks/useWebSocket';
 import { useSettings, type AnimationMode } from './SettingsContext';
 import Tooltip from './Tooltip';
 import * as api from '../api/client';
+import { useSound } from '../audio/useSound';
 
 const LOBBY_PLAYER_COLORS = ['#4a9eff', '#ff4a4a', '#4aff6a', '#ffaa4a', '#aa4aff', '#ff4aaa'];
 
@@ -64,6 +65,7 @@ export default function LobbyScreen({
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const { lastMessage, status } = useWebSocket(lobbyCode, playerId, token);
+  const sound = useSound();
 
   // Handle WebSocket messages
   useEffect(() => {
@@ -75,7 +77,9 @@ export default function LobbyScreen({
       const secs = lastMessage.seconds_remaining as number;
       setCountdown(secs);
       if (secs === 3) setCountdownStart(Date.now());
+      if (secs >= 1 && secs <= 3) sound.countdownTick();
     } else if (lastMessage.type === 'game_start') {
+      sound.countdownGo();
       console.log('[Lobby] WS game_start received, gameStartRef:', gameStartRef.current);
       if (!gameStartRef.current) {
         gameStartRef.current = true;

@@ -3,6 +3,8 @@ import { useAnimationMode } from './SettingsContext';
 
 interface PhaseBannerProps {
   phase: string;
+  /** Override the phase label text (e.g. "Begin!" instead of "Plan"). */
+  labelOverride?: string;
   /** Optional smaller text shown below the phase label. */
   subtitle?: string;
   /** Called when the banner reaches its midpoint (50% through animation). */
@@ -26,14 +28,14 @@ const PHASE_LABELS: Record<string, string> = {
  * Fast: same slide animation at 2x speed (~0.7s total).
  * Off: instant appear/disappear, no motion.
  */
-export default function PhaseBanner({ phase, subtitle, onMidpoint, onComplete }: PhaseBannerProps) {
+export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint, onComplete }: PhaseBannerProps) {
   const animMode = useAnimationMode();
   // Stages: 'mount' (initial position, no transition) → 'enter' (slide/fade in)
   //       → 'hold' (pause at center) → 'exit' (slide/fade out) → done
   const [stage, setStage] = useState<'mount' | 'enter' | 'hold' | 'exit'>('mount');
   const midpointFiredRef = useRef(false);
 
-  const label = PHASE_LABELS[phase] || phase;
+  const label = labelOverride || PHASE_LABELS[phase] || phase;
 
   // Stable refs for callbacks — prevents effect cleanup from cancelling
   // pending timeouts when parent re-renders (e.g. from WebSocket updates)

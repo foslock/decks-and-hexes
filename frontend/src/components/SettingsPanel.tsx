@@ -9,7 +9,7 @@ interface SettingsPanelProps {
 }
 
 export default function SettingsPanel({ isMultiplayer, isHost, onLeaveGame, onEndGame }: SettingsPanelProps) {
-  const { settings, setAnimationMode, setTooltips } = useSettings();
+  const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume } = useSettings();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
 
@@ -56,6 +56,37 @@ export default function SettingsPanel({ isMultiplayer, isHost, onLeaveGame, onEn
               {on ? 'On' : 'Off'}
             </button>
           ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: '#aaa' }}>Sound:</span>
+          {([true, false] as const).map((on) => (
+            <button
+              key={String(on)}
+              onClick={() => setSoundEnabled(on)}
+              style={{
+                padding: '2px 8px',
+                fontSize: 11,
+                background: settings.soundEnabled === on ? '#4a9eff' : '#2a2a3e',
+                border: '1px solid #555',
+                borderRadius: 4,
+                color: '#fff',
+                cursor: 'pointer',
+              }}
+            >
+              {on ? 'On' : 'Off'}
+            </button>
+          ))}
+          {settings.soundEnabled && (
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={settings.soundVolume}
+              onChange={(e) => setSoundVolume(parseFloat(e.target.value))}
+              style={{ width: 60, accentColor: '#4a9eff' }}
+            />
+          )}
         </div>
 
         {/* Multiplayer game controls */}

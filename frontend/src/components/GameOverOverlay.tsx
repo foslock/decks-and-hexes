@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { GameState, Player, Card } from '../types/game';
 import { CardViewPopup } from './CardHand';
+import { useSound } from '../audio/useSound';
 
 const PLAYER_COLORS: Record<string, string> = {
   player_0: '#4a9eff',
@@ -48,6 +49,7 @@ export default function GameOverOverlay({
   const [rowsVisible, setRowsVisible] = useState(0);
   const [buttonsVisible, setButtonsVisible] = useState(false);
   const [viewingDeck, setViewingDeck] = useState<string | null>(null);
+  const sound = useSound();
 
   const hasVoted = replayVotes.has(playerId);
 
@@ -96,10 +98,14 @@ export default function GameOverOverlay({
     return groups;
   };
 
-  // Staggered animation
+  // Staggered animation + jingle
   useEffect(() => {
-    const t1 = setTimeout(() => setBannerVisible(true), 100);
+    const t1 = setTimeout(() => {
+      setBannerVisible(true);
+      if (isVictory) sound.victoryJingle(); else sound.defeatJingle();
+    }, 100);
     return () => clearTimeout(t1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
