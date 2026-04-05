@@ -178,7 +178,13 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
             </div>
             <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
           </div>
-          <div style={{ fontSize: 11, color: '#aaa' }}>
+          <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+              if (el) {
+                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                el.style.setProperty('--sub-scale', String(scale));
+              }
+            }}>
             {(() => {
               const parts: React.ReactNode[] = [];
               if (displayCard.passive_vp !== 0) {
@@ -188,37 +194,38 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
               }
               if (displayCard.card_type === 'defense' && displayCard.defense_bonus > 0) {
                 const tileCount = displayCard.defense_target_count || 1;
-                parts.push(tileCount >= 2 ? `Def ${displayCard.defense_bonus} · ${tileCount} 🔷` : `Def ${displayCard.defense_bonus}`);
+                parts.push(tileCount >= 2 ? `🛡️${displayCard.defense_bonus} · ${tileCount}🔷` : `🛡️${displayCard.defense_bonus}`);
               } else if (displayCard.power > 0 || displayCard.card_type === 'claim') {
                 const tileCount = 1 + (displayCard.multi_target_count || 0);
-                parts.push(tileCount >= 2 ? `Pow ${displayCard.power} · ${tileCount} 🔷` : `Pow ${displayCard.power}`);
+                parts.push(tileCount >= 2 ? `⚔️${displayCard.power} · ${tileCount}🔷` : `⚔️${displayCard.power}`);
               }
-              if (displayCard.resource_gain > 0) parts.push(`+${displayCard.resource_gain} 💰`);
-              if (displayCard.draw_cards > 0) parts.push(`+${displayCard.draw_cards} 🃏`);
-              if (displayCard.action_return > 0) parts.push(`+${displayCard.action_return} ⚡`);
-              if (displayCard.forced_discard > 0) parts.push(`🎯 -${displayCard.forced_discard} 🃏`);
+              if (displayCard.resource_gain > 0) parts.push(`+${displayCard.resource_gain}💰`);
+              if (displayCard.draw_cards > 0) parts.push(`+${displayCard.draw_cards}🃏`);
+              if (displayCard.action_return > 0) parts.push(`+${displayCard.action_return}⚡`);
+              if (displayCard.forced_discard > 0) parts.push(`🎯-${displayCard.forced_discard}🃏`);
               if (displayCard.effects) {
                 for (const eff of displayCard.effects) {
                   if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
                     const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    parts.push(`✂️ ${val}`);
-                    if (eff.type === 'trash_gain_buy_cost') parts.push('+ 💰');
+                    parts.push(`✂️${val}`);
+                    if (eff.type === 'trash_gain_buy_cost') parts.push('+💰');
                   }
                   if (eff.type === 'gain_resources' && eff.condition) {
                     const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    parts.push(`+${val} 💰`);
+                    parts.push(`+${val}💰`);
                   }
                   if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
                     const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    parts.push(`+${val} ⏰🃏`);
+                    parts.push(`+${val}⏰🃏`);
                   }
-                  if (eff.type === 'enhance_vp_tile') parts.push('🔷 +★');
+                  if (eff.type === 'enhance_vp_tile') parts.push('🔷+★');
                   if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') parts.push('⚙️');
                 }
               }
               if (displayCard.trash_on_use) parts.push('🗑️');
               return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
             })()}
+            </span>
           </div>
         </div>
         {upgradeLabel}
@@ -1143,7 +1150,13 @@ export default function CardHand({
                   </div>
                   <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : ''}</span>
                 </div>
-                <div style={{ fontSize: 13, color: '#aaa' }}>
+                <div style={{ fontSize: 13, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                  <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+                    if (el) {
+                      const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                      el.style.setProperty('--sub-scale', String(scale));
+                    }
+                  }}>
                   {(() => {
                     const parts: React.ReactNode[] = [];
                     if (card.passive_vp !== 0) {
@@ -1153,38 +1166,38 @@ export default function CardHand({
                     }
                     if (card.card_type === 'defense' && card.defense_bonus > 0) {
                       const tileCount = card.defense_target_count || 1;
-                      parts.push(tileCount >= 2 ? `Def ${card.defense_bonus} · ${tileCount} 🔷` : `Def ${card.defense_bonus}`);
+                      parts.push(tileCount >= 2 ? `🛡️${card.defense_bonus} · ${tileCount}🔷` : `🛡️${card.defense_bonus}`);
                     } else if (card.power > 0 || card.card_type === 'claim') {
                       const tileCount = 1 + (card.multi_target_count || 0);
-                      parts.push(tileCount >= 2 ? `Pow ${card.power} · ${tileCount} 🔷` : `Pow ${card.power}`);
+                      parts.push(tileCount >= 2 ? `⚔️${card.power} · ${tileCount}🔷` : `⚔️${card.power}`);
                     }
-                    if (card.resource_gain > 0) parts.push(`+${card.resource_gain} 💰`);
-                    if (card.draw_cards > 0) parts.push(`+${card.draw_cards} 🃏`);
-                    if (card.action_return > 0) parts.push(`+${card.action_return} ⚡`);
-                    if (card.forced_discard > 0) parts.push(`🎯 -${card.forced_discard} 🃏`);
-                    if (card.trash_on_use) parts.push('🗑️');
+                    if (card.resource_gain > 0) parts.push(`+${card.resource_gain}💰`);
+                    if (card.draw_cards > 0) parts.push(`+${card.draw_cards}🃏`);
+                    if (card.action_return > 0) parts.push(`+${card.action_return}⚡`);
+                    if (card.forced_discard > 0) parts.push(`🎯-${card.forced_discard}🃏`);
                     if (card.effects) {
                       for (const eff of card.effects) {
                         if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
                           const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                          parts.push(`✂️ ${val}`);
-                          if (eff.type === 'trash_gain_buy_cost') parts.push('+ 💰');
+                          parts.push(`✂️${val}`);
+                          if (eff.type === 'trash_gain_buy_cost') parts.push('+💰');
                         }
                         if (eff.type === 'gain_resources' && eff.condition) {
                           const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                          parts.push(`+${val} 💰`);
+                          parts.push(`+${val}💰`);
                         }
                         if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
                           const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                          parts.push(`+${val} ⏰🃏`);
+                          parts.push(`+${val}⏰🃏`);
                         }
-                        if (eff.type === 'enhance_vp_tile') parts.push('🔷 +★');
+                        if (eff.type === 'enhance_vp_tile') parts.push('🔷+★');
                         if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') parts.push('⚙️');
                       }
                     }
                     if (card.trash_on_use) parts.push('🗑️');
                     return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
                   })()}
+                  </span>
                 </div>
                 {/* Icon overlay — shown when card is selected for trashing/discarding */}
                 {isTrashSelected && (

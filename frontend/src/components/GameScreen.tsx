@@ -457,7 +457,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (ap) {
           const tileCount = Object.values(gameState.grid.tiles).filter(t => t.owner === activePlayerId).length;
           if (ap.tiles_lost_to_upkeep > 0) {
-            setBannerSubtitle(`Lost ${ap.tiles_lost_to_upkeep} tile(s) — couldn't pay ${ap.upkeep_cost} 💰`);
+            setBannerSubtitle(`Lost ${ap.tiles_lost_to_upkeep} tile(s) — couldn't pay ${ap.upkeep_cost}💰`);
           } else if (ap.upkeep_cost > 0) {
             setBannerSubtitle(`${ap.last_upkeep_paid} 💰 paid for ${tileCount} tiles`);
           } else {
@@ -3054,32 +3054,32 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 const def = c.defense_bonus > 0 ? c.defense_bonus : c.power;
                 if (def > 0) {
                   const dtc = c.defense_target_count || 1;
-                  statParts.push(dtc >= 2 ? `Def ${def} · ${dtc} 🔷` : `Def ${def}`);
+                  statParts.push(dtc >= 2 ? `🛡️${def} · ${dtc}🔷` : `🛡️${def}`);
                 }
               } else if (c.power > 0 || c.card_type === 'claim') {
                 const mtc = 1 + (c.multi_target_count || 0);
-                statParts.push(mtc >= 2 ? `Pow ${c.power} · ${mtc} 🔷` : `Pow ${c.power}`);
+                statParts.push(mtc >= 2 ? `⚔️${c.power} · ${mtc}🔷` : `⚔️${c.power}`);
               }
-              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain} 💰`);
-              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards} 🃏`);
-              if (c.action_return > 0) statParts.push(`+${c.action_return} ⚡`);
-              if (c.forced_discard > 0) statParts.push(`🎯 -${c.forced_discard} 🃏`);
+              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain}💰`);
+              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards}🃏`);
+              if (c.action_return > 0) statParts.push(`+${c.action_return}⚡`);
+              if (c.forced_discard > 0) statParts.push(`🎯-${c.forced_discard}🃏`);
               if (c.effects) {
                 for (const eff of c.effects) {
                   if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
                     const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`✂️ ${val}`);
-                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+ 💰');
+                    statParts.push(`✂️${val}`);
+                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+💰');
                   }
                   if (eff.type === 'gain_resources' && eff.condition) {
                     const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val} 💰`);
+                    statParts.push(`+${val}💰`);
                   }
                   if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
                     const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val} ⏰🃏`);
+                    statParts.push(`+${val}⏰🃏`);
                   }
-                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷 +★');
+                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷+★');
                   if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') statParts.push('⚙️');
                 }
               }
@@ -3103,8 +3103,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       </div>
                       <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
                     </div>
-                    <div style={{ fontSize: 11, color: '#aaa' }}>
+                    <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                      <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+                        if (el) {
+                          const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                          el.style.setProperty('--sub-scale', String(scale));
+                        }
+                      }}>
                       {statParts.map((part, j) => <span key={j}>{j > 0 ? ' · ' : ''}{part}</span>)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -3150,32 +3157,32 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 const def = c.defense_bonus > 0 ? c.defense_bonus : c.power;
                 if (def > 0) {
                   const dtc = c.defense_target_count || 1;
-                  statParts.push(dtc >= 2 ? `Def ${def} · ${dtc} 🔷` : `Def ${def}`);
+                  statParts.push(dtc >= 2 ? `🛡️${def} · ${dtc}🔷` : `🛡️${def}`);
                 }
               } else if (c.power > 0 || c.card_type === 'claim') {
                 const mtc = 1 + (c.multi_target_count || 0);
-                statParts.push(mtc >= 2 ? `Pow ${c.power} · ${mtc} 🔷` : `Pow ${c.power}`);
+                statParts.push(mtc >= 2 ? `⚔️${c.power} · ${mtc}🔷` : `⚔️${c.power}`);
               }
-              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain} 💰`);
-              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards} 🃏`);
-              if (c.action_return > 0) statParts.push(`+${c.action_return} ⚡`);
-              if (c.forced_discard > 0) statParts.push(`🎯 -${c.forced_discard} 🃏`);
+              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain}💰`);
+              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards}🃏`);
+              if (c.action_return > 0) statParts.push(`+${c.action_return}⚡`);
+              if (c.forced_discard > 0) statParts.push(`🎯-${c.forced_discard}🃏`);
               if (c.effects) {
                 for (const eff of c.effects) {
                   if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
                     const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`✂️ ${val}`);
-                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+ 💰');
+                    statParts.push(`✂️${val}`);
+                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+💰');
                   }
                   if (eff.type === 'gain_resources' && eff.condition) {
                     const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val} 💰`);
+                    statParts.push(`+${val}💰`);
                   }
                   if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
                     const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                    statParts.push(`+${val} ⏰🃏`);
+                    statParts.push(`+${val}⏰🃏`);
                   }
-                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷 +★');
+                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷+★');
                   if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') statParts.push('⚙️');
                 }
               }
@@ -3196,8 +3203,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     </div>
                     <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: '#aaa' }}>
+                  <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+                      if (el) {
+                        const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                        el.style.setProperty('--sub-scale', String(scale));
+                      }
+                    }}>
                     {statParts.map((part, j) => <span key={j}>{j > 0 ? ' · ' : ''}{part}</span>)}
+                    </span>
                   </div>
                 </div>
               );

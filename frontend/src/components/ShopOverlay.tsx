@@ -223,42 +223,49 @@ function CompactShopCard({
           </div>
           <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : ''}</span>
         </div>
-        <div style={{ fontSize: 11, color: '#aaa' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
+        <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
+          <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+            if (el) {
+              const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+              el.style.setProperty('--sub-scale', String(scale));
+            }
+          }}>
           {(() => {
             const parts: React.ReactNode[] = [];
             if (card.card_type === 'defense' && card.defense_bonus > 0) {
               const dtc = card.defense_target_count || 1;
-              parts.push(dtc >= 2 ? `Def ${card.defense_bonus} · ${dtc} 🔷` : `Def ${card.defense_bonus}`);
+              parts.push(dtc >= 2 ? `🛡️${card.defense_bonus} · ${dtc}🔷` : `🛡️${card.defense_bonus}`);
             } else if (card.card_type !== 'defense' && card.power > 0) {
               const mtc = 1 + (card.multi_target_count || 0);
-              parts.push(mtc >= 2 ? `Pow ${card.power} · ${mtc} 🔷` : `Pow ${card.power}`);
+              parts.push(mtc >= 2 ? `⚔️${card.power} · ${mtc}🔷` : `⚔️${card.power}`);
             }
-            if (card.resource_gain > 0) parts.push(`+${card.resource_gain} 💰`);
-            if (card.draw_cards > 0) parts.push(`+${card.draw_cards} 🃏`);
-            if (card.action_return > 0) parts.push(`+${card.action_return} ⚡`);
-            if (card.forced_discard > 0) parts.push(`🎯 -${card.forced_discard} 🃏`);
+            if (card.resource_gain > 0) parts.push(`+${card.resource_gain}💰`);
+            if (card.draw_cards > 0) parts.push(`+${card.draw_cards}🃏`);
+            if (card.action_return > 0) parts.push(`+${card.action_return}⚡`);
+            if (card.forced_discard > 0) parts.push(`🎯-${card.forced_discard}🃏`);
             if (card.effects) {
               for (const eff of card.effects) {
                 if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
                   const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`✂️ ${val}`);
-                  if (eff.type === 'trash_gain_buy_cost') parts.push('+ 💰');
+                  parts.push(`✂️${val}`);
+                  if (eff.type === 'trash_gain_buy_cost') parts.push('+💰');
                 }
                 if (eff.type === 'gain_resources' && eff.condition) {
                   const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`+${val} 💰`);
+                  parts.push(`+${val}💰`);
                 }
                 if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
                   const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`+${val} ⏰🃏`);
+                  parts.push(`+${val}⏰🃏`);
                 }
-                if (eff.type === 'enhance_vp_tile') parts.push('🔷 +★');
+                if (eff.type === 'enhance_vp_tile') parts.push('🔷+★');
                 if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') parts.push('⚙️');
               }
             }
             if (card.trash_on_use) parts.push('🗑️');
             return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
           })()}
+          </span>
         </div>
       </div>
       {/* Buy button below card */}

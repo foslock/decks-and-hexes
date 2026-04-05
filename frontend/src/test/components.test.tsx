@@ -97,8 +97,8 @@ describe('CardHand', () => {
 
   it('shows power in stats line', () => {
     render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
-    expect(screen.getByText(/Pow 1/)).toBeInTheDocument();
-    expect(screen.getByText(/Pow 4/)).toBeInTheDocument();
+    expect(screen.getByText(/⚔️1/)).toBeInTheDocument();
+    expect(screen.getByText(/⚔️4/)).toBeInTheDocument();
   });
 
   it('shows resource gain for engine cards', () => {

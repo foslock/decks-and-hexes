@@ -105,7 +105,13 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
           </div>
           <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
         </div>
-        <div style={{ fontSize: 11, color: '#aaa' }}>
+        <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+            if (el) {
+              const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+              el.style.setProperty('--sub-scale', String(scale));
+            }
+          }}>
           {(() => {
             const parts: React.ReactNode[] = [];
             if (displayCard.passive_vp !== 0) {
@@ -121,21 +127,21 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
               const hasPermanent = displayCard.effects?.some(e => e.type === 'permanent_defense');
               const hasImmunity = displayCard.effects?.some(e => e.type === 'tile_immunity');
               const dtc = displayCard.defense_target_count || 1;
-              const tileSuffix = dtc >= 2 ? ` · ${dtc} 🔷` : '';
+              const tileSuffix = dtc >= 2 ? ` · ${dtc}🔷` : '';
               if (hasImmunity) {
                 parts.push('Immune');
               } else if (hasPerAdj) {
                 const mod = displayCard.effects?.find(e => e.type === 'defense_per_adjacent');
                 const perVal = mod ? (isUpgraded ? (mod.upgraded_value ?? mod.value) : mod.value) : 1;
-                parts.push(`Def ${perVal}+${tileSuffix}`);
+                parts.push(`🛡️${perVal}+${tileSuffix}`);
               } else if (hasPermanent) {
                 const mod = displayCard.effects?.find(e => e.type === 'permanent_defense');
                 const permVal = mod
                   ? (isUpgraded ? (mod.metadata?.upgraded_value as number ?? mod.value) : mod.value)
                   : defBase;
-                parts.push(`Def ${permVal}${tileSuffix}`);
+                parts.push(`🛡️${permVal}${tileSuffix}`);
               } else if (defBase > 0) {
-                parts.push(`Def ${defBase}${tileSuffix}`);
+                parts.push(`🛡️${defBase}${tileSuffix}`);
               }
             } else if (displayCard.power > 0 || displayCard.card_type === 'claim') {
               const isUpgraded = displayCard.is_upgraded;
@@ -148,46 +154,47 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
                 !isUnbounded && ((isUpgraded ? (e.upgraded_value ?? e.value) : e.value) > 0)
               );
               const mtc = 1 + (displayCard.multi_target_count || 0);
-              const claimTileSuffix = mtc >= 2 ? ` · ${mtc} 🔷` : '';
+              const claimTileSuffix = mtc >= 2 ? ` · ${mtc}🔷` : '';
               if (isUnbounded) {
                 const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
                 const minPow = handMod
                   ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
                   : displayCard.power;
-                parts.push(`Pow ${minPow}+${claimTileSuffix}`);
+                parts.push(`⚔️${minPow}+${claimTileSuffix}`);
               } else if (fixedBonus) {
                 const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
-                parts.push(`Pow ${displayCard.power}/${displayCard.power + bonusVal}${claimTileSuffix}`);
+                parts.push(`⚔️${displayCard.power}/${displayCard.power + bonusVal}${claimTileSuffix}`);
               } else {
-                parts.push(`Pow ${displayCard.power}${claimTileSuffix}`);
+                parts.push(`⚔️${displayCard.power}${claimTileSuffix}`);
               }
             }
-            if (displayCard.resource_gain > 0) parts.push(`+${displayCard.resource_gain} 💰`);
-            if (displayCard.draw_cards > 0) parts.push(`+${displayCard.draw_cards} 🃏`);
-            if (displayCard.action_return > 0) parts.push(`+${displayCard.action_return} ⚡`);
-            if (displayCard.forced_discard > 0) parts.push(`🎯 -${displayCard.forced_discard} 🃏`);
+            if (displayCard.resource_gain > 0) parts.push(`+${displayCard.resource_gain}💰`);
+            if (displayCard.draw_cards > 0) parts.push(`+${displayCard.draw_cards}🃏`);
+            if (displayCard.action_return > 0) parts.push(`+${displayCard.action_return}⚡`);
+            if (displayCard.forced_discard > 0) parts.push(`🎯-${displayCard.forced_discard}🃏`);
             if (displayCard.effects) {
               for (const eff of displayCard.effects) {
                 if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
                   const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`✂️ ${val}`);
-                  if (eff.type === 'trash_gain_buy_cost') parts.push('+ 💰');
+                  parts.push(`✂️${val}`);
+                  if (eff.type === 'trash_gain_buy_cost') parts.push('+💰');
                 }
                 if (eff.type === 'gain_resources' && eff.condition) {
                   const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`+${val} 💰`);
+                  parts.push(`+${val}💰`);
                 }
                 if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
                   const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`+${val} ⏰🃏`);
+                  parts.push(`+${val}⏰🃏`);
                 }
-                if (eff.type === 'enhance_vp_tile') parts.push('🔷 +★');
+                if (eff.type === 'enhance_vp_tile') parts.push('🔷+★');
                 if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') parts.push('⚙️');
               }
             }
             if (displayCard.trash_on_use) parts.push('🗑️');
             return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
           })()}
+          </span>
         </div>
       </div>
       {hoverRect && createPortal(
