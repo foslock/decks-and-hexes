@@ -54,7 +54,7 @@ const PAGES = [
         }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Starting cards</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, color: '#bbb' }}>
-            <div>⬡ <strong style={{ color: '#4a9eff' }}>Explore</strong> — claim an adjacent, defenseless tile</div>
+            <div>⚔️ <strong style={{ color: '#4a9eff' }}>Explore</strong> — claim an adjacent, defenseless tile</div>
             <div>💰 <strong style={{ color: '#5dde5d' }}>Gather</strong> — gain 2 resources</div>
             <div>🎴 <strong style={{ color: '#ffaa33' }}>Archetype Starter</strong> — 2 unique cards based on your archetype</div>
           </div>
