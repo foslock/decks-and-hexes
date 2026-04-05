@@ -1,3 +1,9 @@
+// Mock CanvasRenderingContext2D for PixiJS (not available in jsdom)
+if (typeof globalThis.CanvasRenderingContext2D === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).CanvasRenderingContext2D = class CanvasRenderingContext2D {};
+}
+
 // Mock ResizeObserver for components that use it (e.g. CardHand)
 globalThis.ResizeObserver = class ResizeObserver {
   constructor(_callback: ResizeObserverCallback) {}
