@@ -2456,6 +2456,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           purchases={phase === 'buy' ? enrichPurchases(gameState.buy_phase_purchases?.[pid]) : undefined}
                           onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                           onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
+                          vpTarget={gameState.vp_target}
                         />
                       </div>
                     );
@@ -2480,6 +2481,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         purchases={phase === 'buy' ? enrichPurchases(gameState.buy_phase_purchases?.[activePlayerId]) : undefined}
                         onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                         onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
+                        vpTarget={gameState.vp_target}
                       />
                     );
                   })()}
