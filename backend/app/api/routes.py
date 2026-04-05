@@ -289,14 +289,38 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    # Auto-play CPU buys if any CPU players haven't ended yet
-    if any(p.is_cpu and not p.has_ended_turn for p in game.players.values()):
-        auto_play_cpu_buys(game)
-
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
     return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
+
+
+@router.post("/games/{game_id}/process-cpu-buys")
+async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
+    """Process consecutive CPU buyers during the buy phase.
+
+    Called by the frontend after a brief delay so the user can see
+    the 'Buying...' indicator on CPU players before their purchases appear.
+    """
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    if game.current_phase != Phase.BUY:
+        raise HTTPException(400, f"Not in Buy phase (current: {game.current_phase.value})")
+
+    # Check that the current buyer is actually a CPU
+    pid = game.player_order[game.current_buyer_index]
+    player = game.players[pid]
+    if not player.is_cpu:
+        raise HTTPException(400, "Current buyer is not a CPU player")
+
+    auto_play_cpu_buys(game)
+
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": "CPU buys processed", "state": game.to_dict()}
 
 
 @router.post("/games/{game_id}/advance-upkeep")
@@ -327,10 +351,6 @@ async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
     success, msg = end_buy_phase(game, req.player_id)
     if not success:
         raise HTTPException(400, msg)
-
-    # Auto-play CPU buys if any CPU players haven't ended yet
-    if any(p.is_cpu and not p.has_ended_turn for p in game.players.values()):
-        auto_play_cpu_buys(game)
 
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)

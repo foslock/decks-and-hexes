@@ -801,21 +801,20 @@ class CPUPlayer:
             score = self._score_card_for_purchase(card, player, weights, cost, game)
             scored.append((score, {"source": "archetype", "card_id": card.id}))
 
-        # Score neutral market cards (skip if already bought one this turn)
-        if not player.neutral_bought_this_turn:
-            for stack_info in game.neutral_market.get_available():
-                card_dict = stack_info["card"]
-                card_id = card_dict["id"]
-                # Find the actual card object
-                for base_id, copies in game.neutral_market.stacks.items():
-                    if copies and copies[0].id == card_id:
-                        card_obj = copies[0]
-                        cost = calculate_dynamic_buy_cost(game, player, card_obj)
-                        if cost > player.resources:
-                            break
-                        score = self._score_card_for_purchase(card_obj, player, weights, cost, game)
-                        scored.append((score, {"source": "neutral", "card_id": base_id}))
+        # Score neutral market cards
+        for stack_info in game.neutral_market.get_available():
+            card_dict = stack_info["card"]
+            card_id = card_dict["id"]
+            # Find the actual card object
+            for base_id, copies in game.neutral_market.stacks.items():
+                if copies and copies[0].id == card_id:
+                    card_obj = copies[0]
+                    cost = calculate_dynamic_buy_cost(game, player, card_obj)
+                    if cost > player.resources:
                         break
+                    score = self._score_card_for_purchase(card_obj, player, weights, cost, game)
+                    scored.append((score, {"source": "neutral", "card_id": base_id}))
+                    break
 
         # Score upgrade credits
         if player.resources >= UPGRADE_CREDIT_COST:

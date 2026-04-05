@@ -90,7 +90,6 @@ export interface Player {
   upkeep_cost: number;
   tiles_lost_to_upkeep: number;
   rubble_count: number;
-  neutral_bought_this_turn: boolean;
   is_cpu: boolean;
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
   has_left: boolean;
@@ -159,6 +158,14 @@ export interface GameState {
   test_mode?: boolean;
   neutral_purchases_last_round?: NeutralPurchaseRecord[];
   revealed_actions?: Record<string, PlannedAction[]>;
+  current_buyer_index: number;
+  current_buyer_id: string | null;
+  buy_phase_purchases: Record<string, Array<{
+    card_id: string;
+    card_name: string;
+    source: string;
+    cost: number;
+  }>>;
 }
 
 // ── Lobby types ──────────────────────────────────────────

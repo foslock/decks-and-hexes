@@ -255,6 +255,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const settingsRef = useRef<HTMLDivElement>(null);
   // Player panel expand-on-hover
   const [playerPanelExpanded, setPlayerPanelExpanded] = useState(false);
+  // Purchase pill hover preview
+  const [purchaseHover, setPurchaseHover] = useState<{ card: import('../types/game').Card; rect: DOMRect } | null>(null);
+  const [purchaseHoverVisible, setPurchaseHoverVisible] = useState(false);
   // Phase banner state
   const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
   const [bannerKey, setBannerKey] = useState(0);
@@ -315,6 +318,55 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+  // Card lookup maps for purchase hover previews
+  const { cardById, cardByName } = useMemo(() => {
+    const byId = new Map<string, import('../types/game').Card>();
+    const byName = new Map<string, import('../types/game').Card>();
+    // Neutral market cards
+    for (const stack of gameState.neutral_market) {
+      byId.set(stack.card.id, stack.card);
+      byName.set(stack.card.name, stack.card);
+    }
+    // All players' visible cards (hand, discard, deck, archetype market)
+    for (const p of Object.values(gameState.players)) {
+      for (const c of p.hand) { byId.set(c.id, c); byName.set(c.name, c); }
+      for (const c of p.discard) { byId.set(c.id, c); byName.set(c.name, c); }
+      for (const c of p.deck_cards) { byId.set(c.id, c); byName.set(c.name, c); }
+      for (const c of p.archetype_market) { byId.set(c.id, c); byName.set(c.name, c); }
+      for (const c of p.trash ?? []) { byId.set(c.id, c); byName.set(c.name, c); }
+    }
+    return { cardById: byId, cardByName: byName };
+  }, [gameState.neutral_market, gameState.players]);
+
+  // Enrich purchase records with card_type for pill border colors
+  const enrichPurchases = useCallback((purchases?: Array<{ card_id: string; card_name: string; source: string; cost: number }>) => {
+    if (!purchases) return undefined;
+    return purchases.map(p => {
+      const card = cardById.get(p.card_id) ?? cardByName.get(p.card_name);
+      return { ...p, card_type: card?.card_type };
+    });
+  }, [cardById, cardByName]);
+
+  const handlePurchaseHover = useCallback((e: React.MouseEvent, cardId: string, cardName?: string) => {
+    const card = cardById.get(cardId) ?? (cardName ? cardByName.get(cardName) : undefined);
+    if (!card) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPurchaseHoverVisible(false);
+    setPurchaseHover({ card, rect });
+  }, [cardById, cardByName]);
+
+  const handlePurchaseLeave = useCallback(() => {
+    setPurchaseHover(null);
+    setPurchaseHoverVisible(false);
+  }, []);
+
+  // Delayed fade-in for purchase hover preview (matches shop behavior)
+  useEffect(() => {
+    if (!purchaseHover) return;
+    const timer = setTimeout(() => setPurchaseHoverVisible(true), 150);
+    return () => clearTimeout(timer);
+  }, [purchaseHover]);
 
   // Auto-dismiss drag hint after 2 seconds, reset on player/phase change
   useEffect(() => {
@@ -1209,6 +1261,46 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer, homePlayerIndex, shouldCycle, localPlayerIds]);
+
+  // Hot-seat auto-switch: when the current buyer changes (e.g. after a CPU buys
+  // or another player ends their buy turn), switch to the new buyer if they are
+  // a local player controlled by this browser.
+  const prevBuyerIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const buyerId = gameState.current_buyer_id;
+    if (buyerId && buyerId !== prevBuyerIdRef.current && gameState.current_phase === 'buy') {
+      // Auto-switch if the new buyer is a local (non-CPU) player
+      if (localPlayerIds.includes(buyerId) && !gameState.players[buyerId]?.is_cpu) {
+        const buyerIndex = gameState.player_order.indexOf(buyerId);
+        if (buyerIndex >= 0) {
+          setActivePlayerIndex(buyerIndex);
+          setSelectedCardIndex(null);
+        }
+      }
+    }
+    prevBuyerIdRef.current = buyerId;
+  }, [gameState.current_buyer_id, gameState.current_phase, gameState.player_order, gameState.players, localPlayerIds]);
+
+  // CPU buying delay: when the current buyer is a CPU, wait 1.5s so the user
+  // can see the "Buying..." indicator, then trigger the backend to process
+  // CPU purchases.
+  useEffect(() => {
+    const buyerId = gameState.current_buyer_id;
+    if (!buyerId || gameState.current_phase !== 'buy') return;
+    const buyer = gameState.players[buyerId];
+    if (!buyer?.is_cpu) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await api.processCpuBuys(gameState.id);
+        onStateUpdate(result.state);
+      } catch {
+        // CPU buy failed — ignore (state will be stale until next action)
+      }
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [gameState.current_buyer_id, gameState.current_phase, gameState.id, gameState.players, onStateUpdate]);
 
   // Submit Plan button state
   const submitHasCardsLeft = activePlayer ? activePlayer.hand.length > 0 : false;
@@ -2324,7 +2416,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 transition: 'all 0.2s ease',
               }}
             >
-              {(playerPanelExpanded || reviewing) ? (
+              {(playerPanelExpanded || reviewing || phase === 'buy') ? (
                 /* Expanded: all players */
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
@@ -2357,10 +2449,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           isActive={i === activePlayerIndex}
                           isCurrent={i === activePlayerIndex}
                           isFirstPlayer={i === gameState.first_player_index}
+                          isCurrentBuyer={phase === 'buy' && pid === gameState.current_buyer_id}
                           phase={phase}
                           totalCards={pTotal}
                           tileCount={pTiles}
-
+                          purchases={phase === 'buy' ? enrichPurchases(gameState.buy_phase_purchases?.[pid]) : undefined}
+                          onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
+                          onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                         />
                       </div>
                     );
@@ -2378,10 +2473,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         isActive={true}
                         isCurrent={true}
                         isFirstPlayer={activePlayerIndex === gameState.first_player_index}
+                        isCurrentBuyer={phase === 'buy' && activePlayerId === gameState.current_buyer_id}
                         phase={phase}
                         totalCards={pTotal}
                         tileCount={playerTileCount}
-
+                        purchases={phase === 'buy' ? enrichPurchases(gameState.buy_phase_purchases?.[activePlayerId]) : undefined}
+                        onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
+                        onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                       />
                     );
                   })()}
@@ -2389,6 +2487,26 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               )}
             </div>
           </div>
+
+          {/* Purchase pill hover preview (fixed, portal) */}
+          {purchaseHover && createPortal(
+            <div style={{
+              position: 'fixed',
+              left: purchaseHover.rect.right + 12,
+              top: Math.min(
+                purchaseHover.rect.top + purchaseHover.rect.height / 2 - 150,
+                window.innerHeight - 320,
+              ),
+              width: 220,
+              zIndex: 20000,
+              pointerEvents: 'none',
+              opacity: purchaseHoverVisible ? 1 : 0,
+              transition: 'opacity 0.15s ease',
+            }}>
+              <CardFull card={purchaseHover.card} showKeywordHints />
+            </div>,
+            document.body
+          )}
 
           {/* ── Top-right: action buttons + gear ── */}
           <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, alignItems: 'flex-start', zIndex: 210 }}>
@@ -2557,14 +2675,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onBuyNeutral={handleBuyNeutral}
               onBuyUpgrade={handleBuyUpgrade}
               onReroll={handleReroll}
-              disabled={phase !== 'buy' || !!activePlayer?.has_ended_turn}
+              disabled={phase !== 'buy' || activePlayerId !== gameState.current_buyer_id}
               onClose={() => setShowShopOverlay(false)}
               testMode={!!gameState.test_mode}
               effectiveBuyCosts={activePlayer?.effective_buy_costs}
               currentUpkeep={currentUpkeep}
-              neutralBoughtThisTurn={!!activePlayer?.neutral_bought_this_turn}
               neutralPurchasesLastRound={gameState.neutral_purchases_last_round}
               currentPlayerId={activePlayerId}
+              buyPhasePurchases={gameState.buy_phase_purchases}
+              players={gameState.players}
             />
           )}
 
@@ -2888,12 +3007,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 Done Reviewing ✓
               </button>
             )}
-            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !activePlayer.has_ended_turn && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayerId === gameState.current_buyer_id && !activePlayer.has_ended_turn && (
               <HoldToSubmitButton
                 ref={endTurnRef}
                 onConfirm={handleEndTurn}
                 requireHold={true}
-                warning="Ending the turn advances to the next round. Any unspent resources carry over."
+                warning="Done buying passes the shop to the next player. Any unspent resources carry over."
                 style={{
                   padding: '6px 16px',
                   background: '#ff8844',
@@ -2907,7 +3026,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                 }}
               >
-                End Turn →
+                Done Buying →
               </HoldToSubmitButton>
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && (
@@ -2926,14 +3045,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                 }}
               >
-                ✓ Turn Ended
+                ✓ Done Buying
               </button>
             )}
             {/* Multiplayer: waiting for other players indicator */}
             {isMultiplayer && activePlayer && (
               (phase === 'plan' && activePlayer.has_submitted_plan && !resolving) ||
-              (phase === 'reveal' && activePlayer.has_acknowledged_resolve && !resolving && !phaseBanner) ||
-              (phase === 'buy' && activePlayer.has_ended_turn && !phaseBanner)
+              (phase === 'reveal' && activePlayer.has_acknowledged_resolve && !resolving && !phaseBanner)
             ) && (
               <div style={{
                 padding: '4px 12px',
@@ -2948,6 +3066,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 Waiting for other players...
               </div>
             )}
+            {/* Sequential buy: waiting for current buyer */}
+            {phase === 'buy' && activePlayer && activePlayer.has_ended_turn && activePlayerId !== gameState.current_buyer_id && !phaseBanner && (() => {
+              const buyerId = gameState.current_buyer_id;
+              const buyerName = buyerId ? gameState.players[buyerId]?.name : null;
+              return buyerName ? (
+                <div style={{
+                  padding: '4px 12px',
+                  background: 'rgba(255, 170, 74, 0.15)',
+                  border: '1px solid rgba(255, 170, 74, 0.3)',
+                  borderRadius: 6,
+                  color: '#ffaa4a',
+                  fontSize: 12,
+                  fontWeight: 'bold',
+                  animation: 'pulse 2s ease-in-out infinite',
+                }}>
+                  Waiting for {buyerName} to buy...
+                </div>
+              ) : null;
+            })()}
           </div>
         </div>
 
@@ -2984,6 +3121,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 label: trashMode.label,
               } : null}
               onTrashToggle={handleTrashToggle}
+              closePopups={showShopOverlay || showCardBrowser || showDeckViewer}
             />
           )}
         </div>
@@ -3024,7 +3162,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       {/* Review mode: tile hover popup showing cards played on this tile */}
       {reviewing && reviewHoveredTile && reviewTilePopupPos && reviewTileCards?.has(reviewHoveredTile) && (() => {
         const cards = reviewTileCards.get(reviewHoveredTile)!;
-        const POPUP_W = 160;
+        const POPUP_W = 180;
         const left = Math.min(reviewTilePopupPos.x + 16, window.innerWidth - POPUP_W - 12);
         const top = Math.min(reviewTilePopupPos.y - 20, window.innerHeight - cards.length * 70 - 20);
         const REVIEW_TYPE_COLORS: Record<string, string> = { claim: '#4a9eff', defense: '#4aff6a', engine: '#ffaa4a', passive: '#aa88cc' };
@@ -3090,20 +3228,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     {entry.playerName}
                   </div>
                   <div style={{
-                    width: 134,
+                    width: 154,
                     padding: 6,
                     background: '#2a2a3e',
                     border: `1px solid ${typeColor}`,
                     borderRadius: 6,
                     color: '#fff',
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                      <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+                      <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                         {c.name}
                       </div>
-                      <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
+                      <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
                     </div>
-                    <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                    <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                       <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
                         if (el) {
                           const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -3128,7 +3266,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const rowEl = playerRowRefs.current.get(reviewHoveredPlayer);
         if (!rowEl) return null;
         const rect = rowEl.getBoundingClientRect();
-        const POPUP_W = 160;
+        const POPUP_W = 180;
         const REVIEW_TYPE_COLORS: Record<string, string> = { claim: '#4a9eff', defense: '#4aff6a', engine: '#ffaa4a', passive: '#aa88cc' };
         const REVIEW_EMOJI: Record<string, string> = { claim: '⚔️', defense: '🛡️', engine: '⚙️', passive: '📜' };
         return (
@@ -3189,7 +3327,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               if (c.trash_on_use) statParts.push('🗑️');
               return (
                 <div key={i} style={{
-                  width: 134,
+                  width: 154,
                   padding: 6,
                   background: '#2a2a3e',
                   border: `1px solid ${typeColor}`,
@@ -3197,13 +3335,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   color: '#fff',
                   marginBottom: i < actions.length - 1 ? 4 : 0,
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+                    <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                       {c.name}
                     </div>
-                    <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
+                    <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                  <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                     <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
                       if (el) {
                         const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);

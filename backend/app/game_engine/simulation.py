@@ -266,8 +266,11 @@ def _run_plan_phase(game: GameState, cpus: dict[str, CPUPlayer],
 def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
                    tracking: dict[str, PlayerResult],
                    verbose: bool) -> None:
-    """Run the buy phase for all CPU players."""
-    for pid in game.player_order:
+    """Run the buy phase for all CPU players (in sequential buyer order)."""
+    n = len(game.player_order)
+    for i in range(n):
+        idx = (game.first_player_index + i) % n
+        pid = game.player_order[idx]
         player = game.players[pid]
         cpu = cpus[pid]
 

@@ -138,7 +138,6 @@ class Player:
     has_submitted_plan: bool = False
     has_acknowledged_resolve: bool = False
     has_ended_turn: bool = False
-    neutral_bought_this_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
     trash: list[Card] = field(default_factory=list)
     last_upkeep_paid: int = 0  # resources actually deducted at start of this turn
@@ -207,7 +206,6 @@ class Player:
             "upkeep_cost": self.upkeep_cost,
             "tiles_lost_to_upkeep": self.tiles_lost_to_upkeep,
             "rubble_count": self.rubble_count,
-            "neutral_bought_this_turn": self.neutral_bought_this_turn,
             "is_cpu": self.is_cpu,
             "cpu_difficulty": (
                 "easy" if self.cpu_noise >= 0.25 else
@@ -286,6 +284,10 @@ class GameState:
     lobby_code: Optional[str] = None
     # Tracks neutral market purchases: {card_id, card_name, player_id, player_name, round}
     neutral_purchase_log: list[dict[str, Any]] = field(default_factory=list)
+    # Sequential buy phase: index into player_order for whose turn it is to buy
+    current_buyer_index: int = 0
+    # Cards purchased by each player this round: {player_id: [{card_id, card_name, source, cost}]}
+    buy_phase_purchases: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None) -> None:
@@ -352,6 +354,13 @@ class GameState:
             "vp_target": self.vp_target,
             "log": self.log[-20:],  # last 20 for backward compat
             "test_mode": self.test_mode,
+            "current_buyer_index": self.current_buyer_index,
+            "current_buyer_id": (
+                self.player_order[self.current_buyer_index]
+                if self.current_phase == Phase.BUY and self.player_order
+                else None
+            ),
+            "buy_phase_purchases": self.buy_phase_purchases,
         }
         if self.resolution_steps:
             result["resolution_steps"] = self.resolution_steps
@@ -609,7 +618,6 @@ def execute_start_of_turn(game: GameState) -> GameState:
         player.has_submitted_plan = False
         player.has_acknowledged_resolve = False
         player.has_ended_turn = False
-        player.neutral_bought_this_turn = False
 
         # Reveal archetype market (3 random, or all in test mode)
         player.archetype_market = []
@@ -1353,6 +1361,15 @@ def advance_resolve(game: GameState, player_id: str) -> tuple[bool, str]:
 def _transition_to_buy(game: GameState) -> None:
     """Transition from REVEAL to BUY phase."""
     game.current_phase = Phase.BUY
+    game.buy_phase_purchases = {}
+    # Start with first player, skip left players
+    game.current_buyer_index = game.first_player_index
+    n = len(game.player_order)
+    for _ in range(n):
+        pid = game.player_order[game.current_buyer_index]
+        if not game.players[pid].has_left:
+            break
+        game.current_buyer_index = (game.current_buyer_index + 1) % n
     game._log("=== Buy Phase ===")
 
 
@@ -1371,6 +1388,10 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
     if player.has_ended_turn:
         return False, "Already ended turn"
 
+    # Sequential buying: only current buyer can purchase
+    if game.player_order and player_id != game.player_order[game.current_buyer_index]:
+        return False, "Not your turn to buy"
+
     # Check buy restriction (Blitz Rush)
     if player.turn_modifiers.buy_locked:
         return False, "Cannot purchase cards this round (buy restriction active)"
@@ -1383,6 +1404,10 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         if not free:
             player.resources -= UPGRADE_CREDIT_COST
         player.upgrade_credits += 1
+        game.buy_phase_purchases.setdefault(player_id, []).append({
+            "card_id": "upgrade_credit", "card_name": "Upgrade Credit",
+            "source": "upgrade", "cost": UPGRADE_CREDIT_COST if not free else 0,
+        })
         game._log(f"{player.name} buys upgrade credit ({player.upgrade_credits} total)")
         return True, "Upgrade credit purchased"
 
@@ -1404,12 +1429,14 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         player.archetype_market.remove(target)
         player.archetype_deck.remove(target)
         player.deck.add_to_discard([target])
+        game.buy_phase_purchases.setdefault(player_id, []).append({
+            "card_id": target.id, "card_name": target.name,
+            "source": "archetype", "cost": effective_cost if not free else 0,
+        })
         game._log(f"{player.name} buys {target.name} from archetype market")
         return True, f"Bought {target.name}"
 
     if source == "neutral":
-        if player.neutral_bought_this_turn and not game.test_mode:
-            return False, "Already bought a neutral card this turn (limit 1)"
         result = game.neutral_market.purchase(card_id)
         if not result:
             return False, "Card not available in neutral market"
@@ -1424,7 +1451,10 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             if effective_cost > 0:
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
-        player.neutral_bought_this_turn = True
+        game.buy_phase_purchases.setdefault(player_id, []).append({
+            "card_id": base_card_id, "card_name": purchased.name,
+            "source": "neutral", "cost": effective_cost if not free else 0,
+        })
         game.neutral_purchase_log.append({
             "card_id": base_card_id,
             "card_name": purchased.name,
@@ -1564,6 +1594,10 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
     if player.has_ended_turn:
         return False, "Already ended turn"
 
+    # Sequential buying: only current buyer can reroll
+    if game.player_order and player_id != game.player_order[game.current_buyer_index]:
+        return False, "Not your turn to buy"
+
     # Use free rerolls first (from Surveyor), otherwise charge resources
     if player.turn_modifiers.free_rerolls > 0:
         player.turn_modifiers.free_rerolls -= 1
@@ -1585,8 +1619,23 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
     return True, "Market re-rolled"
 
 
+def _advance_buyer(game: GameState) -> bool:
+    """Advance current_buyer_index to next non-left, non-done player.
+
+    Returns True if a next buyer was found, False if all players are done.
+    """
+    n = len(game.player_order)
+    for _ in range(n):
+        game.current_buyer_index = (game.current_buyer_index + 1) % n
+        pid = game.player_order[game.current_buyer_index]
+        p = game.players[pid]
+        if not p.has_left and not p.has_ended_turn:
+            return True
+    return False
+
+
 def end_buy_phase(game: GameState, player_id: str) -> tuple[bool, str]:
-    """Player signals they're done buying."""
+    """Player signals they're done buying (sequential)."""
     if game.current_phase != Phase.BUY:
         return False, "Not in Buy phase"
     player = game.players.get(player_id)
@@ -1594,11 +1643,19 @@ def end_buy_phase(game: GameState, player_id: str) -> tuple[bool, str]:
         return False, "Player not found"
     if player.has_ended_turn:
         return False, "Already ended turn"
+
+    # Only the current buyer can end their buy turn
+    if game.player_order and player_id != game.player_order[game.current_buyer_index]:
+        return False, "Not your turn to buy"
+
     player.has_ended_turn = True
-    game._log(f"{player.name} ends their turn", actor=player_id)
-    if all(p.has_ended_turn for p in game.players.values()):
+    game._log(f"{player.name} finishes buying", actor=player_id)
+
+    # Advance to next buyer, or end the turn if all done
+    if not _advance_buyer(game):
         execute_end_of_turn(game)
-    return True, "Turn ended"
+
+    return True, "Done buying"
 
 
 def execute_end_of_turn(game: GameState) -> GameState:
@@ -1669,13 +1726,14 @@ def auto_play_cpu_plans(game: GameState) -> None:
 
 
 def auto_play_cpu_buys(game: GameState) -> None:
-    """Auto-play buy phase for all CPU players who haven't ended turn."""
+    """Auto-play buy phase for consecutive CPU buyers (sequential buy order)."""
     from .cpu_player import CPUPlayer
 
-    for pid in game.player_order:
+    while game.current_phase == Phase.BUY:
+        pid = game.player_order[game.current_buyer_index]
         player = game.players[pid]
-        if not player.is_cpu or player.has_ended_turn:
-            continue
+        if not player.is_cpu or player.has_ended_turn or player.has_left:
+            break  # Current buyer is human (or already done) — stop
 
         cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
 

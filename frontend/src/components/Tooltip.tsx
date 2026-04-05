@@ -139,7 +139,7 @@ export function IrreversibleButton({
             zIndex: 20000,
             pointerEvents: 'none',
             boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-            whiteSpace: 'normal',
+            whiteSpace: 'pre-line',
             textAlign: 'center',
           }}
         >

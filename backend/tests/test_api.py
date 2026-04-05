@@ -223,15 +223,20 @@ class TestBuyAndEndTurn:
 
     def test_end_turn(self, client: TestClient) -> None:
         game_id = self._create_and_advance_to_buy(client)
-        # First player ends turn — still in buy phase
-        resp = client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p0"})
+        # Get game state to find current buyer order
+        resp = client.get(f"/api/games/{game_id}")
+        state = resp.json()
+        buyer1 = state["current_buyer_id"]
+        buyer2 = "p1" if buyer1 == "p0" else "p0"
+        # Current buyer ends turn — still in buy phase
+        resp = client.post(f"/api/games/{game_id}/end-turn", json={"player_id": buyer1})
         assert resp.status_code == 200
         state = resp.json()["state"]
         assert state["current_phase"] == "buy"
-        assert state["players"]["p0"]["has_ended_turn"] is True
-        assert state["players"]["p1"]["has_ended_turn"] is False
-        # Second player ends turn — advances to next round
-        resp = client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p1"})
+        assert state["players"][buyer1]["has_ended_turn"] is True
+        assert state["players"][buyer2]["has_ended_turn"] is False
+        # Second buyer ends turn — advances to next round
+        resp = client.post(f"/api/games/{game_id}/end-turn", json={"player_id": buyer2})
         assert resp.status_code == 200
         state = resp.json()["state"]
         assert state["current_round"] == 2
@@ -253,19 +258,21 @@ class TestBuyAndEndTurn:
 
     def test_buy_upgrade(self, client: TestClient) -> None:
         game_id = self._create_and_advance_to_buy(client)
-        # Give p0 enough resources via direct state manipulation
-        _games[game_id].players["p0"].resources = 10
+        # Find the current buyer and give them enough resources
+        buyer_id = _games[game_id].player_order[_games[game_id].current_buyer_index]
+        _games[game_id].players[buyer_id].resources = 10
         resp = client.post(f"/api/games/{game_id}/buy", json={
-            "player_id": "p0",
+            "player_id": buyer_id,
             "source": "upgrade",
         })
         assert resp.status_code == 200
 
     def test_reroll(self, client: TestClient) -> None:
         game_id = self._create_and_advance_to_buy(client)
-        _games[game_id].players["p0"].resources = 10
+        buyer_id = _games[game_id].player_order[_games[game_id].current_buyer_index]
+        _games[game_id].players[buyer_id].resources = 10
         resp = client.post(f"/api/games/{game_id}/reroll", json={
-            "player_id": "p0",
+            "player_id": buyer_id,
         })
         assert resp.status_code == 200
 
@@ -354,8 +361,12 @@ class TestGameLog:
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
-        client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p0"})
-        client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p1"})
+        # End buy phase in sequential buyer order
+        game = _games[game_id]
+        buyer1 = game.player_order[game.current_buyer_index]
+        buyer2 = "p1" if buyer1 == "p0" else "p0"
+        client.post(f"/api/games/{game_id}/end-turn", json={"player_id": buyer1})
+        client.post(f"/api/games/{game_id}/end-turn", json={"player_id": buyer2})
 
         resp = client.get(f"/api/games/{game_id}/log")
         entries = resp.json()["entries"]
