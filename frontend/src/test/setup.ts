@@ -6,14 +6,38 @@ globalThis.ResizeObserver = class ResizeObserver {
   disconnect() {}
 };
 
-// Suppress PixiJS canvas errors in jsdom (getContext returns null)
-const _origListener = process.listeners('unhandledRejection');
-process.on('unhandledRejection', (reason: unknown) => {
-  if (reason instanceof TypeError && String(reason.message).includes('imageSmoothingEnabled')) {
-    return; // Swallow PixiJS canvas init errors in jsdom
-  }
-  // Re-throw anything else
-  throw reason;
-});
+// Suppress PixiJS canvas errors in jsdom (getContext returns null).
+// Mock getContext so PixiJS doesn't throw during component mount.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(HTMLCanvasElement.prototype as any).getContext = function (_type: string) {
+  return {
+    canvas: document.createElement('canvas'),
+    imageSmoothingEnabled: true,
+    fillRect() {},
+    clearRect() {},
+    getImageData() { return { data: new Uint8ClampedArray(0) }; },
+    putImageData() {},
+    drawImage() {},
+    save() {},
+    restore() {},
+    scale() {},
+    translate() {},
+    rotate() {},
+    beginPath() {},
+    closePath() {},
+    moveTo() {},
+    lineTo() {},
+    arc() {},
+    fill() {},
+    stroke() {},
+    clip() {},
+    measureText() { return { width: 0 }; },
+    setTransform() {},
+    resetTransform() {},
+    createLinearGradient() { return { addColorStop() {} }; },
+    createRadialGradient() { return { addColorStop() {} }; },
+    createPattern() { return null; },
+  };
+};
 
 import '@testing-library/jest-dom/vitest';
