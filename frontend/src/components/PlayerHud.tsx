@@ -1,4 +1,5 @@
 import { useRef, useLayoutEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { Player } from '../types/game';
 
 /** Renders text that shrinks (via transform scaleX) to fit a fixed max width. */
@@ -199,32 +200,29 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
         position: 'relative',
       }}
     >
-      {/* VP target tooltip — positioned to the right */}
-      {showVpTooltip && hasReachedVpTarget && (() => {
-        const rect = hudRef.current?.getBoundingClientRect();
-        if (!rect) return null;
-        return (
-          <span style={{
-            position: 'fixed',
-            left: rect.right + 8,
-            top: rect.top + rect.height / 2,
-            transform: 'translateY(-50%)',
-            whiteSpace: 'nowrap',
-            background: '#111122',
-            border: '1px solid #ffd700',
-            borderRadius: 6,
-            padding: '4px 10px',
-            fontSize: 11,
-            color: '#ffd700',
-            fontWeight: 'bold',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-            zIndex: 500,
-            pointerEvents: 'none',
-          }}>
-            ★ {player.name} has reached the VP target — game ends next round
-          </span>
-        );
-      })()}
+      {/* VP target tooltip — portalled to body so it's never clipped */}
+      {showVpTooltip && hasReachedVpTarget && hudRef.current && createPortal(
+        <span style={{
+          position: 'fixed',
+          left: hudRef.current.getBoundingClientRect().right + 8,
+          top: hudRef.current.getBoundingClientRect().top + hudRef.current.getBoundingClientRect().height / 2,
+          transform: 'translateY(-50%)',
+          whiteSpace: 'nowrap',
+          background: '#111122',
+          border: '1px solid #ffd700',
+          borderRadius: 6,
+          padding: '4px 10px',
+          fontSize: 11,
+          color: '#ffd700',
+          fontWeight: 'bold',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+          zIndex: 20000,
+          pointerEvents: 'none',
+        }}>
+          ★ {player.name} has reached the VP target — game ends next round
+        </span>,
+        document.body
+      )}
       {/* Name row */}
       <div style={{ fontWeight: 'bold', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{
