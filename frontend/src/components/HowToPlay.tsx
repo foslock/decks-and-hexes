@@ -261,8 +261,9 @@ const PAGES = [
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
             <div style={{ fontSize: 14, fontWeight: 'bold', color: '#5dde5d', marginBottom: 4 }}>4. Buy</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
-              Spend resources to buy new cards from your archetype market or the shared neutral market.
-              You can also re-roll your archetype market or purchase upgrade credits.
+              Players take turns buying in order. Spend resources to buy new cards from your archetype
+              market or the shared neutral market. You can also re-roll your archetype market or
+              purchase upgrade credits. Other players can see what you bought.
             </div>
           </div>
         </div>

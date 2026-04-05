@@ -43,11 +43,11 @@ Card Clash is a 2–6 player simultaneous deck-building territory control game. 
 
 ## Key Design Rules (critical to get right in implementation)
 
-### Turn Structure (5 phases, all simultaneous)
+### Turn Structure (5 phases)
 1. **Start of Turn** — Pay upkeep (skip round 1), score VP hexes held since last turn, check win (20 VP), draw hand, reveal archetype market (3 random cards from player's archetype deck)
-2. **Plan Phase** — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
+2. **Plan Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
-4. **Buy Phase** — Spend resources. Re-roll (2 resources, once per turn) or Retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards, or upgrade credits (5 resources).
+4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards (unlimited per turn), or upgrade credits (5 resources). Purchases are visible to all players.
 5. **End of Turn** — Discard hand. Check objective reveal threshold. Rotate first player token clockwise.
 
 ### Action Slot System
