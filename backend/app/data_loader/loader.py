@@ -90,9 +90,13 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         timing = Timing.IMMEDIATE
 
     # Parse resource_gain from effect text if not explicit
+    # Skip if a gain_resources effect already handles it (conditional gains)
     resource_gain = _safe_int(entry.get("resource_gain", 0))
     effect = str(entry.get("effect", ""))
-    if resource_gain == 0 and "gain" in effect.lower() and "resource" in effect.lower():
+    has_gain_resources_effect = any(
+        e.get("type") == "gain_resources" for e in entry.get("effects", [])
+    )
+    if resource_gain == 0 and "gain" in effect.lower() and "resource" in effect.lower() and not has_gain_resources_effect:
         match = re.search(r'[Gg]ain\s+(\d+)\s+resource', effect)
         if match:
             resource_gain = int(match.group(1))
