@@ -1,4 +1,4 @@
-# HexDraft – Passive Abilities Pool
+# Card Clash – Passive Abilities Pool
 # At game start, n+2 passives are drawn randomly (n = active players).
 # Drafted in reverse turn order. Each player selects 1. Undrafted passives are discarded.
 # Passives are permanent for the entire game.

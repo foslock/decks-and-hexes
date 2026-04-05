@@ -1,4 +1,4 @@
-# HexDraft – Fortress Card Pool
+# Card Clash – Fortress Card Pool
 # Archetype: Cheap + Strong
 # Action Slots: 3
 # Identity: High power, deliberate cycle, defensive turtling

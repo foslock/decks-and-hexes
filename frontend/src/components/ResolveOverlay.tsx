@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ResolutionStep } from '../types/game';
 import type { GridTransform } from './HexGrid';
-import { useAnimationMode } from './SettingsContext';
+import { useAnimationMode, useAnimationSpeed } from './SettingsContext';
 
 // Must match HexGrid.tsx
 const HEX_SIZE = 32;
@@ -52,14 +52,21 @@ type StepStage = 'numbers_move' | 'winner_grow' | 'done';
  */
 export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepApply, onComplete }: ResolveOverlayProps) {
   const animMode = useAnimationMode();
-  const isNormal = animMode === 'normal';
   const isOff = animMode === 'off';
+  const animSpeed = useAnimationSpeed();
 
   const [currentIdx, setCurrentIdx] = useState(0);
   const [stage, setStage] = useState<StepStage>('numbers_move');
   const [numbersActive, setNumbersActive] = useState(false);
   const completedRef = useRef(false);
   const appliedStepsRef = useRef(new Set<number>());
+
+  // Stable refs for callbacks — prevents effect cleanup from cancelling
+  // pending timeouts when parent re-renders (e.g. from WebSocket updates)
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onStepApplyRef = useRef(onStepApply);
+  onStepApplyRef.current = onStepApply;
 
   const step = steps[currentIdx] as ResolutionStep | undefined;
 
@@ -110,17 +117,17 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
   const isContested = step?.contested && numbers.length > 1;
 
   // Timing
-  const moveMs = isNormal ? (isContested ? 800 : 400) : 0;
-  const growMs = isNormal ? (isContested ? 1200 : 400) : 0;
-  const pauseMs = isNormal ? 200 : (isOff ? 50 : 100);
+  const moveMs = isOff ? 0 : Math.round((isContested ? 800 : 400) * animSpeed);
+  const growMs = isOff ? 0 : Math.round((isContested ? 1200 : 400) * animSpeed);
+  const pauseMs = isOff ? 50 : Math.round(200 * animSpeed);
 
   const hasPositionData = !!(gridTransform && gridRect);
 
   const fireStepApply = useCallback((idx: number) => {
     if (appliedStepsRef.current.has(idx)) return;
     appliedStepsRef.current.add(idx);
-    onStepApply?.(idx);
-  }, [onStepApply]);
+    onStepApplyRef.current?.(idx);
+  }, []);
 
   // Trigger number movement after mount (wait for position data before starting)
   useEffect(() => {
@@ -162,7 +169,7 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
     const nextIdx = currentIdx + 1;
     if (nextIdx >= steps.length) {
       completedRef.current = true;
-      const t = setTimeout(onComplete, pauseMs);
+      const t = setTimeout(() => onCompleteRef.current(), pauseMs);
       return () => clearTimeout(t);
     }
 
@@ -172,13 +179,10 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
       setNumbersActive(false);
     }, pauseMs);
     return () => clearTimeout(t);
-  }, [stage, currentIdx, steps.length, onComplete, pauseMs]);
+  }, [stage, currentIdx, steps.length, pauseMs]);
 
   // Nothing to render if off mode or no steps
   if (!step || isOff || !gridTransform || !gridRect) return null;
-
-  // For uncontested claims in simplified mode, just show a brief flash
-  const isSimplified = animMode === 'simplified';
 
   return (
     <div style={{
@@ -198,32 +202,8 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
         let scale = 1;
         let transition: string;
 
-        if (isSimplified) {
-          // Simplified: numbers appear around tile, winner appears in center
-          if (!numbersActive) {
-            opacity = 0;
-            x = num.endX;
-            y = num.endY;
-          } else if (isWinStage) {
-            if (num.isWinner) {
-              x = num.endX;
-              y = num.endY;
-              scale = 1.8;
-            } else {
-              x = num.endX + (i - numbers.length / 2) * 30;
-              y = num.endY;
-              opacity = 0;
-            }
-          } else {
-            // Spread around tile
-            const angle = (i / numbers.length) * Math.PI * 2 - Math.PI / 2;
-            const radius = 25;
-            x = num.endX + Math.cos(angle) * radius;
-            y = num.endY + Math.sin(angle) * radius;
-          }
-          transition = 'all 200ms ease';
-        } else {
-          // Normal: numbers fly from source tile to target
+        {
+          // Numbers fly from source tile to target (speed-scaled)
           if (!numbersActive) {
             x = num.startX;
             y = num.startY;

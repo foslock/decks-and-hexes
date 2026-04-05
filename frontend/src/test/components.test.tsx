@@ -63,7 +63,7 @@ describe('CardHand', () => {
   ];
 
   it('renders all cards', () => {
-    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText('Advance')).toBeInTheDocument();
     expect(screen.getByText('Gather')).toBeInTheDocument();
     expect(screen.getByText('Blitz')).toBeInTheDocument();
@@ -71,18 +71,18 @@ describe('CardHand', () => {
 
   it('calls onSelect when card clicked', async () => {
     const onSelect = vi.fn();
-    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={onSelect} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={onSelect} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     await userEvent.click(screen.getByText('Advance'));
     expect(onSelect).toHaveBeenCalledWith(0);
   });
 
   it('shows empty message when no cards', () => {
-    render(<WithSettings><CardHand playerId="p0" cards={[]} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={[]} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText(/No cards in hand/)).toBeInTheDocument();
   });
 
   it('shows dark overlay when disabled', () => {
-    const { container } = render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={true} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
+    const { container } = render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={true} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     const cardElements = container.querySelectorAll('[role="button"]');
     expect(cardElements.length).toBe(3);
     cardElements.forEach((el) => {
@@ -96,13 +96,13 @@ describe('CardHand', () => {
   });
 
   it('shows power in stats line', () => {
-    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText(/Pow 1/)).toBeInTheDocument();
     expect(screen.getByText(/Pow 4/)).toBeInTheDocument();
   });
 
   it('shows resource gain for engine cards', () => {
-    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} onCardDetail={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByText(/\+2/)).toBeInTheDocument();
   });
 });
@@ -127,8 +127,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
-        onCardDetail={() => {}}
-        disabled={false}
+               disabled={false}
       />
     );
     expect(screen.getByText('Overrun')).toBeInTheDocument();
@@ -147,8 +146,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
-        onCardDetail={() => {}}
-        disabled={false}
+               disabled={false}
       />
     );
     // Each market card has a Buy button
@@ -156,25 +154,6 @@ describe('MarketPanel', () => {
     // Click the Buy for Strike Team (second archetype card)
     await userEvent.click(buyButtons[1]);
     expect(onBuy).toHaveBeenCalledWith('arch_2');
-  });
-
-  it('calls onCardDetail when card name clicked in market', async () => {
-    const onDetail = vi.fn();
-    render(
-      <MarketPanel
-        archetypeMarket={archetypeMarket}
-        neutralMarket={neutralMarket}
-        playerResources={10}
-        onBuyArchetype={() => {}}
-        onBuyNeutral={() => {}}
-        onBuyUpgrade={() => {}}
-        onReroll={() => {}}
-        onCardDetail={onDetail}
-        disabled={false}
-      />
-    );
-    await userEvent.click(screen.getByText('Overrun'));
-    expect(onDetail).toHaveBeenCalledWith(expect.objectContaining({ id: 'arch_1', name: 'Overrun' }));
   });
 
   it('calls onReroll when reroll button clicked', async () => {
@@ -188,8 +167,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={onReroll}
-        onCardDetail={() => {}}
-        disabled={false}
+               disabled={false}
       />
     );
     await userEvent.click(screen.getByText(/Re-roll/));
@@ -206,8 +184,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
-        onCardDetail={() => {}}
-        disabled={false}
+               disabled={false}
       />
     );
     const rerollBtn = screen.getByText(/Re-roll/);
@@ -224,8 +201,7 @@ describe('MarketPanel', () => {
         onBuyNeutral={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
-        onCardDetail={() => {}}
-        disabled={false}
+               disabled={false}
       />
     );
     const upgradeBtn = screen.getByText(/Buy Upgrade/);
@@ -249,53 +225,29 @@ describe('GameLog', () => {
 });
 
 describe('SetupScreen', () => {
-  it('renders setup form', () => {
-    render(<SetupScreen onStart={() => {}} />);
-    expect(screen.getByText('HexDraft')).toBeInTheDocument();
-    expect(screen.getByText('Start Game')).toBeInTheDocument();
+  it('renders title and lobby buttons', () => {
+    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={() => {}} />);
+    expect(screen.getByText('Card Clash')).toBeInTheDocument();
+    expect(screen.getByText('Create Lobby')).toBeInTheDocument();
+    expect(screen.getByText('Join Lobby')).toBeInTheDocument();
   });
 
-  it('shows grid size options', () => {
-    render(<SetupScreen onStart={() => {}} />);
-    expect(screen.getByText(/Small \(61/)).toBeInTheDocument();
-    expect(screen.getByText(/Medium \(91/)).toBeInTheDocument();
-    expect(screen.getByText(/Large \(127/)).toBeInTheDocument();
+  it('shows info buttons', () => {
+    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={() => {}} />);
+    expect(screen.getByText('How to Play')).toBeInTheDocument();
+    expect(screen.getByText('Card Browser')).toBeInTheDocument();
   });
 
-  it('calls onStart with config', async () => {
-    const onStart = vi.fn();
-    render(<SetupScreen onStart={onStart} />);
-    await userEvent.click(screen.getByText('Start Game'));
-    expect(onStart).toHaveBeenCalledWith(expect.objectContaining({
-      gridSize: 'small',
-      players: expect.arrayContaining([
-        expect.objectContaining({ archetype: 'vanguard' }),
-        expect.objectContaining({ archetype: 'swarm' }),
-      ]),
-    }));
+  it('calls onCreateLobby', async () => {
+    const onCreateLobby = vi.fn();
+    render(<SetupScreen onCreateLobby={onCreateLobby} onJoinLobby={() => {}} />);
+    await userEvent.click(screen.getByText('Create Lobby'));
+    expect(onCreateLobby).toHaveBeenCalled();
   });
 
-  it('allows changing player count', async () => {
-    render(<SetupScreen onStart={() => {}} />);
-    // Default is 3 players (1 human + 2 CPU). Only human players have text inputs.
-    const inputs = screen.getAllByRole('textbox');
-    expect(inputs).toHaveLength(1); // Only human Player 1 has a name input
-    // CPU players show difficulty buttons instead
-    expect(screen.getAllByText('CPU')).toHaveLength(2);
-  });
-
-  it('allows changing player name', async () => {
-    const onStart = vi.fn();
-    render(<SetupScreen onStart={onStart} />);
-    // Only the first player (human) has a text input
-    const inputs = screen.getAllByRole('textbox');
-    await userEvent.clear(inputs[0]);
-    await userEvent.type(inputs[0], 'Gandalf');
-    await userEvent.click(screen.getByText('Start Game'));
-    expect(onStart).toHaveBeenCalledWith(expect.objectContaining({
-      players: expect.arrayContaining([
-        expect.objectContaining({ name: 'Gandalf' }),
-      ]),
-    }));
+  it('shows join code input when Join Lobby clicked', async () => {
+    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={() => {}} />);
+    await userEvent.click(screen.getByText('Join Lobby'));
+    expect(screen.getByPlaceholderText('CODE')).toBeInTheDocument();
   });
 });

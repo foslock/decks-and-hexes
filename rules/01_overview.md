@@ -1,7 +1,7 @@
-# HexDraft – Game Overview
+# Card Clash – Game Overview
 
 ## Summary
-HexDraft is a 2–6 player simultaneous deck-building territory control game. Players start in corners of a hexagonal grid, grow their deck of cards over the course of the game, and compete to be the first player to reach the **VP target** (determined by grid size, player count, and game speed).
+Card Clash is a 2–6 player simultaneous deck-building territory control game. Players start in corners of a hexagonal grid, grow their deck of cards over the course of the game, and compete to be the first player to reach the **VP target** (determined by grid size, player count, and game speed).
 
 ## Core Design Pillars
 - **Simultaneous play** – all players plan and reveal actions at the same time to keep turns fast

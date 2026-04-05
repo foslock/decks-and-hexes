@@ -1,4 +1,4 @@
-"""REST API routes for hot-seat play."""
+"""REST API routes for hot-seat and multiplayer play."""
 
 from __future__ import annotations
 
@@ -9,11 +9,14 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.api.ws_manager import manager
+from app.api.lobby import get_visible_player_ids
 from app.data_loader.loader import load_all_cards
 from app.game_engine.cards import Archetype
 from app.game_engine.game_state import (
     GameState,
     Phase,
+    advance_resolve,
     auto_play_cpu_buys,
     auto_play_cpu_plans,
     buy_card,
@@ -41,6 +44,22 @@ def _get_card_registry() -> dict[str, Any]:
     if _card_registry is None:
         _card_registry = load_all_cards()
     return _card_registry
+
+
+def _is_multiplayer(game: GameState) -> bool:
+    """Check if this game was created from a lobby (multiplayer)."""
+    return bool(getattr(game, 'lobby_code', None))
+
+
+def _game_state_for_player(game: GameState, player_id: str) -> dict[str, Any]:
+    """Return game state dict with proper hand visibility for this player."""
+    visible = get_visible_player_ids(game.id, player_id) if _is_multiplayer(game) else None
+    return game.to_dict(for_player_id=player_id, visible_player_ids=visible)
+
+
+async def _broadcast_state(game_id: str, game: GameState) -> None:
+    """Broadcast game state to all connected players with proper visibility."""
+    await manager.broadcast_game_state(game_id, game, get_visible_ids=get_visible_player_ids)
 
 
 # ── Request/Response models ──────────────────────────────────
@@ -92,6 +111,10 @@ class EndTurnRequest(BaseModel):
     player_id: str
 
 
+class AdvanceResolveRequest(BaseModel):
+    player_id: str
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 
@@ -133,6 +156,9 @@ async def get_game(game_id: str, player_id: Optional[str] = None) -> dict[str, A
     game = _games.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
+    if player_id and _is_multiplayer(game):
+        visible = get_visible_player_ids(game.id, player_id)
+        return game.to_dict(for_player_id=player_id, visible_player_ids=visible)
     return game.to_dict(for_player_id=player_id)
 
 
@@ -157,7 +183,10 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict()}
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
 @router.post("/games/{game_id}/submit-plan")
@@ -175,7 +204,27 @@ async def submit_plan_route(game_id: str, req: SubmitPlanRequest) -> dict[str, A
     if any(p.is_cpu and not p.has_submitted_plan for p in game.players.values()):
         auto_play_cpu_plans(game)
 
-    return {"message": msg, "state": game.to_dict()}
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
+
+
+@router.post("/games/{game_id}/advance-resolve")
+async def advance_resolve_route(game_id: str, req: AdvanceResolveRequest) -> dict[str, Any]:
+    """Player acknowledges resolve phase (animations done), advance to buy."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    success, msg = advance_resolve(game, req.player_id)
+    if not success:
+        raise HTTPException(400, msg)
+
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
 @router.post("/games/{game_id}/buy")
@@ -189,7 +238,10 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict()}
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
 @router.post("/games/{game_id}/upgrade-card")
@@ -203,7 +255,10 @@ async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str,
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict()}
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
 @router.post("/games/{game_id}/reroll")
@@ -217,7 +272,10 @@ async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
-    return {"message": msg, "state": game.to_dict()}
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
 @router.post("/games/{game_id}/end-buy")
@@ -235,7 +293,10 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     if any(p.is_cpu and not p.has_ended_turn for p in game.players.values()):
         auto_play_cpu_buys(game)
 
-    return {"message": msg, "state": game.to_dict()}
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
 @router.post("/games/{game_id}/advance-upkeep")
@@ -249,6 +310,10 @@ async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
         raise HTTPException(400, f"Not in Upkeep phase (current: {game.current_phase.value})")
 
     execute_upkeep(game)
+
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
     return {"message": "Upkeep complete", "state": game.to_dict()}
 
 
@@ -267,7 +332,10 @@ async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
     if any(p.is_cpu and not p.has_ended_turn for p in game.players.values()):
         auto_play_cpu_buys(game)
 
-    return {"message": msg, "state": game.to_dict()}
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
 @router.get("/games/{game_id}/log")
@@ -415,3 +483,57 @@ async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[s
     game._log(f"[TEST] {player.name} discards {card.name}", actor=req.player_id)
 
     return {"message": f"Discarded {card.name}", "state": game.to_dict()}
+
+
+# ── Multiplayer: Leave / End Game ──────────────────────────
+
+
+class LeaveGameRequest(BaseModel):
+    player_id: str
+    token: str
+
+
+class EndGameRequest(BaseModel):
+    player_id: str
+    token: str
+
+
+@router.post("/games/{game_id}/leave")
+async def leave_game_route(game_id: str, req: LeaveGameRequest) -> dict[str, Any]:
+    """Player leaves the game mid-play."""
+    from app.api.lobby import handle_leave_game
+    return await handle_leave_game(game_id, req.player_id, req.token)
+
+
+@router.post("/games/{game_id}/end")
+async def end_game_route(game_id: str, req: EndGameRequest) -> dict[str, Any]:
+    """Host ends the game for all players."""
+    from app.api.lobby import handle_end_game
+    return await handle_end_game(game_id, req.player_id, req.token)
+
+
+# ── Replay Voting ─────────────────────────────────────────
+
+
+class ReplayVoteRequest(BaseModel):
+    player_id: str
+    token: str
+
+
+class ReplayExitRequest(BaseModel):
+    player_id: str
+    token: str
+
+
+@router.post("/games/{game_id}/replay-vote")
+async def replay_vote_route(game_id: str, req: ReplayVoteRequest) -> dict[str, Any]:
+    """Vote to replay the game. When all human players vote, game restarts."""
+    from app.api.lobby import handle_replay_vote
+    return await handle_replay_vote(game_id, req.player_id, req.token)
+
+
+@router.post("/games/{game_id}/replay-exit")
+async def replay_exit_route(game_id: str, req: ReplayExitRequest) -> dict[str, Any]:
+    """Exit the game, disabling replay for all players."""
+    from app.api.lobby import handle_replay_exit
+    return await handle_replay_exit(game_id, req.player_id, req.token)

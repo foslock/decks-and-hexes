@@ -1,7 +1,7 @@
-# HexDraft – Claude Code Project Brief
+# Card Clash – Claude Code Project Brief
 
 ## What This Is
-HexDraft is a 2–6 player simultaneous deck-building territory control game. This repository contains the full game rules, card data, and will house the digital prototype implementation.
+Card Clash is a 2–6 player simultaneous deck-building territory control game. This repository contains the full game rules, card data, and will house the digital prototype implementation.
 
 ## Development Commands
 

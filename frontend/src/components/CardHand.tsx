@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState, useEffect, useLayoutEffect, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
-import { useAnimated, useAnimationOff, useAnimationMode } from './SettingsContext';
+import { useAnimated, useAnimationOff, useAnimationMode, useAnimationSpeed } from './SettingsContext';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
@@ -33,7 +33,7 @@ interface CardHandProps {
   selectedIndex: number | null;
   onSelect: (index: number) => void;
   onDragPlay: (cardIndex: number, screenX: number, screenY: number) => void;
-  onCardDetail: (card: Card) => void;
+  onDoubleClick?: (cardIndex: number) => void;
   onDragStart?: (cardIndex: number) => void;
   onDragEnd?: () => void;
   disabled: boolean;
@@ -258,12 +258,9 @@ export function CardViewPopup({
     }
   }, [animMode]);
 
-  const overlayTransition = animMode === 'normal' ? 'opacity 0.25s ease'
-    : animMode === 'simplified' ? 'opacity 0.1s ease'
-    : 'none';
-  const panelTransition = animMode === 'normal' ? 'opacity 0.25s ease, transform 0.25s ease'
-    : animMode === 'simplified' ? 'opacity 0.1s ease, transform 0.1s ease'
-    : 'none';
+  const speed = animMode === 'fast' ? 0.5 : 1;
+  const overlayTransition = animMode === 'off' ? 'none' : `opacity ${0.25 * speed}s ease`;
+  const panelTransition = animMode === 'off' ? 'none' : `opacity ${0.25 * speed}s ease, transform ${0.25 * speed}s ease`;
 
   return (
     <div
@@ -379,7 +376,7 @@ export default function CardHand({
   selectedIndex,
   onSelect,
   onDragPlay,
-  onCardDetail,
+  onDoubleClick,
   onDragStart,
   onDragEnd,
   disabled,
@@ -398,6 +395,7 @@ export default function CardHand({
   const animated = useAnimated();
   const animationOff = useAnimationOff();
   const animMode = useAnimationMode();
+  const animSpeed = useAnimationSpeed();
 
   // Local display order — indices into the `cards` prop array
   const [localOrder, setLocalOrder] = useState<number[]>(() => cards.map((_, i) => i));
@@ -434,7 +432,7 @@ export default function CardHand({
   // Animation state
   const [enteringAnims, setEnteringAnims] = useState<Map<string, EnteringAnim>>(new Map());
   const [departingAnims, setDepartingAnims] = useState<Map<string, DepartingAnim>>(new Map());
-  const [simplifiedHidden, setSimplifiedHidden] = useState<Set<string>>(new Set());
+  // (simplifiedHidden removed — fast mode uses normal animations at 2x speed)
   const [shuffling, setShuffling] = useState(false);
   const prevDeckSizeRef = useRef(deckSize);
   const prevDiscardCountRef = useRef(discardCount);
@@ -488,7 +486,6 @@ export default function CardHand({
       prevCardsRef.current = cards;
       setEnteringAnims(new Map());
       setDepartingAnims(new Map());
-      setSimplifiedHidden(new Set());
       return;
     }
 
@@ -503,20 +500,7 @@ export default function CardHand({
     if (newCards.length === 0 && removedCards.length === 0) return;
 
     if (!animated) {
-      if (animationOff) {
-        // Off mode: no animations or delays at all
-        return;
-      }
-      // Simplified mode: staggered instant reveal, no movement
-      if (newCards.length > 0) {
-        const ids = newCards.map(c => c.id);
-        setSimplifiedHidden(p => new Set([...p, ...ids]));
-        newCards.forEach((card, i) => {
-          setTimeout(() => {
-            setSimplifiedHidden(p => { const n = new Set(p); n.delete(card.id); return n; });
-          }, i * 500);
-        });
-      }
+      // Off mode: no animations or delays at all
       return;
     }
 
@@ -526,7 +510,7 @@ export default function CardHand({
       newCards.forEach((card, i) => {
         entries.set(card.id, {
           offset: { x: 0, y: 0 },
-          delay: i * 500,
+          delay: Math.round(i * 500 * animSpeed),
           active: false,
           offsetComputed: false,
         });
@@ -695,7 +679,7 @@ export default function CardHand({
       return;
     }
 
-    const duration = animated ? 500 : 200; // shorter for simplified
+    const duration = Math.round(500 * animSpeed);
 
     setDepartingAnims(p => new Map([...p, ...departing]));
     requestAnimationFrame(() => {
@@ -839,14 +823,10 @@ export default function CardHand({
       }
     } else {
       const cardIdx = localOrder[localIdx];
-      if (selectedIndex === cardIdx) {
-        onCardDetail(cards[cardIdx]);
-      } else {
-        onSelect(cardIdx);
-      }
+      onSelect(cardIdx);
     }
     resetDragState();
-  }, [onSelect, onDragPlay, onDragEnd, onCardDetail, selectedIndex, cards, localOrder, dropTargetIndex, resetDragState, trashMode, onTrashToggle]);
+  }, [onSelect, onDragPlay, onDragEnd, selectedIndex, cards, localOrder, dropTargetIndex, resetDragState, trashMode, onTrashToggle]);
 
   // If pointer capture is lost (e.g. card removed from DOM mid-drag), clean up
   const handleLostPointerCapture = useCallback(() => {
@@ -989,8 +969,6 @@ export default function CardHand({
 
             // Compute animation overrides
             const entering = enteringAnims.get(card.id);
-            const isHiddenSimplified = simplifiedHidden.has(card.id);
-
             const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode;
             let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'none';
             // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
@@ -1000,9 +978,7 @@ export default function CardHand({
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';
 
-            if (isHiddenSimplified) {
-              cardOpacity = 0;
-            } else if (entering) {
+            if (entering) {
               if (!entering.active) {
                 // Placed at draw pile position, no transition yet
                 cardTransform = `translate(${entering.offset.x}px, ${entering.offset.y}px)`;
@@ -1010,9 +986,10 @@ export default function CardHand({
                 cardTransition = 'none';
               } else {
                 // Sliding to natural position with stagger delay
+                const enterDur = Math.round(500 * animSpeed);
                 cardTransition = [
-                  `transform 500ms ease-out ${entering.delay}ms`,
-                  `opacity 500ms ease-out ${entering.delay}ms`,
+                  `transform ${enterDur}ms ease-out ${entering.delay}ms`,
+                  `opacity ${enterDur}ms ease-out ${entering.delay}ms`,
                   'border-color 0.1s',
                   'box-shadow 0.1s',
                 ].join(', ');
@@ -1033,6 +1010,13 @@ export default function CardHand({
                 onLostPointerCapture={handleLostPointerCapture}
                 onPointerEnter={(e) => handlePointerEnter(e, localIdx)}
                 onPointerLeave={handlePointerLeave}
+                onDoubleClick={() => {
+                  if (!disabled && onDoubleClick) {
+                    setHoveredIndex(null);
+                    setHoveredRect(null);
+                    onDoubleClick(localOrder[localIdx]);
+                  }
+                }}
                 role="button"
                 tabIndex={disabled ? -1 : 0}
                 style={{
@@ -1255,9 +1239,7 @@ export default function CardHand({
                   transformOrigin: 'center center',
                   opacity: d.active ? 0 : 1,
                   transition: d.active
-                    ? animated
-                      ? 'transform 500ms ease-in, opacity 300ms ease-in'
-                      : 'transform 200ms ease-in, opacity 150ms ease-in'
+                    ? `transform ${Math.round(500 * animSpeed)}ms ease-in, opacity ${Math.round(300 * animSpeed)}ms ease-in`
                     : 'none',
                   pointerEvents: 'none',
                   zIndex: 9990,

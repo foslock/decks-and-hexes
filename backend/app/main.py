@@ -1,13 +1,27 @@
 """FastAPI application entry point."""
 
+import asyncio
 import os
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import router
+from app.api.routes import router, _games, _get_card_registry
+from app.api.lobby import lobby_router, init_lobby, lobby_expiry_task
 
-app = FastAPI(title="HexDraft", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Startup
+    task = asyncio.create_task(lobby_expiry_task())
+    yield
+    # Shutdown
+    task.cancel()
+
+
+app = FastAPI(title="Card Clash", version="0.1.0", lifespan=lifespan)
 
 # CORS — allow frontend origins (dev + Render)
 origins = [
@@ -28,6 +42,10 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(lobby_router)
+
+# Initialize lobby module with shared game storage
+init_lobby(_games, _get_card_registry)
 
 
 @app.get("/health")

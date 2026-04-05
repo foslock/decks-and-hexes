@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entry point for HexDraft Monte Carlo balance testing.
+"""CLI entry point for Card Clash Monte Carlo balance testing.
 
 Usage examples:
     # Run 100 games, 2-player small map, default archetypes
@@ -56,7 +56,7 @@ GRID_MAP = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="HexDraft Monte Carlo Balance Simulator",
+        description="Card Clash Monte Carlo Balance Simulator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

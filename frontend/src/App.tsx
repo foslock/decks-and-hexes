@@ -1,37 +1,214 @@
-import { useState } from 'react';
-import type { GameState } from './types/game';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import type { GameState, LobbyState } from './types/game';
 import { SettingsProvider } from './components/SettingsContext';
 import SetupScreen from './components/SetupScreen';
 import GameScreen from './components/GameScreen';
+import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
+import { useWebSocket } from './hooks/useWebSocket';
 import * as api from './api/client';
 
 // Check for ?preview= query parameter
 const urlParams = new URLSearchParams(window.location.search);
 const previewMode = urlParams.get('preview');
 
+// Session storage keys
+const SS_LOBBY = 'cardclash_lobby';
+
+type AppScreen =
+  | { type: 'home' }
+  | { type: 'lobby'; code: string; playerId: string; token: string; isHost: boolean; lobby: LobbyState }
+  | { type: 'game'; gameId: string; playerId: string; token: string; isMultiplayer: boolean; lobbyCode?: string; isHost?: boolean; localPlayerIds?: string[] };
+
+function loadSession(): AppScreen | null {
+  try {
+    const raw = sessionStorage.getItem(SS_LOBBY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (data.type === 'lobby' || data.type === 'game') return data;
+  } catch { /* ignore */ }
+  return null;
+}
+
+function saveSession(screen: AppScreen | null) {
+  if (screen && screen.type !== 'home') {
+    sessionStorage.setItem(SS_LOBBY, JSON.stringify(screen));
+  } else {
+    sessionStorage.removeItem(SS_LOBBY);
+  }
+}
+
 export default function App() {
-  const [gameState, setGameState] = useState<GameState | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleStart = async (config: {
-    gridSize: string;
-    players: { id: string; name: string; archetype: string; is_cpu?: boolean; cpu_noise?: number }[];
-    testMode?: boolean;
-    speed?: string;
-  }) => {
+  // Multiplayer state machine — restore from session storage on mount
+  const [screen, setScreen] = useState<AppScreen>(() => {
+    const saved = loadSession();
+    if (saved) {
+      // Restore auth token if we have one
+      if ('token' in saved && saved.token) {
+        api.setAuthToken(saved.token);
+      }
+      return saved;
+    }
+    return { type: 'home' };
+  });
+  const [multiplayerGameState, setMultiplayerGameState] = useState<GameState | null>(null);
+  const [replayVotes, setReplayVotes] = useState<Set<string>>(new Set());
+  const [replayDisabled, setReplayDisabled] = useState(false);
+  // Track if this session was restored from storage (skip intro on reconnect)
+  const [isReconnect, setIsReconnect] = useState(() => !!loadSession());
+
+  // WebSocket for multiplayer game (not lobby — lobby manages its own)
+  const gameLobbyCode = screen.type === 'game' && screen.isMultiplayer ? (screen.lobbyCode ?? null) : null;
+  const wsPlayerId = screen.type === 'game' && screen.isMultiplayer ? screen.playerId : null;
+  const wsToken = screen.type === 'game' && screen.isMultiplayer ? screen.token : null;
+
+  const { lastMessage: gameWsMessage } = useWebSocket(
+    gameLobbyCode,
+    wsPlayerId,
+    wsToken,
+  );
+
+  // Handle WebSocket game state updates
+  useEffect(() => {
+    if (!gameWsMessage || screen.type !== 'game' || !screen.isMultiplayer) return;
+
+    if (gameWsMessage.type === 'game_state') {
+      setMultiplayerGameState(gameWsMessage.state as unknown as GameState);
+    } else if (gameWsMessage.type === 'game_ended') {
+      setScreen({ type: 'home' });
+      setMultiplayerGameState(null);
+      saveSession(null);
+    } else if (gameWsMessage.type === 'game_start') {
+      // Replay restart — new game created with same players
+      const newGameId = gameWsMessage.game_id as string;
+      const newState = gameWsMessage.state as unknown as GameState;
+      setMultiplayerGameState(newState);
+      setReplayVotes(new Set());
+      setReplayDisabled(false);
+      setIsReconnect(false);
+      if (screen.type === 'game') {
+        setScreen({
+          ...screen,
+          gameId: newGameId,
+        });
+      }
+    } else if (gameWsMessage.type === 'replay_vote') {
+      const votes = (gameWsMessage.votes as string[]) || [];
+      setReplayVotes(new Set(votes));
+    } else if (gameWsMessage.type === 'replay_disabled') {
+      setReplayDisabled(true);
+    } else if (gameWsMessage.type === 'player_left') {
+      // State update will come via game_state message
+    }
+  }, [gameWsMessage, screen]);
+
+  // Save screen to session storage
+  useEffect(() => {
+    saveSession(screen);
+  }, [screen]);
+
+  // Reconnection: if we restored a game screen from session but have no game state, fetch it
+  const reconnectAttempted = useRef(false);
+  useEffect(() => {
+    if (reconnectAttempted.current) return;
+    if (screen.type === 'game' && screen.isMultiplayer && !multiplayerGameState) {
+      reconnectAttempted.current = true;
+      api.getGame(screen.gameId, screen.playerId)
+        .then((state) => setMultiplayerGameState(state))
+        .catch(() => {
+          // Game no longer exists — return to home
+          setScreen({ type: 'home' });
+          api.setAuthToken(null);
+          saveSession(null);
+        });
+    } else if (screen.type === 'lobby') {
+      reconnectAttempted.current = true;
+      // Lobby reconnection — WebSocket will reconnect automatically via LobbyScreen
+      // Just verify the lobby still exists
+      api.getLobby(screen.code, screen.playerId, screen.token)
+        .catch(() => {
+          setScreen({ type: 'home' });
+          api.setAuthToken(null);
+          saveSession(null);
+        });
+    }
+  }, []); // Only run once on mount
+
+  // ── Multiplayer flow ─────────────────────────────────────
+
+  const handleCreateLobby = useCallback(async () => {
     try {
-      setLoading(true);
       setError(null);
-      const result = await api.createGame(config.gridSize, config.players, undefined, config.testMode, config.speed);
-      setGameState(result.state);
+      const result = await api.createLobby('Player 1', 'vanguard');
+      api.setAuthToken(result.token);
+      const lobbyScreen: AppScreen = {
+        type: 'lobby',
+        code: result.code,
+        playerId: result.player_id,
+        token: result.token,
+        isHost: true,
+        lobby: result.lobby,
+      };
+      setScreen(lobbyScreen);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
     }
-  };
+  }, []);
+
+  const handleJoinLobby = useCallback(async (code: string) => {
+    try {
+      setError(null);
+      const result = await api.joinLobby(code.toUpperCase(), 'Player', 'vanguard');
+      api.setAuthToken(result.token);
+      const lobbyScreen: AppScreen = {
+        type: 'lobby',
+        code: code.toUpperCase(),
+        playerId: result.player_id,
+        token: result.token,
+        isHost: false,
+        lobby: result.lobby,
+      };
+      setScreen(lobbyScreen);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const handleGameStart = useCallback((gameId: string, state: GameState, localPlayerIds?: string[]) => {
+    if (screen.type !== 'lobby') return;
+    setMultiplayerGameState(state);
+    setIsReconnect(false); // New game from lobby — show intro
+    const gameScreen: AppScreen = {
+      type: 'game',
+      gameId,
+      playerId: screen.playerId,
+      token: screen.token,
+      isMultiplayer: true,
+      lobbyCode: screen.code,
+      isHost: screen.isHost,
+      localPlayerIds,
+    };
+    setScreen(gameScreen);
+  }, [screen]);
+
+  const handleLeaveLobby = useCallback(() => {
+    setScreen({ type: 'home' });
+    api.setAuthToken(null);
+    saveSession(null);
+  }, []);
+
+  const handleLeaveGame = useCallback(() => {
+    setScreen({ type: 'home' });
+    setMultiplayerGameState(null);
+    api.setAuthToken(null);
+    saveSession(null);
+  }, []);
+
+  const handleMultiplayerStateUpdate = useCallback((state: GameState) => {
+    setMultiplayerGameState(state);
+  }, []);
 
   // Preview modes (accessible via ?preview=vp-paths)
   if (previewMode === 'vp-paths') {
@@ -42,21 +219,61 @@ export default function App() {
     );
   }
 
+  // ── Render ───────────────────────────────────────────────
+
+  // Lobby
+  if (screen.type === 'lobby') {
+    return (
+      <SettingsProvider>
+        <LobbyScreen
+          lobbyCode={screen.code}
+          playerId={screen.playerId}
+          token={screen.token}
+          isHost={screen.isHost}
+          initialLobby={screen.lobby}
+          onGameStart={handleGameStart}
+          onLeave={handleLeaveLobby}
+        />
+      </SettingsProvider>
+    );
+  }
+
+  // Game in progress
+  if (screen.type === 'game' && screen.isMultiplayer && multiplayerGameState) {
+    return (
+      <SettingsProvider>
+        <GameScreen
+          gameState={multiplayerGameState}
+          onStateUpdate={handleMultiplayerStateUpdate}
+          playerId={screen.playerId}
+          token={screen.token}
+          isMultiplayer={true}
+          localPlayerIds={screen.localPlayerIds}
+          isHost={
+            (() => { try { const s = JSON.parse(sessionStorage.getItem(SS_LOBBY) || '{}'); return s.isHost; } catch { return false; } })()
+          }
+          onLeaveGame={handleLeaveGame}
+          skipIntro={isReconnect}
+          replayVotes={replayVotes}
+          replayDisabled={replayDisabled}
+          onReplayVotesUpdate={setReplayVotes}
+        />
+      </SettingsProvider>
+    );
+  }
+
+  // Home screen
   return (
     <SettingsProvider>
-      {!gameState ? (
-        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh' }}>
-          <SetupScreen onStart={handleStart} />
-          {loading && (
-            <div style={{ textAlign: 'center', color: '#aaa' }}>Creating game...</div>
-          )}
-          {error && (
-            <div style={{ textAlign: 'center', color: '#ff4a4a', padding: 12 }}>{error}</div>
-          )}
-        </div>
-      ) : (
-        <GameScreen gameState={gameState} onStateUpdate={setGameState} />
-      )}
+      <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh' }}>
+        <SetupScreen
+          onCreateLobby={handleCreateLobby}
+          onJoinLobby={handleJoinLobby}
+        />
+        {error && (
+          <div style={{ textAlign: 'center', color: '#ff4a4a', padding: 12 }}>{error}</div>
+        )}
+      </div>
     </SettingsProvider>
   );
 }

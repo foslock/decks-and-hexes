@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
-export type AnimationMode = 'normal' | 'simplified' | 'off';
+export type AnimationMode = 'normal' | 'fast' | 'off';
 
 interface Settings {
   animationMode: AnimationMode;
@@ -13,7 +13,7 @@ interface SettingsContextValue {
   setTooltips: (on: boolean) => void;
 }
 
-const STORAGE_KEY = 'hexdraft_settings';
+const STORAGE_KEY = 'cardclash_settings';
 
 function loadSettings(): Settings {
   try {
@@ -73,7 +73,13 @@ export function useSettings() {
 
 export function useAnimated() {
   const { settings } = useSettings();
-  return settings.animationMode === 'normal';
+  return settings.animationMode !== 'off';
+}
+
+/** Returns duration multiplier: 1.0 for normal, 0.5 for fast, 0 for off */
+export function useAnimationSpeed() {
+  const { settings } = useSettings();
+  return settings.animationMode === 'fast' ? 0.5 : settings.animationMode === 'off' ? 0 : 1;
 }
 
 export function useAnimationOff() {

@@ -136,6 +136,7 @@ class Player:
     upgrade_credits: int = 0
     forced_discard_next_turn: int = 0
     has_submitted_plan: bool = False
+    has_acknowledged_resolve: bool = False
     has_ended_turn: bool = False
     neutral_bought_this_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
@@ -197,6 +198,7 @@ class Player:
             "planned_action_count": len(self.planned_actions),
             "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
             "has_submitted_plan": self.has_submitted_plan,
+            "has_acknowledged_resolve": self.has_acknowledged_resolve,
             "has_ended_turn": self.has_ended_turn,
             "trash": [c.to_dict() for c in self.trash],
             "last_upkeep_paid": self.last_upkeep_paid,
@@ -222,19 +224,22 @@ class NeutralMarket:
         result = []
         for card_id, copies in self.stacks.items():
             if copies:
+                card_dict = copies[0].to_dict()
+                card_dict["id"] = card_id  # Use base card ID for stable matching
                 result.append({
-                    "card": copies[0].to_dict(),
+                    "card": card_dict,
                     "remaining": len(copies),
                 })
         return result
 
-    def purchase(self, card_id: str) -> Optional[Card]:
+    def purchase(self, card_id: str) -> Optional[tuple[Card, str]]:
+        """Purchase a card, returning (card, base_id) or None."""
         # Match by base card ID (without instance suffix).
         # The frontend may pass an instance ID like "card_id_neutral_0",
         # so also try matching when card_id starts with the base ID.
         for base_id, copies in self.stacks.items():
             if copies and (base_id == card_id or card_id.startswith(base_id)):
-                return copies.pop(0)
+                return copies.pop(0), base_id
         return None
 
 
@@ -274,6 +279,10 @@ class GameState:
     game_log: list[LogEntry] = field(default_factory=list)
     test_mode: bool = False
     vp_target: int = VP_TARGET
+    host_id: Optional[str] = None
+    lobby_code: Optional[str] = None
+    # Tracks neutral market purchases: {card_id, card_name, player_id, player_name, round}
+    neutral_purchase_log: list[dict[str, Any]] = field(default_factory=list)
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None) -> None:
@@ -303,17 +312,27 @@ class GameState:
     # Player-targeting effects resolved during reveal (e.g. Sabotage forced discards)
     player_effects: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self, for_player_id: Optional[str] = None) -> dict[str, Any]:
+    def to_dict(self, for_player_id: Optional[str] = None,
+                visible_player_ids: Optional[set[str]] = None) -> dict[str, Any]:
         players_dict: dict[str, Any] = {}
+        game_over = self.current_phase == Phase.GAME_OVER
         for pid, p in self.players.items():
-            pdata = p.to_dict(hide_hand=(for_player_id is not None and pid != for_player_id), game=self)
+            if game_over:
+                hide = False  # all hands visible at game over
+            elif visible_player_ids is not None:
+                hide = pid not in visible_player_ids
+            elif for_player_id is not None:
+                hide = pid != for_player_id
+            else:
+                hide = False
+            pdata = p.to_dict(hide_hand=hide, game=self)
             # Add effective buy costs for all market cards visible to this player
             effective_costs: dict[str, int] = {}
             for card in p.archetype_market:
                 effective_costs[card.id] = calculate_dynamic_buy_cost(self, p, card)
-            for stack in self.neutral_market.stacks.values():
+            for base_id, stack in self.neutral_market.stacks.items():
                 if stack:
-                    effective_costs[stack[0].id] = calculate_dynamic_buy_cost(self, p, stack[0])
+                    effective_costs[base_id] = calculate_dynamic_buy_cost(self, p, stack[0])
             pdata["effective_buy_costs"] = effective_costs
             players_dict[pid] = pdata
 
@@ -335,6 +354,17 @@ class GameState:
             result["resolution_steps"] = self.resolution_steps
         if self.player_effects:
             result["player_effects"] = self.player_effects
+        # Neutral market purchases from last round (for purchase history indicators)
+        result["neutral_purchases_last_round"] = [
+            entry for entry in self.neutral_purchase_log
+            if entry["round"] == self.current_round - 1
+        ]
+        # During REVEAL phase, expose all players' planned actions for review
+        if self.current_phase == Phase.REVEAL:
+            result["revealed_actions"] = {
+                pid: [a.to_dict() for a in p.planned_actions]
+                for pid, p in self.players.items()
+            }
         return result
 
 
@@ -565,6 +595,7 @@ def execute_start_of_turn(game: GameState) -> GameState:
             player.turn_modifiers.extra_actions_next_turn = 0
         player.planned_actions = []
         player.has_submitted_plan = False
+        player.has_acknowledged_resolve = False
         player.has_ended_turn = False
         player.neutral_bought_this_turn = False
 
@@ -1276,9 +1307,41 @@ def execute_reveal(game: GameState) -> GameState:
                 else:
                     player.deck.add_to_discard([action.card])
 
+    # Stay in REVEAL phase — clients animate, then call advance_resolve to proceed to BUY
+    return game
+
+
+def advance_resolve(game: GameState, player_id: str) -> tuple[bool, str]:
+    """Player acknowledges resolve phase is complete (animations done).
+
+    In hotseat: any call advances immediately to BUY.
+    In multiplayer: waits for all human players to acknowledge.
+    """
+    if game.current_phase != Phase.REVEAL:
+        return False, "Not in Reveal phase"
+    player = game.players.get(player_id)
+    if not player:
+        return False, "Player not found"
+    if player.has_acknowledged_resolve:
+        return False, "Already acknowledged"
+
+    player.has_acknowledged_resolve = True
+    game._log(f"{player.name} ready to proceed", actor=player_id)
+
+    # Check if all players have acknowledged (CPU auto-acknowledged)
+    if all(
+        p.has_acknowledged_resolve or p.is_cpu
+        for p in game.players.values()
+    ):
+        _transition_to_buy(game)
+
+    return True, "Resolve acknowledged"
+
+
+def _transition_to_buy(game: GameState) -> None:
+    """Transition from REVEAL to BUY phase."""
     game.current_phase = Phase.BUY
     game._log("=== Buy Phase ===")
-    return game
 
 
 def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tuple[bool, str]:
@@ -1335,20 +1398,28 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
     if source == "neutral":
         if player.neutral_bought_this_turn and not game.test_mode:
             return False, "Already bought a neutral card this turn (limit 1)"
-        purchased = game.neutral_market.purchase(card_id)
-        if not purchased:
+        result = game.neutral_market.purchase(card_id)
+        if not result:
             return False, "Card not available in neutral market"
+        purchased, base_card_id = result
         if not free:
             dynamic_cost = calculate_dynamic_buy_cost(game, player, purchased)
             effective_cost = _apply_cost_reductions(player, purchased, base_cost_override=dynamic_cost)
             if effective_cost > 0 and player.resources < effective_cost:
                 # Put it back
-                game.neutral_market.stacks.setdefault(card_id, []).insert(0, purchased)
+                game.neutral_market.stacks.setdefault(base_card_id, []).insert(0, purchased)
                 return False, f"Need {effective_cost} resources"
             if effective_cost > 0:
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
         player.neutral_bought_this_turn = True
+        game.neutral_purchase_log.append({
+            "card_id": base_card_id,
+            "card_name": purchased.name,
+            "player_id": player_id,
+            "player_name": player.name,
+            "round": game.current_round,
+        })
         # Note: passive_vp cards (e.g. Land Grant) contribute to derived VP automatically
         game._log(f"{player.name} buys {purchased.name} from neutral market")
         return True, f"Bought {purchased.name}"

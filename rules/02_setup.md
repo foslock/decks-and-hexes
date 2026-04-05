@@ -1,4 +1,4 @@
-# HexDraft – Game Setup
+# Card Clash – Game Setup
 
 ## Step 1: Choose Grid Size
 Players collectively agree on a grid size (Small / Medium / Large). This determines:

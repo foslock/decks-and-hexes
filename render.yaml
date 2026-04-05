@@ -1,7 +1,7 @@
 services:
   # Backend API
   - type: web
-    name: hexdraft-api
+    name: card-clash-api
     runtime: python
     plan: starter
     rootDir: backend
@@ -10,7 +10,7 @@ services:
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: hexdraft-db
+          name: card-clash-db
           property: connectionString
       - key: PYTHON_VERSION
         value: "3.11"
@@ -18,7 +18,7 @@ services:
 
   # Frontend static site
   - type: web
-    name: hexdraft-frontend
+    name: card-clash-frontend
     runtime: static
     plan: starter
     rootDir: frontend
@@ -27,13 +27,13 @@ services:
     routes:
       - type: rewrite
         source: /api/*
-        destination: https://hexdraft-api.onrender.com/api/*
+        destination: https://card-clash-api.onrender.com/api/*
       - type: rewrite
         source: /*
         destination: /index.html
 
 databases:
-  - name: hexdraft-db
+  - name: card-clash-db
     plan: starter
-    databaseName: hexdraft
+    databaseName: card-clash
     postgresMajorVersion: "16"

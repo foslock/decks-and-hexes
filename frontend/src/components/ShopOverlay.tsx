@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import type { Card, MarketStack } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
@@ -44,6 +44,10 @@ interface ShopOverlayProps {
   disabled: boolean;
   onClose?: () => void;
   testMode?: boolean;
+  /** Neutral market purchases from last round (by other players) */
+  neutralPurchasesLastRound?: import('../types/game').NeutralPurchaseRecord[];
+  /** Current player ID (to filter out own purchases from the history) */
+  currentPlayerId?: string;
 }
 
 interface HoverState {
@@ -77,6 +81,7 @@ function FullShopCard({
   disabled,
   shiftHeld,
   disabledTooltip,
+  purchaseHighlight,
 }: {
   card: Card;
   remaining: number | null;
@@ -89,6 +94,7 @@ function FullShopCard({
   disabled: boolean;
   shiftHeld: boolean;
   disabledTooltip?: string;
+  purchaseHighlight?: boolean;
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
@@ -131,6 +137,7 @@ function FullShopCard({
           fontSize: 12,
           fontWeight: 'bold',
           cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
+          ...(purchaseHighlight ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
         }}
       >
         Buy{displayCost !== null ? ` (${displayCost}${isDiscounted ? '*' : ''}💰)` : ''}
@@ -155,6 +162,7 @@ function CompactShopCard({
   onLeave,
   disabled,
   disabledTooltip,
+  purchaseHighlight,
 }: {
   card: Card;
   remaining: number | null;
@@ -166,6 +174,7 @@ function CompactShopCard({
   onLeave: () => void;
   disabled: boolean;
   disabledTooltip?: string;
+  purchaseHighlight?: boolean;
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
@@ -235,6 +244,7 @@ function CompactShopCard({
           fontSize: 11,
           fontWeight: 'bold',
           cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
+          ...(purchaseHighlight ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
         }}
       >
         {buyLabel}
@@ -258,6 +268,8 @@ export default function ShopOverlay({
   disabled,
   onClose,
   testMode,
+  neutralPurchasesLastRound,
+  currentPlayerId,
 }: ShopOverlayProps) {
   const [fullView, setFullViewRaw] = useState(() => shopViewMemory ?? false);
   const setFullView = useCallback((v: boolean) => { setFullViewRaw(v); shopViewMemory = v; }, []);
@@ -266,6 +278,18 @@ export default function ShopOverlay({
   const mousePosRef = useRef<{ x: number; y: number } | null>(null);
   const animMode = useAnimationMode();
   const shiftHeld = useShiftKey();
+
+  // Build lookup: neutral card_id → purchaser name (from other players last round)
+  const neutralPurchaseMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!neutralPurchasesLastRound) return map;
+    for (const entry of neutralPurchasesLastRound) {
+      if (entry.player_id !== currentPlayerId) {
+        map.set(entry.card_id, entry.player_name);
+      }
+    }
+    return map;
+  }, [neutralPurchasesLastRound, currentPlayerId]);
 
   const handleCardHover = useCallback((e: React.MouseEvent, card: Card) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -344,12 +368,19 @@ export default function ShopOverlay({
     }
   }, [animMode]);
 
-  const panelTransition = animMode === 'normal' ? 'opacity 0.25s ease, transform 0.25s ease'
-    : animMode === 'simplified' ? 'opacity 0.1s ease, transform 0.1s ease'
+  const speed = animMode === 'fast' ? 0.5 : 1;
+  const panelTransition = animMode !== 'off'
+    ? `opacity ${0.25 * speed}s ease, transform ${0.25 * speed}s ease`
     : 'none';
 
   return (
     <>
+      <style>{`
+        @keyframes shopPurchasePulse {
+          0%, 100% { box-shadow: 0 0 4px rgba(255, 170, 74, 0.3); outline: 2px solid rgba(255, 170, 74, 0.3); outline-offset: -1px; }
+          50% { box-shadow: 0 0 12px rgba(255, 170, 74, 0.7), 0 0 4px rgba(255, 170, 74, 0.4); outline: 2px solid rgba(255, 170, 74, 0.85); outline-offset: -1px; }
+        }
+      `}</style>
       {/* Shop panel — centered over the entire window with backdrop */}
       <div
         onClick={onClose}
@@ -363,7 +394,7 @@ export default function ShopOverlay({
         justifyContent: 'center',
         zIndex: 5000,
         opacity: visible ? 1 : 0,
-        transition: animMode === 'normal' ? 'opacity 0.25s ease' : animMode === 'simplified' ? 'opacity 0.1s ease' : 'none',
+        transition: animMode !== 'off' ? `opacity ${0.25 * speed}s ease` : 'none',
       }}>
         <div
           onClick={(e) => e.stopPropagation()}
@@ -538,6 +569,7 @@ export default function ShopOverlay({
                   const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
                   const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
                   const neutralLimitReached = neutralBoughtThisTurn && !testMode;
+                  const purchasedBy = neutralPurchaseMap.get(stack.card.id);
                   return fullView ? (
                     <FullShopCard
                       key={stack.card.id}
@@ -552,6 +584,7 @@ export default function ShopOverlay({
                       disabled={disabled || neutralLimitReached}
                       shiftHeld={shiftHeld}
                       disabledTooltip={neutralLimitReached ? 'You can only buy 1 neutral card per round.' : undefined}
+                      purchaseHighlight={!!purchasedBy}
                     />
                   ) : (
                     <CompactShopCard
@@ -566,6 +599,7 @@ export default function ShopOverlay({
                       onLeave={handleCardLeave}
                       disabled={disabled || neutralLimitReached}
                       disabledTooltip={neutralLimitReached ? 'You can only buy 1 neutral card per round.' : undefined}
+                      purchaseHighlight={!!purchasedBy}
                     />
                   );
                 })}
@@ -594,6 +628,26 @@ export default function ShopOverlay({
               Upgraded
             </div>
           )}
+          {(() => {
+            const buyer = neutralPurchaseMap.get(hoverState.card.id);
+            if (!buyer) return null;
+            return (
+              <div style={{
+                textAlign: 'center',
+                marginTop: 6,
+                background: '#111122',
+                border: '1px solid #555',
+                borderRadius: 6,
+                padding: '4px 10px',
+                fontSize: 11,
+                color: '#ffaa4a',
+                fontWeight: 'bold',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              }}>
+                {buyer} purchased this last round
+              </div>
+            );
+          })()}
         </div>
       )}
     </>

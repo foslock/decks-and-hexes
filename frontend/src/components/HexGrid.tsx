@@ -90,6 +90,12 @@ interface HexGridProps {
   connectedVpTiles?: Set<string>;
   /** When true, suppress hover effects (highlight, tooltips) — e.g. when a full-screen overlay is open */
   disableHover?: boolean;
+  /** Tile keys to show pulsing outline (review mode — tiles with played cards) */
+  reviewPulseTiles?: Set<string>;
+  /** Called when a tile is hovered during review (provides screen coords for popup positioning) */
+  onTileHover?: (q: number, r: number, screenX: number, screenY: number) => void;
+  /** Called when tile hover ends during review */
+  onTileHoverEnd?: () => void;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -209,7 +215,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -240,6 +246,13 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   tooltipsEnabledRef.current = tooltipsEnabled;
   const disableHoverRef = useRef(disableHover);
   disableHoverRef.current = disableHover;
+  const reviewPulseTilesRef = useRef(reviewPulseTiles);
+  reviewPulseTilesRef.current = reviewPulseTiles;
+  const onTileHoverRef = useRef(onTileHover);
+  onTileHoverRef.current = onTileHover;
+  const onTileHoverEndRef = useRef(onTileHoverEnd);
+  onTileHoverEndRef.current = onTileHoverEnd;
+  const reviewPulseGraphicsRef = useRef<Graphics | null>(null);
 
   tilesRef.current = tiles;
   highlightRef.current = highlightTiles;
@@ -481,6 +494,11 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             setTooltip({ x: e.global.x, y: e.global.y, text: lines.join('\n') });
           }
         }
+
+        // Review mode: notify parent of tile hover with screen coords
+        if (reviewPulseTilesRef.current?.has(key)) {
+          onTileHoverRef.current?.(tile.q, tile.r, e.global.x, e.global.y);
+        }
       });
       g.on('pointermove', (e) => {
         if (disableHoverRef.current) return;
@@ -502,6 +520,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           hiddenLabelKeyRef.current = null;
         }
         setTooltip(null);
+        onTileHoverEndRef.current?.();
       });
       hexContainer.addChild(g);
     }
@@ -864,6 +883,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       autoDensity: true,
     }).then(() => {
       if (destroyed) { app.destroy(); return; }
+      app.canvas.style.position = 'absolute';
+      app.canvas.style.top = '0';
+      app.canvas.style.left = '0';
       containerRef.current!.appendChild(app.canvas);
       appRef.current = app;
 
@@ -948,18 +970,70 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   // Re-render tiles when data changes
   useEffect(() => {
     renderTiles();
-    // Re-add VP path graphics layer (removed by renderTiles → removeChildren)
+    // Re-add graphics layers removed by renderTiles → removeChildren
     const vpG = vpPathGraphicsRef.current;
     if (vpG && hexContainerRef.current) {
       hexContainerRef.current.addChild(vpG);
     }
+    const pulseG = reviewPulseGraphicsRef.current;
+    if (pulseG && hexContainerRef.current) {
+      hexContainerRef.current.addChild(pulseG);
+    }
   }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, claimChevrons, connectedVpTiles, renderTiles]);
+
+  // Review mode: pulsing outlines on tiles that had cards played
+  useEffect(() => {
+    const app = appRef.current;
+    const container = hexContainerRef.current;
+    if (!app || !container || !reviewPulseTiles || reviewPulseTiles.size === 0) {
+      // Clean up if no review tiles
+      if (reviewPulseGraphicsRef.current && container) {
+        container.removeChild(reviewPulseGraphicsRef.current);
+        reviewPulseGraphicsRef.current.destroy();
+        reviewPulseGraphicsRef.current = null;
+      }
+      return;
+    }
+
+    let g = reviewPulseGraphicsRef.current;
+    if (!g) {
+      g = new Graphics();
+      reviewPulseGraphicsRef.current = g;
+    }
+    container.addChild(g);
+
+    const pulseTickerFn = () => {
+      const pulseSet = reviewPulseTilesRef.current;
+      if (!pulseSet || pulseSet.size === 0) { g!.clear(); return; }
+      const t = performance.now() / 1000;
+      const alpha = 0.3 + 0.4 * (0.5 + 0.5 * Math.sin(t * 2.5));
+      g!.clear();
+      g!.setStrokeStyle({ width: 3, color: 0xffffff, alpha, cap: 'round' });
+      for (const key of pulseSet) {
+        const tile = tilesRef.current[key];
+        if (!tile) continue;
+        const { x, y } = axialToPixel(tile.q, tile.r);
+        drawHexagon(g!, x, y, HEX_SIZE);
+      }
+      g!.stroke();
+    };
+    app.ticker.add(pulseTickerFn);
+
+    return () => {
+      app.ticker.remove(pulseTickerFn);
+      if (reviewPulseGraphicsRef.current && container) {
+        container.removeChild(reviewPulseGraphicsRef.current);
+        reviewPulseGraphicsRef.current.destroy();
+        reviewPulseGraphicsRef.current = null;
+      }
+    };
+  }, [reviewPulseTiles]);
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <div
         ref={containerRef}
-        style={{ width: '100%', height: '100%' }}
+        style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
       />
       {tooltip && tooltip.card && (
         <PlannedCardTooltip card={tooltip.card} x={tooltip.x} y={tooltip.y} />
