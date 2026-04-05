@@ -88,6 +88,7 @@ cards:
     action_return: 0
     power: 1
     adjacency_required: false
+    unoccupied_only: true
     effect: "Claim: Power 1 on any neutral tile on the board, ignoring adjacency restrictions."
     effect_upgraded: "Claim: Power 2 on any neutral tile on the board, ignoring adjacency restrictions."
     secondary_effect: null

@@ -68,6 +68,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     neutral_bought_this_turn: false,
     is_cpu: false,
     cpu_difficulty: null,
+    has_left: false,
     ...overrides,
   };
 }

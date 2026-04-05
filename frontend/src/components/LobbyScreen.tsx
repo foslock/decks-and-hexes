@@ -78,10 +78,12 @@ export default function LobbyScreen({
       setCountdown(secs);
       if (secs === 3) setCountdownStart(Date.now());
     } else if (lastMessage.type === 'game_start') {
+      console.log('[Lobby] WS game_start received, gameStartRef:', gameStartRef.current);
       if (!gameStartRef.current) {
         gameStartRef.current = true;
         // Compute local player IDs from lobby state
         const localIds = computeLocalPlayerIds(lobby, playerId, isHost);
+        console.log('[Lobby] calling onGameStart with gameId:', lastMessage.game_id);
         onGameStart(
           lastMessage.game_id as string,
           lastMessage.state as unknown as GameState,
@@ -89,6 +91,7 @@ export default function LobbyScreen({
         );
       }
     } else if (lastMessage.type === 'lobby_closed') {
+      console.log('[Lobby] lobby_closed received → onLeave');
       onLeave();
     } else if (lastMessage.type === 'error') {
       setError(lastMessage.message as string);
@@ -144,14 +147,20 @@ export default function LobbyScreen({
     try {
       setError(null);
       setStarting(true);
+      console.log('[Lobby] handleStart: calling api.startLobby...');
       const result = await api.startLobby(lobbyCode, token);
+      console.log('[Lobby] handleStart: HTTP response received, gameStartRef:', gameStartRef.current);
       // Host also gets the response directly
       if (!gameStartRef.current) {
         gameStartRef.current = true;
         const localIds = computeLocalPlayerIds(lobby, playerId, isHost);
+        console.log('[Lobby] handleStart: calling onGameStart (HTTP path)');
         onGameStart(result.game_id, result.state, localIds);
+      } else {
+        console.log('[Lobby] handleStart: skipped — WS already handled game_start');
       }
     } catch (e: unknown) {
+      console.error('[Lobby] handleStart FAILED:', e);
       setError(e instanceof Error ? e.message : String(e));
       setStarting(false);
     }
@@ -388,6 +397,7 @@ export default function LobbyScreen({
                 {(isSelf || (isHost && p.is_local)) && !p.is_cpu ? (
                   <input
                     value={p.name}
+                    maxLength={12}
                     onChange={(e) => {
                       if (isSelf) handleUpdateSelf({ name: e.target.value });
                       else if (isHost && p.is_local) handleUpdatePlayer(p.id, { name: e.target.value });
@@ -508,6 +518,7 @@ export default function LobbyScreen({
                 }}>
                   <input
                     value={localName}
+                    maxLength={12}
                     onChange={(e) => setLocalName(e.target.value)}
                     placeholder={`Player ${players.length + 1}`}
                     autoFocus

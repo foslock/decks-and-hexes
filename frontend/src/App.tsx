@@ -73,10 +73,12 @@ export default function App() {
   // Handle WebSocket game state updates
   useEffect(() => {
     if (!gameWsMessage || screen.type !== 'game' || !screen.isMultiplayer) return;
+    console.log('[App] game WS effect:', gameWsMessage.type, 'screen:', screen.type);
 
     if (gameWsMessage.type === 'game_state') {
       setMultiplayerGameState(gameWsMessage.state as unknown as GameState);
     } else if (gameWsMessage.type === 'game_ended') {
+      console.log('[App] game_ended → going home');
       setScreen({ type: 'home' });
       setMultiplayerGameState(null);
       saveSession(null);
@@ -99,8 +101,6 @@ export default function App() {
       setReplayVotes(new Set(votes));
     } else if (gameWsMessage.type === 'replay_disabled') {
       setReplayDisabled(true);
-    } else if (gameWsMessage.type === 'player_left') {
-      // State update will come via game_state message
     }
   }, [gameWsMessage, screen]);
 
@@ -115,10 +115,12 @@ export default function App() {
     if (reconnectAttempted.current) return;
     if (screen.type === 'game' && screen.isMultiplayer && !multiplayerGameState) {
       reconnectAttempted.current = true;
+      console.log('[App] reconnect: fetching game state for', screen.gameId);
       api.getGame(screen.gameId, screen.playerId)
         .then((state) => setMultiplayerGameState(state))
         .catch(() => {
           // Game no longer exists — return to home
+          console.log('[App] reconnect FAILED → going home');
           setScreen({ type: 'home' });
           api.setAuthToken(null);
           saveSession(null);
@@ -141,7 +143,7 @@ export default function App() {
   const handleCreateLobby = useCallback(async () => {
     try {
       setError(null);
-      const result = await api.createLobby('Player 1', 'vanguard');
+      const result = await api.createLobby('Player 1', 'vanguard');  // First player is always #1
       api.setAuthToken(result.token);
       const lobbyScreen: AppScreen = {
         type: 'lobby',
@@ -177,7 +179,11 @@ export default function App() {
   }, []);
 
   const handleGameStart = useCallback((gameId: string, state: GameState, localPlayerIds?: string[]) => {
-    if (screen.type !== 'lobby') return;
+    console.log('[App] handleGameStart called, screen.type:', screen.type, 'gameId:', gameId);
+    if (screen.type !== 'lobby') {
+      console.warn('[App] handleGameStart SKIPPED — screen is not lobby, it is:', screen.type);
+      return;
+    }
     setMultiplayerGameState(state);
     setIsReconnect(false); // New game from lobby — show intro
     const gameScreen: AppScreen = {
@@ -200,6 +206,7 @@ export default function App() {
   }, []);
 
   const handleLeaveGame = useCallback(() => {
+    console.log('[App] handleLeaveGame → going home');
     setScreen({ type: 'home' });
     setMultiplayerGameState(null);
     api.setAuthToken(null);
@@ -220,6 +227,7 @@ export default function App() {
   }
 
   // ── Render ───────────────────────────────────────────────
+  console.log('[App] render — screen:', screen.type, 'hasGameState:', !!multiplayerGameState);
 
   // Lobby
   if (screen.type === 'lobby') {
@@ -239,7 +247,15 @@ export default function App() {
   }
 
   // Game in progress
-  if (screen.type === 'game' && screen.isMultiplayer && multiplayerGameState) {
+  if (screen.type === 'game' && screen.isMultiplayer) {
+    if (!multiplayerGameState) {
+      // Brief loading state while game state is being set — prevents flashing home screen
+      return (
+        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ color: '#666', fontSize: 14 }}>Loading game…</div>
+        </div>
+      );
+    }
     return (
       <SettingsProvider>
         <GameScreen

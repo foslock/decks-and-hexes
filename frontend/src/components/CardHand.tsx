@@ -176,27 +176,47 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
                 {displayCard.name}{vpBadge}
               </span>
             </div>
-            <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[displayCard.card_type]}</span>
+            <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
           </div>
           <div style={{ fontSize: 11, color: '#aaa' }}>
             {(() => {
               const parts: React.ReactNode[] = [];
-              if (displayCard.buy_cost !== null) {
-                parts.push(`💰 ${displayCard.buy_cost}`);
-              } else if (displayCard.starter) {
-                parts.push('Starter');
-              }
               if (displayCard.passive_vp !== 0) {
                 parts.push(<span key="vp" style={{ color: displayCard.passive_vp > 0 ? '#ffd700' : '#ff6666' }}>{displayCard.passive_vp > 0 ? '+' : ''}{displayCard.passive_vp}★</span>);
               } else if (displayCard.vp_formula) {
                 parts.push(<span key="vp" style={{ color: '#ffd700' }}>+★</span>);
               }
-              if (displayCard.power > 0 || displayCard.card_type === 'claim') {
-                parts.push(`Pow ${displayCard.power}`);
+              if (displayCard.card_type === 'defense' && displayCard.defense_bonus > 0) {
+                const tileCount = displayCard.defense_target_count || 1;
+                parts.push(tileCount >= 2 ? `Def ${displayCard.defense_bonus} · ${tileCount} 🔷` : `Def ${displayCard.defense_bonus}`);
+              } else if (displayCard.power > 0 || displayCard.card_type === 'claim') {
+                const tileCount = 1 + (displayCard.multi_target_count || 0);
+                parts.push(tileCount >= 2 ? `Pow ${displayCard.power} · ${tileCount} 🔷` : `Pow ${displayCard.power}`);
               }
-              if (displayCard.resource_gain > 0) {
-                parts.push(`+${displayCard.resource_gain}`);
+              if (displayCard.resource_gain > 0) parts.push(`+${displayCard.resource_gain} 💰`);
+              if (displayCard.draw_cards > 0) parts.push(`+${displayCard.draw_cards} 🃏`);
+              if (displayCard.action_return > 0) parts.push(`+${displayCard.action_return} ⚡`);
+              if (displayCard.forced_discard > 0) parts.push(`🎯 -${displayCard.forced_discard} 🃏`);
+              if (displayCard.effects) {
+                for (const eff of displayCard.effects) {
+                  if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
+                    const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    parts.push(`✂️ ${val}`);
+                    if (eff.type === 'trash_gain_buy_cost') parts.push('+ 💰');
+                  }
+                  if (eff.type === 'gain_resources' && eff.condition) {
+                    const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    parts.push(`+${val} 💰`);
+                  }
+                  if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
+                    const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    parts.push(`+${val} ⏰🃏`);
+                  }
+                  if (eff.type === 'enhance_vp_tile') parts.push('🔷 +★');
+                  if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') parts.push('⚙️');
+                }
               }
+              if (displayCard.trash_on_use) parts.push('🗑️');
               return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
             })()}
           </div>
@@ -235,11 +255,16 @@ export function CardViewPopup({
   cards,
   onClose,
   defaultFull = false,
+  note,
+  preserveOrder = false,
 }: {
   title: string;
   cards: { label: string; items: Card[] }[];
   onClose: () => void;
   defaultFull?: boolean;
+  note?: string;
+  /** When true, display cards in the order given (no sorting). */
+  preserveOrder?: boolean;
 }) {
   const [fullView, setFullView] = useState(() => viewModeMemory[title] ?? defaultFull);
   const animMode = useAnimationMode();
@@ -257,6 +282,15 @@ export function CardViewPopup({
       requestAnimationFrame(() => setVisible(true));
     }
   }, [animMode]);
+
+  // Dismiss on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   const speed = animMode === 'fast' ? 0.5 : 1;
   const overlayTransition = animMode === 'off' ? 'none' : `opacity ${0.25 * speed}s ease`;
@@ -299,6 +333,7 @@ export function CardViewPopup({
         }}>
           <span style={{ fontWeight: 'bold', fontSize: 15, color: '#fff' }}>{title}</span>
           <span style={{ fontSize: 12, color: '#888' }}>({totalCount} cards)</span>
+          {note && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>{note}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
               <button
@@ -334,7 +369,10 @@ export function CardViewPopup({
                 <div style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>Empty</div>
               ) : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                  {[...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name)).map((card, i) => (
+                  {(preserveOrder
+                    ? group.items
+                    : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name))
+                  ).map((card, i) => (
                     <CardPopupItem key={`${card.id}-${i}`} card={card} full={fullView} shiftHeld={shiftHeld} />
                   ))}
                 </div>
@@ -434,15 +472,23 @@ export default function CardHand({
   const [departingAnims, setDepartingAnims] = useState<Map<string, DepartingAnim>>(new Map());
   // (simplifiedHidden removed — fast mode uses normal animations at 2x speed)
   const [shuffling, setShuffling] = useState(false);
+  const [shuffleDisplayCount, setShuffleDisplayCount] = useState(0);
+  const shuffleAnimRef = useRef<{ target: number; startTime: number; duration: number } | null>(null);
   const prevDeckSizeRef = useRef(deckSize);
   const prevDiscardCountRef = useRef(discardCount);
   const discardAllFiredRef = useRef(false);
 
   // Force shuffle animation from parent (intro sequence)
   useEffect(() => {
-    if (forceShuffleAnim) setShuffling(true);
-    else if (forceShuffleAnim === false) setShuffling(false);
-  }, [forceShuffleAnim]);
+    if (forceShuffleAnim) {
+      setShuffling(true);
+      setShuffleDisplayCount(0);
+      const duration = animated ? 2000 : 800;
+      shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
+    } else if (forceShuffleAnim === false) {
+      setShuffling(false);
+    }
+  }, [forceShuffleAnim]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ResizeObserver for card overlap
   useEffect(() => {
@@ -726,10 +772,27 @@ export default function CardHand({
 
     if (hasNewCards && discardMovedToDraw && deckReplenished && !animationOff) {
       setShuffling(true);
+      setShuffleDisplayCount(0);
       const duration = animated ? 2000 : 800;
+      shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
       setTimeout(() => setShuffling(false), duration);
     }
   }, [deckSize, discardCount, cards, animated, animationOff]);
+
+  // Animate shuffle count-up
+  useEffect(() => {
+    if (!shuffling || !shuffleAnimRef.current) return;
+    const { target, startTime, duration } = shuffleAnimRef.current;
+    let raf: number;
+    const tick = () => {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(1, elapsed / duration);
+      setShuffleDisplayCount(Math.round(progress * target));
+      if (progress < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [shuffling]);
 
   const resetDragState = useCallback(() => {
     dragStartRef.current = null;
@@ -872,14 +935,15 @@ export default function CardHand({
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    padding: '6px 10px',
+    gap: 2,
+    padding: '4px 10px',
     background: '#2a2a3e',
     border: '1px solid #444',
     borderRadius: 8,
     color: '#fff',
     cursor: 'pointer',
     width: BTN_WIDTH,
+    minHeight: CARD_MIN_HEIGHT,
     flexShrink: 0,
     userSelect: 'none',
     position: 'relative',
@@ -890,19 +954,6 @@ export default function CardHand({
 
   return (
     <>
-      {/* Shuffle notification above hand */}
-      {shuffling && (
-        <div style={{
-          textAlign: 'center',
-          padding: '4px 0',
-          fontSize: 12,
-          color: '#4a9eff',
-          fontStyle: 'italic',
-        }}>
-          {forceShuffleAnim ? 'Shuffling deck...' : 'Draw pile empty, shuffling discarded cards.'}
-        </div>
-      )}
-
       {/* Grid layout: [button | cards | button] — columns are fixed so buttons never shift */}
       <div style={{
         display: 'grid',
@@ -911,30 +962,50 @@ export default function CardHand({
         touchAction: 'none',
         alignItems: 'stretch',
       }}>
-        {/* Deck icon */}
-        <button
-          ref={drawBtnRef}
-          onClick={() => setShowDeckPopup(true)}
-          title="View cards in draw pile"
-          style={{
-            ...iconBtnStyle,
-            ...(shuffling ? {
-              animation: animated
-                ? 'shufflePulse 0.4s ease-in-out infinite'
-                : 'shufflePulse 0.25s ease-in-out infinite',
-              boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
-              borderColor: '#4a9eff',
-            } : {}),
-          }}
-        >
-          {shuffling
-            ? <span style={{ fontSize: 10, fontWeight: 'bold', color: '#4a9eff' }}>Shuffling...</span>
-            : <>
-                <span style={{ fontSize: 12, fontWeight: 'bold', color: '#4a9eff' }}>{deckSize}</span>
-                <span style={{ fontSize: 9, color: '#888' }}>Draw</span>
-              </>
-          }
-        </button>
+        {/* Deck icon + shuffle tooltip */}
+        <div style={{ position: 'relative', alignSelf: 'stretch', zIndex: 201 }}>
+          {shuffling && (
+            <div style={{
+              position: 'absolute',
+              bottom: '100%',
+              left: 0,
+              marginBottom: 6,
+              whiteSpace: 'nowrap',
+              background: '#111122',
+              border: '1px solid #555',
+              borderRadius: 6,
+              padding: '4px 10px',
+              fontSize: 11,
+              color: '#4a9eff',
+              fontWeight: 'bold',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              zIndex: 10000,
+              pointerEvents: 'none',
+            }}>
+              Shuffling...
+            </div>
+          )}
+          <button
+            ref={drawBtnRef}
+            onClick={() => setShowDeckPopup(true)}
+            title="View cards in draw pile"
+            style={{
+              ...iconBtnStyle,
+              ...(shuffling ? {
+                animation: animated
+                  ? 'shufflePulse 0.4s ease-in-out infinite'
+                  : 'shufflePulse 0.25s ease-in-out infinite',
+                boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
+                borderColor: '#4a9eff',
+              } : {}),
+            }}
+          >
+            <span style={{ fontSize: 24, fontWeight: 'bold', color: '#fff', lineHeight: 1 }}>
+              {shuffling ? shuffleDisplayCount : deckSize}
+            </span>
+            <span style={{ fontSize: 9, color: '#888' }}>Draw</span>
+          </button>
+        </div>
 
         {/* Cards container */}
         <div
@@ -1049,7 +1120,7 @@ export default function CardHand({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: 14, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                     <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
                       if (el) {
                         const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -1060,7 +1131,7 @@ export default function CardHand({
                       {card.action_return > 0 && <>{' '}<ActionReturnBadge value={card.action_return} /></>}
                       {card.current_vp !== undefined && (
                         <span style={{
-                          fontSize: 10,
+                          fontSize: 11,
                           fontWeight: 'bold',
                           color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
                           marginLeft: 4,
@@ -1070,27 +1141,48 @@ export default function CardHand({
                       )}
                     </span>
                   </div>
-                  <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[card.card_type]}</span>
+                  <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : ''}</span>
                 </div>
-                <div style={{ fontSize: 11, color: '#aaa' }}>
+                <div style={{ fontSize: 13, color: '#aaa' }}>
                   {(() => {
                     const parts: React.ReactNode[] = [];
-                    if (card.buy_cost !== null) {
-                      parts.push(`💰 ${card.buy_cost}`);
-                    } else if (card.starter) {
-                      parts.push('Starter');
-                    }
                     if (card.passive_vp !== 0) {
                       parts.push(<span key="vp" style={{ color: card.passive_vp > 0 ? '#ffd700' : '#ff6666' }}>{card.passive_vp > 0 ? '+' : ''}{card.passive_vp}★</span>);
                     } else if (card.vp_formula) {
                       parts.push(<span key="vp" style={{ color: '#ffd700' }}>+★</span>);
                     }
-                    if (card.power > 0 || card.card_type === 'claim') {
-                      parts.push(`Pow ${card.power}`);
+                    if (card.card_type === 'defense' && card.defense_bonus > 0) {
+                      const tileCount = card.defense_target_count || 1;
+                      parts.push(tileCount >= 2 ? `Def ${card.defense_bonus} · ${tileCount} 🔷` : `Def ${card.defense_bonus}`);
+                    } else if (card.power > 0 || card.card_type === 'claim') {
+                      const tileCount = 1 + (card.multi_target_count || 0);
+                      parts.push(tileCount >= 2 ? `Pow ${card.power} · ${tileCount} 🔷` : `Pow ${card.power}`);
                     }
-                    if (card.resource_gain > 0) {
-                      parts.push(`+${card.resource_gain}`);
+                    if (card.resource_gain > 0) parts.push(`+${card.resource_gain} 💰`);
+                    if (card.draw_cards > 0) parts.push(`+${card.draw_cards} 🃏`);
+                    if (card.action_return > 0) parts.push(`+${card.action_return} ⚡`);
+                    if (card.forced_discard > 0) parts.push(`🎯 -${card.forced_discard} 🃏`);
+                    if (card.trash_on_use) parts.push('🗑️');
+                    if (card.effects) {
+                      for (const eff of card.effects) {
+                        if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
+                          const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                          parts.push(`✂️ ${val}`);
+                          if (eff.type === 'trash_gain_buy_cost') parts.push('+ 💰');
+                        }
+                        if (eff.type === 'gain_resources' && eff.condition) {
+                          const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                          parts.push(`+${val} 💰`);
+                        }
+                        if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
+                          const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                          parts.push(`+${val} ⏰🃏`);
+                        }
+                        if (eff.type === 'enhance_vp_tile') parts.push('🔷 +★');
+                        if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') parts.push('⚙️');
+                      }
                     }
+                    if (card.trash_on_use) parts.push('🗑️');
                     return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
                   })()}
                 </div>
@@ -1155,7 +1247,7 @@ export default function CardHand({
           title="View discard pile"
           style={{ ...iconBtnStyle, opacity: discardCount === 0 ? 0.4 : 1 }}
         >
-          <span style={{ fontSize: 12, fontWeight: 'bold', color: '#ffaa4a' }}>{discardCount}</span>
+          <span style={{ fontSize: 24, fontWeight: 'bold', color: '#aaa', lineHeight: 1 }}>{discardCount}</span>
           <span style={{ fontSize: 9, color: '#888' }}>Discard</span>
         </button>
       </div>
@@ -1192,30 +1284,33 @@ export default function CardHand({
               <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
                 {dragCard.name}
               </div>
-              <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[dragCard.card_type]}</span>
+              <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{dragCard.buy_cost != null ? `${dragCard.buy_cost}💰` : ''}</span>
             </div>
           </div>
         );
       })()}
 
       {/* Draw pile viewer popup */}
-      {showDeckPopup && (
+      {showDeckPopup && createPortal(
         <CardViewPopup
           title="Draw Pile"
           cards={drawPileCards}
           onClose={() => setShowDeckPopup(false)}
-          defaultFull
-        />
+          note="Not shown in draw order"
+        />,
+        document.body,
       )}
 
       {/* Discard viewer popup */}
-      {showDiscardPopup && (
+      {showDiscardPopup && createPortal(
         <CardViewPopup
           title="Discard Pile"
-          cards={[{ label: 'Discard Pile', items: discardCards }]}
+          cards={[{ label: 'Discard Pile', items: [...discardCards].reverse() }]}
           onClose={() => setShowDiscardPopup(false)}
-          defaultFull
-        />
+          preserveOrder
+          note="Shown in discard order, most recent first"
+        />,
+        document.body,
       )}
 
       {/* Departing card ghosts — animate from last position to target */}
@@ -1255,7 +1350,7 @@ export default function CardHand({
                   <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
                     {d.card.name}
                   </div>
-                  <span style={{ fontSize: 14, flexShrink: 0 }}>{CARD_EMOJI[d.card.card_type]}</span>
+                  <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{d.card.buy_cost != null ? `${d.card.buy_cost}💰` : ''}</span>
                 </div>
               </div>
             );

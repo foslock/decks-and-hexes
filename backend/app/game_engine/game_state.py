@@ -146,6 +146,8 @@ class Player:
     tiles_lost_to_upkeep: int = 0  # tiles forfeited this turn due to unpaid upkeep
     is_cpu: bool = False
     cpu_noise: float = 0.15  # default Medium difficulty
+    has_left: bool = False  # player disconnected/left mid-game
+    left_vp: int = 0  # frozen VP at time of leaving (for leaderboard)
 
     @property
     def hand_size(self) -> int:
@@ -212,6 +214,7 @@ class Player:
                 "medium" if self.cpu_noise >= 0.10 else
                 "hard"
             ) if self.is_cpu else None,
+            "has_left": self.has_left,
         }
 
 
@@ -378,6 +381,8 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
        + player.vp (bonus VP from card effects, etc.)
     """
     player = game.players[player_id]
+    if player.has_left:
+        return player.left_vp
     if not game.grid:
         return max(0, player.vp)
 
@@ -548,6 +553,13 @@ def execute_start_of_turn(game: GameState) -> GameState:
 
     for pid in game.player_order:
         player = game.players[pid]
+
+        if player.has_left:
+            # Left players are frozen — skip everything
+            player.has_submitted_plan = True
+            player.has_acknowledged_resolve = True
+            player.has_ended_turn = True
+            continue
 
         # Reset upkeep tracking (actual payment happens in UPKEEP phase)
         player.last_upkeep_paid = 0
@@ -1596,6 +1608,8 @@ def execute_end_of_turn(game: GameState) -> GameState:
 
     for pid in game.player_order:
         player = game.players[pid]
+        if player.has_left:
+            continue
         # Discard remaining hand
         player.deck.add_to_discard(player.hand)
         player.hand = []
@@ -1604,8 +1618,13 @@ def execute_end_of_turn(game: GameState) -> GameState:
     # so that multi-round effects (like Stronghold's 2-round immunity) persist
     # across the end-of-turn boundary.
 
-    # Rotate first player
-    game.first_player_index = (game.first_player_index + 1) % len(game.player_order)
+    # Rotate first player (skip left players)
+    n = len(game.player_order)
+    for _ in range(n):
+        game.first_player_index = (game.first_player_index + 1) % n
+        fpi_pid = game.player_order[game.first_player_index]
+        if not game.players[fpi_pid].has_left:
+            break
 
     # Advance to next round
     game.current_round += 1

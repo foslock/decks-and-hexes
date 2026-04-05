@@ -27,6 +27,14 @@ export function useWebSocket(
   const retriesRef = useRef(0);
   const closedIntentionallyRef = useRef(false);
 
+  // Reset lastMessage when connection parameters change to prevent stale messages
+  // from a previous session being processed by a new one
+  const prevCodeRef = useRef(code);
+  if (code !== prevCodeRef.current) {
+    prevCodeRef.current = code;
+    setLastMessage(null);
+  }
+
   const connect = useCallback(() => {
     if (!code || !playerId || !token) return;
 
@@ -57,6 +65,7 @@ export function useWebSocket(
       wsRef.current = null;
       if (closedIntentionallyRef.current) {
         setStatus('disconnected');
+        setLastMessage(null); // Clear stale messages on intentional disconnect
         return;
       }
       // Auto-reconnect with exponential backoff

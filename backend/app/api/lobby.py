@@ -262,7 +262,7 @@ async def create_lobby(req: CreateLobbyRequest) -> dict[str, Any]:
 
     host = LobbyPlayer(
         id=player_id,
-        name=req.name,
+        name=req.name[:12],
         archetype=req.archetype,
         is_host=True,
         token=token,
@@ -316,9 +316,12 @@ async def join_lobby(code: str, req: JoinLobbyRequest) -> dict[str, Any]:
     player_id = f"player_{next_idx}"
     token = str(uuid.uuid4())
 
+    # Default name is "Player N" based on join order (total players so far + 1)
+    name = (req.name[:12] if req.name and req.name.strip() not in ('', 'Player') else f"Player {len(lobby.players) + 1}")
+
     player = LobbyPlayer(
         id=player_id,
-        name=req.name,
+        name=name,
         archetype=req.archetype,
         token=token,
     )
@@ -402,7 +405,7 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
         raise HTTPException(403, "Not authorized to edit this player")
 
     if req.name is not None:
-        player.name = req.name
+        player.name = req.name[:12]
     if req.archetype is not None:
         try:
             Archetype(req.archetype)
@@ -478,7 +481,7 @@ async def add_local_player(code: str, req: AddLocalPlayerRequest) -> dict[str, A
 
     local_player = LobbyPlayer(
         id=player_id,
-        name=req.name,
+        name=req.name[:12],
         archetype=req.archetype,
         is_local=True,
     )
@@ -686,55 +689,82 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
     player = game.players.get(player_id)
     if not player:
         raise HTTPException(404, "Player not found")
+    if player.has_left:
+        raise HTTPException(400, "Player already left")
 
-    # Neutralize all tiles owned by this player
+    from app.game_engine.game_state import (
+        Phase,
+        _transition_to_buy,
+        compute_player_vp,
+        end_buy_phase,
+        execute_end_of_turn,
+        execute_reveal,
+    )
+
+    # Freeze VP before neutralizing tiles (so leaderboard shows their score at departure)
+    player.left_vp = compute_player_vp(game, player_id)
+
+    # Neutralize all tiles owned by this player (including base → normal neutral tile)
     if game.grid:
         for tile in game.grid.tiles.values():
             if tile.owner == player_id:
                 tile.owner = None
-                tile.defense_power = 0
-                tile.base_defense = 0
+                tile.defense_power = tile.base_defense
+                tile.permanent_defense_bonus = 0
                 tile.held_since_turn = None
+            if tile.is_base and tile.base_owner == player_id:
+                tile.is_base = False
+                tile.base_owner = None
 
-    # Remove their planned actions
+    # Mark player as left and freeze all phase flags.
+    # Move hand and planned action cards to discard so the full deck is viewable.
+    player.has_left = True
+    planned_cards = [a.card for a in player.planned_actions]
+    player.deck.add_to_discard(player.hand + planned_cards)
     player.planned_actions = []
+    player.hand = []
     player.has_submitted_plan = True
+    player.has_acknowledged_resolve = True
     player.has_ended_turn = True
-    player.is_cpu = True  # Mark as effectively CPU so they're skipped
-    player.cpu_noise = 0.0
     game._log(f"{player.name} has left the game.")
 
-    # Check if this unblocks phase advancement
-    from app.game_engine.game_state import (
-        Phase,
-        _transition_to_buy,
-        auto_play_cpu_buys,
-        auto_play_cpu_plans,
-        execute_reveal,
-        submit_plan,
-        end_buy_phase,
-    )
-
-    player.has_acknowledged_resolve = True  # pre-set in case we're in reveal
-
-    if game.current_phase == Phase.PLAN:
-        if all(p.has_submitted_plan for p in game.players.values()):
-            execute_reveal(game)
-            # Also auto-advance through resolve since leaving player is now CPU
-            if all(p.has_acknowledged_resolve or p.is_cpu for p in game.players.values()):
+    # Check if only one active (non-left) player remains → they win
+    active_players = [pid for pid, p in game.players.items() if not p.has_left]
+    if len(active_players) == 1 and game.current_phase != Phase.GAME_OVER:
+        sole_pid = active_players[0]
+        game.winner = sole_pid
+        game.current_phase = Phase.GAME_OVER
+        game._log(f"{game.players[sole_pid].name} wins — all opponents left!")
+    elif len(active_players) == 0 and game.current_phase != Phase.GAME_OVER:
+        game.current_phase = Phase.GAME_OVER
+        game._log("All players have left — game over.")
+    elif game.current_phase != Phase.GAME_OVER:
+        # Check if this unblocks phase advancement
+        if game.current_phase == Phase.PLAN:
+            if all(p.has_submitted_plan for p in game.players.values()):
+                execute_reveal(game)
+                if all(
+                    p.has_acknowledged_resolve or p.is_cpu or p.has_left
+                    for p in game.players.values()
+                ):
+                    _transition_to_buy(game)
+        elif game.current_phase == Phase.REVEAL:
+            if all(
+                p.has_acknowledged_resolve or p.is_cpu or p.has_left
+                for p in game.players.values()
+            ):
                 _transition_to_buy(game)
-    elif game.current_phase == Phase.REVEAL:
-        if all(p.has_acknowledged_resolve or p.is_cpu for p in game.players.values()):
-            _transition_to_buy(game)
-    elif game.current_phase == Phase.BUY:
-        if all(p.has_ended_turn for p in game.players.values()):
-            end_buy_phase(game, player_id)  # no-op, but triggers advance
+        elif game.current_phase == Phase.BUY:
+            if all(p.has_ended_turn for p in game.players.values()):
+                execute_end_of_turn(game)
 
-    # Broadcast updated state
+    # Broadcast updated state (includes has_left=True + winner if applicable),
+    # then disconnect the leaving player.
+    # Note: we do NOT send a separate "player_left" message after the state broadcast,
+    # because two rapid WS messages can cause React to skip the first (game_state) and
+    # only process the second (player_left), losing the critical state update.
     await manager.broadcast_game_state(game_id, game, get_visible_ids=get_visible_player_ids)
-    # Disconnect the player's WebSocket
     manager.disconnect(game_id, player_id)
-    await manager.broadcast(game_id, {"type": "player_left", "player_id": player_id, "name": player.name})
 
     return {"message": f"{player.name} left the game", "state": game.to_dict()}
 
@@ -791,8 +821,8 @@ async def handle_replay_vote(game_id: str, player_id: str, token: str) -> dict[s
     votes = _replay_votes.setdefault(game_id, set())
     votes.add(player_id)
 
-    # Count human players
-    human_ids = [pid for pid, p in game.players.items() if not p.is_cpu]
+    # Count human players (exclude those who left)
+    human_ids = [pid for pid, p in game.players.items() if not p.is_cpu and not p.has_left]
     all_voted = all(pid in votes for pid in human_ids)
 
     if all_voted:
@@ -849,6 +879,11 @@ async def _restart_game(game_id: str, old_game: GameState) -> dict[str, Any]:
     games = _get_games()
     old_lobby_code = _game_to_lobby.pop(game_id, None)
     games.pop(game_id, None)
+
+    # Remove players who left from the lobby so they aren't in the new game
+    left_pids = {pid for pid, p in old_game.players.items() if p.has_left}
+    for pid in left_pids:
+        lobby.players.pop(pid, None)
 
     # Create new game using the lobby (reuse start_lobby logic)
     registry = _get_registry()

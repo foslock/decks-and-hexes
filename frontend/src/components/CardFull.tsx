@@ -225,8 +225,8 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
       boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
       ...style,
     }}>
-      {/* Top row: VP badge top-left, title centered, cost top-right */}
-      <div style={{ position: 'relative', textAlign: 'center', minHeight: 22 }}>
+      {/* Top row: VP badge top-left, title left-aligned, cost top-right */}
+      <div style={{ position: 'relative', textAlign: 'left', minHeight: 22 }}>
         {card.current_vp !== undefined && (
           <Tooltip content={
             card.current_vp >= 0
@@ -251,11 +251,11 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
             </div>
           </Tooltip>
         )}
-        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingLeft: card.current_vp !== undefined ? 36 : 0, paddingRight: hasCost ? 36 : 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingLeft: card.current_vp !== undefined ? 36 : 0, paddingRight: 36 }}>
           {card.name}
           {card.is_upgraded && !card.name.endsWith('+') && <span style={{ color: '#ffd700' }}> +</span>}
         </div>
-        {hasCost && (
+        {hasCost ? (
           <Tooltip content={
             isDiscounted
               ? `Cost: ${displayCost} (reduced from ${card.buy_cost})`
@@ -278,6 +278,22 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
               {isDiscounted ? `${displayCost}*` : displayCost}💰
             </div>
           </Tooltip>
+        ) : (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            fontSize: 12,
+            fontWeight: 'bold',
+            color: '#555',
+            background: '#2a2a4e',
+            borderRadius: 5,
+            padding: '1px 6px',
+            border: '1px solid #444',
+            lineHeight: 1.3,
+          }}>
+            —
+          </div>
         )}
       </div>
 
