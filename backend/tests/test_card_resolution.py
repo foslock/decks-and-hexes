@@ -471,7 +471,7 @@ class TestNeutralRecruit:
         card = card_registry["neutral_recruit"]
         assert card.power == 1
         assert card.action_return == 1
-        assert card.buy_cost == 1
+        assert card.buy_cost == 2
 
 
 class TestNeutralConscription:
@@ -494,22 +494,22 @@ class TestNeutralWatchtower:
         """Watchtower: +3 defense, draw 1."""
         card = card_registry["neutral_watchtower"]
         assert card.defense_bonus == 3
-        assert card.buy_cost == 4
+        assert card.buy_cost == 3
 
 
 class TestNeutralSiegeTower:
     def test_siege_tower_high_power(self, card_registry):
-        """Siege Tower: Power 6, cost 6."""
+        """Siege Tower: Power 6, cost 8."""
         card = card_registry["neutral_siege_tower"]
         assert card.power == 6
-        assert card.buy_cost == 6
+        assert card.buy_cost == 8
 
 
 class TestNeutralReclaim:
     def test_consolidate_stats(self, card_registry):
-        """Consolidate: cost 3."""
+        """Consolidate: cost 2."""
         card = card_registry["neutral_reclaim"]
-        assert card.buy_cost == 3
+        assert card.buy_cost == 2
 
     def test_consolidate_trash_for_resources(self, card_registry):
         """Consolidate: trash a card and gain half its buy cost (rounded down)."""
@@ -543,9 +543,9 @@ class TestNeutralReclaim:
 
 class TestNeutralDiplomat:
     def test_diplomat_stats(self, card_registry):
-        """Diplomat: cost 4, trash on use."""
+        """Diplomat: cost 3, trash on use."""
         card = card_registry["neutral_diplomat"]
-        assert card.buy_cost == 4
+        assert card.buy_cost == 3
         assert card.trash_on_use is True
 
 
@@ -625,10 +625,10 @@ class TestVanguardRapidAssault:
 
 class TestVanguardSpearhead:
     def test_spearhead_high_power(self, card_registry):
-        """Spearhead: Power 5, no special effects."""
+        """Spearhead: Power 8, trash on use."""
         card = card_registry["vanguard_spearhead"]
-        assert card.power == 5
-        assert card.effects == []  # no immediate_resolve anymore
+        assert card.power == 8
+        assert card.trash_on_use is True
 
 
 class TestVanguardCoordinatedPush:
@@ -1065,10 +1065,10 @@ class TestSwarmRabble:
 
 class TestSwarmDogPile:
     def test_dog_pile_stackable(self, card_registry):
-        """Dog Pile: is stackable."""
+        """Dog Pile: is stackable, power 2."""
         card = card_registry["swarm_dog_pile"]
         assert card.stackable is True
-        assert card.power == 1
+        assert card.power == 2
 
     def test_dog_pile_stacks_on_same_tile(self, card_registry):
         """Dog Pile: multiple can target same tile."""
@@ -1825,9 +1825,10 @@ class TestVanguardCounterattack:
 
 class TestVanguardRearguard:
     def test_rearguard_stats(self, card_registry):
-        """Rearguard: cost 4, defense type."""
+        """Rearguard: cost 3, defense type, gains 2 resources."""
         card = card_registry["vanguard_rearguard"]
-        assert card.buy_cost == 4
+        assert card.buy_cost == 3
+        assert card.resource_gain == 2
         assert card.card_type == CardType.DEFENSE
 
 

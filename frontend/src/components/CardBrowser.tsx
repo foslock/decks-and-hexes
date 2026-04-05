@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview } from '../hooks/upgradePreview';
+import { buildCardSubtitle } from './cardSubtitle';
 import { useShiftKey } from '../hooks/useShiftKey';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -112,88 +113,11 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
               el.style.setProperty('--sub-scale', String(scale));
             }
           }}>
-          {(() => {
-            const parts: React.ReactNode[] = [];
-            if (displayCard.passive_vp !== 0) {
-              parts.push(<span key="vp" style={{ color: displayCard.passive_vp > 0 ? '#ffd700' : '#ff6666' }}>{displayCard.passive_vp > 0 ? '+' : ''}{displayCard.passive_vp}★</span>);
-            } else if (displayCard.vp_formula) {
-              parts.push(<span key="vp" style={{ color: '#ffd700' }}>+★</span>);
-            }
-            if (displayCard.card_type === 'defense') {
-              // Defense cards: show "Def X" using defense_bonus or power
-              const isUpgraded = displayCard.is_upgraded;
-              const defBase = displayCard.defense_bonus > 0 ? displayCard.defense_bonus : displayCard.power;
-              const hasPerAdj = displayCard.effects?.some(e => e.type === 'defense_per_adjacent');
-              const hasPermanent = displayCard.effects?.some(e => e.type === 'permanent_defense');
-              const hasImmunity = displayCard.effects?.some(e => e.type === 'tile_immunity');
-              const dtc = displayCard.defense_target_count || 1;
-              const tileSuffix = dtc >= 2 ? ` · ${dtc}🔷` : '';
-              if (hasImmunity) {
-                parts.push('Immune');
-              } else if (hasPerAdj) {
-                const mod = displayCard.effects?.find(e => e.type === 'defense_per_adjacent');
-                const perVal = mod ? (isUpgraded ? (mod.upgraded_value ?? mod.value) : mod.value) : 1;
-                parts.push(`🛡️${perVal}+${tileSuffix}`);
-              } else if (hasPermanent) {
-                const mod = displayCard.effects?.find(e => e.type === 'permanent_defense');
-                const permVal = mod
-                  ? (isUpgraded ? (mod.metadata?.upgraded_value as number ?? mod.value) : mod.value)
-                  : defBase;
-                parts.push(`🛡️${permVal}${tileSuffix}`);
-              } else if (defBase > 0) {
-                parts.push(`🛡️${defBase}${tileSuffix}`);
-              }
-            } else if (displayCard.power > 0 || displayCard.card_type === 'claim') {
-              const isUpgraded = displayCard.is_upgraded;
-              const powerMods = displayCard.effects?.filter(e => e.type === 'power_modifier') ?? [];
-              const hasTileScaling = displayCard.effects?.some(e => e.type === 'power_per_tiles_owned');
-              const isUnbounded = hasTileScaling || powerMods.some(e =>
-                e.condition === 'cards_in_hand' || e.metadata?.per_tile
-              );
-              const fixedBonus = powerMods.find(e =>
-                !isUnbounded && ((isUpgraded ? (e.upgraded_value ?? e.value) : e.value) > 0)
-              );
-              const mtc = 1 + (displayCard.multi_target_count || 0);
-              const claimTileSuffix = mtc >= 2 ? ` · ${mtc}🔷` : '';
-              if (isUnbounded) {
-                const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
-                const minPow = handMod
-                  ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
-                  : displayCard.power;
-                parts.push(`⚔️${minPow}+${claimTileSuffix}`);
-              } else if (fixedBonus) {
-                const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
-                parts.push(`⚔️${displayCard.power}/${displayCard.power + bonusVal}${claimTileSuffix}`);
-              } else {
-                parts.push(`⚔️${displayCard.power}${claimTileSuffix}`);
-              }
-            }
-            if (displayCard.resource_gain > 0) parts.push(`+${displayCard.resource_gain}💰`);
-            if (displayCard.draw_cards > 0) parts.push(`+${displayCard.draw_cards}🃏`);
-            if (displayCard.action_return > 0) parts.push(`+${displayCard.action_return}⚡`);
-            if (displayCard.forced_discard > 0) parts.push(`🎯-${displayCard.forced_discard}🃏`);
-            if (displayCard.effects) {
-              for (const eff of displayCard.effects) {
-                if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
-                  const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`✂️${val}`);
-                  if (eff.type === 'trash_gain_buy_cost') parts.push('+💰');
-                }
-                if (eff.type === 'gain_resources' && eff.condition) {
-                  const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`+${val}💰`);
-                }
-                if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
-                  const val = displayCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-                  parts.push(`+${val}⏰🃏`);
-                }
-                if (eff.type === 'enhance_vp_tile') parts.push('🔷+★');
-                if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') parts.push('⚙️');
-              }
-            }
-            if (displayCard.trash_on_use) parts.push('🗑️');
-            return parts.map((part, i) => <span key={i}>{i > 0 ? ' · ' : ''}{part}</span>);
-          })()}
+          {buildCardSubtitle(displayCard).map((part, i) => {
+            const isVp = part.endsWith('★');
+            const vpColor = displayCard.passive_vp !== undefined && displayCard.passive_vp < 0 ? '#ff6666' : '#ffd700';
+            return <span key={i} style={isVp ? { color: vpColor } : undefined}>{i > 0 ? ' · ' : ''}{part}</span>;
+          })}
           </span>
         </div>
       </div>

@@ -132,18 +132,17 @@ cards:
     name: Dog Pile
     name_upgraded: Dog Pile+
     type: Claim
-    buy_cost: 2
+    buy_cost: 3
     action_return: 0
-    power: 1
-    effect: "Claim: Power 1. Stackable. Each other claim you play on the same tile this turn gets +1 power."
-    effect_upgraded: "Claim: Power 2. Stackable. Each other claim you play on the same tile this turn gets +2 power."
+    power: 2
+    effect: "Claim: Power 2. Stackable. Each other claim you play on the same tile this turn gets +1 power."
+    effect_upgraded: "Claim: Power 3. Stackable. Each other claim you play on the same tile this turn gets +1 power."
     secondary_effect: null
     secondary_timing: null
     stackable: true
     effects:
       - type: stacking_power_bonus
         value: 1
-        upgraded_value: 2
         timing: on_resolution
 
   - id: swarm_thin_the_herd
@@ -241,7 +240,7 @@ cards:
     name: Consecrate
     name_upgraded: Consecrate+
     type: Engine
-    buy_cost: 4
+    buy_cost: 3
     action_return: 0
     power: 0
     trash_on_use: true

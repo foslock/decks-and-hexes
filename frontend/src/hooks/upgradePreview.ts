@@ -19,6 +19,7 @@ export function getUpgradedPreview(card: Card): Card {
     forced_discard: stats?.forced_discard ?? card.forced_discard,
     defense_bonus: stats?.defense_bonus ?? card.defense_bonus,
     multi_target_count: stats?.multi_target_count ?? card.multi_target_count,
+    defense_target_count: stats?.defense_target_count ?? card.defense_target_count,
   };
 }
 
