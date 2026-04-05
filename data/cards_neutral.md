@@ -61,7 +61,7 @@ cards:
     power: 0
     passive_vp: -1
     unplayable: true
-    effect: "Dead weight from a base raid. -1 VP per copy. Can be trashed by trash effects."
+    effect: "Dead weight from a base raid. -1 VP per copy."
     effect_upgraded: null
     trash_on_use: false
     note: "Generated when an opponent raids your base. Each Rubble card reduces derived VP by 1 and wastes a hand slot when drawn. Trashing Rubble is a key recovery mechanism."
@@ -133,8 +133,8 @@ cards:
     copies: 4
     action_return: 0
     power: 0
-    effect: "Draw 2 extra cards at the start of your next turn if you did not claim any opponent-owned tiles this turn."
-    effect_upgraded: "Draw 3 extra cards at the start of your next turn if you did not claim any opponent-owned tiles this turn."
+    effect: "Draw 2 cards next turn if you did not claim any opponent-owned tiles this turn."
+    effect_upgraded: "Draw 3 cards next turn if you did not claim any opponent-owned tiles this turn."
     trash_on_use: false
     effects:
       - type: cease_fire

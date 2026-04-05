@@ -1233,9 +1233,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
       // C/D/S: toggle Cards/Deck/Shop overlays
       const key = e.key.toLowerCase();
-      if (key === 'c') { setShowCardBrowser(p => !p); return; }
-      if (key === 'd') { setShowDeckViewer(p => { if (!p) setShowShopOverlay(false); return !p; }); return; }
-      if (key === 's' && !e.ctrlKey && !e.metaKey) { setShowShopOverlay(p => { if (!p) setShowDeckViewer(false); return !p; }); return; }
+      if (key === 'c') { setShowCardBrowser(p => { if (!p) { setShowDeckViewer(false); setShowShopOverlay(false); } return !p; }); return; }
+      if (key === 'd') { setShowDeckViewer(p => { if (!p) { setShowShopOverlay(false); setShowCardBrowser(false); } return !p; }); return; }
+      if (key === 's' && !e.ctrlKey && !e.metaKey) { setShowShopOverlay(p => { if (!p) { setShowDeckViewer(false); setShowCardBrowser(false); } return !p; }); return; }
 
       // Enter key: play engine card, done reviewing, or hold-to-submit/end-turn
       if (e.key === 'Enter') {
@@ -1732,7 +1732,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   // ── Game Over handlers ─────────────────────────────────────
   const humanPlayerCount = useMemo(
-    () => gameState.player_order.filter(pid => !gameState.players[pid]?.is_cpu).length,
+    () => gameState.player_order.filter(pid => {
+      const p = gameState.players[pid];
+      return p && !p.is_cpu && !p.has_left;
+    }).length,
     [gameState.player_order, gameState.players],
   );
 
@@ -2357,7 +2360,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           phase={phase}
                           totalCards={pTotal}
                           tileCount={pTiles}
-                          cpuBadge={isCpu ? (p.cpu_difficulty === 'easy' ? '🤖 Easy' : p.cpu_difficulty === 'hard' ? '🤖 Hard' : '🤖 Med') : undefined}
+
                         />
                       </div>
                     );
@@ -2378,7 +2381,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         phase={phase}
                         totalCards={pTotal}
                         tileCount={playerTileCount}
-                        cpuBadge={activePlayer.is_cpu ? (activePlayer.cpu_difficulty === 'easy' ? '🤖 Easy' : activePlayer.cpu_difficulty === 'hard' ? '🤖 Hard' : '🤖 Med') : undefined}
+
                       />
                     );
                   })()}
@@ -2390,7 +2393,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           {/* ── Top-right: action buttons + gear ── */}
           <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, alignItems: 'flex-start', zIndex: 210 }}>
             <button
-              onClick={() => { setShowCardBrowser(true); }}
+              onClick={() => { setShowCardBrowser(true); setShowDeckViewer(false); setShowShopOverlay(false); }}
               style={{
                 padding: '6px 14px',
                 background: '#2a2a3e',
@@ -2468,7 +2471,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     isHost={mpIsHost}
                     onLeaveGame={isMultiplayer && onLeaveGame ? async () => {
                       if (mpPlayerId && mpToken) {
-                        try { await import('../api/client').then(api => api.leaveGame(gameState.id, mpPlayerId, mpToken)); } catch { /* ignore */ }
+                        try { await import('../api/client').then(api => api.leaveGame(gameState.id, mpPlayerId, mpToken)); } catch (e) { console.warn('leaveGame failed:', e); }
                       }
                       onLeaveGame();
                     } : undefined}
@@ -2949,7 +2952,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         </div>
 
         {/* Bottom panel: hand */}
-        <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30 }}>
           {activePlayer && (
             <CardHand
               playerId={activePlayerId}
@@ -3049,11 +3052,38 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               const statParts: string[] = [];
               if (c.card_type === 'defense') {
                 const def = c.defense_bonus > 0 ? c.defense_bonus : c.power;
-                if (def > 0) statParts.push(`Def ${def}`);
+                if (def > 0) {
+                  const dtc = c.defense_target_count || 1;
+                  statParts.push(dtc >= 2 ? `Def ${def} · ${dtc} 🔷` : `Def ${def}`);
+                }
               } else if (c.power > 0 || c.card_type === 'claim') {
-                statParts.push(`Pow ${c.power}`);
+                const mtc = 1 + (c.multi_target_count || 0);
+                statParts.push(mtc >= 2 ? `Pow ${c.power} · ${mtc} 🔷` : `Pow ${c.power}`);
               }
-              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain}`);
+              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain} 💰`);
+              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards} 🃏`);
+              if (c.action_return > 0) statParts.push(`+${c.action_return} ⚡`);
+              if (c.forced_discard > 0) statParts.push(`🎯 -${c.forced_discard} 🃏`);
+              if (c.effects) {
+                for (const eff of c.effects) {
+                  if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
+                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    statParts.push(`✂️ ${val}`);
+                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+ 💰');
+                  }
+                  if (eff.type === 'gain_resources' && eff.condition) {
+                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    statParts.push(`+${val} 💰`);
+                  }
+                  if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
+                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    statParts.push(`+${val} ⏰🃏`);
+                  }
+                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷 +★');
+                  if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') statParts.push('⚙️');
+                }
+              }
+              if (c.trash_on_use) statParts.push('🗑️');
               return (
                 <div key={i} style={{ marginBottom: i < cards.length - 1 ? 6 : 0 }}>
                   <div style={{ fontSize: 10, color: playerColor, fontWeight: 'bold', marginBottom: 2 }}>
@@ -3071,7 +3101,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                         {c.name}
                       </div>
-                      <span style={{ fontSize: 14, flexShrink: 0 }}>{REVIEW_EMOJI[c.card_type] || '📄'}</span>
+                      <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
                     </div>
                     <div style={{ fontSize: 11, color: '#aaa' }}>
                       {statParts.map((part, j) => <span key={j}>{j > 0 ? ' · ' : ''}{part}</span>)}
@@ -3118,12 +3148,38 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               const statParts: string[] = [];
               if (c.card_type === 'defense') {
                 const def = c.defense_bonus > 0 ? c.defense_bonus : c.power;
-                if (def > 0) statParts.push(`Def ${def}`);
+                if (def > 0) {
+                  const dtc = c.defense_target_count || 1;
+                  statParts.push(dtc >= 2 ? `Def ${def} · ${dtc} 🔷` : `Def ${def}`);
+                }
               } else if (c.power > 0 || c.card_type === 'claim') {
-                statParts.push(`Pow ${c.power}`);
+                const mtc = 1 + (c.multi_target_count || 0);
+                statParts.push(mtc >= 2 ? `Pow ${c.power} · ${mtc} 🔷` : `Pow ${c.power}`);
               }
-              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain}`);
-              if (action.target_q != null) statParts.push(`→ ${action.target_q},${action.target_r}`);
+              if (c.resource_gain > 0) statParts.push(`+${c.resource_gain} 💰`);
+              if (c.draw_cards > 0) statParts.push(`+${c.draw_cards} 🃏`);
+              if (c.action_return > 0) statParts.push(`+${c.action_return} ⚡`);
+              if (c.forced_discard > 0) statParts.push(`🎯 -${c.forced_discard} 🃏`);
+              if (c.effects) {
+                for (const eff of c.effects) {
+                  if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
+                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    statParts.push(`✂️ ${val}`);
+                    if (eff.type === 'trash_gain_buy_cost') statParts.push('+ 💰');
+                  }
+                  if (eff.type === 'gain_resources' && eff.condition) {
+                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    statParts.push(`+${val} 💰`);
+                  }
+                  if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
+                    const val = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                    statParts.push(`+${val} ⏰🃏`);
+                  }
+                  if (eff.type === 'enhance_vp_tile') statParts.push('🔷 +★');
+                  if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') statParts.push('⚙️');
+                }
+              }
+              if (c.trash_on_use) statParts.push('🗑️');
               return (
                 <div key={i} style={{
                   width: 134,
@@ -3138,7 +3194,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                       {c.name}
                     </div>
-                    <span style={{ fontSize: 14, flexShrink: 0 }}>{REVIEW_EMOJI[c.card_type] || '📄'}</span>
+                    <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
                   </div>
                   <div style={{ fontSize: 11, color: '#aaa' }}>
                     {statParts.map((part, j) => <span key={j}>{j > 0 ? ' · ' : ''}{part}</span>)}

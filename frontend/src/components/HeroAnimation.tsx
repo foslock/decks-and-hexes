@@ -181,7 +181,7 @@ export default function HeroAnimation() {
 
       // --- Card drawing ---
       const gridPixelH = (radius * 2) * Math.sqrt(3) * HEX_SIZE;
-      const cardH = gridPixelH * 0.75;
+      const cardH = gridPixelH * 0.60;
       const cardW = cardH * 0.65;
       const cardR = 8; // corner radius
 

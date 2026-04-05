@@ -1474,8 +1474,8 @@ class TestFortressConsolidate:
 
     def test_consolidate_stats(self, card_registry):
         card = card_registry["fortress_consolidate"]
-        assert card.buy_cost == 3
-        assert card.action_return == 1
+        assert card.buy_cost == 4
+        assert card.action_return == 0
 
 
 class TestFortressBatteringRam:

@@ -19,6 +19,7 @@ interface LeaderboardEntry {
   tiles: number;
   deckSize: number;
   isWinner: boolean;
+  hasLeft: boolean;
   color: string;
 }
 
@@ -69,6 +70,7 @@ export default function GameOverOverlay({
         tiles: tileCounts[pid] || 0,
         deckSize: p.deck_size + p.discard_count + p.hand_count,
         isWinner: pid === gameState.winner,
+        hasLeft: p.has_left,
         color: PLAYER_COLORS[pid] || '#888',
       };
     }).sort((a, b) => {
@@ -200,10 +202,23 @@ export default function GameOverOverlay({
               </div>
               {/* Name + archetype */}
               <div>
-                <span style={{ color: entry.color }}>{entry.name}</span>
+                <span style={{ color: entry.hasLeft ? '#666' : entry.color }}>{entry.name}</span>
                 <span style={{ fontSize: 13, color: '#666', marginLeft: 8, textTransform: 'capitalize' }}>
                   {entry.archetype}
                 </span>
+                {entry.hasLeft && (
+                  <span style={{
+                    fontSize: 10,
+                    padding: '1px 5px',
+                    borderRadius: 6,
+                    background: '#333',
+                    color: '#888',
+                    fontWeight: 'bold',
+                    marginLeft: 6,
+                  }}>
+                    Left
+                  </span>
+                )}
               </div>
               {/* VP */}
               <div style={{ textAlign: 'right', color: '#ffd700', fontWeight: 'bold' }}>
@@ -233,19 +248,19 @@ export default function GameOverOverlay({
       }}>
         <button
           onClick={onReplayVote}
-          disabled={replayDisabled || hasVoted}
+          disabled={replayDisabled || humanPlayerCount < 2 || hasVoted}
           style={{
             padding: '12px 32px',
             fontSize: 16,
             fontWeight: 'bold',
-            background: replayDisabled ? '#333' : hasVoted ? '#2a4a3e' : '#2a6e3e',
-            border: `1px solid ${replayDisabled ? '#444' : hasVoted ? '#3a6a4e' : '#3a8e5e'}`,
+            background: replayDisabled || humanPlayerCount < 2 ? '#333' : hasVoted ? '#2a4a3e' : '#2a6e3e',
+            border: `1px solid ${replayDisabled || humanPlayerCount < 2 ? '#444' : hasVoted ? '#3a6a4e' : '#3a8e5e'}`,
             borderRadius: 8,
-            color: replayDisabled ? '#666' : '#fff',
-            cursor: replayDisabled || hasVoted ? 'default' : 'pointer',
+            color: replayDisabled || humanPlayerCount < 2 ? '#666' : '#fff',
+            cursor: replayDisabled || humanPlayerCount < 2 || hasVoted ? 'default' : 'pointer',
           }}
         >
-          {replayDisabled
+          {replayDisabled || humanPlayerCount < 2
             ? 'Replay Unavailable'
             : hasVoted
               ? `Waiting... (${replayVotes.size}/${humanPlayerCount})`

@@ -229,11 +229,11 @@ cards:
     name: Consolidate
     name_upgraded: Consolidate+
     type: Engine
-    buy_cost: 3
-    action_return: 1
+    buy_cost: 4
+    action_return: 0
     power: 0
-    effect: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down). Draw 1 card. Gain 1 action."
-    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) +2. Draw 1 card. Gain 1 action."
+    effect: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down). Draw 1 card."
+    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) +2. Draw 1 card."
     secondary_effect: null
     secondary_timing: null
 

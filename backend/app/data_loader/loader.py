@@ -98,8 +98,9 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             resource_gain = int(match.group(1))
 
     # Parse draw_cards from effect text if not explicit
+    # Skip if draw is delayed ("next turn") — those use the draw_next_turn effect instead
     draw_cards = _safe_int(entry.get("draw_cards", 0))
-    if draw_cards == 0 and "draw" in effect.lower():
+    if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower():
         match = re.search(r'[Dd]raw\s+(\d+)\s+card', effect)
         if match:
             draw_cards = int(match.group(1))

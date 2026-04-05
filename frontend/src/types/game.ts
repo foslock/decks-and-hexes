@@ -93,6 +93,7 @@ export interface Player {
   neutral_bought_this_turn: boolean;
   is_cpu: boolean;
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
+  has_left: boolean;
 }
 
 export interface MarketStack {
