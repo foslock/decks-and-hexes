@@ -239,7 +239,7 @@ export default function HeroAnimation() {
       const GRID_FADE_START = 0;
       const GRID_FADE_DUR = 600;
       const CARD_ENTER_START = 300;
-      const CARD_ENTER_DUR = 600;
+      const CARD_ENTER_DUR = 1000;
       const COLLISION_TIME = CARD_ENTER_START + CARD_ENTER_DUR; // 900
       const REBOUND_DUR = 600;
       const TILE_FILL_START = 400;
