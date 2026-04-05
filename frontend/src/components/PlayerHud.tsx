@@ -117,6 +117,7 @@ interface PlayerHudProps {
   purchases?: BuyPurchase[];
   onPurchaseHover?: (e: React.MouseEvent, cardId: string, cardName?: string) => void;
   onPurchaseLeave?: () => void;
+  vpTarget?: number;
 }
 
 const ARCHETYPE_ICONS: Record<string, string> = {
@@ -149,20 +150,44 @@ function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { l
   return { label: phase.replace(/_/g, ' '), color: '#888' };
 }
 
-export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, isCurrentBuyer, phase, totalCards, tileCount, purchases, onPurchaseHover, onPurchaseLeave }: PlayerHudProps) {
+export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, isCurrentBuyer, phase, totalCards, tileCount, purchases, onPurchaseHover, onPurchaseLeave, vpTarget }: PlayerHudProps) {
   const status = getStatus(player, phase, isCurrentBuyer);
+  const hasReachedVpTarget = vpTarget != null && player.vp >= vpTarget;
+  const [showVpTooltip, setShowVpTooltip] = useState(false);
+  const hudRef = useRef<HTMLDivElement>(null);
 
   const borderStyle = player.has_left
     ? '1px solid #2a2a2a'
+    : hasReachedVpTarget
+      ? '2px solid #ffd700'
+      : isCurrentBuyer
+        ? '2px solid #ffaa4a'
+        : isCurrent
+          ? '2px solid #4a9eff'
+          : '1px solid #333';
+
+  // Pick the right animation — VP target glow takes priority
+  const animation = hasReachedVpTarget
+    ? 'vpTargetGlow 2s ease-in-out infinite'
     : isCurrentBuyer
-      ? '2px solid #ffaa4a'
-      : isCurrent
-        ? '2px solid #4a9eff'
-        : '1px solid #333';
+      ? 'pulse 2s ease-in-out infinite'
+      : undefined;
 
   return (
+    <>
+    {hasReachedVpTarget && (
+      <style>{`
+        @keyframes vpTargetGlow {
+          0%, 100% { box-shadow: 0 0 6px rgba(255, 215, 0, 0.3); }
+          50% { box-shadow: 0 0 16px rgba(255, 215, 0, 0.7), 0 0 6px rgba(255, 215, 0, 0.4); }
+        }
+      `}</style>
+    )}
     <div
+      ref={hudRef}
       data-player-hud
+      onPointerEnter={hasReachedVpTarget ? () => setShowVpTooltip(true) : undefined}
+      onPointerLeave={hasReachedVpTarget ? () => setShowVpTooltip(false) : undefined}
       style={{
         padding: '8px 12px',
         background: player.has_left ? '#111' : isActive ? '#2a2a4e' : '#1a1a2e',
@@ -170,9 +195,36 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
         borderRadius: 8,
         opacity: player.has_left ? 0.45 : isActive ? 1 : 0.7,
         filter: player.has_left ? 'grayscale(0.8)' : undefined,
-        animation: isCurrentBuyer ? 'pulse 2s ease-in-out infinite' : undefined,
+        animation,
+        position: 'relative',
       }}
     >
+      {/* VP target tooltip — positioned to the right */}
+      {showVpTooltip && hasReachedVpTarget && (() => {
+        const rect = hudRef.current?.getBoundingClientRect();
+        if (!rect) return null;
+        return (
+          <span style={{
+            position: 'fixed',
+            left: rect.right + 8,
+            top: rect.top + rect.height / 2,
+            transform: 'translateY(-50%)',
+            whiteSpace: 'nowrap',
+            background: '#111122',
+            border: '1px solid #ffd700',
+            borderRadius: 6,
+            padding: '4px 10px',
+            fontSize: 11,
+            color: '#ffd700',
+            fontWeight: 'bold',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            zIndex: 500,
+            pointerEvents: 'none',
+          }}>
+            ★ {player.name} has reached the VP target — game ends next round
+          </span>
+        );
+      })()}
       {/* Name row */}
       <div style={{ fontWeight: 'bold', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{
@@ -258,5 +310,6 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
         </div>
       )}
     </div>
+    </>
   );
 }
