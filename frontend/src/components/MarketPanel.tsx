@@ -118,7 +118,7 @@ function MarketCard({
   return (
     <div
       style={{
-        width: 130,
+        width: 154,
         padding: 6,
         background: '#2a2a3e',
         border: `1px solid ${canAfford && !disabled ? '#4a9eff' : '#333'}`,
@@ -127,9 +127,9 @@ function MarketCard({
         opacity: disabled || !canAfford ? 0.5 : 1,
       }}
     >
-      <div style={{ marginBottom: 4 }}>
-        <div style={{ fontWeight: 'bold', fontSize: 12 }}>{card.name}</div>
-        <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <div>
+        <div style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 2 }}>{card.name}</div>
+        <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
           <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
             if (el) {
               const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);

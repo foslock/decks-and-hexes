@@ -55,6 +55,8 @@ interface CardHandProps {
   trashMode?: TrashSelectionMode | null;
   /** Toggle a card's trash selection (during trash mode) */
   onTrashToggle?: (cardIndex: number) => void;
+  /** When true, close any open draw/discard popups */
+  closePopups?: boolean;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -141,7 +143,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
   ) : null;
   const vpBadge = displayCard.current_vp !== undefined ? (
     <span style={{
-      fontSize: 10,
+      fontSize: 14,
       fontWeight: 'bold',
       color: displayCard.current_vp > 0 ? '#ffd700' : displayCard.current_vp < 0 ? '#ff6666' : '#888',
       marginLeft: 4,
@@ -155,7 +157,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
         onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
         onPointerLeave={() => setHoverRect(null)}
         style={{
-          width: 134,
+          width: 154,
           padding: 6,
           background: '#2a2a3e',
           border: `1px solid ${color}`,
@@ -164,9 +166,9 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
           flexShrink: 0,
         }}
       >
-        <div style={{ marginBottom: 4 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-            <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+            <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
               <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
                 if (el) {
                   const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -176,9 +178,9 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
                 {displayCard.name}{vpBadge}
               </span>
             </div>
-            <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
+            <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
           </div>
-          <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
             <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
               if (el) {
                 const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -436,6 +438,7 @@ export default function CardHand({
   forceShuffleAnim,
   trashMode,
   onTrashToggle,
+  closePopups,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -460,6 +463,14 @@ export default function CardHand({
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
   const [showDeckPopup, setShowDeckPopup] = useState(false);
   const [showDiscardPopup, setShowDiscardPopup] = useState(false);
+
+  // Close draw/discard popups when parent signals (e.g. shop/browser opened)
+  useEffect(() => {
+    if (closePopups) {
+      setShowDeckPopup(false);
+      setShowDiscardPopup(false);
+    }
+  }, [closePopups]);
   const [cardMarginLeft, setCardMarginLeft] = useState(CARD_GAP);
 
   const handContainerRef = useRef<HTMLDivElement>(null);

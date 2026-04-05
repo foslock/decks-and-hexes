@@ -140,6 +140,14 @@ export async function endTurn(
   });
 }
 
+export async function processCpuBuys(
+  gameId: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/process-cpu-buys`, {
+    method: 'POST',
+  });
+}
+
 // ── Lobby APIs ───────────────────────────────────────────
 
 export async function createLobby(

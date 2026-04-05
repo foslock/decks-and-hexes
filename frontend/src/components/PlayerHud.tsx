@@ -90,14 +90,33 @@ function StatTip({ label, children, color }: { label: string; children: ReactNod
   );
 }
 
+interface BuyPurchase {
+  card_id: string;
+  card_name: string;
+  source: string;
+  cost: number;
+  card_type?: string;
+}
+
+const TYPE_BORDER_COLORS: Record<string, string> = {
+  claim: '#4a9eff',
+  defense: '#4aff6a',
+  engine: '#ffaa4a',
+  passive: '#aa88cc',
+};
+
 interface PlayerHudProps {
   player: Player;
   isActive: boolean;
   isCurrent: boolean;
   isFirstPlayer?: boolean;
+  isCurrentBuyer?: boolean;
   phase: string;
   totalCards: number;
   tileCount: number;
+  purchases?: BuyPurchase[];
+  onPurchaseHover?: (e: React.MouseEvent, cardId: string, cardName?: string) => void;
+  onPurchaseLeave?: () => void;
 }
 
 const ARCHETYPE_ICONS: Record<string, string> = {
@@ -115,22 +134,31 @@ const PLAYER_COLORS: Record<string, string> = {
   player_5: '#cc2a7a',
 };
 
-function getStatus(player: Player, phase: string): { label: string; color: string } {
+function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { label: string; color: string } {
   if (player.has_left) return { label: 'Left', color: '#666' };
   if (phase === 'plan') {
     if (player.has_submitted_plan) return { label: 'Ready', color: '#4aff6a' };
     return { label: 'Planning', color: '#ffaa4a' };
   }
   if (phase === 'buy') {
-    if (player.has_ended_turn) return { label: 'Ready', color: '#4aff6a' };
-    return { label: 'Buying', color: '#ffaa4a' };
+    if (isCurrentBuyer) return { label: 'Buying', color: '#ffaa4a' };
+    if (player.has_ended_turn) return { label: 'Done', color: '#4aff6a' };
+    return { label: 'Waiting', color: '#888' };
   }
   if (phase === 'reveal') return { label: 'Resolving', color: '#aa88ff' };
   return { label: phase.replace(/_/g, ' '), color: '#888' };
 }
 
-export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, phase, totalCards, tileCount }: PlayerHudProps) {
-  const status = getStatus(player, phase);
+export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, isCurrentBuyer, phase, totalCards, tileCount, purchases, onPurchaseHover, onPurchaseLeave }: PlayerHudProps) {
+  const status = getStatus(player, phase, isCurrentBuyer);
+
+  const borderStyle = player.has_left
+    ? '1px solid #2a2a2a'
+    : isCurrentBuyer
+      ? '2px solid #ffaa4a'
+      : isCurrent
+        ? '2px solid #4a9eff'
+        : '1px solid #333';
 
   return (
     <div
@@ -138,10 +166,11 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
       style={{
         padding: '8px 12px',
         background: player.has_left ? '#111' : isActive ? '#2a2a4e' : '#1a1a2e',
-        border: player.has_left ? '1px solid #2a2a2a' : isCurrent ? '2px solid #4a9eff' : '1px solid #333',
+        border: borderStyle,
         borderRadius: 8,
         opacity: player.has_left ? 0.45 : isActive ? 1 : 0.7,
         filter: player.has_left ? 'grayscale(0.8)' : undefined,
+        animation: isCurrentBuyer ? 'pulse 2s ease-in-out infinite' : undefined,
       }}
     >
       {/* Name row */}
@@ -203,6 +232,31 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           </StatTip>
         )}
       </div>
+
+      {/* Purchases made this buy phase */}
+      {purchases && purchases.length > 0 && (
+        <div style={{ marginTop: 4, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+          {purchases.map((p, i) => (
+            <span
+              key={i}
+              onMouseEnter={onPurchaseHover ? (e) => onPurchaseHover(e, p.card_id, p.card_name) : undefined}
+              onMouseLeave={onPurchaseLeave}
+              style={{
+                fontSize: 10,
+                padding: '1px 5px',
+                background: '#1a1a2e',
+                border: `1px solid ${p.card_type ? (TYPE_BORDER_COLORS[p.card_type] || '#555') : (p.source === 'upgrade' ? '#ffaa4a' : '#555')}`,
+                borderRadius: 4,
+                color: '#ccc',
+                whiteSpace: 'nowrap',
+                cursor: onPurchaseHover ? 'pointer' : undefined,
+              }}
+            >
+              {p.card_name} ({p.cost}💰)
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

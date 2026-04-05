@@ -36,7 +36,6 @@ interface ShopOverlayProps {
   playerArchetype: string;
   effectiveBuyCosts?: Record<string, number>;
   currentUpkeep: number;
-  neutralBoughtThisTurn: boolean;
   onBuyArchetype: (cardId: string) => void;
   onBuyNeutral: (cardId: string) => void;
   onBuyUpgrade: () => void;
@@ -48,6 +47,10 @@ interface ShopOverlayProps {
   neutralPurchasesLastRound?: import('../types/game').NeutralPurchaseRecord[];
   /** Current player ID (to filter out own purchases from the history) */
   currentPlayerId?: string;
+  /** Current-turn purchases by all players (from buy_phase_purchases) */
+  buyPhasePurchases?: Record<string, Array<{ card_id: string; card_name: string; source: string; cost: number }>>;
+  /** Player map for looking up names */
+  players?: Record<string, { name: string }>;
 }
 
 interface HoverState {
@@ -82,6 +85,7 @@ function FullShopCard({
   shiftHeld,
   disabledTooltip,
   purchaseHighlight,
+  currentTurnPurchaseInfo,
 }: {
   card: Card;
   remaining: number | null;
@@ -95,16 +99,25 @@ function FullShopCard({
   shiftHeld: boolean;
   disabledTooltip?: string;
   purchaseHighlight?: boolean;
+  /** Tooltip text for current-turn purchases by other players */
+  currentTurnPurchaseInfo?: Array<{ playerName: string; count: number }>;
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
+  const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
   const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
+  const purchaseLines = hasCurrentTurnPurchase
+    ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this turn`).join('\n')
+    : '';
   const buyTooltip = disabledTooltip
     ? disabledTooltip
-    : upkeepWarning
-      ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
-      : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`;
+    : [
+        upkeepWarning
+          ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
+          : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
+        purchaseLines,
+      ].filter(Boolean).join('\n');
   return (
     <div
       data-card-id={card.id}
@@ -137,7 +150,7 @@ function FullShopCard({
           fontSize: 12,
           fontWeight: 'bold',
           cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
-          ...(purchaseHighlight ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
+          ...(purchaseHighlight || hasCurrentTurnPurchase ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
         }}
       >
         Buy{displayCost !== null ? ` (${displayCost}${isDiscounted ? '*' : ''}💰)` : ''}
@@ -147,9 +160,8 @@ function FullShopCard({
 }
 
 /** Compact card width — matches CardHand CARD_WIDTH */
-const COMPACT_CARD_WIDTH = 134;
+const COMPACT_CARD_WIDTH = 154;
 /** Compact card height — matches CardHand CARD_MIN_HEIGHT */
-const COMPACT_CARD_HEIGHT = 52;
 
 function CompactShopCard({
   card,
@@ -163,6 +175,7 @@ function CompactShopCard({
   disabled,
   disabledTooltip,
   purchaseHighlight,
+  currentTurnPurchaseInfo,
 }: {
   card: Card;
   remaining: number | null;
@@ -175,16 +188,25 @@ function CompactShopCard({
   disabled: boolean;
   disabledTooltip?: string;
   purchaseHighlight?: boolean;
+  /** Tooltip text for current-turn purchases by other players */
+  currentTurnPurchaseInfo?: Array<{ playerName: string; count: number }>;
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
   const typeColor = TYPE_COLORS[card.card_type] || '#4a9eff';
+  const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
   const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
+  const purchaseLines = hasCurrentTurnPurchase
+    ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this turn`).join('\n')
+    : '';
   const buyTooltip = disabledTooltip
     ? disabledTooltip
-    : upkeepWarning
-      ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
-      : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`;
+    : [
+        upkeepWarning
+          ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
+          : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
+        purchaseLines,
+      ].filter(Boolean).join('\n');
   const buyLabel = remaining !== null ? `Buy (${remaining} left)` : 'Buy';
   return (
     <div
@@ -201,7 +223,6 @@ function CompactShopCard({
       {/* Card element — same dimensions as CardHand compact cards */}
       <div style={{
         width: COMPACT_CARD_WIDTH,
-        height: COMPACT_CARD_HEIGHT,
         padding: 6,
         background: '#2a2a3e',
         border: `2px solid ${canAfford && !disabled ? typeColor : '#333'}`,
@@ -210,8 +231,8 @@ function CompactShopCard({
         boxSizing: 'border-box',
         overflow: 'hidden',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
             <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
               if (el) {
                 const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -221,9 +242,9 @@ function CompactShopCard({
               {card.name}
             </span>
           </div>
-          <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : ''}</span>
+          <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : ''}</span>
         </div>
-        <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
+        <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
           <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
             if (el) {
               const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -232,12 +253,58 @@ function CompactShopCard({
           }}>
           {(() => {
             const parts: React.ReactNode[] = [];
-            if (card.card_type === 'defense' && card.defense_bonus > 0) {
+            if (card.passive_vp !== undefined && card.passive_vp !== 0) {
+              parts.push(<span key="vp" style={{ color: card.passive_vp > 0 ? '#ffd700' : '#ff6666' }}>{card.passive_vp > 0 ? '+' : ''}{card.passive_vp}★</span>);
+            } else if (card.vp_formula) {
+              parts.push(<span key="vp" style={{ color: '#ffd700' }}>+★</span>);
+            }
+            if (card.card_type === 'defense') {
+              const isUpgraded = card.is_upgraded;
+              const defBase = card.defense_bonus > 0 ? card.defense_bonus : card.power;
+              const hasPerAdj = card.effects?.some(e => e.type === 'defense_per_adjacent');
+              const hasPermanent = card.effects?.some(e => e.type === 'permanent_defense');
+              const hasImmunity = card.effects?.some(e => e.type === 'tile_immunity');
               const dtc = card.defense_target_count || 1;
-              parts.push(dtc >= 2 ? `🛡️${card.defense_bonus} · ${dtc}🔷` : `🛡️${card.defense_bonus}`);
-            } else if (card.card_type !== 'defense' && card.power > 0) {
+              const tileSuffix = dtc >= 2 ? ` · ${dtc}🔷` : '';
+              if (hasImmunity) {
+                parts.push('Immune');
+              } else if (hasPerAdj) {
+                const mod = card.effects?.find(e => e.type === 'defense_per_adjacent');
+                const perVal = mod ? (isUpgraded ? (mod.upgraded_value ?? mod.value) : mod.value) : 1;
+                parts.push(`🛡️${perVal}+${tileSuffix}`);
+              } else if (hasPermanent) {
+                const mod = card.effects?.find(e => e.type === 'permanent_defense');
+                const permVal = mod
+                  ? (isUpgraded ? (mod.metadata?.upgraded_value as number ?? mod.value) : mod.value)
+                  : defBase;
+                parts.push(`🛡️${permVal}${tileSuffix}`);
+              } else if (defBase > 0) {
+                parts.push(`🛡️${defBase}${tileSuffix}`);
+              }
+            } else if (card.power > 0 || card.card_type === 'claim') {
+              const isUpgraded = card.is_upgraded;
+              const powerMods = card.effects?.filter(e => e.type === 'power_modifier') ?? [];
+              const hasTileScaling = card.effects?.some(e => e.type === 'power_per_tiles_owned');
+              const isUnbounded = hasTileScaling || powerMods.some(e =>
+                e.condition === 'cards_in_hand' || e.metadata?.per_tile
+              );
+              const fixedBonus = powerMods.find(e =>
+                !isUnbounded && ((isUpgraded ? (e.upgraded_value ?? e.value) : e.value) > 0)
+              );
               const mtc = 1 + (card.multi_target_count || 0);
-              parts.push(mtc >= 2 ? `⚔️${card.power} · ${mtc}🔷` : `⚔️${card.power}`);
+              const claimTileSuffix = mtc >= 2 ? ` · ${mtc}🔷` : '';
+              if (isUnbounded) {
+                const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
+                const minPow = handMod
+                  ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
+                  : card.power;
+                parts.push(`⚔️${minPow}+${claimTileSuffix}`);
+              } else if (fixedBonus) {
+                const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
+                parts.push(`⚔️${card.power}/${card.power + bonusVal}${claimTileSuffix}`);
+              } else {
+                parts.push(`⚔️${card.power}${claimTileSuffix}`);
+              }
             }
             if (card.resource_gain > 0) parts.push(`+${card.resource_gain}💰`);
             if (card.draw_cards > 0) parts.push(`+${card.draw_cards}🃏`);
@@ -283,7 +350,7 @@ function CompactShopCard({
           fontSize: 11,
           fontWeight: 'bold',
           cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
-          ...(purchaseHighlight ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
+          ...(purchaseHighlight || hasCurrentTurnPurchase ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
         }}
       >
         {buyLabel}
@@ -299,7 +366,6 @@ export default function ShopOverlay({
   playerArchetype,
   effectiveBuyCosts,
   currentUpkeep,
-  neutralBoughtThisTurn,
   onBuyArchetype,
   onBuyNeutral,
   onBuyUpgrade,
@@ -309,6 +375,8 @@ export default function ShopOverlay({
   testMode,
   neutralPurchasesLastRound,
   currentPlayerId,
+  buyPhasePurchases,
+  players,
 }: ShopOverlayProps) {
   const [fullView, setFullViewRaw] = useState(() => shopViewMemory ?? false);
   const setFullView = useCallback((v: boolean) => { setFullViewRaw(v); shopViewMemory = v; }, []);
@@ -329,6 +397,29 @@ export default function ShopOverlay({
     }
     return map;
   }, [neutralPurchasesLastRound, currentPlayerId]);
+
+  // Build lookup: neutral card_id → [{ playerName, count }] for current-turn purchases by OTHER players
+  const currentTurnNeutralPurchases = useMemo(() => {
+    const map = new Map<string, Array<{ playerName: string; count: number }>>();
+    if (!buyPhasePurchases) return map;
+    for (const [pid, purchases] of Object.entries(buyPhasePurchases)) {
+      if (pid === currentPlayerId) continue; // skip own purchases
+      // Count neutral purchases per card_id
+      const counts = new Map<string, number>();
+      for (const p of purchases) {
+        if (p.source === 'neutral') {
+          counts.set(p.card_id, (counts.get(p.card_id) ?? 0) + 1);
+        }
+      }
+      const playerName = players?.[pid]?.name ?? pid;
+      for (const [cardId, count] of counts) {
+        const existing = map.get(cardId) ?? [];
+        existing.push({ playerName, count });
+        map.set(cardId, existing);
+      }
+    }
+    return map;
+  }, [buyPhasePurchases, currentPlayerId, players]);
 
   const handleCardHover = useCallback((e: React.MouseEvent, card: Card) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -607,38 +698,38 @@ export default function ShopOverlay({
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
                   const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
                   const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
-                  const neutralLimitReached = neutralBoughtThisTurn && !testMode;
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
+                  const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
                   return fullView ? (
                     <FullShopCard
                       key={stack.card.id}
                       card={stack.card}
                       remaining={stack.remaining}
-                      canAfford={canAfford && !neutralLimitReached}
+                      canAfford={canAfford}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled || neutralLimitReached}
+                      disabled={disabled}
                       shiftHeld={shiftHeld}
-                      disabledTooltip={neutralLimitReached ? 'You can only buy 1 neutral card per round.' : undefined}
                       purchaseHighlight={!!purchasedBy}
+                      currentTurnPurchaseInfo={turnPurchases}
                     />
                   ) : (
                     <CompactShopCard
                       key={stack.card.id}
                       card={stack.card}
                       remaining={stack.remaining}
-                      canAfford={canAfford && !neutralLimitReached}
+                      canAfford={canAfford}
                       effectiveCost={effCost}
                       upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => onBuyNeutral(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled || neutralLimitReached}
-                      disabledTooltip={neutralLimitReached ? 'You can only buy 1 neutral card per round.' : undefined}
+                      disabled={disabled}
                       purchaseHighlight={!!purchasedBy}
+                      currentTurnPurchaseInfo={turnPurchases}
                     />
                   );
                 })}
@@ -669,7 +760,8 @@ export default function ShopOverlay({
           )}
           {(() => {
             const buyer = neutralPurchaseMap.get(hoverState.card.id);
-            if (!buyer) return null;
+            const turnPurchases = currentTurnNeutralPurchases.get(hoverState.card.id);
+            if (!buyer && !turnPurchases) return null;
             return (
               <div style={{
                 textAlign: 'center',
@@ -682,8 +774,14 @@ export default function ShopOverlay({
                 color: '#ffaa4a',
                 fontWeight: 'bold',
                 boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
               }}>
-                {buyer} purchased this last round
+                {turnPurchases?.map((p, i) => (
+                  <div key={i}>{p.playerName} bought {p.count} this turn</div>
+                ))}
+                {buyer && <div style={{ color: '#888' }}>{buyer} purchased this last round</div>}
               </div>
             );
           })()}

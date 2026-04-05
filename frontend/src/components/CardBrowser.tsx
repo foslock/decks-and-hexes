@@ -72,7 +72,7 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
       onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
       onPointerLeave={() => setHoverRect(null)}
       style={{
-        width: 134,
+        width: 154,
         padding: 6,
         background: '#2a2a3e',
         border: `1px solid ${color}`,
@@ -81,9 +81,9 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
         flexShrink: 0,
       }}
     >
-      <div style={{ marginBottom: 2 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
             <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
               if (el) {
                 const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -93,7 +93,7 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
               {displayCard.name}
               {displayCard.current_vp !== undefined && (
                 <span style={{
-                  fontSize: 10,
+                  fontSize: 14,
                   fontWeight: 'bold',
                   color: displayCard.current_vp > 0 ? '#ffd700' : displayCard.current_vp < 0 ? '#ff6666' : '#888',
                   marginLeft: 4,
@@ -103,9 +103,9 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
               )}
             </span>
           </div>
-          <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
+          <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
         </div>
-        <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
           <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
             if (el) {
               const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);

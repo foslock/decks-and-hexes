@@ -65,7 +65,6 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     upkeep_cost: 0,
     tiles_lost_to_upkeep: 0,
     rubble_count: 0,
-    neutral_bought_this_turn: false,
     is_cpu: false,
     cpu_difficulty: null,
     has_left: false,
@@ -132,6 +131,9 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
     current_phase: 'plan',
     current_round: 1,
     first_player_index: 0,
+    current_buyer_index: 0,
+    current_buyer_id: null,
+    buy_phase_purchases: {},
     neutral_market: [
       { card: makeCard({ id: 'neutral_mercenary', name: 'Mercenary', buy_cost: 3, power: 3 }), remaining: 5 },
       { card: makeCard({ id: 'neutral_gather', name: 'Land Grant', buy_cost: 2, card_type: 'engine' }), remaining: 3 },

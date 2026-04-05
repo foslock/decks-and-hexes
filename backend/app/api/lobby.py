@@ -694,6 +694,7 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
 
     from app.game_engine.game_state import (
         Phase,
+        _advance_buyer,
         _transition_to_buy,
         compute_player_vp,
         end_buy_phase,
@@ -755,7 +756,11 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
             ):
                 _transition_to_buy(game)
         elif game.current_phase == Phase.BUY:
-            if all(p.has_ended_turn for p in game.players.values()):
+            # If the leaving player was the current buyer, advance to next
+            if game.player_order[game.current_buyer_index] == player_id:
+                if not _advance_buyer(game):
+                    execute_end_of_turn(game)
+            elif all(p.has_ended_turn or p.has_left for p in game.players.values()):
                 execute_end_of_turn(game)
 
     # Broadcast updated state (includes has_left=True + winner if applicable),
