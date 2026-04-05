@@ -204,8 +204,6 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
   if (card.description) abilityParts.push(card.description);
 
   const statNotes: string[] = [];
-  if (card.action_return === 1) statNotes.push('Returns 1 action (↺)');
-  if (card.action_return === 2) statNotes.push('Returns 2 actions (↑)');
   if (card.trash_on_use) statNotes.push('Trashed after use.');
   if (card.stackable) statNotes.push('Stackable');
   if (!card.adjacency_required) statNotes.push('No adjacency required.');

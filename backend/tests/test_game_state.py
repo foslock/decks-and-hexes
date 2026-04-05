@@ -404,9 +404,8 @@ class TestBuyPhase:
             None,
         )
         if affordable:
-            card_id = affordable["card"]["id"]
-            # The neutral market uses the base card id (before _copy suffix)
-            base_id = next(k for k in game.neutral_market.stacks if game.neutral_market.stacks[k])
+            # The neutral market card["id"] is the base card id (stack key)
+            base_id = affordable["card"]["id"]
             resources_before = p0.resources
             ok, msg = buy_card(game, "p0", "neutral", base_id)
             assert ok, msg

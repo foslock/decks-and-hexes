@@ -201,12 +201,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             if m:
                 upgraded_power = int(m.group(1))
 
-        if upgraded_resource_gain is None and "gain" in effect_upgraded.lower() and "resource" in effect_upgraded.lower():
+        if upgraded_resource_gain is None and "gain" in effect_upgraded.lower() and "resource" in effect_upgraded.lower() and not has_gain_resources_effect:
             m = re.search(r'[Gg]ain\s+(\d+)\s+resource', effect_upgraded)
             if m:
                 upgraded_resource_gain = int(m.group(1))
 
-        if upgraded_draw_cards is None and "draw" in effect_upgraded.lower():
+        if upgraded_draw_cards is None and "draw" in effect_upgraded.lower() and "next turn" not in effect_upgraded.lower():
             m = re.search(r'[Dd]raw\s+(\d+)\s+card', effect_upgraded)
             if m:
                 upgraded_draw_cards = int(m.group(1))
@@ -216,7 +216,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             if m:
                 upgraded_defense_bonus = int(m.group(1))
 
-        if upgraded_forced_discard is None and "discard" in effect_upgraded.lower():
+        if upgraded_forced_discard is None and "discard" in effect_upgraded.lower() and not has_self_discard_effect:
             m = re.search(r'[Dd]iscard\w*\s+(\d+)', effect_upgraded)
             if m:
                 upgraded_forced_discard = int(m.group(1))

@@ -1,5 +1,6 @@
 import type { Card, MarketStack } from '../types/game';
 import { IrreversibleButton } from './Tooltip';
+import { buildCardSubtitle } from './cardSubtitle';
 
 interface MarketPanelProps {
   archetypeMarket: Card[];
@@ -137,36 +138,7 @@ function MarketCard({
             }
           }}>
           {card.buy_cost !== null ? `💰 ${card.buy_cost}` : 'Free'}
-          {card.card_type === 'defense' && card.defense_bonus > 0 && (() => {
-            const dtc = card.defense_target_count || 1;
-            return ` · 🛡️${card.defense_bonus}${dtc >= 2 ? ` · ${dtc}🔷` : ''}`;
-          })()}
-          {card.card_type !== 'defense' && card.power > 0 && (() => {
-            const mtc = 1 + (card.multi_target_count || 0);
-            return ` · ⚔️${card.power}${mtc >= 2 ? ` · ${mtc}🔷` : ''}`;
-          })()}
-          {card.resource_gain > 0 && ` · +${card.resource_gain}💰`}
-          {card.draw_cards > 0 && ` · +${card.draw_cards}🃏`}
-          {card.action_return > 0 && ` · +${card.action_return}⚡`}
-          {card.forced_discard > 0 && ` · 🎯-${card.forced_discard}🃏`}
-          {card.effects?.map((eff, i) => {
-            if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
-              const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-              return <span key={`t${i}`}> · ✂️{val}{eff.type === 'trash_gain_buy_cost' ? ' · +💰' : ''}</span>;
-            }
-            if (eff.type === 'gain_resources' && eff.condition) {
-              const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-              return <span key={`r${i}`}> · +{val}💰</span>;
-            }
-            if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
-              const val = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-              return <span key={`d${i}`}> · +{val}⏰🃏</span>;
-            }
-            if (eff.type === 'enhance_vp_tile') return <span key={`v${i}`}> · 🔷+★</span>;
-            if (eff.type === 'free_reroll' || eff.type === 'grant_stackable' || eff.type === 'grant_land_grants') return <span key={`g${i}`}> · ⚙️</span>;
-            return null;
-          })}
-          {card.trash_on_use && ' · 🗑️'}
+          {buildCardSubtitle(card).map((part, i) => <span key={i}> · {part}</span>)}
           {remaining !== null && ` · ×${remaining}`}
           </span>
         </div>

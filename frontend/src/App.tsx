@@ -73,14 +73,23 @@ export default function App() {
   // Handle WebSocket game state updates
   useEffect(() => {
     if (!gameWsMessage || screen.type !== 'game' || !screen.isMultiplayer) return;
-    console.log('[App] game WS effect:', gameWsMessage.type, 'screen:', screen.type);
+    console.log('[App] game WS effect:', gameWsMessage.type, 'screen:', screen.type, 'gameId:', screen.gameId);
 
     if (gameWsMessage.type === 'game_state') {
       setMultiplayerGameState(gameWsMessage.state as unknown as GameState);
     } else if (gameWsMessage.type === 'game_ended') {
+      // Verify this game_ended is for our current game by checking the game_id if present,
+      // or at minimum that we're still in a game screen (guard against stale WS messages)
+      const msgGameId = gameWsMessage.game_id as string | undefined;
+      if (msgGameId && msgGameId !== screen.gameId) {
+        console.warn('[App] game_ended IGNORED — stale message for', msgGameId, 'but current game is', screen.gameId);
+        return;
+      }
       console.log('[App] game_ended → going home');
       setScreen({ type: 'home' });
       setMultiplayerGameState(null);
+      setReplayVotes(new Set());
+      setReplayDisabled(false);
       saveSession(null);
     } else if (gameWsMessage.type === 'game_start') {
       // Replay restart — new game created with same players
@@ -209,6 +218,8 @@ export default function App() {
     console.log('[App] handleLeaveGame → going home');
     setScreen({ type: 'home' });
     setMultiplayerGameState(null);
+    setReplayVotes(new Set());
+    setReplayDisabled(false);
     api.setAuthToken(null);
     saveSession(null);
   }, []);

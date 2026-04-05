@@ -37,8 +37,8 @@ cards:
     defense_bonus: 3
     defense_target_count: 1
     upgraded_defense_target_count: 2
-    effect: "One tile you own gains +3 defense this round."
-    effect_upgraded: "Two tiles you own each gain +3 defense this round."
+    effect: "One tile you own gains +3 defense this round. Gain 1 action."
+    effect_upgraded: "Two tiles you own each gain +3 defense this round. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -135,7 +135,7 @@ cards:
     name: Supply Line
     name_upgraded: Supply Line+
     type: Engine
-    buy_cost: 2
+    buy_cost: 3
     action_return: 1
     power: 0
     effect: "Gain 2 resources. One card in your hand costs 2 less resources to purchase this turn. Gain 1 action."
@@ -179,7 +179,7 @@ cards:
     power: 2
     effect: "Claim: Power 2. If the defender holds, they draw 1 fewer card next turn."
     effect_upgraded: "Claim: Power 3. If the defender holds, they draw 1 fewer card next turn."
-    secondary_effect: "If the defender successfully holds the tile, that defending player draws 1 fewer card at the start of their next turn."
+    secondary_effect: null
     secondary_timing: on_resolution
 
     effects:
@@ -305,7 +305,7 @@ cards:
     name: Iron Discipline
     name_upgraded: Iron Discipline+
     type: Engine
-    buy_cost: 2
+    buy_cost: 3
     action_return: 1
     power: 0
     effect: "Gain 1 resource. Draw 1 card. Gain 1 action."
