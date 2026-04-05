@@ -168,7 +168,7 @@ Card data files use YAML-style fields within markdown. Key fields:
 
 ## Frequently Changing Values (expect these to shift during playtesting)
 - VP target: **dynamic** (see `compute_vp_target`)
-- Tiles per VP: **grid radius - 1** (Small=3, Medium=4, Large=5)
+- Tiles per VP: **3** (constant across all grid sizes)
 - Upkeep cost: **dynamic** — 1 resource per 3 tiles beyond first 4
 - Re-roll cost: **2 resources**
 - Retain cost: **1 resource**

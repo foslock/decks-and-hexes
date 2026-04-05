@@ -205,7 +205,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
               ? { bottom: window.innerHeight - hoverRect.top + 8 }
               : { top: hoverRect.bottom + 8 }),
             pointerEvents: 'none',
-            zIndex: 20000,
+            zIndex: 50000,
           }}>
             <CardFull card={displayCard} showKeywordHints />
           </div>,
@@ -278,7 +278,7 @@ export function CardViewPopup({
         position: 'fixed', inset: 0,
         background: 'rgba(0,0,0,0.75)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 5000,
+        zIndex: 45000,
         opacity: visible ? 1 : 0,
         transition: overlayTransition,
       }}
@@ -461,13 +461,17 @@ export default function CardHand({
   const prevDeckSizeRef = useRef(deckSize);
   const prevDiscardCountRef = useRef(discardCount);
   const discardAllFiredRef = useRef(false);
+  // Cards drawn during a shuffle — held back until shuffle animation finishes
+  const deferredDrawnCardsRef = useRef<Set<string>>(new Set());
+  // Separate prev-cards tracking for shuffle detection (useLayoutEffect updates prevCardsRef before useEffect)
+  const prevCardsForShuffleRef = useRef(cards);
 
   // Force shuffle animation from parent (intro sequence)
   useEffect(() => {
     if (forceShuffleAnim) {
       setShuffling(true);
       setShuffleDisplayCount(0);
-      const duration = animated ? 2000 : 800;
+      const duration = Math.round(2500 * (animSpeed || 0.5));
       shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
     } else if (forceShuffleAnim === false) {
       setShuffling(false);
@@ -535,17 +539,22 @@ export default function CardHand({
     }
 
     // Register entering cards with placeholder offset — Phase 2 will compute the real offset
+    // Skip cards that are deferred (waiting for shuffle animation to complete)
     if (newCards.length > 0) {
-      const entries = new Map<string, EnteringAnim>();
-      newCards.forEach((card, i) => {
-        entries.set(card.id, {
-          offset: { x: 0, y: 0 },
-          delay: Math.round(i * 500 * animSpeed),
-          active: false,
-          offsetComputed: false,
+      const deferred = deferredDrawnCardsRef.current;
+      const immediateCards = deferred.size > 0 ? newCards.filter(c => !deferred.has(c.id)) : newCards;
+      if (immediateCards.length > 0) {
+        const entries = new Map<string, EnteringAnim>();
+        immediateCards.forEach((card, i) => {
+          entries.set(card.id, {
+            offset: { x: 0, y: 0 },
+            delay: Math.round(i * 500 * animSpeed),
+            active: false,
+            offsetComputed: false,
+          });
         });
-      });
-      setEnteringAnims(p => new Map([...p, ...entries]));
+        setEnteringAnims(p => new Map([...p, ...entries]));
+      }
     }
 
     // Departing cards: snapshot position is available now (card was in DOM last render)
@@ -739,44 +748,83 @@ export default function CardHand({
   }, [discardAll]);
 
   // Shuffle detection: discard pile was moved to draw pile during a draw
-  useEffect(() => {
+  // Uses useLayoutEffect to run BEFORE the Phase 1 entering-anim detection,
+  // so deferredDrawnCardsRef is set before Phase 1 checks it.
+  useLayoutEffect(() => {
     const prevDeck = prevDeckSizeRef.current;
     const prevDiscard = prevDiscardCountRef.current;
     prevDeckSizeRef.current = deckSize;
     prevDiscardCountRef.current = discardCount;
 
+    const prev = prevCardsForShuffleRef.current;
+    prevCardsForShuffleRef.current = cards;
+
     // A shuffle happened when:
     // - Draw pile was empty (or nearly so) and is now replenished
     // - Discard pile shrank (cards moved from discard → draw pile)
     // - New cards appeared in hand (a draw was attempted)
-    const prev = prevCardsRef.current;
-    const hasNewCards = cards.some(c => !prev.some(p => p.id === c.id));
+    const newCardIds = cards.filter(c => !prev.some(p => p.id === c.id)).map(c => c.id);
+    const hasNewCards = newCardIds.length > 0;
     const discardMovedToDraw = prevDiscard > 0 && discardCount < prevDiscard;
     const deckReplenished = deckSize > prevDeck || (prevDeck === 0 && deckSize >= 0 && discardMovedToDraw);
 
     if (hasNewCards && discardMovedToDraw && deckReplenished && !animationOff) {
+      // Mark the newly drawn cards as deferred — they'll animate in after shuffle completes
+      deferredDrawnCardsRef.current = new Set(newCardIds);
       setShuffling(true);
       setShuffleDisplayCount(0);
-      const duration = animated ? 2000 : 800;
+      const duration = Math.round(2500 * (animSpeed || 0.5));
       shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
-      setTimeout(() => setShuffling(false), duration);
+      // Shuffle ends when the count-up animation completes (in the rAF tick below)
     }
   }, [deckSize, discardCount, cards, animated, animationOff]);
 
   // Animate shuffle count-up
   useEffect(() => {
     if (!shuffling || !shuffleAnimRef.current) return;
-    const { target, startTime, duration } = shuffleAnimRef.current;
+    const { target, duration } = shuffleAnimRef.current;
+    const animStart = performance.now();
     let raf: number;
     const tick = () => {
-      const elapsed = performance.now() - startTime;
+      const elapsed = performance.now() - animStart;
       const progress = Math.min(1, elapsed / duration);
       setShuffleDisplayCount(Math.round(progress * target));
-      if (progress < 1) raf = requestAnimationFrame(tick);
+      if (progress < 1) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        // Count-up finished — end the shuffle in sync
+        setShuffling(false);
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [shuffling]);
+
+  // When shuffle finishes, trigger entering animations for deferred drawn cards
+  const prevShufflingRef = useRef(false);
+  useEffect(() => {
+    const wasShuffling = prevShufflingRef.current;
+    prevShufflingRef.current = shuffling;
+    if (wasShuffling && !shuffling && animated) {
+      const deferred = deferredDrawnCardsRef.current;
+      if (deferred.size > 0) {
+        const deferredCards = cards.filter(c => deferred.has(c.id));
+        if (deferredCards.length > 0) {
+          const entries = new Map<string, EnteringAnim>();
+          deferredCards.forEach((card, i) => {
+            entries.set(card.id, {
+              offset: { x: 0, y: 0 },
+              delay: Math.round(i * 500 * animSpeed),
+              active: false,
+              offsetComputed: false,
+            });
+          });
+          setEnteringAnims(p => new Map([...p, ...entries]));
+        }
+        deferredDrawnCardsRef.current = new Set();
+      }
+    }
+  }, [shuffling]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const resetDragState = useCallback(() => {
     dragStartRef.current = null;
@@ -948,27 +996,41 @@ export default function CardHand({
       }}>
         {/* Deck icon + shuffle tooltip */}
         <div style={{ position: 'relative', alignSelf: 'stretch', zIndex: 201 }}>
-          {shuffling && (
-            <div style={{
-              position: 'absolute',
-              bottom: '100%',
-              left: 0,
-              marginBottom: 6,
-              whiteSpace: 'nowrap',
-              background: '#111122',
-              border: '1px solid #555',
-              borderRadius: 6,
-              padding: '4px 10px',
-              fontSize: 11,
-              color: '#4a9eff',
-              fontWeight: 'bold',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-              zIndex: 10000,
-              pointerEvents: 'none',
-            }}>
-              Shuffling...
-            </div>
-          )}
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: 0,
+            marginBottom: 10,
+            whiteSpace: 'nowrap',
+            background: '#111122',
+            border: '2px solid #fff',
+            borderRadius: 10,
+            padding: '10px 20px',
+            fontSize: 18,
+            fontWeight: 'bold',
+            boxShadow: '0 4px 20px rgba(255, 255, 255, 0.4)',
+            zIndex: 10000,
+            pointerEvents: 'none',
+            letterSpacing: 1,
+            opacity: shuffling ? 1 : 0,
+            transition: 'opacity 0.3s ease',
+            display: 'flex',
+          }}>
+            <style>{`
+              @keyframes shuffleWave {
+                0%, 100% { color: #888; }
+                50% { color: #fff; }
+              }
+            `}</style>
+            {'Shuffling...'.split('').map((ch, i) => (
+              <span key={i} style={{
+                animation: shuffling ? `shuffleWave 1.2s ease-in-out ${i * 0.08}s infinite` : 'none',
+                color: '#888',
+              }}>
+                {ch}
+              </span>
+            ))}
+          </div>
           <button
             ref={drawBtnRef}
             onClick={() => setShowDeckPopup(true)}
@@ -979,8 +1041,8 @@ export default function CardHand({
                 animation: animated
                   ? 'shufflePulse 0.4s ease-in-out infinite'
                   : 'shufflePulse 0.25s ease-in-out infinite',
-                boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
-                borderColor: '#4a9eff',
+                boxShadow: '0 0 12px rgba(255, 255, 255, 0.6)',
+                borderColor: '#fff',
               } : {}),
             }}
           >
@@ -1024,11 +1086,12 @@ export default function CardHand({
 
             // Compute animation overrides
             const entering = enteringAnims.get(card.id);
+            const isDeferredDuringShuffle = shuffling && deferredDrawnCardsRef.current.has(card.id);
             const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode;
             let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'none';
             // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
-            let cardOpacity: number = isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
+            let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';

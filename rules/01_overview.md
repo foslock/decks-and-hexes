@@ -18,7 +18,7 @@ Card Clash is a 2–6 player simultaneous deck-building territory control game. 
 The **first player whose derived VP reaches the VP target wins.** VP is checked at the start of each turn after upkeep.
 
 VP is derived instantaneously from the game state:
-1. **Territory:** +1 VP for every N tiles owned (N = grid radius - 1: Small=3, Medium=4, Large=5)
+1. **Territory:** +1 VP for every 3 tiles owned
 2. **Connected VP hexes:** VP hex tiles connected back to your base via owned tiles add their bonus VP (+1 or +2)
 3. **Card VP:** Land Grant cards in deck add +1 VP each; Rubble cards subtract -1 VP each
 4. **Objectives:** Completing mid-game objectives awards +2 VP each
@@ -28,7 +28,7 @@ VP is derived instantaneously from the game state:
 Each player's starting corner tile is their **base** — permanently owned, with passive defense (Swarm: 2, Vanguard: 3, Fortress: 4). Bases cannot be captured but can be **raided** to inflict Rubble cards on the defender.
 
 ### Dynamic VP Target
-The VP target scales with grid size, player count, and game speed (Fast/Normal/Slow). Default speed is Normal (1.0× multiplier). Formula: `total_tiles // (tiles_per_vp × player_count × 0.75) × speed_multiplier`, minimum 3. `tiles_per_vp` = grid radius - 1 (Small=3, Medium=4, Large=5).
+The VP target scales with grid size, player count, and game speed (Fast/Normal/Slow). Default speed is Normal (1.0× multiplier). Formula: `total_tiles // (tiles_per_vp × player_count × 0.75) × speed_multiplier`, minimum 3. `tiles_per_vp` = 3 (constant across all grid sizes).
 
 ---
 

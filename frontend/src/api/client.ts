@@ -183,7 +183,7 @@ export async function getLobby(
 export async function updateLobbyConfig(
   code: string,
   token: string,
-  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean },
+  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null },
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}/config`, {
     method: 'PATCH',
@@ -195,7 +195,7 @@ export async function updateLobbyPlayer(
   code: string,
   playerId: string,
   token: string,
-  updates: { name?: string; archetype?: string },
+  updates: { name?: string; archetype?: string; difficulty?: string },
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}/player/${playerId}`, {
     method: 'PATCH',
@@ -224,6 +224,17 @@ export async function addCpuToLobby(
   return request(`/lobby/${code}/cpu`, {
     method: 'POST',
     body: JSON.stringify({ archetype, difficulty, token }),
+  });
+}
+
+export async function reorderLobbyPlayers(
+  code: string,
+  token: string,
+  order: string[],
+): Promise<{ lobby: LobbyState }> {
+  return request(`/lobby/${code}/reorder`, {
+    method: 'POST',
+    body: JSON.stringify({ order, token }),
   });
 }
 
@@ -325,6 +336,26 @@ export async function testDiscardCard(
   return request(`/games/${gameId}/test/discard-card`, {
     method: 'POST',
     body: JSON.stringify({ player_id: playerId, card_index: cardIndex }),
+  });
+}
+
+export async function testDrawCard(
+  gameId: string,
+  playerId: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/draw-card`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
+export async function testDiscardHand(
+  gameId: string,
+  playerId: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/discard-hand`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId }),
   });
 }
 

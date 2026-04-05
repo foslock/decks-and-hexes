@@ -169,22 +169,18 @@ export default function App() {
   }, []);
 
   const handleJoinLobby = useCallback(async (code: string) => {
-    try {
-      setError(null);
-      const result = await api.joinLobby(code.toUpperCase(), 'Player', 'vanguard');
-      api.setAuthToken(result.token);
-      const lobbyScreen: AppScreen = {
-        type: 'lobby',
-        code: code.toUpperCase(),
-        playerId: result.player_id,
-        token: result.token,
-        isHost: false,
-        lobby: result.lobby,
-      };
-      setScreen(lobbyScreen);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
+    setError(null);
+    const result = await api.joinLobby(code.toUpperCase(), 'Player', 'vanguard');
+    api.setAuthToken(result.token);
+    const lobbyScreen: AppScreen = {
+      type: 'lobby',
+      code: code.toUpperCase(),
+      playerId: result.player_id,
+      token: result.token,
+      isHost: false,
+      lobby: result.lobby,
+    };
+    setScreen(lobbyScreen);
   }, []);
 
   const handleGameStart = useCallback((gameId: string, state: GameState, localPlayerIds?: string[]) => {

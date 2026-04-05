@@ -482,6 +482,10 @@ class TestDiscardCardRequest(BaseModel):
     card_index: int
 
 
+class TestPlayerRequest(BaseModel):
+    player_id: str
+
+
 @router.post("/games/{game_id}/test/discard-card")
 async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[str, Any]:
     """Test mode: discard a card from a player's hand to their discard pile."""
@@ -503,6 +507,50 @@ async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[s
     game._log(f"[TEST] {player.name} discards {card.name}", actor=req.player_id)
 
     return {"message": f"Discarded {card.name}", "state": game.to_dict()}
+
+
+@router.post("/games/{game_id}/test/draw-card")
+async def test_draw_card(game_id: str, req: TestPlayerRequest) -> dict[str, Any]:
+    """Test mode: draw a card from the player's draw pile into their hand."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+
+    player = game.players.get(req.player_id)
+    if not player:
+        raise HTTPException(404, "Player not found")
+
+    drawn = player.deck.draw(1, game.rng)
+    if drawn:
+        player.hand.extend(drawn)
+        game._log(f"[TEST] {player.name} draws {drawn[0].name}", actor=req.player_id)
+        return {"message": f"Drew {drawn[0].name}", "state": game.to_dict()}
+    else:
+        return {"message": "No cards to draw", "state": game.to_dict()}
+
+
+@router.post("/games/{game_id}/test/discard-hand")
+async def test_discard_hand(game_id: str, req: TestPlayerRequest) -> dict[str, Any]:
+    """Test mode: discard all cards in the player's hand to their discard pile."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+
+    player = game.players.get(req.player_id)
+    if not player:
+        raise HTTPException(404, "Player not found")
+
+    count = len(player.hand)
+    if count > 0:
+        player.deck.add_to_discard(player.hand)
+        game._log(f"[TEST] {player.name} discards entire hand ({count} cards)", actor=req.player_id)
+        player.hand = []
+
+    return {"message": f"Discarded {count} card(s)", "state": game.to_dict()}
 
 
 # ── Multiplayer: Leave / End Game ──────────────────────────

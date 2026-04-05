@@ -81,11 +81,19 @@ export default function GameOverOverlay({
     });
   }, [gameState]);
 
-  // Get all cards for a player (hand + deck + discard)
-  const getDeckCards = (pid: string): Card[] => {
+  // Get all cards for a player, grouped for display
+  const getDeckGroups = (pid: string): { label: string; items: Card[] }[] => {
     const p = gameState.players[pid];
     if (!p) return [];
-    return [...p.hand, ...p.deck_cards, ...p.discard];
+    const inDeck = [...p.hand, ...p.deck_cards, ...p.discard];
+    const trashed = p.trash ?? [];
+    const groups: { label: string; items: Card[] }[] = [
+      { label: `Deck (${inDeck.length})`, items: inDeck },
+    ];
+    if (trashed.length > 0) {
+      groups.push({ label: `Trashed (${trashed.length})`, items: trashed });
+    }
+    return groups;
   };
 
   // Staggered animation
@@ -286,11 +294,10 @@ export default function GameOverOverlay({
       {/* Deck viewer modal — reuses the in-game CardViewPopup */}
       {viewingDeck && (() => {
         const player = gameState.players[viewingDeck];
-        const cards = getDeckCards(viewingDeck);
         return (
           <CardViewPopup
             title={`${player?.name ?? viewingDeck}'s Deck`}
-            cards={[{ label: 'All Cards', items: cards }]}
+            cards={getDeckGroups(viewingDeck)}
             onClose={() => setViewingDeck(null)}
           />
         );

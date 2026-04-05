@@ -13,7 +13,7 @@ import ResolveOverlay from './ResolveOverlay';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } from './SettingsContext';
-import { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
+import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull from './CardFull';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
@@ -212,7 +212,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [dragHintHidden, setDragHintHidden] = useState(false);
   const [showUpgradePreview, setShowUpgradePreview] = useState(false);
   const [showFullLog, setShowFullLog] = useState(false);
   const [showDeckViewer, setShowDeckViewer] = useState(false);
@@ -222,6 +221,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
   // Test mode state
   const [showTestPanel, setShowTestPanel] = useState(false);
+  const [testShuffleAnim, setTestShuffleAnim] = useState(false);
   const [testCardId, setTestCardId] = useState('');
   const [testVp, setTestVp] = useState('');
   const [testResources, setTestResources] = useState('');
@@ -263,6 +263,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [phaseBanner, setPhaseBanner] = useState<string | null>(null);
   const [bannerKey, setBannerKey] = useState(0);
   const [interactionBlocked, setInteractionBlocked] = useState(false);
+  const [submitButtonVisible, setSubmitButtonVisible] = useState(false);
+  const [buyButtonVisible, setBuyButtonVisible] = useState(false);
   const submitPlanRef = useRef<HoldToSubmitHandle>(null);
   const endTurnRef = useRef<HoldToSubmitHandle>(null);
   const prevPhaseRef = useRef<string>(gameState.current_phase);
@@ -368,13 +370,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const timer = setTimeout(() => setPurchaseHoverVisible(true), 150);
     return () => clearTimeout(timer);
   }, [purchaseHover]);
-
-  // Auto-dismiss drag hint after 2 seconds, reset on player/phase change
-  useEffect(() => {
-    setDragHintHidden(false);
-    const timer = setTimeout(() => setDragHintHidden(true), 2000);
-    return () => clearTimeout(timer);
-  }, [activePlayerId, phase]);
 
 
   // Close settings dropdown on outside click
@@ -530,6 +525,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       setInteractionBlocked(true);
     }
   }, [phase, animationOff, resolving, phaseBanner, gameState, showIntro, activePlayerId, homePlayerIndex, onStateUpdate]);
+
+  // Submit button fade-in: hide when phase changes, fade in after banner clears
+  useEffect(() => {
+    if (phase === 'plan' && !phaseBanner && !resolving && !showIntro) {
+      // Banner just cleared — trigger fade-in after a brief delay
+      const timer = setTimeout(() => setSubmitButtonVisible(true), 50);
+      return () => clearTimeout(timer);
+    }
+    setSubmitButtonVisible(false);
+  }, [phase, phaseBanner, resolving, showIntro]);
+
+  // Buy button fade-in: hide when phase changes, fade in after banner clears
+  useEffect(() => {
+    if (phase === 'buy' && !phaseBanner && !resolving) {
+      const timer = setTimeout(() => setBuyButtonVisible(true), 50);
+      return () => clearTimeout(timer);
+    }
+    setBuyButtonVisible(false);
+  }, [phase, phaseBanner, resolving]);
 
   // Chevron reveal animation: fade in all claim chevrons before resolve overlay
   useEffect(() => {
@@ -1311,6 +1325,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Keyboard shortcuts: Escape, C/D/S, 1-9, Enter (with hold support)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Disable shortcuts when intro or game-over overlay is active
+      if (showIntro || showGameOver) return;
+
       // Escape: close the topmost overlay
       if (e.key === 'Escape') {
         if (showCardBrowser) { setShowCardBrowser(false); return; }
@@ -1396,7 +1413,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         handleTrashToggle(cardIndex);
       } else if (phase === 'plan' && !activePlayer.has_submitted_plan && !interactionBlocked) {
         setSelectedCardIndex(prev => prev === cardIndex ? null : cardIndex);
-        setDragHintHidden(true);
       }
     };
 
@@ -1413,7 +1429,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, activePlayerEffects, submitCanStillPlay, handleSubmitPlan, phaseBanner]);
+  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, activePlayerEffects, submitCanStillPlay, handleSubmitPlan, phaseBanner, showIntro, showGameOver]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -1811,6 +1827,27 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [gameState.id, activePlayerId, onStateUpdate]);
 
+  const handleTestDrawCard = useCallback(async () => {
+    try {
+      setError(null);
+      const result = await api.testDrawCard(gameState.id, activePlayerId);
+      onStateUpdate(result.state);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, activePlayerId, onStateUpdate]);
+
+  const handleTestDiscardHand = useCallback(async () => {
+    try {
+      setError(null);
+      const result = await api.testDiscardHand(gameState.id, activePlayerId);
+      onStateUpdate(result.state);
+      setSelectedCardIndex(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, activePlayerId, onStateUpdate]);
+
   const handleSwitchPlayer = useCallback((index: number) => {
     const pid = gameState.player_order[index];
     if (!pid) return;
@@ -1904,19 +1941,19 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Submit Plan button state (used by keyboard handler and UI)
   // NOTE: declared here so it's available to the keyboard effect above
 
-  // Upkeep indicator calculations — tiles_per_vp = grid radius - 1, used for both VP and upkeep
+  // Upkeep indicator calculations — tiles_per_vp is a constant 3 for all grid sizes
   const UPKEEP_FREE_TILES = 4;
-  const GRID_RADIUS: Record<string, number> = { small: 4, medium: 5, large: 6 };
-  const tilesPerVp = (GRID_RADIUS[gameState.grid.size] ?? 4) - 1;
+  const tilesPerVp = 3;
   const playerTileCount = activePlayer
     ? Object.values(gameState.grid.tiles).filter(t => t.owner === activePlayerId).length
     : 0;
   const anyPlayerReachedVp = Object.values(gameState.players).some(p => !p.has_left && p.vp >= gameState.vp_target);
-  const currentUpkeep = Math.max(0, Math.floor((playerTileCount - UPKEEP_FREE_TILES) / tilesPerVp));
+  const upkeepDivisor = tilesPerVp * 2;
+  const currentUpkeep = Math.max(0, Math.floor((playerTileCount - UPKEEP_FREE_TILES) / upkeepDivisor));
   const upkeepBracketHigh = currentUpkeep === 0
-    ? UPKEEP_FREE_TILES + tilesPerVp - 1
-    : UPKEEP_FREE_TILES + (currentUpkeep + 1) * tilesPerVp - 1;
-  const upkeepBracketLow = currentUpkeep === 0 ? 1 : UPKEEP_FREE_TILES + currentUpkeep * tilesPerVp;
+    ? UPKEEP_FREE_TILES + upkeepDivisor - 1
+    : UPKEEP_FREE_TILES + (currentUpkeep + 1) * upkeepDivisor - 1;
+  const upkeepBracketLow = currentUpkeep === 0 ? 1 : UPKEEP_FREE_TILES + currentUpkeep * upkeepDivisor;
   // Glow if pending claims might push past bracket boundary
   const pendingClaimCount = activePlayer
     ? activePlayer.planned_actions.filter(a => a.card.card_type === 'claim' && a.target_q !== null).length
@@ -2653,11 +2690,35 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                                 style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button
+                              onClick={handleTestDrawCard}
+                              style={{ flex: 1, padding: '4px 8px', background: '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', marginTop: 4 }}
+                            >
+                              Draw Card
+                            </button>
+                            <button
+                              onClick={handleTestDiscardHand}
+                              style={{ flex: 1, padding: '4px 8px', background: '#aa6633', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', marginTop: 4 }}
+                            >
+                              Discard Hand
+                            </button>
+                          </div>
                           <button
                             onClick={() => setShowGameOver(true)}
                             style={{ padding: '4px 8px', background: '#8844aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', marginTop: 4 }}
                           >
                             Trigger Game Over
+                          </button>
+                          <button
+                            onClick={() => {
+                              setTestShuffleAnim(true);
+                              setTimeout(() => setTestShuffleAnim(false), 2500);
+                            }}
+                            disabled={testShuffleAnim}
+                            style={{ padding: '4px 8px', background: testShuffleAnim ? '#555' : '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: testShuffleAnim ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                          >
+                            {testShuffleAnim ? 'Shuffling...' : 'Play Shuffling'}
                           </button>
                         </div>
                       )}
@@ -2693,21 +2754,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
           {/* Toasts — floating above the hand panel */}
           <div style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, zIndex: 20, pointerEvents: 'none' }}>
-            {phase === 'plan' && activePlayer && !activePlayer.has_submitted_plan && (
-              <div style={{
-                fontSize: 12,
-                padding: '4px 14px',
-                background: '#ffffff11',
-                border: '1px solid #ffffff22',
-                borderRadius: 6,
-                color: '#888',
-                whiteSpace: 'nowrap',
-                opacity: dragHintHidden ? 0 : 1,
-                transition: animationOff ? 'none' : 'opacity 0.4s ease',
-              }}>
-                {activePlayer.name}'s turn — drag a card onto the board, or select + click
-              </div>
-            )}
             {error && (
               <div style={{
                 fontSize: 13,
@@ -2723,23 +2769,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             )}
           </div>
 
-          {/* Bottom bar: action counter (left) + buttons (right) */}
+          {/* Bottom bar: buttons (right) */}
           <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: 20, minHeight: 34 }}>
-            {/* Action counter — left aligned */}
-            {phase === 'plan' && activePlayer && !resolving && (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-              }}>
-                <span style={{ fontSize: 16, fontWeight: 'bold', color: submitActionsLeft > 0 ? '#fff' : '#666', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
-                  ⚡ {submitActionsLeft}
-                </span>
-                <span style={{ fontSize: 12, color: '#aaa', textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}>
-                  action{submitActionsLeft !== 1 ? 's' : ''} remaining
-                </span>
-              </div>
-            )}
             <div style={{ flex: 1 }} />
             {/* Buttons — right aligned */}
             {/* Test-mode Discard & Trash buttons */}
@@ -2949,29 +2980,34 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </>
               );
             })()}
-            {phase === 'plan' && !resolving && !phaseBanner && activePlayer && !activePlayer.has_submitted_plan && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
-              <HoldToSubmitButton
-                ref={submitPlanRef}
-                key={activePlayerId}
-                onConfirm={handleSubmitPlan}
-                requireHold={submitCanStillPlay}
-                warning={`You still have ${activePlayer.hand.length} card(s) and ${submitActionsLeft} action(s) remaining.`}
-                tooltip="Submitting locks your plan for this round. You cannot change it after."
-                style={{
-                  padding: '6px 16px',
-                  background: submitCanStillPlay ? '#ff8844' : '#2a9a3e',
-                  border: 'none',
-                  borderRadius: 6,
-                  color: '#fff',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  lineHeight: '1.2',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                }}
-              >
-                Submit Plan{submitCanStillPlay ? '' : ' ✓'}
-              </HoldToSubmitButton>
+            {phase === 'plan' && !resolving && !phaseBanner && !showIntro && activePlayer && !activePlayer.has_submitted_plan && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
+              <div style={{
+                opacity: submitButtonVisible ? 1 : 0,
+                transition: 'opacity 0.4s ease-in',
+              }}>
+                <HoldToSubmitButton
+                  ref={submitPlanRef}
+                  key={activePlayerId}
+                  onConfirm={handleSubmitPlan}
+                  requireHold={submitCanStillPlay}
+                  warning={`You still have ${activePlayer.hand.length} card(s) and ${submitActionsLeft} action(s) remaining.`}
+                  tooltip="Submitting locks your plan for this round. You cannot change it after."
+                  style={{
+                    padding: '6px 16px',
+                    background: submitCanStillPlay ? '#ff8844' : '#2a9a3e',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#fff',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    lineHeight: '1.2',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  Submit Plan{submitCanStillPlay ? ' →' : ' ✓'}
+                </HoldToSubmitButton>
+              </div>
             )}
             {resolving && (
               <button
@@ -3012,45 +3048,49 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               </button>
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayerId === gameState.current_buyer_id && !activePlayer.has_ended_turn && (
-              <HoldToSubmitButton
-                ref={endTurnRef}
-                onConfirm={handleEndTurn}
-                requireHold={true}
-                warning="Done buying passes the shop to the next player. Any unspent resources carry over."
-                style={{
-                  padding: '6px 16px',
-                  background: '#ff8844',
-                  border: 'none',
-                  borderRadius: 6,
-                  color: '#fff',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  lineHeight: '1.2',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                }}
-              >
-                Done Buying →
-              </HoldToSubmitButton>
+              <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
+                <HoldToSubmitButton
+                  ref={endTurnRef}
+                  onConfirm={handleEndTurn}
+                  requireHold={true}
+                  warning="Done buying passes the shop to the next player. Any unspent resources carry over."
+                  style={{
+                    padding: '6px 16px',
+                    background: '#ff8844',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#fff',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    fontSize: 13,
+                    lineHeight: '1.2',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  Done Buying →
+                </HoldToSubmitButton>
+              </div>
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && (
-              <button
-                disabled
-                style={{
-                  padding: '6px 16px',
-                  background: '#555',
-                  border: 'none',
-                  borderRadius: 6,
-                  color: '#aaa',
-                  fontWeight: 'bold',
-                  cursor: 'not-allowed',
-                  fontSize: 13,
-                  lineHeight: '1.2',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                }}
-              >
-                ✓ Done Buying
-              </button>
+              <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
+                <button
+                  disabled
+                  style={{
+                    padding: '6px 16px',
+                    background: '#555',
+                    border: 'none',
+                    borderRadius: 6,
+                    color: '#aaa',
+                    fontWeight: 'bold',
+                    cursor: 'not-allowed',
+                    fontSize: 13,
+                    lineHeight: '1.2',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  ✓ Done Buying
+                </button>
+              </div>
             )}
             {/* Multiplayer: waiting for other players indicator */}
             {isMultiplayer && activePlayer && (
@@ -3075,22 +3115,78 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               const buyerId = gameState.current_buyer_id;
               const buyerName = buyerId ? gameState.players[buyerId]?.name : null;
               return buyerName ? (
-                <div style={{
-                  padding: '4px 12px',
-                  background: 'rgba(255, 170, 74, 0.15)',
-                  border: '1px solid rgba(255, 170, 74, 0.3)',
-                  borderRadius: 6,
-                  color: '#ffaa4a',
-                  fontSize: 12,
-                  fontWeight: 'bold',
-                  animation: 'pulse 2s ease-in-out infinite',
-                }}>
-                  Waiting for {buyerName} to buy...
+                <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
+                  <div style={{
+                    padding: '4px 12px',
+                    background: 'rgba(255, 170, 74, 0.15)',
+                    border: '1px solid rgba(255, 170, 74, 0.3)',
+                    borderRadius: 6,
+                    color: '#ffaa4a',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    animation: 'pulse 2s ease-in-out infinite',
+                  }}>
+                    Waiting for {buyerName} to buy...
+                  </div>
                 </div>
               ) : null;
             })()}
           </div>
         </div>
+
+        {/* Action counter — above hand panel */}
+        {phase === 'plan' && activePlayer && !resolving && (
+          <div style={{ position: 'relative', zIndex: 30 }}>
+            <div
+              className="action-counter-wrap"
+              style={{
+                position: 'absolute', bottom: 4, left: 12,
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 14px',
+                background: 'rgba(26, 26, 46, 0.85)',
+                border: `1px solid ${submitActionsLeft > 0 ? '#4a9eff44' : '#33333366'}`,
+                borderRadius: 8,
+              }}
+            >
+              <style>{`
+                .action-counter-wrap .action-counter-tip {
+                  opacity: 0;
+                  transition: opacity 0.15s ease;
+                  pointer-events: none;
+                }
+                .action-counter-wrap:hover .action-counter-tip {
+                  opacity: 1;
+                }
+              `}</style>
+              <div className="action-counter-tip" style={{
+                position: 'absolute', bottom: '100%', left: 0,
+                paddingBottom: 8,
+              }}>
+                <div style={{
+                  padding: '4px 10px',
+                  background: '#111122',
+                  border: '1px solid #555',
+                  borderRadius: 6,
+                  color: '#ccc',
+                  fontSize: 12,
+                  whiteSpace: 'nowrap',
+                }}>
+                  Playing a card costs 1 action.
+                </div>
+              </div>
+              <span style={{
+                fontSize: 22, fontWeight: 'bold',
+                color: submitActionsLeft > 0 ? '#fff' : '#555',
+                textShadow: submitActionsLeft > 0 ? '0 0 8px rgba(74, 158, 255, 0.4)' : 'none',
+              }}>
+                ⚡ {submitActionsLeft}
+              </span>
+              <span style={{ fontSize: 13, color: submitActionsLeft > 0 ? '#aaa' : '#555' }}>
+                action{submitActionsLeft !== 1 ? 's' : ''} left
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Bottom panel: hand */}
         <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30 }}>
@@ -3099,7 +3195,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               playerId={activePlayerId}
               cards={introSequence === 'overlay' || introSequence === 'shuffle' ? [] : activePlayer.hand}
               selectedIndex={selectedCardIndex}
-              onSelect={(idx) => { setSelectedCardIndex(idx); setDragHintHidden(true); }}
+              onSelect={(idx) => { setSelectedCardIndex(idx); }}
               onDragPlay={handleDragPlay}
               onDoubleClick={(idx) => {
                 const card = activePlayer?.hand[idx];
@@ -3116,7 +3212,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               discardAll={discardingAll}
               onDiscardAllComplete={handleDiscardAllComplete}
               lastPlayedTarget={lastPlayedTarget}
-              forceShuffleAnim={introSequence === 'shuffle'}
+              forceShuffleAnim={introSequence === 'shuffle' || testShuffleAnim}
               trashMode={trashMode ? {
                 playedCardIndex: trashMode.cardIndex,
                 selectedIndices: trashSelectedIndices,

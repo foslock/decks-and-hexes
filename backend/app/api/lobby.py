@@ -68,6 +68,7 @@ class LobbyConfig:
     speed: str = "normal"
     max_players: int = 3
     test_mode: bool = False
+    vp_target: Optional[int] = None  # None = use computed default
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +76,7 @@ class LobbyConfig:
             "speed": self.speed,
             "max_players": self.max_players,
             "test_mode": self.test_mode,
+            "vp_target": self.vp_target,
         }
 
 
@@ -88,12 +90,16 @@ class Lobby:
     last_activity: float = 0.0
     game_id: Optional[str] = None
     status: str = "waiting"  # waiting | countdown | started | expired
+    player_order: list[str] = field(default_factory=list)  # explicit ordering for turn order
 
     def to_dict(self) -> dict[str, Any]:
+        # Use explicit player_order if set, otherwise dict insertion order
+        order = self.player_order if self.player_order else list(self.players.keys())
         return {
             "code": self.code,
             "host_id": self.host_id,
             "players": {pid: p.to_dict() for pid, p in self.players.items()},
+            "player_order": order,
             "config": self.config.to_dict(),
             "status": self.status,
             "game_id": self.game_id,
@@ -213,11 +219,13 @@ class UpdateConfigRequest(BaseModel):
     speed: Optional[str] = None
     max_players: Optional[int] = None
     test_mode: Optional[bool] = None
+    vp_target: Optional[int] = None
 
 
 class UpdatePlayerRequest(BaseModel):
     name: Optional[str] = None
     archetype: Optional[str] = None
+    difficulty: Optional[str] = None
     token: str
 
 
@@ -234,6 +242,11 @@ class RemovePlayerRequest(BaseModel):
 class AddLocalPlayerRequest(BaseModel):
     name: str
     archetype: str
+    token: str
+
+
+class ReorderPlayersRequest(BaseModel):
+    order: list[str]
     token: str
 
 
@@ -326,6 +339,8 @@ async def join_lobby(code: str, req: JoinLobbyRequest) -> dict[str, Any]:
         token=token,
     )
     lobby.players[player_id] = player
+    if lobby.player_order:
+        lobby.player_order.append(player_id)
     lobby.touch()
     _tokens[player_id] = token
 
@@ -383,6 +398,11 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
     if req.test_mode is not None:
         lobby.config.test_mode = req.test_mode
 
+    if req.vp_target is not None:
+        if req.vp_target < 1:
+            raise HTTPException(400, "vp_target must be a positive integer")
+        lobby.config.vp_target = req.vp_target
+
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
 
@@ -412,6 +432,12 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
         except ValueError:
             raise HTTPException(400, f"Invalid archetype: {req.archetype}")
         player.archetype = req.archetype
+
+    if req.difficulty is not None and player.is_cpu:
+        noise_map = {"easy": 0.30, "medium": 0.15, "hard": 0.05}
+        if req.difficulty not in noise_map:
+            raise HTTPException(400, f"Invalid difficulty: {req.difficulty}")
+        player.cpu_noise = noise_map[req.difficulty]
 
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
@@ -452,6 +478,8 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
         cpu_noise=noise,
     )
     lobby.players[player_id] = cpu
+    if lobby.player_order:
+        lobby.player_order.append(player_id)
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
 
@@ -486,6 +514,8 @@ async def add_local_player(code: str, req: AddLocalPlayerRequest) -> dict[str, A
         is_local=True,
     )
     lobby.players[player_id] = local_player
+    if lobby.player_order:
+        lobby.player_order.append(player_id)
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
 
@@ -512,12 +542,33 @@ async def remove_player(code: str, target_player_id: str, req: RemovePlayerReque
         raise HTTPException(400, "Host cannot be removed — use end game instead")
 
     del lobby.players[target_player_id]
+    if lobby.player_order and target_player_id in lobby.player_order:
+        lobby.player_order.remove(target_player_id)
     _tokens.pop(target_player_id, None)
     lobby.touch()
 
     await manager.broadcast_lobby(code, lobby.to_dict())
     # Disconnect the removed player's WebSocket
     manager.disconnect(code, target_player_id)
+
+    return {"lobby": lobby.to_dict()}
+
+
+@lobby_router.post("/{code}/reorder")
+async def reorder_players(code: str, req: ReorderPlayersRequest) -> dict[str, Any]:
+    """Reorder players in the lobby (host only). Affects in-game turn order."""
+    lobby = _require_lobby(code)
+    _require_token(lobby.host_id, req.token)
+
+    # Validate that the order contains exactly the current player IDs
+    current_ids = set(lobby.players.keys())
+    requested_ids = set(req.order)
+    if current_ids != requested_ids:
+        raise HTTPException(400, "Order must contain exactly the current player IDs")
+
+    lobby.player_order = list(req.order)
+    lobby.touch()
+    await manager.broadcast_lobby(code, lobby.to_dict())
 
     return {"lobby": lobby.to_dict()}
 
@@ -561,10 +612,12 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
         await manager.broadcast(code, {"type": "countdown", "seconds_remaining": seconds})
         await asyncio.sleep(1)
 
-    # Create the game from lobby config
+    # Create the game from lobby config — use explicit player_order if set
     registry = _get_registry()
+    ordered_pids = lobby.player_order if lobby.player_order else list(lobby.players.keys())
     player_configs = []
-    for pid, p in lobby.players.items():
+    for pid in ordered_pids:
+        p = lobby.players[pid]
         player_configs.append({
             "id": pid,
             "name": p.name,
@@ -582,6 +635,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
         grid_size, player_configs, registry,
         test_mode=lobby.config.test_mode,
         speed=lobby.config.speed,
+        vp_target=lobby.config.vp_target,
     )
     game.host_id = lobby.host_id
     game.lobby_code = code
@@ -889,11 +943,17 @@ async def _restart_game(game_id: str, old_game: GameState) -> dict[str, Any]:
     left_pids = {pid for pid, p in old_game.players.items() if p.has_left}
     for pid in left_pids:
         lobby.players.pop(pid, None)
+        if lobby.player_order and pid in lobby.player_order:
+            lobby.player_order.remove(pid)
 
     # Create new game using the lobby (reuse start_lobby logic)
     registry = _get_registry()
+    ordered_pids = lobby.player_order if lobby.player_order else list(lobby.players.keys())
     player_configs = []
-    for pid, p in lobby.players.items():
+    for pid in ordered_pids:
+        p = lobby.players.get(pid)
+        if not p:
+            continue  # player may have left
         player_configs.append({
             "id": pid,
             "name": p.name,
@@ -911,6 +971,7 @@ async def _restart_game(game_id: str, old_game: GameState) -> dict[str, Any]:
         grid_size, player_configs, registry,
         test_mode=lobby.config.test_mode,
         speed=lobby.config.speed,
+        vp_target=lobby.config.vp_target,
     )
     game.host_id = lobby.host_id
     game.lobby_code = lobby.code

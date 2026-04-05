@@ -28,10 +28,11 @@ origins = [
     "http://localhost:5173",
     "http://localhost:3000",
     "https://cardclash.online",
+    "https://card-clash-frontend.onrender.com",
 ]
-# Allow the Render frontend domain if configured
+# Allow additional frontend domains if configured
 frontend_url = os.environ.get("FRONTEND_URL")
-if frontend_url:
+if frontend_url and frontend_url not in origins:
     origins.append(frontend_url)
 
 app.add_middleware(

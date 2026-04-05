@@ -116,8 +116,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
   });
 
   const vpTiles = Object.values(gameState.grid.tiles).filter(t => t.is_vp).length;
-  const GRID_RADIUS: Record<string, number> = { small: 4, medium: 5, large: 6 };
-  const tilesPerVp = (GRID_RADIUS[gameState.grid.size] ?? 4) - 1;
+  const tilesPerVp = 3;
 
   return (
     <div style={{

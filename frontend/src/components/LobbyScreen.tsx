@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { GameState, LobbyState } from '../types/game';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useSettings, type AnimationMode } from './SettingsContext';
+import Tooltip from './Tooltip';
 import * as api from '../api/client';
 
+const LOBBY_PLAYER_COLORS = ['#4a9eff', '#ff4a4a', '#4aff6a', '#ffaa4a', '#aa4aff', '#ff4aaa'];
+
 const ARCHETYPES = [
-  { id: 'vanguard', name: 'Vanguard', icon: '⚔️' },
-  { id: 'swarm', name: 'Swarm', icon: '🐝' },
-  { id: 'fortress', name: 'Fortress', icon: '🏰' },
+  { id: 'vanguard', name: 'Vanguard', icon: '⚔️', desc: 'Vanguard — Aggressive, high-power claims. Excels at taking territory with brute force and punishing defenders.' },
+  { id: 'swarm', name: 'Swarm', icon: '🐝', desc: 'Swarm — Wide expansion with many small claims. Strength grows from controlling adjacent tiles and spreading fast.' },
+  { id: 'fortress', name: 'Fortress', icon: '🏰', desc: 'Fortress — Defensive and resilient. Specializes in holding territory with strong defenses and tile immunity.' },
 ];
 
 const GRID_SIZES = [
@@ -16,25 +19,15 @@ const GRID_SIZES = [
   { id: 'large', name: 'Large (127)', players: '4-6', tiles: 127, radius: 6 },
 ];
 
-const SPEED_MULTIPLIERS: Record<string, number> = { fast: 0.66, normal: 1.0, slow: 1.33 };
+const RECOMMENDED_VP: Record<string, number> = { small: 10, medium: 12, large: 14 };
 
-function computeVpTarget(gridSizeId: string, playerCount: number, speed: string): number {
-  const grid = GRID_SIZES.find(g => g.id === gridSizeId) ?? GRID_SIZES[0];
-  const tilesPerVp = grid.radius - 1;
-  const divisor = Math.floor(tilesPerVp * playerCount * 0.75) || 1;
-  const base = Math.floor(grid.tiles / divisor);
-  return Math.max(3, Math.round(base * (SPEED_MULTIPLIERS[speed] ?? 1.0)));
+function computeRecommendedVp(gridSizeId: string): number {
+  return RECOMMENDED_VP[gridSizeId] ?? 10;
 }
-
-const SPEEDS = [
-  { id: 'fast', name: 'Fast' },
-  { id: 'normal', name: 'Normal' },
-  { id: 'slow', name: 'Slow' },
-];
 
 const DIFFICULTIES = [
   { id: 'easy', name: 'Easy' },
-  { id: 'medium', name: 'Medium' },
+  { id: 'medium', name: 'Normal' },
   { id: 'hard', name: 'Hard' },
 ];
 
@@ -65,6 +58,10 @@ export default function LobbyScreen({
   const [showAddLocal, setShowAddLocal] = useState(false);
   const [localName, setLocalName] = useState('');
   const [localArchetype, setLocalArchetype] = useState('swarm');
+
+  // Drag-and-drop reorder state (host only)
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   const { lastMessage, status } = useWebSocket(lobbyCode, playerId, token);
 
@@ -99,7 +96,11 @@ export default function LobbyScreen({
     }
   }, [lastMessage, onGameStart, onLeave, lobby, playerId, isHost]);
 
-  const players = Object.values(lobby.players);
+  // Use explicit player_order for rendering if available, else dict key order
+  const orderedPlayerIds = lobby.player_order?.length
+    ? lobby.player_order.filter(pid => pid in lobby.players)
+    : Object.keys(lobby.players);
+  const players = orderedPlayerIds.map(pid => lobby.players[pid]);
 
   // ── Host actions ─────────────────────────────────────────
 
@@ -179,7 +180,7 @@ export default function LobbyScreen({
   }, [lobbyCode, playerId, token]);
 
   // Host edits local or CPU player (uses host's token)
-  const handleUpdatePlayer = useCallback(async (targetId: string, updates: { name?: string; archetype?: string }) => {
+  const handleUpdatePlayer = useCallback(async (targetId: string, updates: { name?: string; archetype?: string; difficulty?: string }) => {
     try {
       setError(null);
       await api.updateLobbyPlayer(lobbyCode, targetId, token, updates);
@@ -187,6 +188,21 @@ export default function LobbyScreen({
       setError(e instanceof Error ? e.message : String(e));
     }
   }, [lobbyCode, token]);
+
+  const handleReorder = useCallback(async (fromIdx: number, toIdx: number) => {
+    // Use player_order from lobby state, falling back to Object.keys
+    const currentOrder = lobby.player_order?.length
+      ? [...lobby.player_order]
+      : Object.keys(lobby.players);
+    const [moved] = currentOrder.splice(fromIdx, 1);
+    currentOrder.splice(toIdx, 0, moved);
+    try {
+      setError(null);
+      await api.reorderLobbyPlayers(lobbyCode, token, currentOrder);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [lobbyCode, token, lobby]);
 
   const handleLeave = useCallback(async () => {
     try {
@@ -352,26 +368,7 @@ export default function LobbyScreen({
               </button>
             ))}
           </div>
-          {/* Speed */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            {SPEEDS.map((s) => (
-              <button
-                key={s.id}
-                onClick={() => isHost && handleConfigChange('speed', s.id)}
-                style={{
-                  flex: 1, padding: '8px',
-                  background: lobby.config.speed === s.id ? '#3a3a6e' : '#2a2a3e',
-                  border: lobby.config.speed === s.id ? '2px solid #4a9eff' : '1px solid #444',
-                  borderRadius: 8, color: '#fff', fontSize: 13,
-                  cursor: isHost ? 'pointer' : 'default',
-                  opacity: isHost ? 1 : 0.8,
-                }}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-          {/* VP Target display */}
+          {/* VP Target */}
           <div style={{
             fontSize: 13, color: '#aaa', marginBottom: 12,
             padding: '8px 12px', background: '#1e1e36',
@@ -379,7 +376,44 @@ export default function LobbyScreen({
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
             <span style={{ color: '#ffcc00', fontWeight: 'bold' }}>🏆</span>
-            <span>VP Target: <strong style={{ color: '#fff' }}>{computeVpTarget(lobby.config.grid_size, players.length, lobby.config.speed)}</strong></span>
+            <span>VP Target:</span>
+            {isHost ? (
+              <>
+                <input
+                  type="number"
+                  min={1}
+                  value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val) && val > 0) {
+                      handleConfigChange('vp_target', val);
+                    }
+                  }}
+                  style={{
+                    width: 52, padding: '3px 6px',
+                    background: '#2a2a3e', border: '1px solid #555',
+                    borderRadius: 4, color: '#fff', fontSize: 13,
+                    fontWeight: 'bold', textAlign: 'center',
+                  }}
+                />
+                {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size) && (
+                  <button
+                    onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size))}
+                    style={{
+                      fontSize: 11, padding: '2px 8px',
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#888', cursor: 'pointer',
+                    }}
+                  >
+                    Reset ({computeRecommendedVp(lobby.config.grid_size)})
+                  </button>
+                )}
+              </>
+            ) : (
+              <strong style={{ color: '#fff' }}>
+                {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
+              </strong>
+            )}
           </div>
           {/* Test mode (host only) */}
           {isHost && (
@@ -403,20 +437,73 @@ export default function LobbyScreen({
         {/* Players list */}
         <div style={{ marginBottom: 24 }}>
           <h3 style={{ marginBottom: 8 }}>Players ({players.length})</h3>
-          {players.map((p) => {
+          {players.map((p, playerIdx) => {
             const isSelf = p.id === playerId;
             const canEditArchetype = isSelf || (isHost && (p.is_cpu || p.is_local));
+            const playerColor = LOBBY_PLAYER_COLORS[playerIdx] || '#888';
+            const isDragging = dragIdx === playerIdx;
+            const isDragOver = dragOverIdx === playerIdx;
             return (
               <div
                 key={p.id}
+                draggable={isHost && players.length > 1}
+                onDragStart={(e) => {
+                  if (!isHost) return;
+                  setDragIdx(playerIdx);
+                  e.dataTransfer.effectAllowed = 'move';
+                  // Make drag image semi-transparent
+                  if (e.currentTarget instanceof HTMLElement) {
+                    e.dataTransfer.setDragImage(e.currentTarget, 0, 0);
+                  }
+                }}
+                onDragEnd={() => {
+                  setDragIdx(null);
+                  setDragOverIdx(null);
+                }}
+                onDragOver={(e) => {
+                  if (!isHost || dragIdx === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverIdx(playerIdx);
+                }}
+                onDragLeave={() => {
+                  if (dragOverIdx === playerIdx) setDragOverIdx(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIdx !== null && dragIdx !== playerIdx) {
+                    handleReorder(dragIdx, playerIdx);
+                  }
+                  setDragIdx(null);
+                  setDragOverIdx(null);
+                }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   marginBottom: 8, padding: '8px 12px',
                   background: isSelf ? '#2a2a4e' : '#1e1e36',
-                  border: isSelf ? '1px solid #4a9eff' : '1px solid #333',
+                  border: isDragOver && dragIdx !== playerIdx
+                    ? '2px solid #4a9eff'
+                    : isSelf ? '1px solid #4a9eff' : '1px solid #333',
                   borderRadius: 8,
+                  opacity: isDragging ? 0.4 : 1,
+                  cursor: isHost && players.length > 1 ? 'grab' : 'default',
+                  transition: 'border 0.15s ease, opacity 0.15s ease',
                 }}
               >
+                {/* Drag handle (host only) */}
+                {isHost && players.length > 1 && (
+                  <span style={{
+                    color: '#555', fontSize: 14, cursor: 'grab',
+                    flexShrink: 0, userSelect: 'none', lineHeight: 1,
+                  }}>
+                    ⠿
+                  </span>
+                )}
+                {/* Player color dot */}
+                <span style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: playerColor, flexShrink: 0,
+                }} />
                 {/* Player type icon */}
                 <span style={{ fontSize: 16 }}>
                   {p.is_cpu ? '🤖' : '🧑'}
@@ -440,7 +527,7 @@ export default function LobbyScreen({
                 ) : (
                   <span style={{ flex: 1, fontSize: 14 }}>
                     {p.name}
-                    {p.is_cpu && p.cpu_difficulty && (
+                    {p.is_cpu && p.cpu_difficulty && !isHost && (
                       <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>
                         ({p.cpu_difficulty})
                       </span>
@@ -448,26 +535,47 @@ export default function LobbyScreen({
                   </span>
                 )}
 
+                {/* CPU difficulty selector (host only) */}
+                {p.is_cpu && isHost && (
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {DIFFICULTIES.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
+                        style={{
+                          padding: '2px 6px', fontSize: 10,
+                          background: p.cpu_difficulty === d.id ? '#3a3a6e' : '#2a2a3e',
+                          border: p.cpu_difficulty === d.id ? '1px solid #4a9eff' : '1px solid #444',
+                          borderRadius: 4, color: p.cpu_difficulty === d.id ? '#fff' : '#888',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {d.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* Archetype selector */}
                 {canEditArchetype ? (
                   <div style={{ display: 'flex', gap: 4 }}>
                     {ARCHETYPES.map((arch) => (
-                      <button
-                        key={arch.id}
-                        onClick={() => {
-                          if (isSelf) handleUpdateSelf({ archetype: arch.id });
-                          else if (isHost && (p.is_local || p.is_cpu)) handleUpdatePlayer(p.id, { archetype: arch.id });
-                        }}
-                        title={arch.name}
-                        style={{
-                          padding: '4px 8px',
-                          background: p.archetype === arch.id ? '#3a3a6e' : '#2a2a3e',
-                          border: p.archetype === arch.id ? '2px solid #4a9eff' : '1px solid #444',
-                          borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 14,
-                        }}
-                      >
-                        {arch.icon}
-                      </button>
+                      <Tooltip key={arch.id} content={arch.desc}>
+                        <button
+                          onClick={() => {
+                            if (isSelf) handleUpdateSelf({ archetype: arch.id });
+                            else if (isHost && (p.is_local || p.is_cpu)) handleUpdatePlayer(p.id, { archetype: arch.id });
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            background: p.archetype === arch.id ? '#3a3a6e' : '#2a2a3e',
+                            border: p.archetype === arch.id ? '2px solid #4a9eff' : '1px solid #444',
+                            borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 14,
+                          }}
+                        >
+                          {arch.icon}
+                        </button>
+                      </Tooltip>
                     ))}
                   </div>
                 ) : (
@@ -525,8 +633,8 @@ export default function LobbyScreen({
           {/* Add player buttons (host only) */}
           {isHost && players.length < 6 && (
             <div style={{ marginTop: 8 }}>
-              {/* Add Local Player */}
-              {!showAddLocal ? (
+              {/* Add Local Player (test mode only) */}
+              {lobby.config.test_mode && (!showAddLocal ? (
                 <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
                   <button
                     onClick={() => setShowAddLocal(true)}
@@ -599,7 +707,7 @@ export default function LobbyScreen({
                     ✕
                   </button>
                 </div>
-              )}
+              ))}
 
               {/* Add CPU buttons */}
               <div style={{ display: 'flex', gap: 8 }}>

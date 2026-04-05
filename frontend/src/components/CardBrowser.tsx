@@ -247,7 +247,7 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
             </span>
           )}
           <span style={{ fontSize: 11, color: '#555', marginLeft: 4 }}>
-            Hold Shift for upgrades
+            Hold shift to view upgrades
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <input

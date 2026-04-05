@@ -16,7 +16,7 @@ player_vp     = max(0, tile_vp + vp_hex_bonus + card_vp + bonus_vp)
 
 | Component | Source | Amount |
 |-----------|--------|--------|
-| Territory | Every N tiles owned (N = grid radius - 1: Small=3, Med=4, Lg=5) | +1 VP per N tiles |
+| Territory | Every 3 tiles owned | +1 VP per 3 tiles |
 | Connected VP hexes | VP hex tiles connected to your base via owned tiles | +1 or +2 VP per hex |
 | Land Grant cards | In deck (passive, not played) | +1 VP each |
 | Rubble cards | In deck (from base raids) | -1 VP each |
@@ -37,7 +37,7 @@ If multiple players reach the target simultaneously, the player with the highest
 The VP target scales with grid size, player count, and game speed:
 
 ```
-tiles_per_vp = grid_radius - 1    # Small=3, Medium=4, Large=5
+tiles_per_vp = 3                   # constant across all grid sizes
 base_vp = total_tiles // (tiles_per_vp × player_count × 0.75)
 vp_target = max(3, round(base_vp × speed_multiplier))
 ```

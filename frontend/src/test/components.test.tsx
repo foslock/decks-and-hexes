@@ -226,27 +226,27 @@ describe('GameLog', () => {
 
 describe('SetupScreen', () => {
   it('renders title and lobby buttons', () => {
-    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={() => {}} />);
+    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={async () => {}} />);
     expect(screen.getByText('Card Clash')).toBeInTheDocument();
     expect(screen.getByText('Create Lobby')).toBeInTheDocument();
     expect(screen.getByText('Join Lobby')).toBeInTheDocument();
   });
 
   it('shows info buttons', () => {
-    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={() => {}} />);
+    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={async () => {}} />);
     expect(screen.getByText('How to Play')).toBeInTheDocument();
     expect(screen.getByText('Card Browser')).toBeInTheDocument();
   });
 
   it('calls onCreateLobby', async () => {
     const onCreateLobby = vi.fn();
-    render(<SetupScreen onCreateLobby={onCreateLobby} onJoinLobby={() => {}} />);
+    render(<SetupScreen onCreateLobby={onCreateLobby} onJoinLobby={async () => {}} />);
     await userEvent.click(screen.getByText('Create Lobby'));
     expect(onCreateLobby).toHaveBeenCalled();
   });
 
   it('shows join code input when Join Lobby clicked', async () => {
-    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={() => {}} />);
+    render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={async () => {}} />);
     await userEvent.click(screen.getByText('Join Lobby'));
     expect(screen.getByPlaceholderText('CODE')).toBeInTheDocument();
   });

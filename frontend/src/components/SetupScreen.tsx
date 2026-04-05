@@ -5,7 +5,7 @@ import HeroAnimation from './HeroAnimation';
 
 interface SetupScreenProps {
   onCreateLobby: () => void;
-  onJoinLobby: (code: string) => void;
+  onJoinLobby: (code: string) => Promise<void>;
 }
 
 export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenProps) {
@@ -13,6 +13,24 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
   const [joinCode, setJoinCode] = useState('');
+  const [joinError, setJoinError] = useState<string | null>(null);
+
+  const attemptJoin = async () => {
+    if (joinCode.length === 0) return;
+    setJoinError(null);
+    try {
+      await onJoinLobby(joinCode);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/full/i.test(msg)) {
+        setJoinError('Lobby is full and cannot be joined.');
+      } else if (/not found/i.test(msg) || /invalid/i.test(msg) || /404/i.test(msg)) {
+        setJoinError('Lobby not found. Check the code and try again.');
+      } else {
+        setJoinError(msg);
+      }
+    }
+  };
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -74,15 +92,16 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
           }}>
             <input
               value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 4))}
+              onChange={(e) => { setJoinCode(e.target.value.toUpperCase().slice(0, 4)); setJoinError(null); }}
               placeholder="CODE"
               autoFocus
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && joinCode.length > 0) {
-                  onJoinLobby(joinCode);
+                if (e.key === 'Enter') {
+                  attemptJoin();
                 } else if (e.key === 'Escape') {
                   setShowJoinDialog(false);
                   setJoinCode('');
+                  setJoinError(null);
                 }
               }}
               style={{
@@ -93,11 +112,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
               }}
             />
             <button
-              onClick={() => {
-                if (joinCode.length > 0) {
-                  onJoinLobby(joinCode);
-                }
-              }}
+              onClick={attemptJoin}
               disabled={joinCode.length === 0}
               style={{
                 flexShrink: 0, padding: '10px 14px',
@@ -110,7 +125,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
               Join
             </button>
             <button
-              onClick={() => { setShowJoinDialog(false); setJoinCode(''); }}
+              onClick={() => { setShowJoinDialog(false); setJoinCode(''); setJoinError(null); }}
               style={{
                 flexShrink: 0, padding: '10px', background: 'transparent',
                 border: 'none', color: '#888', cursor: 'pointer', fontSize: 14,
@@ -121,6 +136,16 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
           </div>
         )}
       </div>
+      {joinError && (
+        <div style={{
+          fontSize: 12, color: '#ff6666', textAlign: 'center',
+          padding: '6px 12px', marginBottom: 8,
+          background: '#2a1a1a', border: '1px solid #552222',
+          borderRadius: 6,
+        }}>
+          {joinError}
+        </div>
+      )}
 
       {/* How to Play / Card Browser */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>

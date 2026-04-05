@@ -51,32 +51,32 @@ UPGRADE_CREDIT_COST = 5
 
 
 def tiles_per_vp(grid_size: GridSize) -> int:
-    """Tiles required per 1 VP — scales with grid radius (radius - 1).
+    """Tiles required per 1 VP — constant 3 for all grid sizes."""
+    return 3
 
-    Small (r=4) → 3, Medium (r=5) → 4, Large (r=6) → 5.
+
+def compute_vp_target(grid_size: GridSize, player_count: int = 2, speed: str = "normal") -> int:
+    """Compute the recommended VP target based on grid size.
+
+    Simple fixed targets: Small=10, Medium=15, Large=20.
     """
-    return int(GRID_CONFIG[grid_size]["radius"]) - 1
-
-
-def compute_vp_target(grid_size: GridSize, player_count: int, speed: str = "normal") -> int:
-    """Compute the VP target based on grid size, player count, and game speed."""
-    total_tiles: int = int(GRID_CONFIG[grid_size]["tiles"])
-    tpv = tiles_per_vp(grid_size)
-    divisor = int(tpv * player_count * 0.75)
-    if divisor == 0:
-        divisor = 1
-    base = total_tiles // divisor
-    return max(3, round(base * SPEED_MULTIPLIERS.get(speed, 1.25)))
+    _RECOMMENDED: dict[GridSize, int] = {
+        GridSize.SMALL: 10,
+        GridSize.MEDIUM: 15,
+        GridSize.LARGE: 20,
+    }
+    return _RECOMMENDED.get(grid_size, 10)
 
 
 def compute_upkeep_cost(tile_count: int, grid_size: GridSize = GridSize.SMALL) -> int:
     """Compute dynamic upkeep cost based on number of tiles controlled.
 
-    Formula: max(0, (tiles - FREE_TILES) // tiles_per_vp)
-    First 4 tiles are free; then 1 resource per tiles_per_vp additional tiles.
-    tiles_per_vp scales with grid radius (Small=3, Medium=4, Large=5).
+    Formula: max(0, (tiles - FREE_TILES) // (tiles_per_vp * 2))
+    First 4 tiles are free; then 1 resource per (tiles_per_vp * 2) additional tiles.
+    tiles_per_vp scales with grid radius (Small=3, Medium=4, Large=5),
+    so the divisor is Small=6, Medium=8, Large=10.
     """
-    return max(0, (tile_count - UPKEEP_FREE_TILES) // tiles_per_vp(grid_size))
+    return max(0, (tile_count - UPKEEP_FREE_TILES) // (tiles_per_vp(grid_size) * 2))
 
 
 

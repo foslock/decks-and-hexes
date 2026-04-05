@@ -185,12 +185,14 @@ export interface LobbyConfig {
   speed: string;
   max_players: number;
   test_mode: boolean;
+  vp_target: number | null;
 }
 
 export interface LobbyState {
   code: string;
   host_id: string;
   players: Record<string, LobbyPlayer>;
+  player_order: string[];
   config: LobbyConfig;
   status: string;
   game_id: string | null;

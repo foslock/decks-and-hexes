@@ -478,7 +478,9 @@ export default function ShopOverlay({
           flexShrink: 0,
         }}>
           <span style={{ fontWeight: 'bold', color: '#fff', fontSize: 14 }}>🛒 Shop</span>
-          <span style={{ fontSize: 13, color: '#aaa' }}>· 💰 {playerResources} resources</span>
+          <span style={{ fontSize: 16, fontWeight: 'bold', color: '#fff' }}>
+            · You have <span style={{ color: '#ffcc00' }}>{playerResources}</span> resource{playerResources !== 1 ? 's' : ''}
+          </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{
               display: 'flex',
