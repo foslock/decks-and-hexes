@@ -195,6 +195,12 @@ class TestSubmitPlan:
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
         resp = client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
         state = resp.json()["state"]
+        assert state["current_phase"] == "reveal"
+
+        # Advance through reveal to buy
+        client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
+        resp = client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
+        state = resp.json()["state"]
         assert state["current_phase"] == "buy"
 
 
@@ -211,6 +217,8 @@ class TestBuyAndEndTurn:
         game_id = resp.json()["game_id"]
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
+        client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
         return game_id
 
     def test_end_turn(self, client: TestClient) -> None:
@@ -344,6 +352,8 @@ class TestGameLog:
         # Play through a round
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
+        client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
         client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/end-turn", json={"player_id": "p1"})
 
@@ -352,6 +362,40 @@ class TestGameLog:
         rounds = {e["round"] for e in entries}
         assert 1 in rounds
         assert 2 in rounds
+
+
+class TestAdvanceResolveAPI:
+    def _create_game(self, client: TestClient) -> str:
+        resp = client.post("/api/games", json={
+            "grid_size": "small",
+            "players": [
+                {"id": "p0", "name": "Alice", "archetype": "vanguard"},
+                {"id": "p1", "name": "Bob", "archetype": "swarm"},
+            ],
+            "seed": 42,
+        })
+        return resp.json()["game_id"]
+
+    def test_advance_resolve_endpoint(self, client: TestClient) -> None:
+        game_id = self._create_game(client)
+        # Submit plans to enter REVEAL
+        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
+        resp = client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        assert resp.json()["state"]["current_phase"] == "reveal"
+
+        # First player advances — still REVEAL
+        resp = client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
+        assert resp.status_code == 200
+        assert resp.json()["state"]["current_phase"] == "reveal"
+
+        # Second player advances — now BUY
+        resp = client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
+        assert resp.status_code == 200
+        assert resp.json()["state"]["current_phase"] == "buy"
+
+        # Duplicate call should fail
+        resp = client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
+        assert resp.status_code == 400
 
 
 class TestCardsEndpoint:

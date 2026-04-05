@@ -2,11 +2,11 @@ import { useState } from 'react';
 
 const PAGES = [
   {
-    title: 'Welcome to HexDraft',
+    title: 'Welcome to Card Clash',
     content: (
       <>
         <p style={{ fontSize: 17, lineHeight: 1.7, color: '#ccc' }}>
-          HexDraft is a <strong style={{ color: '#fff' }}>deck-building territory control game</strong> for 2–6 players.
+          Card Clash is a <strong style={{ color: '#fff' }}>deck-building territory control game</strong> for 2–6 players.
         </p>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa', marginTop: 16 }}>
           You start in a corner of a hex grid with a small deck of cards. Each round, you play cards to
@@ -30,7 +30,6 @@ const PAGES = [
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, color: '#bbb' }}>
             <div>🗺️ <strong style={{ color: '#ccc' }}>Territory</strong> — own tiles to earn VP (every 3–5 tiles = 1 VP)</div>
             <div>⭐ <strong style={{ color: '#ffd700' }}>VP Hexes</strong> — special tiles worth bonus VP when connected to your base</div>
-            <div>🎯 <strong style={{ color: '#ccc' }}>Objectives</strong> — mid-game goals worth 2 VP each</div>
             <div>🃏 <strong style={{ color: '#ccc' }}>Cards</strong> — some cards contribute VP directly</div>
           </div>
         </div>
@@ -55,7 +54,7 @@ const PAGES = [
         }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Starting cards</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, color: '#bbb' }}>
-            <div>⬡ <strong style={{ color: '#4a9eff' }}>Explore</strong> — claim an adjacent tile at Power 1</div>
+            <div>⬡ <strong style={{ color: '#4a9eff' }}>Explore</strong> — claim an adjacent, defenseless tile</div>
             <div>💰 <strong style={{ color: '#5dde5d' }}>Gather</strong> — gain 2 resources</div>
             <div>🎴 <strong style={{ color: '#ffaa33' }}>Archetype Starter</strong> — 2 unique cards based on your archetype</div>
           </div>
@@ -65,7 +64,7 @@ const PAGES = [
           stronger cards from the market. New cards go to your discard pile and will appear in future hands.
         </p>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa', marginTop: 12 }}>
-          Building your deck is key — add powerful cards, and thin out weak ones to draw your best cards
+          Building your deck is key — add powerful cards, and trash weak ones to draw your best cards
           more often.
         </p>
       </>
@@ -90,7 +89,7 @@ const PAGES = [
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14, color: '#bbb' }}>
             <div>⬡ <strong style={{ color: '#ccc' }}>Neutral Tiles</strong> — unclaimed, free to take</div>
             <div>⭐ <strong style={{ color: '#ffd700' }}>VP Hexes</strong> — earn bonus VP while connected to your base</div>
-            <div>🚫 <strong style={{ color: '#666' }}>Blocked Terrain</strong> — impassable obstacles (random each game)</div>
+            <div>🚫 <strong style={{ color: '#666' }}>Blocked Terrain</strong> — impassable obstacles</div>
             <div>🏰 <strong style={{ color: '#4a9eff' }}>Base Tiles</strong> — your permanent starting tile, can never be captured</div>
           </div>
         </div>
@@ -135,9 +134,9 @@ const PAGES = [
             padding: '14px 18px',
             background: '#1a1a40',
             borderRadius: 8,
-            border: '1px solid #5dde5d',
+            border: '1px solid #ffaa4a',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#5dde5d', marginBottom: 4 }}>⚙️ Engine Cards</div>
+            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#ffaa4a', marginBottom: 4 }}>⚙️ Engine Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Support cards that generate resources, draw extra cards, grant actions, or
               provide other effects. They don't claim tiles directly but fuel your strategy.
@@ -147,9 +146,9 @@ const PAGES = [
             padding: '14px 18px',
             background: '#1a1a40',
             borderRadius: 8,
-            border: '1px solid #aa88ff',
+            border: '1px solid #4aff6a',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#aa88ff', marginBottom: 4 }}>🛡️ Defense Cards</div>
+            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#4aff6a', marginBottom: 4 }}>🛡️ Defense Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Protect tiles you own by boosting their defense. A defended tile is harder
               for opponents to take.
@@ -159,9 +158,9 @@ const PAGES = [
             padding: '14px 18px',
             background: '#1a1a40',
             borderRadius: 8,
-            border: '1px solid #888',
+            border: '1px solid #aa88cc',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#aaa', marginBottom: 4 }}>📜 Passive Cards</div>
+            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#aa88cc', marginBottom: 4 }}>📜 Passive Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Cards that provide ongoing effects or VP bonuses without being played.
               They take up a hand slot when drawn.
@@ -191,8 +190,7 @@ const PAGES = [
             borderRadius: 8,
             border: '1px solid #e05050',
           }}>
-            <div style={{ fontSize: 17, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>⚔�� Vanguard</div>
-            <div style={{ fontSize: 13, color: '#888', marginBottom: 6 }}>Fast & Strong</div>
+            <div style={{ fontSize: 17, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>⚔️ Vanguard</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               High-power claim cards that hit hard. Excels at taking contested territory
               and overwhelming opponents. Cards are expensive but decisive.
@@ -205,7 +203,6 @@ const PAGES = [
             border: '1px solid #e0c050',
           }}>
             <div style={{ fontSize: 17, fontWeight: 'bold', color: '#e0c050', marginBottom: 4 }}>🐝 Swarm</div>
-            <div style={{ fontSize: 13, color: '#888', marginBottom: 6 }}>Fast & Cheap</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Floods the board with many low-power claims. Cheap cards, lots of card draw,
               and action generation let Swarm play more cards per turn than anyone else.
@@ -218,7 +215,6 @@ const PAGES = [
             border: '1px solid #5090e0',
           }}>
             <div style={{ fontSize: 17, fontWeight: 'bold', color: '#5090e0', marginBottom: 4 }}>🏰 Fortress</div>
-            <div style={{ fontSize: 13, color: '#888', marginBottom: 6 }}>Cheap & Strong</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Slow but sturdy. Strong defense cards make territory hard to take back.
               Generates lots of resources and builds an engine before pushing outward.

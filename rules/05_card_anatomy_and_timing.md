@@ -1,8 +1,8 @@
-# HexDraft – Card Anatomy & Timing Rules
+# Card Clash – Card Anatomy & Timing Rules
 
 ## Card Types
 
-Every card in HexDraft is one of three types:
+Every card in Card Clash is one of three types:
 
 ### Claim
 Asserts power on a target tile. All board interaction — both expanding to neutral tiles and attacking opponent-owned tiles — uses Claim cards. The target tile must be adjacent to a tile the player already owns, unless the card states otherwise.
@@ -78,7 +78,7 @@ These cards must be played in the same round as the additional Claim cards they 
 
 ## Card Draw Clarity
 
-To avoid ambiguity, HexDraft uses explicit timing language on all card draw effects:
+To avoid ambiguity, Card Clash uses explicit timing language on all card draw effects:
 
 | Card Text | Timing | Effect |
 |---|---|---|

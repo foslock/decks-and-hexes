@@ -13,6 +13,7 @@ from app.game_engine.game_state import (
     VP_TARGET,
     GameState,
     Phase,
+    advance_resolve,
     buy_card,
     compute_upkeep_cost,
     create_game,
@@ -291,7 +292,7 @@ class TestSubmitPlan:
         submit_plan(game, "p0")
         assert game.current_phase == Phase.PLAN  # Still waiting for p1
         submit_plan(game, "p1")
-        assert game.current_phase == Phase.BUY  # Reveal + Buy
+        assert game.current_phase == Phase.REVEAL  # Reveal phase, awaiting advance_resolve
 
     def test_cannot_play_after_submit(self, small_2p_game: GameState) -> None:
         game = small_2p_game
@@ -384,6 +385,9 @@ class TestBuyPhase:
         """Helper to advance game to Buy phase."""
         for pid in game.player_order:
             submit_plan(game, pid)
+        assert game.current_phase == Phase.REVEAL
+        for pid in game.player_order:
+            advance_resolve(game, pid)
         assert game.current_phase == Phase.BUY
 
     def test_buy_neutral_card(self, small_2p_game: GameState) -> None:
@@ -487,6 +491,11 @@ class TestEndOfTurn:
         # Plan phase — both submit empty plans
         for pid in game.player_order:
             submit_plan(game, pid)
+        assert game.current_phase == Phase.REVEAL
+
+        # Advance through reveal phase
+        for pid in game.player_order:
+            advance_resolve(game, pid)
         assert game.current_phase == Phase.BUY
 
         # Buy phase — end turn
@@ -620,3 +629,88 @@ class TestGameSerialization:
         d = small_2p_game.to_dict()
         for pid in small_2p_game.player_order:
             assert len(d["players"][pid]["hand"]) > 0
+
+
+class TestAdvanceResolve:
+    def test_advance_resolve_transitions_to_buy(self, small_2p_game: GameState) -> None:
+        """Submit plans -> REVEAL, advance all players -> BUY."""
+        game = small_2p_game
+        for pid in game.player_order:
+            submit_plan(game, pid)
+        assert game.current_phase == Phase.REVEAL
+
+        for pid in game.player_order:
+            advance_resolve(game, pid)
+        assert game.current_phase == Phase.BUY
+
+    def test_advance_resolve_wrong_phase(self, small_2p_game: GameState) -> None:
+        """advance_resolve during PLAN phase should fail."""
+        game = small_2p_game
+        assert game.current_phase == Phase.PLAN
+        ok, msg = advance_resolve(game, "p0")
+        assert not ok
+        assert "reveal" in msg.lower()
+
+    def test_advance_resolve_already_acknowledged(self, small_2p_game: GameState) -> None:
+        """Calling advance_resolve twice for the same player should fail."""
+        game = small_2p_game
+        for pid in game.player_order:
+            submit_plan(game, pid)
+        assert game.current_phase == Phase.REVEAL
+
+        ok1, _ = advance_resolve(game, "p0")
+        assert ok1
+        ok2, msg2 = advance_resolve(game, "p0")
+        assert not ok2
+        assert "already" in msg2.lower()
+
+    def test_advance_resolve_multiplayer_waits_for_all(
+        self, card_registry: dict[str, Card]
+    ) -> None:
+        """In a multiplayer game, advancing one player keeps REVEAL until all advance."""
+        game = create_game(
+            GridSize.SMALL,
+            [
+                {"id": "p0", "name": "Alice", "archetype": "vanguard"},
+                {"id": "p1", "name": "Bob", "archetype": "swarm"},
+            ],
+            card_registry,
+            seed=42,
+        )
+        game.lobby_code = "TEST"
+        execute_start_of_turn(game)
+
+        for pid in game.player_order:
+            submit_plan(game, pid)
+        assert game.current_phase == Phase.REVEAL
+
+        # Only p0 advances — should still be REVEAL
+        advance_resolve(game, "p0")
+        assert game.current_phase == Phase.REVEAL
+
+        # p1 advances — now BUY
+        advance_resolve(game, "p1")
+        assert game.current_phase == Phase.BUY
+
+    def test_advance_resolve_skips_cpu(
+        self, card_registry: dict[str, Card]
+    ) -> None:
+        """CPU players auto-acknowledge; only human needs to advance."""
+        game = create_game(
+            GridSize.SMALL,
+            [
+                {"id": "p0", "name": "Alice", "archetype": "vanguard"},
+                {"id": "cpu0", "name": "CPU Bot", "archetype": "swarm", "is_cpu": True},
+            ],
+            card_registry,
+            seed=42,
+        )
+        execute_start_of_turn(game)
+
+        for pid in game.player_order:
+            submit_plan(game, pid)
+        assert game.current_phase == Phase.REVEAL
+
+        # Only human player needs to advance
+        advance_resolve(game, "p0")
+        assert game.current_phase == Phase.BUY

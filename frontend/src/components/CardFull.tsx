@@ -291,7 +291,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        fontSize: 40,
+        fontSize: 52,
         userSelect: 'none',
         flexShrink: 0,
       }}>

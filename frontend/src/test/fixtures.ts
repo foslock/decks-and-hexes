@@ -58,6 +58,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     planned_action_count: 0,
     planned_actions: [],
     has_submitted_plan: false,
+    has_acknowledged_resolve: false,
     has_ended_turn: false,
     trash: [],
     last_upkeep_paid: 0,

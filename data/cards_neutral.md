@@ -1,4 +1,4 @@
-# HexDraft – Neutral Card Pool
+# Card Clash – Neutral Card Pool
 # Available to all archetypes from a shared market.
 # Each card has a fixed number of copies. When exhausted, the stack is gone for the game.
 # Buying out a neutral card stack is a valid denial strategy.

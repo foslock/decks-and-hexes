@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAnimationOff } from './SettingsContext';
+import { useAnimationOff, useAnimationSpeed } from './SettingsContext';
 import type { GameState } from '../types/game';
 
 interface GameIntroOverlayProps {
@@ -40,6 +40,7 @@ const GRID_SIZE_LABELS: Record<string, string> = {
  */
 export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverlayProps) {
   const animOff = useAnimationOff();
+  const animSpeed = useAnimationSpeed();
   const playerCount = gameState.player_order.length;
 
   // Animation stages: 'vp' → 'players' (one per player) → 'settings' → 'ready' → 'fadeout'
@@ -64,16 +65,16 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       return;
     }
 
+    const s = animSpeed; // 1.0 normal, 0.5 fast
     const timers: ReturnType<typeof setTimeout>[] = [];
-    let t = 100; // initial delay
+    let t = Math.round(100 * s); // initial delay
 
     // VP target slides in
     timers.push(setTimeout(() => setVpVisible(true), t));
-    t += 1000 + 1000; // 1s animation + 1s pause
+    t += Math.round((1000 + 1000) * s); // animation + pause
 
     // Each player row slides in
-    const playerAnimMs = Math.min(500, 300); // faster with more players
-    const perPlayerMs = playerCount > 3 ? 350 : 500;
+    const perPlayerMs = Math.round((playerCount > 3 ? 350 : 500) * s);
     for (let i = 0; i < playerCount; i++) {
       const idx = i;
       timers.push(setTimeout(() => {
@@ -85,17 +86,17 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       }, t));
       t += perPlayerMs;
     }
-    t += 1000; // 1s pause after final player
+    t += Math.round(1000 * s); // pause after final player
 
     // Settings slide in
     timers.push(setTimeout(() => setSettingsVisible(true), t));
-    t += 1000 + 500; // 1s animation + 500ms pause
+    t += Math.round((1000 + 500) * s); // animation + pause
 
     // Ready button appears
     timers.push(setTimeout(() => setReadyVisible(true), t));
 
     return () => timers.forEach(clearTimeout);
-  }, [animOff, playerCount]);
+  }, [animOff, playerCount, animSpeed]);
 
   const handleReady = () => {
     if (animOff) {
@@ -103,14 +104,15 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       return;
     }
     setFadingOut(true);
-    setTimeout(() => onReadyRef.current(), 600);
+    setTimeout(() => onReadyRef.current(), Math.round(600 * animSpeed));
   };
 
+  const slideDur = animOff ? 0 : 0.8 * animSpeed;
   const slideStyle = (visible: boolean, delayMs?: number): React.CSSProperties => ({
     opacity: visible ? 1 : 0,
     transform: visible ? 'translateY(0)' : 'translateY(30px)',
-    transition: animOff ? 'none' : `opacity 0.8s ease, transform 0.8s ease`,
-    transitionDelay: delayMs ? `${delayMs}ms` : undefined,
+    transition: animOff ? 'none' : `opacity ${slideDur}s ease, transform ${slideDur}s ease`,
+    transitionDelay: delayMs ? `${Math.round(delayMs * animSpeed)}ms` : undefined,
   });
 
   const vpTiles = Object.values(gameState.grid.tiles).filter(t => t.is_vp).length;
@@ -128,7 +130,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       alignItems: 'center',
       justifyContent: 'center',
       opacity: fadingOut ? 0 : 1,
-      transition: fadingOut ? 'opacity 0.6s ease' : 'none',
+      transition: fadingOut ? `opacity ${0.6 * animSpeed}s ease` : 'none',
       pointerEvents: fadingOut ? 'none' : 'auto',
     }}>
       {/* VP Target — top area */}
@@ -236,7 +238,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       <div style={{
         opacity: readyVisible ? 1 : 0,
         transform: readyVisible ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.9)',
-        transition: animOff ? 'none' : 'opacity 0.5s ease, transform 0.5s ease',
+        transition: animOff ? 'none' : `opacity ${0.5 * animSpeed}s ease, transform ${0.5 * animSpeed}s ease`,
       }}>
         <button
           onClick={handleReady}

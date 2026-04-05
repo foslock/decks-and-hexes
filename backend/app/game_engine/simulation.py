@@ -21,6 +21,7 @@ from .game_state import (
     execute_upkeep,
     play_card,
     submit_plan,
+    advance_resolve,
     buy_card,
     reroll_market,
     end_buy_phase,
@@ -150,6 +151,11 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
 
             if game.current_phase == Phase.PLAN:
                 _run_plan_phase(game, cpus, tracking, config.verbose)
+            elif game.current_phase == Phase.REVEAL:
+                # Auto-advance all players through resolve (no animations in simulation)
+                for pid in game.player_order:
+                    if not game.players[pid].has_acknowledged_resolve:
+                        advance_resolve(game, pid)
             elif game.current_phase == Phase.BUY:
                 _run_buy_phase(game, cpus, tracking, config.verbose)
             elif game.current_phase == Phase.UPKEEP:

@@ -1,8 +1,8 @@
-# Contributing to HexDraft
+# Contributing to Card Clash
 
 ## Overview
 
-HexDraft is split into two packages:
+Card Clash is split into two packages:
 
 - **`backend/`** -- Python 3.11 FastAPI server (game engine, REST API)
 - **`frontend/`** -- TypeScript React + PixiJS client (game UI)
@@ -220,9 +220,9 @@ Plan phase card plays are private to the acting player. Phase transitions, claim
 
 The `render.yaml` blueprint defines three services:
 
-1. **hexdraft-api** (web service, starter plan) -- FastAPI backend
-2. **hexdraft-frontend** (static site, starter plan) -- Vite build with API rewrites
-3. **hexdraft-db** (Postgres 16, starter plan) -- Database
+1. **card-clash-api** (web service, starter plan) -- FastAPI backend
+2. **card-clash-frontend** (static site, starter plan) -- Vite build with API rewrites
+3. **card-clash-db** (Postgres 16, starter plan) -- Database
 
 To deploy: create a Render Blueprint pointing at the repo. Render provisions everything automatically.
 

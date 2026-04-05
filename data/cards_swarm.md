@@ -1,4 +1,4 @@
-# HexDraft – Swarm Card Pool
+# Card Clash – Swarm Card Pool
 # Archetype: Fast + Cheap
 # Action Slots: 4
 # Identity: Low power, cheap to buy, floods the board with many tiles

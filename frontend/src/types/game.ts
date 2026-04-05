@@ -82,6 +82,7 @@ export interface Player {
   planned_action_count: number;
   planned_actions: PlannedAction[];
   has_submitted_plan: boolean;
+  has_acknowledged_resolve: boolean;
   has_ended_turn: boolean;
   effective_buy_costs?: Record<string, number>;
   trash: Card[];
@@ -128,6 +129,14 @@ export interface PlayerEffect {
   value: number;
 }
 
+export interface NeutralPurchaseRecord {
+  card_id: string;
+  card_name: string;
+  player_id: string;
+  player_name: string;
+  round: number;
+}
+
 export interface GameState {
   id: string;
   grid: {
@@ -147,4 +156,34 @@ export interface GameState {
   resolution_steps?: ResolutionStep[];
   player_effects?: PlayerEffect[];
   test_mode?: boolean;
+  neutral_purchases_last_round?: NeutralPurchaseRecord[];
+  revealed_actions?: Record<string, PlannedAction[]>;
+}
+
+// ── Lobby types ──────────────────────────────────────────
+
+export interface LobbyPlayer {
+  id: string;
+  name: string;
+  archetype: string;
+  is_cpu: boolean;
+  is_host: boolean;
+  is_local: boolean;
+  cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
+}
+
+export interface LobbyConfig {
+  grid_size: string;
+  speed: string;
+  max_players: number;
+  test_mode: boolean;
+}
+
+export interface LobbyState {
+  code: string;
+  host_id: string;
+  players: Record<string, LobbyPlayer>;
+  config: LobbyConfig;
+  status: string;
+  game_id: string | null;
 }

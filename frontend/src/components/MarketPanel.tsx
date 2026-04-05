@@ -9,7 +9,6 @@ interface MarketPanelProps {
   onBuyNeutral: (cardId: string) => void;
   onBuyUpgrade: () => void;
   onReroll: () => void;
-  onCardDetail: (card: Card) => void;
   disabled: boolean;
 }
 
@@ -21,7 +20,6 @@ export default function MarketPanel({
   onBuyNeutral,
   onBuyUpgrade,
   onReroll,
-  onCardDetail,
   disabled,
 }: MarketPanelProps) {
   return (
@@ -56,7 +54,6 @@ export default function MarketPanel({
               remaining={null}
               canAfford={card.buy_cost !== null && playerResources >= card.buy_cost}
               onBuy={() => onBuyArchetype(card.id)}
-              onDetail={() => onCardDetail(card)}
               disabled={disabled}
             />
           ))}
@@ -96,7 +93,6 @@ export default function MarketPanel({
               remaining={stack.remaining}
               canAfford={stack.card.buy_cost !== null && playerResources >= stack.card.buy_cost}
               onBuy={() => onBuyNeutral(stack.card.id)}
-              onDetail={() => onCardDetail(stack.card)}
               disabled={disabled}
             />
           ))}
@@ -111,14 +107,12 @@ function MarketCard({
   remaining,
   canAfford,
   onBuy,
-  onDetail,
   disabled,
 }: {
   card: Card;
   remaining: number | null;
   canAfford: boolean;
   onBuy: () => void;
-  onDetail: () => void;
   disabled: boolean;
 }) {
   return (
@@ -133,11 +127,7 @@ function MarketCard({
         opacity: disabled || !canAfford ? 0.5 : 1,
       }}
     >
-      <div
-        onClick={onDetail}
-        style={{ cursor: 'pointer', marginBottom: 4 }}
-        title="Click to view card details"
-      >
+      <div style={{ marginBottom: 4 }}>
         <div style={{ fontWeight: 'bold', fontSize: 12 }}>{card.name}</div>
         <div style={{ fontSize: 11, color: '#aaa' }}>
           {card.buy_cost !== null ? `💰 ${card.buy_cost}` : 'Free'}

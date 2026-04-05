@@ -1,10 +1,21 @@
-import type { GameState } from '../types/game';
+import type { GameState, LobbyState } from '../types/game';
 
 const BASE = '/api';
 
+// Module-level auth token for multiplayer games
+let _authToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  _authToken = token;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (_authToken) {
+    headers['X-Player-Token'] = _authToken;
+  }
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     ...options,
   });
   if (!res.ok) {
@@ -109,6 +120,16 @@ export async function advanceUpkeep(
   });
 }
 
+export async function advanceResolve(
+  gameId: string,
+  playerId: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/advance-resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
 export async function endTurn(
   gameId: string,
   playerId: string,
@@ -116,6 +137,161 @@ export async function endTurn(
   return request(`/games/${gameId}/end-buy`, {
     method: 'POST',
     body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
+// ── Lobby APIs ───────────────────────────────────────────
+
+export async function createLobby(
+  name: string,
+  archetype: string,
+): Promise<{ code: string; player_id: string; token: string; lobby: LobbyState }> {
+  return request('/lobby/create', {
+    method: 'POST',
+    body: JSON.stringify({ name, archetype }),
+  });
+}
+
+export async function joinLobby(
+  code: string,
+  name: string,
+  archetype: string,
+): Promise<{ player_id: string; token: string; lobby: LobbyState }> {
+  return request(`/lobby/${code}/join`, {
+    method: 'POST',
+    body: JSON.stringify({ name, archetype }),
+  });
+}
+
+export async function getLobby(
+  code: string,
+  playerId: string,
+  token: string,
+): Promise<{ lobby: LobbyState }> {
+  return request(`/lobby/${code}?player_id=${playerId}&token=${token}`);
+}
+
+export async function updateLobbyConfig(
+  code: string,
+  token: string,
+  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean },
+): Promise<{ lobby: LobbyState }> {
+  return request(`/lobby/${code}/config`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ...config, token }),
+  });
+}
+
+export async function updateLobbyPlayer(
+  code: string,
+  playerId: string,
+  token: string,
+  updates: { name?: string; archetype?: string },
+): Promise<{ lobby: LobbyState }> {
+  return request(`/lobby/${code}/player/${playerId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ...updates, token }),
+  });
+}
+
+export async function addLocalPlayer(
+  code: string,
+  token: string,
+  name: string,
+  archetype: string,
+): Promise<{ lobby: LobbyState }> {
+  return request(`/lobby/${code}/local-player`, {
+    method: 'POST',
+    body: JSON.stringify({ name, archetype, token }),
+  });
+}
+
+export async function addCpuToLobby(
+  code: string,
+  token: string,
+  archetype: string,
+  difficulty: string = 'medium',
+): Promise<{ lobby: LobbyState }> {
+  return request(`/lobby/${code}/cpu`, {
+    method: 'POST',
+    body: JSON.stringify({ archetype, difficulty, token }),
+  });
+}
+
+export async function removeLobbyPlayer(
+  code: string,
+  token: string,
+  targetPlayerId: string,
+): Promise<{ lobby: LobbyState }> {
+  return request(`/lobby/${code}/player/${targetPlayerId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function closeLobby(
+  code: string,
+  token: string,
+): Promise<{ ok: boolean }> {
+  return request(`/lobby/${code}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function startLobby(
+  code: string,
+  token: string,
+): Promise<{ game_id: string; state: GameState }> {
+  return request(`/lobby/${code}/start`, {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function leaveGame(
+  gameId: string,
+  playerId: string,
+  token: string,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/leave`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, token }),
+  });
+}
+
+export async function endGame(
+  gameId: string,
+  playerId: string,
+  token: string,
+): Promise<{ message: string }> {
+  return request(`/games/${gameId}/end`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, token }),
+  });
+}
+
+// ── Replay APIs ──────────────────────────────────────────
+
+export async function replayVote(
+  gameId: string,
+  playerId: string,
+  token: string,
+): Promise<{ message: string; votes?: string[]; game_id?: string; state?: GameState }> {
+  return request(`/games/${gameId}/replay-vote`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, token }),
+  });
+}
+
+export async function replayExit(
+  gameId: string,
+  playerId: string,
+  token: string,
+): Promise<{ message: string }> {
+  return request(`/games/${gameId}/replay-exit`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, token }),
   });
 }
 

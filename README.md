@@ -1,4 +1,4 @@
-# HexDraft
+# Card Clash
 
 A 2-6 player simultaneous deck-building territory control game played on a hexagonal grid. Players choose asymmetric archetypes, build decks through markets, claim territory, and race to 20 VP.
 

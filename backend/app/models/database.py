@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/hexdraft",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/card_clash",
 )
 
 # Render.com provides DATABASE_URL with postgres:// prefix, need postgresql+asyncpg://

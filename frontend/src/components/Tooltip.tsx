@@ -1,6 +1,5 @@
-import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useCallback, useEffect, useImperativeHandle, forwardRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useAnimationMode } from './SettingsContext';
 
 interface TooltipProps {
   content: string;
@@ -159,7 +158,19 @@ export function IrreversibleButton({
  * buffer the action confirms at `holdDuration` ms total.
  * When `requireHold` is false, it acts as a normal click button.
  */
-export function HoldToSubmitButton({
+export interface HoldToSubmitHandle {
+  startKeyboardHold: () => void;
+  stopKeyboardHold: () => void;
+}
+
+export const HoldToSubmitButton = forwardRef<HoldToSubmitHandle, Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
+  onConfirm: () => void;
+  requireHold: boolean;
+  holdDuration?: number;
+  animDuration?: number;
+  warning: string;
+  tooltip?: string;
+}>(function HoldToSubmitButton({
   children,
   onConfirm,
   requireHold,
@@ -169,17 +180,7 @@ export function HoldToSubmitButton({
   tooltip,
   style,
   ...buttonProps
-}: Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
-  onConfirm: () => void;
-  requireHold: boolean;
-  holdDuration?: number;
-  /** How long the outline animation takes (must be ≤ holdDuration). */
-  animDuration?: number;
-  warning: string;
-  tooltip?: string;
-}) {
-  const animMode = useAnimationMode();
-  const animated = animMode === 'normal';
+}, ref) {
   // 'idle' → 'holding' (outline animates via CSS) → 'filled' (outline complete, waiting for buffer) → 'idle'
   const [phase, setPhase] = useState<'idle' | 'holding' | 'filled'>('idle');
   const [showWarning, setShowWarning] = useState(false);
@@ -201,28 +202,64 @@ export function HoldToSubmitButton({
     }
   }, []);
 
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const holdStartTimeRef = useRef<number>(0);
+  const isKeyboardHoldRef = useRef(false);
+
   const stopHold = useCallback(() => {
     clearTimers();
     setPhase('idle');
+    isKeyboardHoldRef.current = false;
   }, [clearTimers]);
 
-  const startHold = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+  const beginHold = useCallback((posX?: number, posY?: number) => {
     if (!requireHold) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPosition({ x: rect.left + rect.width / 2, y: rect.top });
+    if (posX !== undefined && posY !== undefined) {
+      setPosition({ x: posX, y: posY });
+    } else if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setPosition({ x: rect.right, y: rect.top });
+    }
     setShowWarning(true);
     clearTimers();
     confirmedRef.current = false;
+    holdStartTimeRef.current = Date.now();
 
-    // Start holding: CSS transition drives the outline from 0→100% over animDuration.
-    // A setTimeout fires onConfirm after the full holdDuration.
     setPhase('holding');
     confirmTimerRef.current = setTimeout(() => {
       confirmedRef.current = true;
       setPhase('idle');
+      isKeyboardHoldRef.current = false;
       onConfirmRef.current();
     }, holdDuration);
   }, [requireHold, holdDuration, clearTimers]);
+
+  const startHold = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!requireHold) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    beginHold(rect.right, rect.top);
+  }, [requireHold, beginHold]);
+
+  useImperativeHandle(ref, () => ({
+    startKeyboardHold: () => {
+      isKeyboardHoldRef.current = true;
+      beginHold();
+    },
+    stopKeyboardHold: () => {
+      if (!isKeyboardHoldRef.current) return;
+      // If held long enough (past animation), confirm immediately instead of cancelling
+      const elapsed = Date.now() - holdStartTimeRef.current;
+      if (elapsed >= animDuration && !confirmedRef.current) {
+        confirmedRef.current = true;
+        clearTimers();
+        setPhase('idle');
+        isKeyboardHoldRef.current = false;
+        onConfirmRef.current();
+      } else {
+        stopHold();
+      }
+    },
+  }), [beginHold, stopHold, animDuration, clearTimers]);
 
   const handleClick = useCallback(() => {
     if (!requireHold) {
@@ -236,7 +273,7 @@ export function HoldToSubmitButton({
 
   const handleEnter = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    setPosition({ x: rect.left + rect.width / 2, y: rect.top });
+    setPosition({ x: rect.right, y: rect.top });
     if (requireHold) {
       setShowWarning(true);
     } else if (tooltip) {
@@ -263,6 +300,7 @@ export function HoldToSubmitButton({
     <>
       <button
         {...buttonProps}
+        ref={buttonRef}
         onClick={handleClick}
         onPointerDown={startHold}
         onPointerUp={stopHold}
@@ -286,7 +324,7 @@ export function HoldToSubmitButton({
             borderRadius: 'inherit',
             pointerEvents: 'none',
             clipPath: outlineRevealed ? 'inset(0 0% 0 0)' : 'inset(0 100% 0 0)',
-            transition: outlineRevealed && animated
+            transition: outlineRevealed
               ? `clip-path ${animDuration}ms linear`
               : 'none',
           }} />
@@ -297,32 +335,33 @@ export function HoldToSubmitButton({
         <div
           style={{
             position: 'fixed',
-            left: position.x,
-            top: position.y - 8,
-            transform: 'translate(-50%, -100%)',
+            right: `calc(100vw - ${position.x}px)`,
+            top: position.y - 6,
+            transform: 'translateY(-100%)',
             background: '#332200',
             border: '1px solid #aa7722',
             borderRadius: 6,
-            padding: '6px 10px',
+            padding: '4px 10px',
             fontSize: 11,
+            lineHeight: 1.3,
             color: '#ffcc66',
-            maxWidth: 240,
+            width: 200,
             zIndex: 20000,
             pointerEvents: 'none',
             boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
             whiteSpace: 'normal',
-            textAlign: 'center',
+            textAlign: 'left',
           }}
         >
           {requireHold ? warning : (tooltip || '')}
           {requireHold && (
-            <div style={{ fontSize: 10, color: '#aa8833', marginTop: 3 }}>
-              Hold button for 1 second to confirm
-            </div>
+            <span style={{ fontSize: 10, color: '#aa8833', marginLeft: 6 }}>
+              — Hold to confirm
+            </span>
           )}
         </div>,
         document.body
       )}
     </>
   );
-}
+});

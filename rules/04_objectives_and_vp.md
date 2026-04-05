@@ -1,4 +1,4 @@
-# HexDraft – Objectives & Victory Points
+# Card Clash – Objectives & Victory Points
 
 ## Victory Points (Derived Scoring)
 

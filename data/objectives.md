@@ -1,4 +1,4 @@
-# HexDraft – Objective Pool
+# Card Clash – Objective Pool
 # Three objectives are revealed at the 1/3 mark of the game.
 # Each completed objective awards 2 VP to the first player to meet its condition.
 # Each objective can only be claimed once per game.

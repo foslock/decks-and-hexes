@@ -32,6 +32,7 @@ from app.game_engine.game_state import (
     Phase,
     PlannedAction,
     Player,
+    advance_resolve,
     buy_card,
     create_game,
     execute_end_of_turn,
@@ -386,6 +387,9 @@ class TestBuyRestriction:
         # Submit plans and advance to buy phase
         submit_plan(game, "p1")
         submit_plan(game, "p0")
+        assert game.current_phase == Phase.REVEAL
+        for pid in game.player_order:
+            advance_resolve(game, pid)
         assert game.current_phase == Phase.BUY
 
         # Try to buy — should be blocked
@@ -832,6 +836,10 @@ class TestFullTurnIntegration:
         play_card(game, "p1", 0)
         submit_plan(game, "p0")
         submit_plan(game, "p1")
+
+        # Advance through reveal
+        for pid in game.player_order:
+            advance_resolve(game, pid)
 
         # Buy phase — should be blocked
         assert game.current_phase == Phase.BUY

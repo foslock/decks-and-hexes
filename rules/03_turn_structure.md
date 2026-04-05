@@ -1,4 +1,4 @@
-# HexDraft – Turn Structure
+# Card Clash – Turn Structure
 
 Each round consists of five phases executed by all players simultaneously where noted.
 

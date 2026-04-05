@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAnimationMode } from './SettingsContext';
 
 interface PhaseBannerProps {
@@ -22,9 +22,9 @@ const PHASE_LABELS: Record<string, string> = {
  * Full-window translucent banner that slides in from left, holds at center,
  * then exits right. Used to announce phase transitions.
  *
- * Normal: full slide animation (~1.8s total).
- * Simplified: quick fade in/out (~0.8s total).
- * Off: not rendered (caller should skip).
+ * Normal: full slide animation (~1.4s total).
+ * Fast: same slide animation at 2x speed (~0.7s total).
+ * Off: instant appear/disappear, no motion.
  */
 export default function PhaseBanner({ phase, subtitle, onMidpoint, onComplete }: PhaseBannerProps) {
   const animMode = useAnimationMode();
@@ -35,10 +35,18 @@ export default function PhaseBanner({ phase, subtitle, onMidpoint, onComplete }:
 
   const label = PHASE_LABELS[phase] || phase;
 
-  const isNormal = animMode === 'normal';
-  const enterMs = isNormal ? 350 : 200;
-  const holdMs = isNormal ? 700 : 300;
-  const exitMs = isNormal ? 350 : 200;
+  // Stable refs for callbacks — prevents effect cleanup from cancelling
+  // pending timeouts when parent re-renders (e.g. from WebSocket updates)
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const onMidpointRef = useRef(onMidpoint);
+  onMidpointRef.current = onMidpoint;
+
+  const isOff = animMode === 'off';
+  const speed = animMode === 'fast' ? 0.5 : 1;
+  const enterMs = isOff ? 0 : Math.round(350 * speed);
+  const holdMs = isOff ? 1400 : Math.round(700 * speed);
+  const exitMs = isOff ? 0 : Math.round(350 * speed);
 
   // mount → enter: trigger the slide-in on the next frame so the browser
   // paints the start position first, then the CSS transition kicks in.
@@ -62,9 +70,9 @@ export default function PhaseBanner({ phase, subtitle, onMidpoint, onComplete }:
   useEffect(() => {
     if (stage === 'hold' && !midpointFiredRef.current) {
       midpointFiredRef.current = true;
-      onMidpoint?.();
+      onMidpointRef.current?.();
     }
-  }, [stage, onMidpoint]);
+  }, [stage]);
 
   // hold → exit
   useEffect(() => {
@@ -76,65 +84,42 @@ export default function PhaseBanner({ phase, subtitle, onMidpoint, onComplete }:
   // exit → complete
   useEffect(() => {
     if (stage !== 'exit') return;
-    const t = setTimeout(() => onComplete(), exitMs);
+    const t = setTimeout(() => onCompleteRef.current(), exitMs);
     return () => clearTimeout(t);
-  }, [stage, exitMs, onComplete]);
+  }, [stage, exitMs]);
 
   // Compute visual properties per stage
   let transform: string;
   let opacity: number;
   let transition: string;
 
-  if (isNormal) {
-    // Slide: left → center → right
+  if (isOff) {
+    // Off: appear/disappear instantly at center, no motion
+    transform = 'translate(-50%, -50%)';
+    opacity = (stage === 'mount' || stage === 'exit') ? 0 : 1;
+    transition = 'none';
+  } else {
+    // Normal / Fast: slide left → center → right (fast uses shorter durations)
     switch (stage) {
       case 'mount':
-        // Starting position: off screen left, no transition
         transform = 'translate(-100%, -50%)';
         opacity = 1;
         transition = 'none';
         break;
       case 'enter':
-        // Animate to center — fast swipe in, sharp deceleration
         transform = 'translate(-50%, -50%)';
         opacity = 1;
         transition = `transform ${enterMs}ms cubic-bezier(0.0, 0.0, 0.15, 1.0)`;
         break;
       case 'hold':
-        // Stay at center, no transition needed
         transform = 'translate(-50%, -50%)';
         opacity = 1;
         transition = 'none';
         break;
       case 'exit':
-        // Animate out to right — slow start, fast swipe out
         transform = 'translate(0%, -50%)';
         opacity = 0;
         transition = `transform ${exitMs}ms cubic-bezier(0.85, 0.0, 1.0, 1.0), opacity ${exitMs}ms cubic-bezier(0.85, 0.0, 1.0, 1.0)`;
-        break;
-    }
-  } else {
-    // Simplified: fade in/out at center
-    switch (stage) {
-      case 'mount':
-        transform = 'translate(-50%, -50%)';
-        opacity = 0;
-        transition = 'none';
-        break;
-      case 'enter':
-        transform = 'translate(-50%, -50%)';
-        opacity = 1;
-        transition = `opacity ${enterMs}ms ease`;
-        break;
-      case 'hold':
-        transform = 'translate(-50%, -50%)';
-        opacity = 1;
-        transition = 'none';
-        break;
-      case 'exit':
-        transform = 'translate(-50%, -50%)';
-        opacity = 0;
-        transition = `opacity ${exitMs}ms ease`;
         break;
     }
   }

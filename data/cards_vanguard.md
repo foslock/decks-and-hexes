@@ -1,4 +1,4 @@
-# HexDraft – Vanguard Card Pool
+# Card Clash – Vanguard Card Pool
 # Archetype: Fast + Strong
 # Action Slots: 4
 # Identity: High power, expensive to buy, aggressive expansion
