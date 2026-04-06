@@ -92,7 +92,7 @@ class EffectType(str, Enum):
     # Power scaled by total tiles owned (Mob Rule, Locust Swarm)
     POWER_PER_TILES_OWNED = "power_per_tiles_owned"
 
-    # Override ignore-defense effects on a tile (Citadel)
+    # Override ignore-defense effects on a tile
     IGNORE_DEFENSE_OVERRIDE = "ignore_defense_override"
 
     # VP-related effects (derived VP system)
@@ -184,7 +184,7 @@ class TurnModifiers:
     immediate_resolve_tiles: set[str] = field(default_factory=set)
     # Cease Fire: pending bonus draws (granted if no opponent tiles claimed)
     cease_fire_bonus: int = 0
-    # Citadel: tiles where ignore-defense is overridden (tile_key set)
+    # Tiles where ignore-defense is overridden (tile_key set)
     ignore_defense_override_tiles: set[str] = field(default_factory=set)
 
     def reset_for_new_turn(self) -> None:

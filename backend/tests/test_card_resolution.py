@@ -179,8 +179,8 @@ class TestNeutralGather:
         assert success
         assert player.resources == initial_resources + 1
 
-    def test_gather_upgraded_gives_2(self, card_registry):
-        """Gather+: gain 2 resources."""
+    def test_gather_upgraded_gives_3(self, card_registry):
+        """Gather+: gain 3 resources."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         gather = _copy_card(card_registry["neutral_gather"], "test_gather_up")
@@ -190,7 +190,7 @@ class TestNeutralGather:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_resources + 2
+        assert player.resources == initial_resources + 3
 
 
 class TestNeutralMercenary:
@@ -1507,29 +1507,21 @@ class TestFortressBatteringRam:
         assert power == 7
 
 
-class TestFortressCitadel:
-    def test_citadel_permanent_defense(self, card_registry):
-        """Citadel: grants permanent +3 defense."""
+class TestFortressTwinCities:
+    def test_twin_cities_permanent_defense(self, card_registry):
+        """Twin Cities: grants permanent +3 defense, trash on use."""
         card = card_registry["fortress_citadel"]
         assert card.buy_cost == 7
+        assert card.trash_on_use is True
+        assert card.defense_target_count == 2
 
-    def test_citadel_ignore_defense_override(self, card_registry):
-        """Citadel: sets ignore_defense_override on tile."""
-        game = _make_2p_game(card_registry, arch0="fortress")
-        player = game.players["p0"]
-        citadel = _copy_card(card_registry["fortress_citadel"], "test_citadel")
-
-        assert game.grid is not None
-        own_tiles = game.grid.get_player_tiles("p0")
-        assert len(own_tiles) > 0
-        target = own_tiles[0]
-        player.hand = [citadel] + player.hand[1:]
-
-        action = PlannedAction(card=citadel, target_q=target.q, target_r=target.r)
-        resolve_immediate_effects(game, player, citadel, action)
-
-        tile_key = f"{target.q},{target.r}"
-        assert tile_key in player.turn_modifiers.ignore_defense_override_tiles
+    def test_twin_cities_upgraded_defense(self, card_registry):
+        """Twin Cities+: grants permanent +5 defense."""
+        card = card_registry["fortress_citadel"]
+        # Check the upgraded value from the effect metadata
+        perm_def_effect = [e for e in card.effects if e.type.value == "permanent_defense"]
+        assert len(perm_def_effect) == 1
+        assert perm_def_effect[0].metadata.get("upgraded_value") == 5
 
 
 class TestFortressWarCouncil:

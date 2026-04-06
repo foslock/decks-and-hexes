@@ -8,15 +8,30 @@ const HEX_SIZE = 32;
 const HEX_WIDTH = HEX_SIZE * 2;
 const HEX_HEIGHT = Math.sqrt(3) * HEX_SIZE;
 
-// Player colors (exported for use in GameScreen chevrons)
+// Player colors — mutable, populated from game state on game start.
+// Fallback defaults used if game state hasn't been loaded yet.
 export const PLAYER_COLORS: Record<string, number> = {
-  player_0: 0x2a6ecc,
-  player_1: 0xcc2a2a,
-  player_2: 0x2aaa4a,
-  player_3: 0xcc7a2a,
-  player_4: 0x7a2acc,
-  player_5: 0xcc2a7a,
+  player_0: 0xe6194b,
+  player_1: 0x3cb44b,
+  player_2: 0xffe119,
+  player_3: 0x4363d8,
+  player_4: 0xf58231,
+  player_5: 0x911eb4,
 };
+
+/** Convert a CSS hex color string (#rrggbb) to a numeric 0xRRGGBB value. */
+export function cssHexToNumber(hex: string): number {
+  return parseInt(hex.replace('#', ''), 16);
+}
+
+/** Update PLAYER_COLORS from the game state's player color assignments. */
+export function syncPlayerColors(players: Record<string, { color?: string }>): void {
+  for (const [pid, p] of Object.entries(players)) {
+    if (p.color) {
+      PLAYER_COLORS[pid] = cssHexToNumber(p.color);
+    }
+  }
+}
 
 const TILE_COLORS = {
   normal: 0x2a2a3e,
@@ -395,7 +410,6 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       let fillColor = TILE_COLORS.normal;
       if (tile.is_blocked) fillColor = TILE_COLORS.blocked;
       else if (tile.owner) fillColor = PLAYER_COLORS[tile.owner] ?? 0x666666;
-      else if (tile.is_vp) fillColor = tile.vp_value >= 2 ? TILE_COLORS.vp_premium : TILE_COLORS.vp;
 
       const isHighlighted = highlights?.has(key) ?? false;
       let fillAlpha = tile.is_blocked ? 0.3 : (tile.owner ? 1.0 : (isHighlighted ? 0.95 : 0.8));
@@ -560,6 +574,94 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       hexContainer.addChild(g);
     }
 
+    // === PASS 2b: Territory border shadows (embossed/3D effect) ===
+    // For each owned tile, darken edges adjacent to tiles with a different owner (or neutral/blocked/absent).
+    // Uses radial insets (toward center) for proper trapezoid strips. At vertices where two consecutive
+    // border edges meet, the inset is extended so the perpendicular shadow depth reaches the full INSET distance.
+    {
+      const INSET = 8; // px inward from edge where shadow begins
+      const MAX_ALPHA = 0.35; // darkest at the edge
+      const STRIPS = 4; // number of gradient bands
+      const STD_FRAC = INSET / HEX_SIZE; // radial inset fraction for single-border vertices
+      const CORNER_FRAC = INSET / (HEX_SIZE * Math.sin(Math.PI / 3)); // extended inset at double-border corners
+
+      for (const [, tile] of Object.entries(tiles)) {
+        if (!tile.owner) continue;
+        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+
+        let tileAlpha = 1.0;
+        if (bp !== undefined && bp < 1) {
+          tileAlpha = buildAlpha(tile.q, tile.r);
+          if (tileAlpha <= 0) continue;
+        }
+
+        // Determine which edges need shadow
+        const edgeNeedsShadow: boolean[] = [];
+        for (const [dq, dr] of DIRECTIONS_WITH_EDGES) {
+          const nKey = `${tile.q + dq},${tile.r + dr}`;
+          const neighbor = tiles[nKey];
+          edgeNeedsShadow.push(!(neighbor && neighbor.owner === tile.owner && !neighbor.is_blocked));
+        }
+
+        if (!edgeNeedsShadow.some(Boolean)) continue;
+
+        const sg = new Graphics();
+
+        for (let dirIdx = 0; dirIdx < 6; dirIdx++) {
+          if (!edgeNeedsShadow[dirIdx]) continue;
+          const [,, vA, vB] = DIRECTIONS_WITH_EDGES[dirIdx];
+          const a = hexVertex(cx, cy, vA, HEX_SIZE);
+          const b = hexVertex(cx, cy, vB, HEX_SIZE);
+
+          const prevIdx = (dirIdx - 1 + 6) % 6;
+          const nextIdx = (dirIdx + 1) % 6;
+
+          // Compute inset target for vertex A:
+          // If the adjacent edge (prevIdx) is also a border → inset radially toward center (extended for corner)
+          // If the adjacent edge is friendly → inset along the friendly shared edge
+          let aTargetX: number, aTargetY: number;
+          if (edgeNeedsShadow[prevIdx]) {
+            aTargetX = a.x + (cx - a.x) * CORNER_FRAC;
+            aTargetY = a.y + (cy - a.y) * CORNER_FRAC;
+          } else {
+            // Move along the friendly edge from vA toward the other vertex of that edge
+            const friendlyEnd = hexVertex(cx, cy, DIRECTIONS_WITH_EDGES[prevIdx][2], HEX_SIZE);
+            aTargetX = a.x + (friendlyEnd.x - a.x) * CORNER_FRAC;
+            aTargetY = a.y + (friendlyEnd.y - a.y) * CORNER_FRAC;
+          }
+
+          // Compute inset target for vertex B (same logic with nextIdx)
+          let bTargetX: number, bTargetY: number;
+          if (edgeNeedsShadow[nextIdx]) {
+            bTargetX = b.x + (cx - b.x) * CORNER_FRAC;
+            bTargetY = b.y + (cy - b.y) * CORNER_FRAC;
+          } else {
+            const friendlyEnd = hexVertex(cx, cy, DIRECTIONS_WITH_EDGES[nextIdx][3], HEX_SIZE);
+            bTargetX = b.x + (friendlyEnd.x - b.x) * CORNER_FRAC;
+            bTargetY = b.y + (friendlyEnd.y - b.y) * CORNER_FRAC;
+          }
+
+          for (let s = 0; s < STRIPS; s++) {
+            const t0 = s / STRIPS;
+            const t1 = (s + 1) / STRIPS;
+            const edgeness = 1 - t0;
+            const alpha = MAX_ALPHA * (edgeness * edgeness) * tileAlpha;
+            // Interpolate between edge vertex and its inset target
+            const a0x = a.x + (aTargetX - a.x) * t0, a0y = a.y + (aTargetY - a.y) * t0;
+            const b0x = b.x + (bTargetX - b.x) * t0, b0y = b.y + (bTargetY - b.y) * t0;
+            const a1x = a.x + (aTargetX - a.x) * t1, a1y = a.y + (aTargetY - a.y) * t1;
+            const b1x = b.x + (bTargetX - b.x) * t1, b1y = b.y + (bTargetY - b.y) * t1;
+
+            sg.fill({ color: 0x000000, alpha });
+            sg.poly([a0x, a0y, b0x, b0y, b1x, b1y, a1x, a1y], true);
+            sg.fill();
+          }
+        }
+
+        hexContainer.addChild(sg);
+      }
+    }
+
     // === PASS 3: Base grid edges — each edge drawn exactly once ===
     // Interior edges between same-owner tiles are skipped; solid fills tile seamlessly.
     if (building) {
@@ -613,6 +715,41 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       }
       edgeG.stroke();
       hexContainer.addChild(edgeG);
+    }
+
+    // === PASS 3b: VP tile edge outlines (dark orange) ===
+    const VP_EDGE_COLOR = 0xcc7a2a;
+    if (building) {
+      for (const [, tile] of Object.entries(tiles)) {
+        if (!tile.is_vp || tile.is_blocked || tile.owner) continue;
+        const tAlpha = buildAlpha(tile.q, tile.r);
+        if (tAlpha <= 0) continue;
+        const g = new Graphics();
+        g.setStrokeStyle({ width: 2, color: VP_EDGE_COLOR, cap: 'round' });
+        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+        for (const [, , vA, vB] of DIRECTIONS_WITH_EDGES) {
+          const a = hexVertex(cx, cy, vA, HEX_SIZE);
+          const b = hexVertex(cx, cy, vB, HEX_SIZE);
+          g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
+        }
+        g.stroke();
+        g.alpha = tAlpha;
+        hexContainer.addChild(g);
+      }
+    } else {
+      const vpEdgeG = new Graphics();
+      vpEdgeG.setStrokeStyle({ width: 2, color: VP_EDGE_COLOR, cap: 'round' });
+      for (const [, tile] of Object.entries(tiles)) {
+        if (!tile.is_vp || tile.is_blocked || tile.owner) continue;
+        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+        for (const [, , vA, vB] of DIRECTIONS_WITH_EDGES) {
+          const a = hexVertex(cx, cy, vA, HEX_SIZE);
+          const b = hexVertex(cx, cy, vB, HEX_SIZE);
+          vpEdgeG.moveTo(a.x, a.y); vpEdgeG.lineTo(b.x, b.y);
+        }
+      }
+      vpEdgeG.stroke();
+      hexContainer.addChild(vpEdgeG);
     }
 
     // === PASS 4: Highlighted tile outlines ===

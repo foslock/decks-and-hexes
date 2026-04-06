@@ -18,6 +18,8 @@ const NO_OP_SOUNDS = {
   defeatJingle: NO_OP,
   resolveTileOccupied: NO_OP,
   resolveContested: NO_OP,
+  upgradeCard: NO_OP,
+  beginJingle: NO_OP,
 };
 
 export type SoundApi = typeof NO_OP_SOUNDS;
@@ -47,6 +49,8 @@ export function useSound(): SoundApi {
       defeatJingle: () => soundEngine.defeatJingle(),
       resolveTileOccupied: () => soundEngine.resolveTileOccupied(),
       resolveContested: () => soundEngine.resolveContested(),
+      upgradeCard: () => soundEngine.upgradeCard(),
+      beginJingle: () => soundEngine.beginJingle(),
     };
   }, [soundEnabled]);
 }

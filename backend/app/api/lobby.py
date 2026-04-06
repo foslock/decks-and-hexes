@@ -34,12 +34,29 @@ _CODE_LENGTH = 4
 _LOBBY_EXPIRY_SECONDS = 900  # 15 minutes of inactivity
 _LOBBY_CHECK_INTERVAL = 60   # Check for expired lobbies every 60s
 
+# 12 distinct player colors (CSS hex strings)
+PLAYER_COLOR_OPTIONS = [
+    "#e6194b",  # Red
+    "#3cb44b",  # Green
+    "#ffe119",  # Yellow
+    "#4363d8",  # Blue
+    "#f58231",  # Orange
+    "#911eb4",  # Purple
+    "#42d4f4",  # Cyan
+    "#f032e6",  # Magenta
+    "#bfef45",  # Lime
+    "#fabed4",  # Pink
+    "#469990",  # Teal
+    "#dcbeff",  # Lavender
+]
+
 
 @dataclass
 class LobbyPlayer:
     id: str
     name: str
     archetype: str
+    color: str = ""  # CSS hex color, assigned on join
     is_cpu: bool = False
     cpu_noise: float = 0.15
     is_host: bool = False
@@ -51,6 +68,7 @@ class LobbyPlayer:
             "id": self.id,
             "name": self.name,
             "archetype": self.archetype,
+            "color": self.color,
             "is_cpu": self.is_cpu,
             "is_host": self.is_host,
             "is_local": self.is_local,
@@ -69,6 +87,7 @@ class LobbyConfig:
     max_players: int = 3
     test_mode: bool = False
     vp_target: Optional[int] = None  # None = use computed default
+    granted_actions: Optional[int] = None  # None = use archetype default (currently 5)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -77,6 +96,7 @@ class LobbyConfig:
             "max_players": self.max_players,
             "test_mode": self.test_mode,
             "vp_target": self.vp_target,
+            "granted_actions": self.granted_actions,
         }
 
 
@@ -176,6 +196,16 @@ def get_visible_player_ids(game_id: str, player_id: str) -> set[str] | None:
     return {player_id}
 
 
+def _next_available_color(lobby: Lobby) -> str:
+    """Return the first color from PLAYER_COLOR_OPTIONS not taken by any player."""
+    used = {p.color for p in lobby.players.values()}
+    for c in PLAYER_COLOR_OPTIONS:
+        if c not in used:
+            return c
+    # Fallback — all 12 taken (shouldn't happen with max 6 players)
+    return PLAYER_COLOR_OPTIONS[0]
+
+
 def _generate_code() -> str:
     """Generate a unique 4-character lobby code."""
     for _ in range(100):
@@ -186,6 +216,20 @@ def _generate_code() -> str:
 
 
 # ── Router ────────────────────────────────────────────────
+
+# Common first names for CPU players (50 names, mix of male/female)
+_CPU_NAMES = [
+    "Alice", "Bob", "Charlie", "Diana", "Ethan",
+    "Fiona", "George", "Hannah", "Isaac", "Julia",
+    "Kevin", "Luna", "Marcus", "Nora", "Oscar",
+    "Penny", "Quinn", "Rosa", "Sam", "Tara",
+    "Uma", "Victor", "Wendy", "Xander", "Yara",
+    "Zach", "Amber", "Blake", "Chloe", "Derek",
+    "Elena", "Felix", "Grace", "Hugo", "Iris",
+    "Jake", "Kira", "Leo", "Maya", "Nate",
+    "Olive", "Paul", "Ruby", "Sean", "Tess",
+    "Uri", "Vera", "Will", "Xena", "Yuki",
+]
 
 lobby_router = APIRouter(prefix="/api/lobby")
 
@@ -220,12 +264,14 @@ class UpdateConfigRequest(BaseModel):
     max_players: Optional[int] = None
     test_mode: Optional[bool] = None
     vp_target: Optional[int] = None
+    granted_actions: Optional[int] = None
 
 
 class UpdatePlayerRequest(BaseModel):
     name: Optional[str] = None
     archetype: Optional[str] = None
     difficulty: Optional[str] = None
+    color: Optional[str] = None
     token: str
 
 
@@ -277,6 +323,7 @@ async def create_lobby(req: CreateLobbyRequest) -> dict[str, Any]:
         id=player_id,
         name=req.name[:12],
         archetype=req.archetype,
+        color=PLAYER_COLOR_OPTIONS[0],
         is_host=True,
         token=token,
     )
@@ -336,6 +383,7 @@ async def join_lobby(code: str, req: JoinLobbyRequest) -> dict[str, Any]:
         id=player_id,
         name=name,
         archetype=req.archetype,
+        color=_next_available_color(lobby),
         token=token,
     )
     lobby.players[player_id] = player
@@ -403,6 +451,11 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
             raise HTTPException(400, "vp_target must be a positive integer")
         lobby.config.vp_target = req.vp_target
 
+    if req.granted_actions is not None:
+        if req.granted_actions < 1 or req.granted_actions > 10:
+            raise HTTPException(400, "granted_actions must be between 1 and 10")
+        lobby.config.granted_actions = req.granted_actions
+
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
 
@@ -439,6 +492,15 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
             raise HTTPException(400, f"Invalid difficulty: {req.difficulty}")
         player.cpu_noise = noise_map[req.difficulty]
 
+    if req.color is not None:
+        if req.color not in PLAYER_COLOR_OPTIONS:
+            raise HTTPException(400, f"Invalid color: {req.color}")
+        # Check that no other player already has this color
+        for pid, p in lobby.players.items():
+            if pid != player_id and p.color == req.color:
+                raise HTTPException(400, "Color already taken by another player")
+        player.color = req.color
+
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
 
@@ -469,11 +531,15 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
         next_idx += 1
     player_id = f"player_{next_idx}"
 
-    archetype_names = {"vanguard": "Vanguard", "swarm": "Swarm", "fortress": "Fortress"}
+    # Pick a random name not already used in this lobby
+    used_names = {p.name for p in lobby.players.values()}
+    available = [n for n in _CPU_NAMES if f"\U0001F916 {n}" not in used_names]
+    cpu_name = random.choice(available) if available else f"CPU {len(lobby.players)}"
     cpu = LobbyPlayer(
         id=player_id,
-        name=f"CPU {archetype_names.get(req.archetype, req.archetype)}",
+        name=f"\U0001F916 {cpu_name}",
         archetype=req.archetype,
+        color=_next_available_color(lobby),
         is_cpu=True,
         cpu_noise=noise,
     )
@@ -511,6 +577,7 @@ async def add_local_player(code: str, req: AddLocalPlayerRequest) -> dict[str, A
         id=player_id,
         name=req.name[:12],
         archetype=req.archetype,
+        color=_next_available_color(lobby),
         is_local=True,
     )
     lobby.players[player_id] = local_player
@@ -622,6 +689,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
             "id": pid,
             "name": p.name,
             "archetype": p.archetype,
+            "color": p.color,
             "is_cpu": p.is_cpu,
             "cpu_noise": p.cpu_noise,
         })
@@ -636,6 +704,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
         test_mode=lobby.config.test_mode,
         speed=lobby.config.speed,
         vp_target=lobby.config.vp_target,
+        granted_actions=lobby.config.granted_actions,
     )
     game.host_id = lobby.host_id
     game.lobby_code = code
@@ -958,6 +1027,7 @@ async def _restart_game(game_id: str, old_game: GameState) -> dict[str, Any]:
             "id": pid,
             "name": p.name,
             "archetype": p.archetype,
+            "color": p.color,
             "is_cpu": p.is_cpu,
             "cpu_noise": p.cpu_noise,
         })
@@ -972,6 +1042,7 @@ async def _restart_game(game_id: str, old_game: GameState) -> dict[str, Any]:
         test_mode=lobby.config.test_mode,
         speed=lobby.config.speed,
         vp_target=lobby.config.vp_target,
+        granted_actions=lobby.config.granted_actions,
     )
     game.host_id = lobby.host_id
     game.lobby_code = lobby.code

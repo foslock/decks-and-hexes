@@ -233,6 +233,40 @@ export function defeatJingle(ctx: Ctx, dest: Dest) {
   lfo.stop(vibratoStart + vibratoDur + 0.01);
 }
 
+/** Short fanfare — game begin */
+export function beginJingle(ctx: Ctx, dest: Dest) {
+  // Quick ascending triad: C5 → E5 → G5, bright and short
+  oscAt(ctx, dest, 'sine', 523.25, 0.09, 0, 0.18, 8);
+  oscAt(ctx, dest, 'triangle', 523.25, 0.04, 0, 0.18, 8);
+  oscAt(ctx, dest, 'sine', 659.25, 0.10, 0.12, 0.18, 8);
+  oscAt(ctx, dest, 'triangle', 659.25, 0.04, 0.12, 0.18, 8);
+  oscAt(ctx, dest, 'sine', 783.99, 0.11, 0.24, 0.3, 8);
+  oscAt(ctx, dest, 'triangle', 783.99, 0.05, 0.24, 0.3, 8);
+  // Final bright octave accent
+  oscAt(ctx, dest, 'sine', 1046.50, 0.08, 0.36, 0.4, 10);
+}
+
+/** Bright ascending sparkle — card upgraded */
+export function upgradeCard(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
+  // Quick ascending tones
+  oscAt(ctx, dest, 'sine', 800, 0.06, 0, 0.12, 5);
+  oscAt(ctx, dest, 'sine', 1200, 0.07, 0.08, 0.12, 5);
+  oscAt(ctx, dest, 'sine', 1600, 0.08, 0.16, 0.2, 5);
+  // High shimmer
+  const now = ctx.currentTime + 0.2;
+  const src = ctx.createBufferSource();
+  src.buffer = noiseBuf;
+  const hp = ctx.createBiquadFilter();
+  hp.type = 'highpass';
+  hp.frequency.value = 6000;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.04, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+  src.connect(hp).connect(g).connect(dest);
+  src.start(now);
+  src.stop(now + 0.31);
+}
+
 /** Low-mid tone with pitch drop — tile claimed */
 export function resolveTileOccupied(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
   osc(ctx, dest, 'sine', 300, 0.08, 0.2, 10, 220);

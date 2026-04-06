@@ -183,7 +183,7 @@ export async function getLobby(
 export async function updateLobbyConfig(
   code: string,
   token: string,
-  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null },
+  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null; granted_actions?: number | null },
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}/config`, {
     method: 'PATCH',
@@ -195,7 +195,7 @@ export async function updateLobbyPlayer(
   code: string,
   playerId: string,
   token: string,
-  updates: { name?: string; archetype?: string; difficulty?: string },
+  updates: { name?: string; archetype?: string; difficulty?: string; color?: string },
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}/player/${playerId}`, {
     method: 'PATCH',

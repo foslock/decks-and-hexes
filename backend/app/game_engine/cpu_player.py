@@ -459,13 +459,13 @@ class CPUPlayer:
             if has_defense_per_adjacent:
                 score += owned_neighbors * 2.5  # more adjacent owned = much stronger defense
 
-            # Citadel (IGNORE_DEFENSE_OVERRIDE): prioritize high-value tiles
+            # IGNORE_DEFENSE_OVERRIDE: prioritize high-value tiles
             if has_ignore_defense_override:
                 score += 3.0  # extra value for the "cannot be ignored" protection
                 if tile.is_vp:
                     score += 4.0  # strongly prefer VP tiles for this premium effect
 
-            # Permanent defense (Entrench, Citadel): prefer tiles you expect to hold long-term
+            # Permanent defense (Entrench, Twin Cities): prefer tiles you expect to hold long-term
             if has_permanent_defense:
                 score += 2.0  # permanent effects are intrinsically valuable
                 # Prefer tiles deeper in own territory (more owned neighbors = safer)
@@ -867,7 +867,7 @@ class CPUPlayer:
             for effect in card.effects:
                 if effect.type == EffectType.PERMANENT_DEFENSE:
                     score += effect.effective_value(card.is_upgraded) * 2.0 * weights.defense
-            # Ignore defense override (Citadel)
+            # Ignore defense override
             for effect in card.effects:
                 if effect.type == EffectType.IGNORE_DEFENSE_OVERRIDE:
                     score += 3.0 * weights.defense

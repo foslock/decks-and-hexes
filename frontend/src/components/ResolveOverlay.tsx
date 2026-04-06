@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ResolutionStep } from '../types/game';
-import type { GridTransform } from './HexGrid';
+import { type GridTransform, PLAYER_COLORS } from './HexGrid';
 import { useAnimationMode, useAnimationSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
 
@@ -13,14 +13,11 @@ function axialToPixel(q: number, r: number): { x: number; y: number } {
   return { x, y };
 }
 
-const PLAYER_COLORS: Record<string, string> = {
-  player_0: '#2a6ecc',
-  player_1: '#cc2a2a',
-  player_2: '#2aaa4a',
-  player_3: '#cc7a2a',
-  player_4: '#7a2acc',
-  player_5: '#cc2a7a',
-};
+/** Convert numeric PLAYER_COLORS entry to CSS hex string. */
+function playerColorStr(playerId: string): string {
+  const n = PLAYER_COLORS[playerId];
+  return n != null ? `#${n.toString(16).padStart(6, '0')}` : '#fff';
+}
 
 interface ResolveOverlayProps {
   steps: ResolutionStep[];
@@ -196,7 +193,7 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
     }}>
       {/* Power numbers */}
       {numbers.map((num, i) => {
-        const color = PLAYER_COLORS[num.playerId] || '#fff';
+        const color = playerColorStr(num.playerId);
         const isWinStage = stage === 'winner_grow';
 
         // Position calculation

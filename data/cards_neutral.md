@@ -28,7 +28,8 @@ cards:
     unoccupied_only: true
     upgraded_unoccupied_only: false
     effect: "Claim: Power 0 on any adjacent unoccupied tile."
-    effect_upgraded: "Claim: Power 1."
+    effect_upgraded: "Claim: Power 1. Draw 1 card."
+    upgraded_draw_cards: 1
     trash_on_use: false
     note: "The baseline scouting action. Claims uncontested neutral tiles; loses any contested claim. Every archetype starts with copies of this card."
 
@@ -42,9 +43,9 @@ cards:
     action_return: 0
     power: 0
     effect: "Gain 1 resources."
-    effect_upgraded: "Gain 2 resources."
+    effect_upgraded: "Gain 3 resources."
     resource_gain: 1
-    upgraded_resource_gain: 2
+    upgraded_resource_gain: 3
     trash_on_use: false
     note: "The baseline economy card. Every archetype starts with copies of this card."
 

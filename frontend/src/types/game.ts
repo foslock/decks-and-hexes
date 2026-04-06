@@ -67,6 +67,7 @@ export interface Player {
   id: string;
   name: string;
   archetype: string;
+  color: string;
   hand: Card[];
   hand_count: number;
   resources: number;
@@ -174,6 +175,7 @@ export interface LobbyPlayer {
   id: string;
   name: string;
   archetype: string;
+  color: string;
   is_cpu: boolean;
   is_host: boolean;
   is_local: boolean;
@@ -186,6 +188,7 @@ export interface LobbyConfig {
   max_players: number;
   test_mode: boolean;
   vp_target: number | null;
+  granted_actions: number | null;
 }
 
 export interface LobbyState {

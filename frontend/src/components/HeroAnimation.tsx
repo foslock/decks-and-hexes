@@ -217,12 +217,13 @@ export default function HeroAnimation() {
         const barW1 = cardW * 0.65;
         const barW2 = cardW * 0.5;
         const barW3 = cardW * 0.55;
+        const barLeft = -cardW * 0.35; // left-aligned margin
 
-        barG.roundRect(-barW1 / 2, barY1, barW1, 8, 4);
+        barG.roundRect(barLeft, barY1, barW1, 8, 4);
         barG.fill({ color: 0x555566, alpha: 0.6 });
-        barG.roundRect(-barW2 / 2, barY2, barW2, 6, 3);
+        barG.roundRect(barLeft, barY2, barW2, 6, 3);
         barG.fill({ color: 0x444455, alpha: 0.5 });
-        barG.roundRect(-barW3 / 2, barY3, barW3, 6, 3);
+        barG.roundRect(barLeft, barY3, barW3, 6, 3);
         barG.fill({ color: 0x444455, alpha: 0.4 });
         c.addChild(barG);
 

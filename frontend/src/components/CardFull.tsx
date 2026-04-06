@@ -82,7 +82,7 @@ const CARD_ART: Record<string, string> = {
   fortress_overwhelming_force: '🔨',
   fortress_consolidate: '♻️',
   fortress_battering_ram: '🪓',
-  fortress_citadel: '🏛️',
+  fortress_citadel: '🏙️',
   fortress_war_council: '📋',
   fortress_iron_discipline: '⚖️',
   fortress_fortified_position: '🏅',

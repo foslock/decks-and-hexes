@@ -124,6 +124,7 @@ class Player:
     id: str
     name: str
     archetype: Archetype
+    color: str = "#666666"  # CSS hex color, assigned from lobby
     deck: Deck = field(default_factory=Deck)
     hand: list[Card] = field(default_factory=list)
     resources: int = STARTING_RESOURCES
@@ -183,6 +184,7 @@ class Player:
             "id": self.id,
             "name": self.name,
             "archetype": self.archetype.value,
+            "color": self.color,
             "hand": [] if hide_hand else [_card_dict(c) for c in self.hand],
             "hand_count": len(self.hand),
             "resources": self.resources,
@@ -280,6 +282,7 @@ class GameState:
     game_log: list[LogEntry] = field(default_factory=list)
     test_mode: bool = False
     vp_target: int = VP_TARGET
+    granted_actions: Optional[int] = None  # None = use archetype default
     host_id: Optional[str] = None
     lobby_code: Optional[str] = None
     # Tracks neutral market purchases: {card_id, card_name, player_id, player_name, round}
@@ -352,6 +355,7 @@ class GameState:
             "neutral_market": self.neutral_market.get_available(),
             "winner": self.winner,
             "vp_target": self.vp_target,
+            "granted_actions": self.granted_actions,
             "log": self.log[-20:],  # last 20 for backward compat
             "test_mode": self.test_mode,
             "current_buyer_index": self.current_buyer_index,
@@ -463,6 +467,7 @@ def create_game(
     test_mode: bool = False,
     vp_target: Optional[int] = None,
     speed: str = "normal",
+    granted_actions: Optional[int] = None,
 ) -> GameState:
     """Create a new game with the given configuration."""
     rng = random.Random(seed)
@@ -477,6 +482,9 @@ def create_game(
     else:
         game.vp_target = compute_vp_target(grid_size, num_players, speed)
 
+    # Set granted actions override (None = use archetype default)
+    game.granted_actions = granted_actions
+
     # Create players and assign starting positions
     for i, config in enumerate(player_configs):
         player_id = config.get("id", str(uuid.uuid4()))
@@ -486,6 +494,7 @@ def create_game(
             id=player_id,
             name=config.get("name", f"Player {i + 1}"),
             archetype=archetype,
+            color=config.get("color", "#666666"),
             is_cpu=bool(config.get("is_cpu", False)),
             cpu_noise=float(config.get("cpu_noise", 0.15)),
         )
@@ -609,7 +618,8 @@ def execute_start_of_turn(game: GameState) -> GameState:
         # Reset action tracking
         player.actions_used = 0
         extra_actions = player.turn_modifiers.extra_actions_next_turn
-        player.actions_available = player.action_slots + extra_actions
+        base_actions = game.granted_actions if game.granted_actions is not None else player.action_slots
+        player.actions_available = base_actions + extra_actions
         if extra_actions > 0:
             game._log(f"{player.name} gains {extra_actions} extra action(s) from last turn",
                       visible_to=[pid], actor=pid)

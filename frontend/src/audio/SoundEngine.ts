@@ -121,6 +121,18 @@ class SoundEngine {
     const ctx = this.ensureContext();
     sounds.resolveContested(ctx, this.dest);
   }
+
+  upgradeCard() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.upgradeCard(ctx, this.dest, this.noise);
+  }
+
+  beginJingle() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.beginJingle(ctx, this.dest);
+  }
 }
 
 export const soundEngine = new SoundEngine();

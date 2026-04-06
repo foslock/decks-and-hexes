@@ -36,6 +36,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     id: 'player_0',
     name: 'Alice',
     archetype: 'vanguard',
+    color: '#e6194b',
     hand: [
       makeCard({ id: 'adv_0', name: 'Advance', card_type: 'claim', power: 1 }),
       makeCard({ id: 'adv_1', name: 'Advance', card_type: 'claim', power: 1 }),

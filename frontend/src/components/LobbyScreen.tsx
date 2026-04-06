@@ -6,7 +6,10 @@ import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
 
-const LOBBY_PLAYER_COLORS = ['#4a9eff', '#ff4a4a', '#4aff6a', '#ffaa4a', '#aa4aff', '#ff4aaa'];
+const PLAYER_COLOR_OPTIONS = [
+  '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4',
+  '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff',
+];
 
 const ARCHETYPES = [
   { id: 'vanguard', name: 'Vanguard', icon: '⚔️', desc: 'Vanguard — Aggressive, high-power claims. Excels at taking territory with brute force and punishing defenders.' },
@@ -15,9 +18,9 @@ const ARCHETYPES = [
 ];
 
 const GRID_SIZES = [
-  { id: 'small', name: 'Small (61)', players: '2-3', tiles: 61, radius: 4 },
-  { id: 'medium', name: 'Medium (91)', players: '3-4', tiles: 91, radius: 5 },
-  { id: 'large', name: 'Large (127)', players: '4-6', tiles: 127, radius: 6 },
+  { id: 'small', name: 'Small (61 tiles)', players: '2-3', tiles: 61, radius: 4 },
+  { id: 'medium', name: 'Medium (91 tiles)', players: '3-4', tiles: 91, radius: 5 },
+  { id: 'large', name: 'Large (127 tiles)', players: '4-6', tiles: 127, radius: 6 },
 ];
 
 const RECOMMENDED_VP: Record<string, number> = { small: 10, medium: 12, large: 14 };
@@ -53,12 +56,40 @@ export default function LobbyScreen({
   const [starting, setStarting] = useState(false);
   const [showCopied, setShowCopied] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [settingsOpen]);
   const gameStartRef = useRef(false);
 
   // For "Add Local Player" inline form
   const [showAddLocal, setShowAddLocal] = useState(false);
   const [localName, setLocalName] = useState('');
   const [localArchetype, setLocalArchetype] = useState('swarm');
+
+  // Color picker state
+  const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
+  const colorPickerRef = useRef<HTMLDivElement>(null);
+
+  // Close color picker on click outside
+  useEffect(() => {
+    if (!colorPickerFor) return;
+    const handleClick = (e: MouseEvent) => {
+      if (colorPickerRef.current && !colorPickerRef.current.contains(e.target as Node)) {
+        setColorPickerFor(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [colorPickerFor]);
 
   // Drag-and-drop reorder state (host only)
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -193,6 +224,21 @@ export default function LobbyScreen({
     }
   }, [lobbyCode, token]);
 
+  const handleChangeColor = useCallback(async (targetId: string, color: string) => {
+    try {
+      setError(null);
+      const isSelf = targetId === playerId;
+      if (isSelf) {
+        await api.updateLobbyPlayer(lobbyCode, targetId, token, { color });
+      } else if (isHost) {
+        await api.updateLobbyPlayer(lobbyCode, targetId, token, { color });
+      }
+      setColorPickerFor(null);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [lobbyCode, playerId, token, isHost]);
+
   const handleReorder = useCallback(async (fromIdx: number, toIdx: number) => {
     // Use player_order from lobby state, falling back to Object.keys
     const currentOrder = lobby.player_order?.length
@@ -239,7 +285,7 @@ export default function LobbyScreen({
   return (
     <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh' }}>
       {/* Settings gear — top right */}
-      <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 100 }}>
+      <div ref={settingsRef} style={{ position: 'fixed', top: 16, right: 16, zIndex: 100 }}>
         <button
           onClick={() => setSettingsOpen(p => !p)}
           style={{
@@ -367,17 +413,17 @@ export default function LobbyScreen({
                   opacity: isHost ? 1 : 0.8,
                 }}
               >
-                <div style={{ fontWeight: 'bold', fontSize: 13 }}>{size.name}</div>
-                <div style={{ fontSize: 11, color: '#aaa' }}>{size.players} players</div>
+                <div style={{ fontWeight: 'bold', fontSize: 16 }}>{size.name}</div>
+                <div style={{ fontSize: 12, color: '#aaa' }}>{size.players} players</div>
               </button>
             ))}
           </div>
-          {/* VP Target */}
+          {/* VP Target + Granted Actions */}
           <div style={{
             fontSize: 13, color: '#aaa', marginBottom: 12,
             padding: '8px 12px', background: '#1e1e36',
             borderRadius: 8, border: '1px solid #333',
-            display: 'flex', alignItems: 'center', gap: 6,
+            display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
           }}>
             <span style={{ color: '#ffcc00', fontWeight: 'bold' }}>🏆</span>
             <span>VP Target:</span>
@@ -418,6 +464,48 @@ export default function LobbyScreen({
                 {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
               </strong>
             )}
+
+            <span style={{ color: '#555', margin: '0 4px' }}>|</span>
+            <span style={{ color: '#6ab4ff', fontWeight: 'bold' }}>⚡</span>
+            <span>Actions:</span>
+            {isHost ? (
+              <>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={lobby.config.granted_actions ?? 5}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val) && val >= 1 && val <= 10) {
+                      handleConfigChange('granted_actions', val);
+                    }
+                  }}
+                  style={{
+                    width: 42, padding: '3px 6px',
+                    background: '#2a2a3e', border: '1px solid #555',
+                    borderRadius: 4, color: '#fff', fontSize: 13,
+                    fontWeight: 'bold', textAlign: 'center',
+                  }}
+                />
+                {lobby.config.granted_actions !== null && lobby.config.granted_actions !== 5 && (
+                  <button
+                    onClick={() => handleConfigChange('granted_actions', 5)}
+                    style={{
+                      fontSize: 11, padding: '2px 8px',
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#888', cursor: 'pointer',
+                    }}
+                  >
+                    Reset (5)
+                  </button>
+                )}
+              </>
+            ) : (
+              <strong style={{ color: '#fff' }}>
+                {lobby.config.granted_actions ?? 5}
+              </strong>
+            )}
           </div>
           {/* Test mode (host only) */}
           {isHost && (
@@ -444,7 +532,9 @@ export default function LobbyScreen({
           {players.map((p, playerIdx) => {
             const isSelf = p.id === playerId;
             const canEditArchetype = isSelf || (isHost && (p.is_cpu || p.is_local));
-            const playerColor = LOBBY_PLAYER_COLORS[playerIdx] || '#888';
+            const canEditColor = isSelf || (isHost && (p.is_cpu || p.is_local));
+            const playerColor = p.color || '#888';
+            const usedColors = new Set(players.map(pl => pl.color));
             const isDragging = dragIdx === playerIdx;
             const isDragOver = dragOverIdx === playerIdx;
             return (
@@ -503,16 +593,70 @@ export default function LobbyScreen({
                     ⠿
                   </span>
                 )}
-                {/* Player color dot */}
-                <span style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  background: playerColor, flexShrink: 0,
-                }} />
-                {/* Player type icon */}
-                <span style={{ fontSize: 16 }}>
-                  {p.is_cpu ? '🤖' : '🧑'}
+                {/* Player color dot — clickable for color picker */}
+                <span style={{ position: 'relative', flexShrink: 0 }}>
+                  <span
+                    onClick={canEditColor ? () => setColorPickerFor(colorPickerFor === p.id ? null : p.id) : undefined}
+                    style={{
+                      display: 'inline-block',
+                      width: 16, height: 16, borderRadius: '50%',
+                      background: playerColor,
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      cursor: canEditColor ? 'pointer' : 'default',
+                      transition: 'transform 0.15s ease',
+                      transform: colorPickerFor === p.id ? 'scale(1.2)' : undefined,
+                    }}
+                    title={canEditColor ? 'Change color' : undefined}
+                  />
+                  {colorPickerFor === p.id && (
+                    <div
+                      ref={colorPickerRef}
+                      style={{
+                        position: 'absolute',
+                        top: 24,
+                        left: -4,
+                        background: '#2a2a3e',
+                        border: '1px solid #555',
+                        borderRadius: 8,
+                        padding: 8,
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(4, 1fr)',
+                        gap: 6,
+                        zIndex: 200,
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                      }}
+                    >
+                      {PLAYER_COLOR_OPTIONS.map((c) => {
+                        const taken = usedColors.has(c) && c !== p.color;
+                        return (
+                          <span
+                            key={c}
+                            onClick={taken ? undefined : () => handleChangeColor(p.id, c)}
+                            style={{
+                              position: 'relative',
+                              width: 24, height: 24, borderRadius: '50%',
+                              background: c,
+                              border: c === p.color ? '2px solid #fff' : '2px solid transparent',
+                              cursor: taken ? 'not-allowed' : 'pointer',
+                              opacity: taken ? 0.25 : 1,
+                              transition: 'transform 0.1s ease',
+                              overflow: 'hidden',
+                            }}
+                            onMouseEnter={(e) => { if (!taken) (e.target as HTMLElement).style.transform = 'scale(1.2)'; }}
+                            onMouseLeave={(e) => { (e.target as HTMLElement).style.transform = ''; }}
+                          >
+                            {taken && (
+                              <svg viewBox="0 0 24 24" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+                                <line x1="5" y1="5" x2="19" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                                <line x1="19" y1="5" x2="5" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                              </svg>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </span>
-
                 {/* Name — editable for self and host-controlled local players */}
                 {(isSelf || (isHost && p.is_local)) && !p.is_cpu ? (
                   <input
@@ -713,23 +857,17 @@ export default function LobbyScreen({
                 </div>
               ))}
 
-              {/* Add CPU buttons */}
-              <div style={{ display: 'flex', gap: 8 }}>
-                {ARCHETYPES.map((arch) => (
-                  <button
-                    key={arch.id}
-                    onClick={() => handleAddCpu(arch.id)}
-                    title={`Add ${arch.name} CPU`}
-                    style={{
-                      flex: 1, padding: '8px', fontSize: 12,
-                      background: '#2a2a3e', border: '1px solid #444',
-                      borderRadius: 6, color: '#aaa', cursor: 'pointer',
-                    }}
-                  >
-                    + CPU {arch.icon}
-                  </button>
-                ))}
-              </div>
+              {/* Add CPU button */}
+              <button
+                onClick={() => handleAddCpu('vanguard')}
+                style={{
+                  width: '100%', padding: '8px', fontSize: 12,
+                  background: '#2a2a3e', border: '1px solid #444',
+                  borderRadius: 6, color: '#aaa', cursor: 'pointer',
+                }}
+              >
+                + CPU Player
+              </button>
             </div>
           )}
         </div>

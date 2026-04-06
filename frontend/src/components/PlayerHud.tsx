@@ -127,14 +127,7 @@ const ARCHETYPE_ICONS: Record<string, string> = {
   fortress: '🏰',
 };
 
-const PLAYER_COLORS: Record<string, string> = {
-  player_0: '#2a6ecc',
-  player_1: '#cc2a2a',
-  player_2: '#2aaa4a',
-  player_3: '#cc7a2a',
-  player_4: '#7a2acc',
-  player_5: '#cc2a7a',
-};
+// Player colors are now dynamic — read from player.color field
 
 function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { label: string; color: string } {
   if (player.has_left) return { label: 'Left', color: '#666' };
@@ -230,11 +223,11 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           width: 12,
           height: 12,
           borderRadius: '50%',
-          background: PLAYER_COLORS[player.id] || '#666',
+          background: player.color || '#666',
           flexShrink: 0,
         }} />
         <ShrinkText
-          text={`${ARCHETYPE_ICONS[player.archetype] || ''} ${player.name}`}
+          text={player.name}
           maxWidth={90}
           style={{ fontSize: 13 }}
         />

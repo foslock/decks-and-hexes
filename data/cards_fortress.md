@@ -264,14 +264,17 @@ cards:
         condition: if_target_has_defense
 
   - id: fortress_citadel
-    name: Citadel
-    name_upgraded: Citadel+
+    name: Twin Cities
+    name_upgraded: Twin Cities+
     type: Defense
     buy_cost: 7
     action_return: 0
     power: 0
-    effect: "One tile you own gains permanent +3 defense. That tile's defense cannot be ignored this round."
-    effect_upgraded: "Permanent +4 defense. Cannot be ignored. Adjacent tiles gain +1 defense this round."
+    defense_target_count: 2
+    upgraded_defense_target_count: 2
+    trash_on_use: true
+    effect: "Two tiles you own each get +3 permanent defense. Trash this card."
+    effect_upgraded: "Two tiles you own each get +5 permanent defense. Trash this card."
     secondary_effect: null
     secondary_timing: null
 
@@ -279,9 +282,7 @@ cards:
       - type: permanent_defense
         value: 3
         timing: immediate
-        metadata: {upgraded_value: 4}
-      - type: ignore_defense_override
-        timing: immediate
+        metadata: {upgraded_value: 5}
 
   - id: fortress_war_council
     name: War Council

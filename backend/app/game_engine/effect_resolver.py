@@ -849,7 +849,7 @@ def _handle_power_per_tiles_owned(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_ignore_defense_override(effect: Effect, ctx: EffectContext) -> None:
-    """Citadel: tile's defense cannot be ignored this round."""
+    """Tile's defense cannot be ignored this round."""
     if ctx.target_tile_key:
         ctx.player.turn_modifiers.ignore_defense_override_tiles.add(ctx.target_tile_key)
         ctx.game._log(

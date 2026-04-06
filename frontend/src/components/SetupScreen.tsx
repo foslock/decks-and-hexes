@@ -75,11 +75,11 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
           style={{
             padding: 16,
             background: '#2a6e3e', border: '1px solid #3a8e5e',
-            borderRadius: 8, color: '#fff', fontSize: 16,
+            borderRadius: 8, color: '#fff', fontSize: 22,
             fontWeight: 'bold', cursor: 'pointer',
           }}
         >
-          Create Lobby
+          Create
         </button>
         {!showJoinDialog ? (
           <button
@@ -88,11 +88,11 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
             style={{
               padding: 16,
               background: '#2a4a6e', border: '1px solid #3a6a8e',
-              borderRadius: 8, color: '#fff', fontSize: 16,
+              borderRadius: 8, color: '#fff', fontSize: 22,
               fontWeight: 'bold', cursor: 'pointer',
             }}
           >
-            Join Lobby
+            Join
           </button>
         ) : (
           <div style={{

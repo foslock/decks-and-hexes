@@ -59,6 +59,8 @@ interface CardHandProps {
   onTrashToggle?: (cardIndex: number) => void;
   /** When true, close any open draw/discard popups */
   closePopups?: boolean;
+  /** Card IDs that are being trashed (for tear animation instead of discard) */
+  trashedCardIds?: Set<string>;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -180,7 +182,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
                 {displayCard.name}{vpBadge}
               </span>
             </div>
-            <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : ''}</span>
+            <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : '—'}</span>
           </div>
           <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
             <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -233,6 +235,7 @@ export function CardViewPopup({
   defaultFull = false,
   note,
   preserveOrder = false,
+  allowUpgradePreview = false,
 }: {
   title: string;
   cards: { label: string; items: Card[] }[];
@@ -241,12 +244,18 @@ export function CardViewPopup({
   note?: string;
   /** When true, display cards in the order given (no sorting). */
   preserveOrder?: boolean;
+  /** When true, holding Shift shows upgraded card previews. */
+  allowUpgradePreview?: boolean;
 }) {
   const [fullView, setFullView] = useState(() => viewModeMemory[title] ?? defaultFull);
   const animMode = useAnimationMode();
-  const shiftHeld = useShiftKey();
+  const rawShiftHeld = useShiftKey();
+  const shiftHeld = (allowUpgradePreview ?? false) && rawShiftHeld;
   const [visible, setVisible] = useState(animMode === 'off');
   const totalCount = cards.reduce((s, g) => s + g.items.length, 0);
+  const trashedGroup = cards.find(g => g.label === 'Trashed');
+  const trashedCount = trashedGroup?.items.length ?? 0;
+  const deckCount = totalCount - trashedCount;
 
   const toggleView = useCallback((full: boolean) => {
     setFullView(full);
@@ -308,7 +317,9 @@ export function CardViewPopup({
           flexShrink: 0,
         }}>
           <span style={{ fontWeight: 'bold', fontSize: 15, color: '#fff' }}>{title}</span>
-          <span style={{ fontSize: 12, color: '#888' }}>({totalCount} cards)</span>
+          <span style={{ fontSize: 12, color: '#888' }}>
+            ({deckCount} card{deckCount !== 1 ? 's' : ''}{trashedCount > 0 && <>, <span style={{ color: '#aa4444' }}>{trashedCount} trashed</span></>})
+          </span>
           {note && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>{note}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
@@ -334,17 +345,24 @@ export function CardViewPopup({
           </div>
         </div>
         <div style={{ overflowY: 'auto', padding: 16 }}>
-          {cards.map((group) => (
+          {cards.map((group) => {
+            const isTrashed = group.label === 'Trashed';
+            return (
             <div key={group.label} style={{ marginBottom: 16 }}>
               {cards.length > 1 && (
-                <div style={{ fontSize: 12, color: '#888', marginBottom: 8, fontWeight: 'bold' }}>
-                  {group.label} ({group.items.length})
+                <div style={{
+                  fontSize: 12,
+                  color: isTrashed ? '#aa4444' : '#888',
+                  marginBottom: 8,
+                  fontWeight: 'bold',
+                }}>
+                  {isTrashed ? '🗑 ' : ''}{group.label} ({group.items.length})
                 </div>
               )}
               {group.items.length === 0 ? (
                 <div style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>Empty</div>
               ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, ...(isTrashed ? { opacity: 0.55 } : {}) }}>
                   {(preserveOrder
                     ? group.items
                     : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name))
@@ -354,7 +372,8 @@ export function CardViewPopup({
                 </div>
               )}
             </div>
-          ))}
+          );
+          })}
         </div>
       </div>
     </div>
@@ -382,6 +401,8 @@ interface DepartingAnim {
   active: boolean;
   /** Whether the card should shrink as it moves (played to tile) */
   shrink: boolean;
+  /** Whether the card is being trashed (tear-apart animation) */
+  trash: boolean;
 }
 
 export default function CardHand({
@@ -406,12 +427,15 @@ export default function CardHand({
   trashMode,
   onTrashToggle,
   closePopups,
+  trashedCardIds,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
   const animMode = useAnimationMode();
   const animSpeed = useAnimationSpeed();
   const sound = useSound();
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
 
   // Local display order — indices into the `cards` prop array
   const [localOrder, setLocalOrder] = useState<number[]>(() => cards.map((_, i) => i));
@@ -455,6 +479,8 @@ export default function CardHand({
 
   // Animation state
   const [enteringAnims, setEnteringAnims] = useState<Map<string, EnteringAnim>>(new Map());
+  const enteringAnimsRef = useRef(enteringAnims);
+  enteringAnimsRef.current = enteringAnims;
   const [departingAnims, setDepartingAnims] = useState<Map<string, DepartingAnim>>(new Map());
   // (simplifiedHidden removed — fast mode uses normal animations at 2x speed)
   const [shuffling, setShuffling] = useState(false);
@@ -575,8 +601,13 @@ export default function CardHand({
           let toX: number;
           let toY: number;
           let shrink = false;
+          const isTrashed = trashedCardIds?.has(card.id) ?? false;
 
-          if (lastPlayedTarget && lastPlayedTarget.cardId === card.id) {
+          if (isTrashed) {
+            // Trashed cards animate upward from current position
+            toX = rect.left;
+            toY = rect.top - 180;
+          } else if (lastPlayedTarget && lastPlayedTarget.cardId === card.id) {
             if (lastPlayedTarget.screenX !== null && lastPlayedTarget.screenY !== null) {
               // Targeting card → animate to tile position
               toX = lastPlayedTarget.screenX - rect.width / 2;
@@ -601,6 +632,7 @@ export default function CardHand({
             width: rect.width, height: rect.height,
             active: false,
             shrink,
+            trash: isTrashed,
           });
         });
 
@@ -633,9 +665,10 @@ export default function CardHand({
 
   // Phase 2: Compute real draw-pile offsets once card elements are in the DOM.
   // This fires when localOrder updates (which flushes after localOrder's useEffect runs,
-  // guaranteeing card divs exist) OR when enteringAnims gains new uncomputed entries.
+  // guaranteeing card divs exist). Uses enteringAnimsRef to avoid re-triggering on anim state changes.
   useLayoutEffect(() => {
-    const uncomputed = [...enteringAnims.entries()].filter(([, a]) => !a.offsetComputed);
+    const current = enteringAnimsRef.current;
+    const uncomputed = [...current.entries()].filter(([, a]) => !a.offsetComputed);
     if (uncomputed.length === 0) return;
 
     const drawRect = drawBtnRef.current?.getBoundingClientRect();
@@ -663,21 +696,31 @@ export default function CardHand({
       return next;
     });
 
+    // Schedule a draw sound for each card, timed to its stagger delay
+    // Skip cards that are deferred (waiting for shuffle) — they'll get sounds when shuffle ends
+    const deferred = deferredDrawnCardsRef.current;
+    const drawTimers: ReturnType<typeof setTimeout>[] = [];
+    for (const [id, anim] of resolved) {
+      if (deferred.has(id)) continue;
+      if (anim.delay <= 0) {
+        soundRef.current.cardDraw();
+      } else {
+        drawTimers.push(setTimeout(() => soundRef.current.cardDraw(), anim.delay));
+      }
+    }
+
     // Next frame: activate transitions — cards slide from draw pile to their slots
     requestAnimationFrame(() => {
-      let anyActivated = false;
       setEnteringAnims(p => {
         const next = new Map(p);
         for (const [id] of resolved) {
           const a = next.get(id);
           if (a?.offsetComputed && !a.active) {
             next.set(id, { ...a, active: true });
-            anyActivated = true;
           }
         }
         return next;
       });
-      if (anyActivated) sound.cardDraw();
     });
 
     // Clean up after all staggered animations finish
@@ -689,7 +732,7 @@ export default function CardHand({
         return next;
       });
     }, maxDelay + 600);
-  }, [localOrder, enteringAnims, sound]);
+  }, [localOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Discard-all animation: triggered by parent when turn ends
   useEffect(() => {
@@ -721,6 +764,7 @@ export default function CardHand({
         width: rect.width, height: rect.height,
         active: false,
         shrink: false,
+        trash: false,
       });
     });
 
@@ -1044,6 +1088,7 @@ export default function CardHand({
             ))}
           </div>
           <button
+            className="hud-btn"
             ref={drawBtnRef}
             onClick={() => setShowDeckPopup(true)}
             title="View cards in draw pile"
@@ -1099,10 +1144,11 @@ export default function CardHand({
             // Compute animation overrides
             const entering = enteringAnims.get(card.id);
             const isDeferredDuringShuffle = shuffling && deferredDrawnCardsRef.current.has(card.id);
-            const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode;
-            let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'none';
             // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
+            const isAnimating = (!!entering && !entering.active) || isDiscardingAll || isDeferredDuringShuffle;
+            const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode && !isAnimating;
+            let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'none';
             let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
@@ -1159,6 +1205,7 @@ export default function CardHand({
                   border: `2px solid ${isTrashSelected ? '#ff4444' : isTrashPlayed ? '#4aff6a' : isSelected ? '#fff' : typeColor}`,
                   borderRadius: 6,
                   color: '#fff',
+                  pointerEvents: isAnimating ? 'none' as const : 'auto' as const,
                   cursor: trashMode ? (isTrashPlayed ? 'default' : 'pointer') : disabled ? 'not-allowed' : 'grab',
                   opacity: cardOpacity,
                   transition: cardTransition,
@@ -1200,7 +1247,7 @@ export default function CardHand({
                       )}
                     </span>
                   </div>
-                  <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : ''}</span>
+                  <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>
                 </div>
                 <div style={{ fontSize: 13, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                   <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -1272,6 +1319,7 @@ export default function CardHand({
 
         {/* Discard icon */}
         <button
+          className="hud-btn"
           ref={discardBtnRef}
           onClick={() => setShowDiscardPopup(true)}
           title="View discard pile"
@@ -1314,7 +1362,7 @@ export default function CardHand({
               <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
                 {dragCard.name}
               </div>
-              <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{dragCard.buy_cost != null ? `${dragCard.buy_cost}💰` : ''}</span>
+              <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{dragCard.buy_cost != null ? `${dragCard.buy_cost}💰` : '—'}</span>
             </div>
           </div>
         );
@@ -1346,8 +1394,66 @@ export default function CardHand({
       {/* Departing card ghosts — animate from last position to target */}
       {departingAnims.size > 0 && createPortal(
         <>
-          {[...departingAnims.values()].map(d => {
+          {[...departingAnims.values()].flatMap(d => {
             const typeColor = TYPE_COLORS[d.card.card_type] || '#555';
+            const durMs = Math.round(500 * animSpeed);
+            const fadeDurMs = Math.round(300 * animSpeed);
+
+            if (d.trash) {
+              // Trash tear animation: two halves split apart, rotate outward, rise up, fade out
+              const dy = d.active ? d.toY - d.startY : 0;
+              const halfW = d.width / 2;
+              const cardContent = (
+                <div style={{
+                  width: d.width, padding: 6, background: '#2a2a3e',
+                  border: `2px solid ${typeColor}`, borderRadius: 6,
+                  color: '#fff', boxSizing: 'border-box',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                    <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                      {d.card.name}
+                    </div>
+                    <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{d.card.buy_cost != null ? `${d.card.buy_cost}💰` : '—'}</span>
+                  </div>
+                </div>
+              );
+              return [
+                // Left half
+                <div key={`${d.card.id}-L`} style={{
+                  position: 'fixed', left: d.startX, top: d.startY,
+                  width: halfW, height: d.height, overflow: 'hidden',
+                  transform: d.active
+                    ? `translate(${-12}px, ${dy}px) rotate(-8deg)`
+                    : 'translate(0, 0) rotate(0deg)',
+                  transformOrigin: 'right center',
+                  opacity: d.active ? 0 : 1,
+                  transition: d.active
+                    ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in ${Math.round(durMs * 0.4)}ms`
+                    : 'none',
+                  pointerEvents: 'none', zIndex: 9990,
+                }}>
+                  <div style={{ width: d.width }}>{cardContent}</div>
+                </div>,
+                // Right half
+                <div key={`${d.card.id}-R`} style={{
+                  position: 'fixed', left: d.startX + halfW, top: d.startY,
+                  width: halfW, height: d.height, overflow: 'hidden',
+                  transform: d.active
+                    ? `translate(${12}px, ${dy}px) rotate(8deg)`
+                    : 'translate(0, 0) rotate(0deg)',
+                  transformOrigin: 'left center',
+                  opacity: d.active ? 0 : 1,
+                  transition: d.active
+                    ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in ${Math.round(durMs * 0.4)}ms`
+                    : 'none',
+                  pointerEvents: 'none', zIndex: 9990,
+                }}>
+                  <div style={{ width: d.width, marginLeft: -halfW }}>{cardContent}</div>
+                </div>,
+              ];
+            }
+
+            // Standard departing animation (play/discard)
             const dx = d.active ? d.toX - d.startX : 0;
             const dy = d.active ? d.toY - d.startY : 0;
             const scale = d.active && d.shrink ? 'scale(0.3)' : 'scale(1)';
@@ -1364,7 +1470,7 @@ export default function CardHand({
                   transformOrigin: 'center center',
                   opacity: d.active ? 0 : 1,
                   transition: d.active
-                    ? `transform ${Math.round(500 * animSpeed)}ms ease-in, opacity ${Math.round(300 * animSpeed)}ms ease-in`
+                    ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in`
                     : 'none',
                   pointerEvents: 'none',
                   zIndex: 9990,
@@ -1380,7 +1486,7 @@ export default function CardHand({
                   <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
                     {d.card.name}
                   </div>
-                  <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{d.card.buy_cost != null ? `${d.card.buy_cost}💰` : ''}</span>
+                  <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{d.card.buy_cost != null ? `${d.card.buy_cost}��` : ''}</span>
                 </div>
               </div>
             );

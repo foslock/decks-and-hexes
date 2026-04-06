@@ -1,7 +1,7 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { GameState, Card, ResolutionStep, PlayerEffect } from '../types/game';
-import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS } from './HexGrid';
+import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardBrowser from './CardBrowser';
@@ -194,6 +194,8 @@ function computePlayerVpPaths(
 }
 
 export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, localPlayerIds: localPlayerIdsProp, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, replayVotes: replayVotesProp, replayDisabled: replayDisabledProp, onReplayVotesUpdate }: GameScreenProps) {
+  // Sync player colors from game state into the shared PLAYER_COLORS map
+  syncPlayerColors(gameState.players);
   const animated = useAnimated();
   const animationMode = useAnimationMode();
   const animationOff = useAnimationOff();
@@ -221,6 +223,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [discardingAll, setDiscardingAll] = useState(false);
   const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
+  const [trashedCardIds, setTrashedCardIds] = useState<Set<string>>(new Set());
   // Test mode state
   const [showTestPanel, setShowTestPanel] = useState(false);
   const [testShuffleAnim, setTestShuffleAnim] = useState(false);
@@ -276,6 +279,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [buyButtonVisible, setBuyButtonVisible] = useState(false);
   const submitPlanRef = useRef<HoldToSubmitHandle>(null);
   const endTurnRef = useRef<HoldToSubmitHandle>(null);
+  // Responsive: stack top-right buttons vertically when screen is narrow
+  const [narrowTop, setNarrowTop] = useState(() => window.innerWidth < 700);
+  useEffect(() => {
+    const check = () => setNarrowTop(window.innerWidth < 700);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+  // Detect mobile browser — disable double-tap shortcuts
+  const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
   const prevPhaseRef = useRef<string>(gameState.current_phase);
   // Track previous tiles for resolve animation (needed for multiplayer WebSocket updates)
   const prevTilesRef = useRef(gameState.grid.tiles);
@@ -424,7 +436,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const displayState = resolveDisplayState ?? gameState;
 
   // Phase change detection → show phase banner or trigger resolve animation
-  useEffect(() => {
+  // useLayoutEffect so resolveDisplayState is set before browser paint (avoids flash of post-resolve tiles)
+  useLayoutEffect(() => {
     const prev = prevPhaseRef.current;
     const oldTiles = prevTilesRef.current;
     if (prev === phase) {
@@ -776,6 +789,23 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [phase, resolving, phaseBanner, interactionBlocked, activePlayerEffects, activePlayerId, gameState.current_buyer_id]);
 
+  // Auto-enter review mode when reconnecting into REVEAL phase (resolve animations already happened)
+  const revealStableRef = useRef(phase === 'reveal');
+  useEffect(() => {
+    if (phase === 'reveal') {
+      if (revealStableRef.current && !resolving && !reviewing && !phaseBanner && !showIntro) {
+        setReviewing(true);
+        setInteractionBlocked(false);
+      }
+      const timer = setTimeout(() => { revealStableRef.current = true; }, 0);
+      return () => clearTimeout(timer);
+    } else {
+      revealStableRef.current = false;
+      // Clear review mode when leaving reveal phase (e.g. WebSocket pushed buy phase)
+      if (reviewing) setReviewing(false);
+    }
+  }, [phase, resolving, reviewing, phaseBanner, showIntro]);
+
   // Compute which tiles are adjacent to the active player's territory
   const adjacentTiles = useMemo(() => {
     const adj = new Set<string>();
@@ -810,6 +840,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (phase !== 'plan' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
+    setTrashedCardIds(new Set());
+
+    // Track which cards are being trashed for tear animation
+    const trashing = new Set<string>();
+    if (card.trash_on_use) trashing.add(card.id);
+    if (trashIndices) {
+      // trashIndices are post-removal indices (after played card popped) — map back to hand
+      for (const ti of trashIndices) {
+        const adjustedIdx = ti >= cardIndex ? ti + 1 : ti;
+        const tc = activePlayer.hand[adjustedIdx];
+        if (tc) trashing.add(tc.id);
+      }
+    }
+    if (trashing.size > 0) setTrashedCardIds(trashing);
 
     // Compute screen position for card animation
     if (q != null && r != null) {
@@ -1240,11 +1284,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     try {
       setError(null);
       const result = await api.upgradeCard(gameState.id, activePlayerId, cardIndex);
+      sound.upgradeCard();
       onStateUpdate(result.state);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState.id, activePlayerId, onStateUpdate]);
+  }, [gameState.id, activePlayerId, onStateUpdate, sound]);
 
   const handleReroll = useCallback(async () => {
     try {
@@ -1513,6 +1558,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setIntroSequence('done');
         setBannerSubtitle(null);
         setBannerLabelOverride('Begin!');
+        sound.beginJingle();
         setPhaseBanner('plan');
         setBannerKey(k => k + 1);
       }, drawDuration);
@@ -1868,13 +1914,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const handleTestTrashCard = useCallback(async (cardIndex: number) => {
     try {
       setError(null);
+      const card = activePlayer?.hand[cardIndex];
+      if (card) setTrashedCardIds(new Set([card.id]));
       const result = await api.testTrashCard(gameState.id, activePlayerId, cardIndex);
       onStateUpdate(result.state);
       setSelectedCardIndex(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState.id, activePlayerId, onStateUpdate]);
+  }, [gameState.id, activePlayerId, onStateUpdate, activePlayer]);
 
   const handleTestDrawCard = useCallback(async () => {
     try {
@@ -2272,9 +2320,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const inPlayCards = useMemo(() => {
     if (phase !== 'plan' && phase !== 'reveal') return [];
     if (!activePlayer?.planned_actions) return [];
-    return activePlayer.planned_actions
-      .filter(a => a.target_q != null)
-      .map(a => a.card);
+    return activePlayer.planned_actions.map(a => a.card);
   }, [activePlayer?.planned_actions, phase]);
 
   // Full deck breakdown for the Deck viewer button
@@ -2289,11 +2335,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     ];
   }, [activePlayer, inPlayCards]);
 
-  const totalDeckCount = useMemo(() => {
-    if (!activePlayer) return 0;
-    return inPlayCards.length + activePlayer.hand.length +
-      (activePlayer.deck_cards?.length ?? 0) + (activePlayer.discard?.length ?? 0);
-  }, [activePlayer, inPlayCards]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a2e', color: '#fff' }}>
@@ -2380,7 +2421,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
-              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || phaseBanner)}
+              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving)}
               reviewPulseTiles={reviewPulseTiles}
               onTileHover={reviewing ? (q, r, sx, sy) => {
                 setReviewHoveredTile(`${q},${r}`);
@@ -2416,6 +2457,55 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               <div style={{ fontSize: 12, color: '#aaa' }}>
                 ★ {gameState.vp_target} VP to win
               </div>
+              {/* Upkeep indicator — inside round info box */}
+              {(phase === 'plan' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (() => {
+                const cantAfford = activePlayer.resources < currentUpkeep;
+                const tooltipText = cantAfford
+                  ? `⚠ You can't afford ${currentUpkeep} 💰 upkeep! Tiles will be lost next round.`
+                  : `Upkeep: ${currentUpkeep} 💰 paid before each Plan phase for ${playerTileCount} tile${playerTileCount !== 1 ? 's' : ''}. If you can't pay, your most distant tiles are lost.`;
+                return (
+                  <div
+                    style={{ marginTop: 4, cursor: 'help', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
+                    onPointerEnter={(e) => {
+                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                      setUpkeepTooltip({ x: rect.left, y: rect.bottom });
+                    }}
+                    onPointerLeave={() => setUpkeepTooltip(null)}
+                  >
+                    <span style={{ fontWeight: 'bold', color: upkeepMightIncrease ? '#ffaa33' : '#fff' }}>
+                      Upkeep: 💰 {currentUpkeep}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#777' }}>
+                      ({upkeepBracketLow}–{upkeepBracketHigh} tiles)
+                    </span>
+                    {upkeepMightIncrease && (
+                      <span style={{ fontSize: 11, color: '#ffaa33', fontWeight: 'bold' }}>⚠</span>
+                    )}
+                    {upkeepTooltip && createPortal(
+                      <div style={{
+                        position: 'fixed',
+                        left: upkeepTooltip.x,
+                        top: upkeepTooltip.y + 8,
+                        background: cantAfford ? '#332200' : '#111122',
+                        border: `1px solid ${cantAfford ? '#aa7722' : '#555'}`,
+                        borderRadius: 6,
+                        padding: '6px 10px',
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                        color: cantAfford ? '#ffcc66' : '#ddd',
+                        maxWidth: 260,
+                        zIndex: 20000,
+                        pointerEvents: 'none',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                        whiteSpace: 'normal',
+                      }}>
+                        {tooltipText}
+                      </div>,
+                      document.body
+                    )}
+                  </div>
+                );
+              })()}
               {gameState.winner && (
                 <div style={{
                   marginTop: 4, padding: '4px 8px', background: '#4a9eff33', borderRadius: 6, fontWeight: 'bold',
@@ -2425,72 +2515,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </div>
               )}
             </div>
-
-            {/* Upkeep indicator */}
-            {(phase === 'plan' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (() => {
-              const cantAfford = activePlayer.resources < currentUpkeep;
-              const tooltipText = cantAfford
-                ? `⚠ You can't afford ${currentUpkeep} 💰 upkeep! Tiles will be lost next round.`
-                : `Upkeep: ${currentUpkeep} 💰 paid before each Plan phase for ${playerTileCount} tile${playerTileCount !== 1 ? 's' : ''}. If you can't pay, your most distant tiles are lost.`;
-              return (
-                <div
-                  style={{ marginBottom: 6 }}
-                  onPointerEnter={(e) => {
-                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                    setUpkeepTooltip({ x: rect.left, y: rect.bottom });
-                  }}
-                  onPointerLeave={() => setUpkeepTooltip(null)}
-                >
-                  <div style={{
-                    fontSize: 12,
-                    color: upkeepMightIncrease ? '#ffaa33' : '#aaa',
-                    display: 'flex', alignItems: 'center', gap: 4,
-                    cursor: 'help',
-                    background: 'rgba(10, 10, 20, 0.85)',
-                    padding: '5px 12px',
-                    borderRadius: 6,
-                    border: '1px solid #333',
-                    backdropFilter: 'blur(4px)',
-                  }}>
-                    <span style={{ fontSize: 11, color: '#777' }}>Upkeep:</span>
-                    <span style={{
-                      fontWeight: upkeepMightIncrease ? 'bold' : 'normal',
-                      color: upkeepMightIncrease ? '#ffaa33' : '#aaa',
-                    }}>
-                      💰 {currentUpkeep}
-                    </span>
-                    <span style={{ fontSize: 11, color: '#777' }}>
-                      ({upkeepBracketLow}–{upkeepBracketHigh} tiles)
-                    </span>
-                    {upkeepMightIncrease && (
-                      <span style={{ fontSize: 11, color: '#ffaa33', fontWeight: 'bold' }}>⚠</span>
-                    )}
-                  </div>
-                  {upkeepTooltip && createPortal(
-                    <div style={{
-                      position: 'fixed',
-                      left: upkeepTooltip.x,
-                      top: upkeepTooltip.y + 8,
-                      background: cantAfford ? '#332200' : '#111122',
-                      border: `1px solid ${cantAfford ? '#aa7722' : '#555'}`,
-                      borderRadius: 6,
-                      padding: '6px 10px',
-                      fontSize: 12,
-                      lineHeight: 1.4,
-                      color: cantAfford ? '#ffcc66' : '#ddd',
-                      maxWidth: 260,
-                      zIndex: 20000,
-                      pointerEvents: 'none',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                      whiteSpace: 'normal',
-                    }}>
-                      {tooltipText}
-                    </div>,
-                    document.body
-                  )}
-                </div>
-              );
-            })()}
 
             {/* Expandable player panel */}
             <div
@@ -2510,7 +2534,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
                     const p = gameState.players[pid];
-                    const pInPlay = phase === 'plan' ? (p.planned_actions?.filter(a => a.target_q != null).length ?? 0) : 0;
+                    const pInPlay = phase === 'plan' ? (p.planned_action_count ?? 0) : 0;
                     const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
                     const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
                     const isCpu = p.is_cpu;
@@ -2555,7 +2579,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 /* Collapsed: active player only */
                 <div style={{ padding: 6 }}>
                   {activePlayer && (() => {
-                    const pInPlay = phase === 'plan' ? (activePlayer.planned_actions?.filter(a => a.target_q != null).length ?? 0) : 0;
+                    const pInPlay = phase === 'plan' ? (activePlayer.planned_action_count ?? 0) : 0;
                     const pTotal = activePlayer.hand_count + activePlayer.deck_size + activePlayer.discard_count + pInPlay;
                     return (
                       <PlayerHud
@@ -2600,8 +2624,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           )}
 
           {/* ── Top-right: action buttons + gear ── */}
-          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', gap: 8, alignItems: 'flex-start', zIndex: 210, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
+          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', flexDirection: narrowTop ? 'column' : 'row', gap: 8, alignItems: narrowTop ? 'flex-end' : 'flex-start', zIndex: 210, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
             <button
+              className="hud-btn"
               onClick={() => { setShowCardBrowser(true); setShowDeckViewer(false); setShowShopOverlay(false); }}
               style={{
                 padding: '6px 14px',
@@ -2614,9 +2639,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 cursor: 'pointer',
               }}
             >
-              📖 <span style={{ textDecoration: 'underline' }}>C</span>ards
+              <span style={{ textDecoration: 'underline' }}>C</span>ards
             </button>
             <button
+              className="hud-btn"
               onClick={() => { setShowDeckViewer(s => !s); setShowShopOverlay(false); }}
               style={{
                 padding: '6px 14px',
@@ -2629,9 +2655,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 cursor: 'pointer',
               }}
             >
-              <span style={{ textDecoration: 'underline' }}>D</span>eck ({totalDeckCount})
+              <span style={{ textDecoration: 'underline' }}>D</span>eck
             </button>
             <button
+              className="hud-btn"
               onClick={() => { setShowShopOverlay(s => !s); setShowDeckViewer(false); }}
               style={{
                 padding: '6px 14px',
@@ -2642,10 +2669,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 fontSize: 13,
                 fontWeight: 'bold',
                 cursor: 'pointer',
+                borderColor: phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? '#4a9eff' : '#555',
                 ...(phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? {
                   animation: animationMode !== 'off' ? 'shopPulse 2s ease-in-out infinite' : undefined,
                   boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
-                  borderColor: '#4a9eff',
                 } : {}),
               }}
             >
@@ -2653,8 +2680,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             </button>
 
             {/* Gear icon dropdown */}
-            <div ref={settingsRef} style={{ position: 'relative' }}>
+            <div ref={settingsRef} style={{ position: 'relative', order: narrowTop ? -1 : undefined }}>
               <button
+                className="hud-btn"
                 onClick={() => setSettingsExpanded(p => !p)}
                 style={{
                   padding: '6px 14px', borderRadius: 6,
@@ -3263,7 +3291,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               selectedIndex={selectedCardIndex}
               onSelect={(idx) => { setSelectedCardIndex(idx); }}
               onDragPlay={handleDragPlay}
-              onDoubleClick={(idx) => {
+              onDoubleClick={isMobile ? undefined : (idx) => {
                 const card = activePlayer?.hand[idx];
                 if (card?.card_type === 'engine') playCardNoTarget(idx);
               }}
@@ -3288,6 +3316,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               } : null}
               onTrashToggle={handleTrashToggle}
               closePopups={showShopOverlay || showCardBrowser || showDeckViewer}
+              trashedCardIds={trashedCardIds.size > 0 ? trashedCardIds : undefined}
             />
           )}
         </div>
@@ -3371,7 +3400,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                         {c.name}
                       </div>
-                      <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
+                      <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : '—'}</span>
                     </div>
                     <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                       <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -3417,7 +3446,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             overflowY: 'auto',
           }}>
             <div style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-              Cards Played
+              Cards Played ({actions.length})
             </div>
             {actions.map((action, i) => {
               const typeColor = REVIEW_TYPE_COLORS[action.card.card_type] || '#555';
@@ -3437,7 +3466,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                       {c.name}
                     </div>
-                    <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : ''}</span>
+                    <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : '—'}</span>
                   </div>
                   <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                     <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -3609,6 +3638,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           0%, 100% { box-shadow: 0 0 8px rgba(74, 158, 255, 0.4); }
           50% { box-shadow: 0 0 20px rgba(74, 158, 255, 0.8), 0 0 40px rgba(74, 158, 255, 0.3); }
         }
+        .hud-btn { transition: box-shadow 0.2s ease; }
+        .hud-btn:hover { box-shadow: 0 0 8px rgba(160, 170, 255, 0.45); }
         @keyframes playerEffectPopup {
           0% { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.8); }
           10% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.05); }
