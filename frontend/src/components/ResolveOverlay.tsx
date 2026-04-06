@@ -253,6 +253,8 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
               fontSize: 18,
               fontWeight: 'bold',
               color,
+              WebkitTextStroke: '2.5px rgba(255,255,255,0.9)',
+              paintOrder: 'stroke fill',
               textShadow: `0 0 8px ${color}, 0 2px 4px rgba(0,0,0,0.8)`,
               zIndex: num.isWinner && isWinStage ? 502 : 501,
               whiteSpace: 'nowrap',
