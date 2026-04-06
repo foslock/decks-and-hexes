@@ -131,6 +131,48 @@ function drawHexagon(g: Graphics, x: number, y: number, size: number) {
   g.poly(points, true);
 }
 
+/**
+ * Clip a ray from hex center (cx, cy) toward (tx, ty) to the hex boundary.
+ * Returns the point on the hex edge where the ray exits the hexagon.
+ */
+function clipToHexEdge(cx: number, cy: number, tx: number, ty: number, size: number): { x: number; y: number } {
+  const dx = tx - cx;
+  const dy = ty - cy;
+  if (dx === 0 && dy === 0) return { x: cx, y: cy };
+
+  // Test intersection with each of the 6 hex edges
+  let bestT = Infinity;
+  for (let i = 0; i < 6; i++) {
+    const a0 = (Math.PI / 180) * (60 * i);
+    const a1 = (Math.PI / 180) * (60 * ((i + 1) % 6));
+    const ex0 = cx + size * Math.cos(a0);
+    const ey0 = cy + size * Math.sin(a0);
+    const ex1 = cx + size * Math.cos(a1);
+    const ey1 = cy + size * Math.sin(a1);
+
+    // Ray: P = (cx, cy) + t * (dx, dy), t > 0
+    // Edge: Q = (ex0, ey0) + s * (ex1 - ex0, ey1 - ey0), 0 <= s <= 1
+    const edx = ex1 - ex0;
+    const edy = ey1 - ey0;
+    const denom = dx * edy - dy * edx;
+    if (Math.abs(denom) < 1e-10) continue;
+    const t = ((ex0 - cx) * edy - (ey0 - cy) * edx) / denom;
+    const s = ((ex0 - cx) * dy - (ey0 - cy) * dx) / denom;
+    if (t > 0 && s >= -0.001 && s <= 1.001 && t < bestT) {
+      bestT = t;
+    }
+  }
+
+  if (bestT === Infinity) return { x: cx, y: cy };
+  // Extend 5px past the edge into the hex (back toward center)
+  const edgeX = cx + dx * bestT;
+  const edgeY = cy + dy * bestT;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return { x: edgeX, y: edgeY };
+  const inset = 5;
+  return { x: edgeX - (dx / len) * inset, y: edgeY - (dy / len) * inset };
+}
+
 function hexVertex(cx: number, cy: number, index: number, size: number): { x: number; y: number } {
   const angle = (Math.PI / 180) * (60 * index);
   return {
@@ -163,14 +205,10 @@ const ARCHETYPE_LABELS: Record<string, string> = {
   fortress: 'Fortress',
 };
 
-const TYPE_COLORS: Record<string, string> = {
-  claim: '#4a9eff',
-  defense: '#4aff6a',
-  engine: '#ffaa4a',
-};
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
 function PlannedCardTooltip({ card, x, y }: { card: Card; x: number; y: number }) {
-  const typeColor = TYPE_COLORS[card.card_type] || '#888';
+  const typeColor = CARD_TYPE_COLORS[card.card_type] || '#888';
   const parts: string[] = [];
   if (card.power > 0) parts.push(`Power ${card.power}`);
   if (card.resource_gain > 0) parts.push(`+${card.resource_gain} Res`);
@@ -251,6 +289,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const connectedVpRef = useRef(connectedVpTiles);
   const hexContainerRef = useRef<Container | null>(null);
   const vpPathGraphicsRef = useRef<Graphics | null>(null);
+  const vpInsertIndexRef = useRef<number>(0);
   const hoveredTileRef = useRef<string | null>(null);
   const hoverEdgeGraphicsRef = useRef<Graphics | null>(null);
   const previewLabelRef = useRef<Text | null>(null);
@@ -652,7 +691,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             const a1x = a.x + (aTargetX - a.x) * t1, a1y = a.y + (aTargetY - a.y) * t1;
             const b1x = b.x + (bTargetX - b.x) * t1, b1y = b.y + (bTargetY - b.y) * t1;
 
-            sg.fill({ color: 0x000000, alpha });
+            sg.fill({ color: 0x555577, alpha });
             sg.poly([a0x, a0y, b0x, b0y, b1x, b1y, a1x, a1y], true);
             sg.fill();
           }
@@ -994,6 +1033,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       hexContainer.addChild(surgeG);
     }
 
+    // Record child index before PASS 8 — VP path layer will be inserted here
+    vpInsertIndexRef.current = hexContainer.children.length;
+
     // === PASS 8: Text labels — rendered last so they are always on top ===
     tileLabelRef.current.clear();
     hiddenLabelKeyRef.current = null;
@@ -1033,7 +1075,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         castle.anchor.set(0.5);
-        castle.position.set(x, y - 11);
+        castle.position.set(x + 1, y - 11);
         castle.alpha = 0.8 * labelAlpha;
         hexContainer.addChild(castle);
 
@@ -1116,7 +1158,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         });
         def.anchor.set(0.5);
         // VP tiles: below the star. Non-VP tiles: vertically centered.
-        def.position.set(x, tile.is_vp ? y + 8 : y);
+        def.position.set(x, tile.is_vp ? y + 12 : y);
         def.alpha = labelAlpha;
         hexContainer.addChild(def);
         tileLabelRef.current.set(key, def);
@@ -1152,10 +1194,11 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
 
       renderTiles();
 
-      // Create VP path graphics layer (managed outside renderTiles)
+      // Create VP path graphics layer — inserted under tile icons/text but above hex fills
       const vpPathG = new Graphics();
       vpPathGraphicsRef.current = vpPathG;
-      hexContainer.addChild(vpPathG);
+      const idx = Math.min(vpInsertIndexRef.current, hexContainer.children.length);
+      hexContainer.addChildAt(vpPathG, idx);
 
       // Pixi ticker for smooth VP path pulse animation
       const vpTickerFn = () => {
@@ -1180,18 +1223,24 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           // Convert hex coords to pixel positions
           const pts = path.points.map(([q, r]) => axialToPixel(q, r));
 
+          // Clip first and last points to hex edges (stop at edge, not center)
+          const first = pts[0];
+          const last = pts[pts.length - 1];
+          const clippedFirst = clipToHexEdge(first.x, first.y, pts[1].x, pts[1].y, HEX_SIZE);
+          const clippedLast = clipToHexEdge(last.x, last.y, pts[pts.length - 2].x, pts[pts.length - 2].y, HEX_SIZE);
+
           g.setStrokeStyle({ width: pulseWidth, color: lightColor, alpha: pulseAlpha, cap: 'round', join: 'round' });
-          g.moveTo(pts[0].x, pts[0].y);
+          g.moveTo(clippedFirst.x, clippedFirst.y);
 
           if (pts.length === 2) {
-            // Simple straight line
-            g.lineTo(pts[1].x, pts[1].y);
+            // Simple straight line — both ends clipped
+            g.lineTo(clippedLast.x, clippedLast.y);
           } else {
             // Smooth bezier curve with rounded corners at each intermediate point
             for (let i = 1; i < pts.length - 1; i++) {
-              const prev = pts[i - 1];
+              const prev = i === 1 ? clippedFirst : pts[i - 1];
               const curr = pts[i];
-              const next = pts[i + 1];
+              const next = i === pts.length - 2 ? clippedLast : pts[i + 1];
               const bmX = (prev.x + curr.x) / 2;
               const bmY = (prev.y + curr.y) / 2;
               const amX = (curr.x + next.x) / 2;
@@ -1202,7 +1251,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
               }
               g.quadraticCurveTo(curr.x, curr.y, amX, amY);
             }
-            g.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+            g.lineTo(clippedLast.x, clippedLast.y);
           }
           g.stroke();
         }
@@ -1227,11 +1276,13 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   // Re-render tiles when data changes
   useEffect(() => {
     renderTiles();
-    // Re-add graphics layers removed by renderTiles → removeChildren
+    // Re-add VP path layer under tile icons/text (at the index saved before PASS 8)
     const vpG = vpPathGraphicsRef.current;
     if (vpG && hexContainerRef.current) {
-      hexContainerRef.current.addChild(vpG);
+      const idx = Math.min(vpInsertIndexRef.current, hexContainerRef.current.children.length);
+      hexContainerRef.current.addChildAt(vpG, idx);
     }
+    // Re-add review pulse layer on top
     const pulseG = reviewPulseGraphicsRef.current;
     if (pulseG && hexContainerRef.current) {
       hexContainerRef.current.addChild(pulseG);

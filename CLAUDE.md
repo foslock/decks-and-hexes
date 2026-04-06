@@ -67,7 +67,7 @@ Bump frontend version when frontend files change, backend version when backend f
 ### Claiming Tiles
 - All board interaction uses unified Claim cards — neutral tiles have implicit defense 0
 - Claims must target tiles adjacent to one the player already owns, unless card says otherwise
-- One Claim per tile per round — except stacking exception cards (Coordinated Push, Dog Pile, Overwhelming Force)
+- One Claim per tile per round — except stacking exception cards (Coordinated Push, Dog Pile, Juggernaut)
 - Ties go to current owner (defender wins)
 - Blocked terrain cannot be claimed without Pathfinder passive
 

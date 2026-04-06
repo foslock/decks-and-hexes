@@ -183,7 +183,7 @@ export async function getLobby(
 export async function updateLobbyConfig(
   code: string,
   token: string,
-  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null; granted_actions?: number | null },
+  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null; granted_actions?: number | null; card_pack?: string; map_seed?: string },
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}/config`, {
     method: 'PATCH',
@@ -291,25 +291,14 @@ export async function endGame(
   });
 }
 
-// ── Replay APIs ──────────────────────────────────────────
+// ── Return to Lobby API ──────────────────────────────────
 
-export async function replayVote(
+export async function returnToLobby(
   gameId: string,
   playerId: string,
   token: string,
-): Promise<{ message: string; votes?: string[]; game_id?: string; state?: GameState }> {
-  return request(`/games/${gameId}/replay-vote`, {
-    method: 'POST',
-    body: JSON.stringify({ player_id: playerId, token }),
-  });
-}
-
-export async function replayExit(
-  gameId: string,
-  playerId: string,
-  token: string,
-): Promise<{ message: string }> {
-  return request(`/games/${gameId}/replay-exit`, {
+): Promise<{ message: string; lobby: LobbyState }> {
+  return request(`/games/${gameId}/return-to-lobby`, {
     method: 'POST',
     body: JSON.stringify({ player_id: playerId, token }),
   });

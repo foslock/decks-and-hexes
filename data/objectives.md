@@ -151,7 +151,7 @@ objectives:
     vp_reward: 2
     condition: "Cause opponents to draw a combined total of 5 fewer cards through card effects across any number of rounds."
     verification: "Track cumulative hand reduction effects applied to opponents. Each -1 card draw applied counts as 1 toward the total."
-    notes: "Rewards disruptive defensive play. War of Attrition card and Sabotage neutral card are the primary contributors."
+    notes: "Rewards disruptive defensive play. Attrition card and Sabotage neutral card are the primary contributors."
 
   - id: obj_the_long_game
     name: The Long Game

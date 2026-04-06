@@ -4,11 +4,12 @@ import { useSettings, type AnimationMode } from './SettingsContext';
 interface SettingsPanelProps {
   isMultiplayer?: boolean;
   isHost?: boolean;
+  mapSeed?: string;
   onLeaveGame?: () => void;
   onEndGame?: () => void;
 }
 
-export default function SettingsPanel({ isMultiplayer, isHost, onLeaveGame, onEndGame }: SettingsPanelProps) {
+export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, onLeaveGame, onEndGame }: SettingsPanelProps) {
   const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume } = useSettings();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -89,6 +90,29 @@ export default function SettingsPanel({ isMultiplayer, isHost, onLeaveGame, onEn
           )}
         </div>
 
+        {/* Map seed (read-only) */}
+        {mapSeed && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, borderTop: '1px solid #333', paddingTop: 6 }}>
+            <span style={{ fontSize: 12, color: '#aaa' }}>Map Seed:</span>
+            <span
+              style={{
+                fontSize: 12,
+                color: '#fff',
+                fontFamily: 'monospace',
+                letterSpacing: 1,
+                background: '#2a2a3e',
+                padding: '2px 8px',
+                borderRadius: 4,
+                cursor: 'pointer',
+                userSelect: 'all',
+              }}
+              title="Click to copy"
+              onClick={() => navigator.clipboard.writeText(mapSeed)}
+            >
+              {mapSeed}
+            </span>
+          </div>
+        )}
         {/* Multiplayer game controls */}
         {isMultiplayer && (
           <div style={{ display: 'flex', gap: 6, marginTop: 4, borderTop: '1px solid #333', paddingTop: 6 }}>

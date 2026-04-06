@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
 const PAGES = [
   {
@@ -10,7 +11,7 @@ const PAGES = [
         </p>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa', marginTop: 16 }}>
           You start in a corner of a hex grid with a small deck of cards. Each round, you play cards to
-          <strong style={{ color: '#4a9eff' }}> claim tiles</strong>,
+          <strong style={{ color: CARD_TYPE_COLORS.claim }}> claim tiles</strong>,
           <strong style={{ color: '#5dde5d' }}> gather resources</strong>, and
           <strong style={{ color: '#ffaa33' }}> buy new cards</strong> to
           strengthen your deck.
@@ -54,7 +55,7 @@ const PAGES = [
         }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Starting cards</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, color: '#bbb' }}>
-            <div>⚔️ <strong style={{ color: '#4a9eff' }}>Explore</strong> — claim an adjacent, defenseless tile</div>
+            <div>⚔️ <strong style={{ color: CARD_TYPE_COLORS.claim }}>Explore</strong> — claim an adjacent, defenseless tile</div>
             <div>💰 <strong style={{ color: '#5dde5d' }}>Gather</strong> — gain 2 resources</div>
             <div>🎴 <strong style={{ color: '#ffaa33' }}>Archetype Starter</strong> — 2 unique cards based on your archetype</div>
           </div>
@@ -110,7 +111,7 @@ const PAGES = [
       <>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa' }}>
           Every card costs <strong style={{ color: '#fff' }}>1 action</strong> to play. You start each
-          round with 3 actions, though some cards grant extra actions when played.
+          round with a set number of actions, though some cards grant extra actions when played.
         </p>
         <div style={{
           marginTop: 20,
@@ -122,9 +123,9 @@ const PAGES = [
             padding: '14px 18px',
             background: '#1a1a40',
             borderRadius: 8,
-            border: '1px solid #4a9eff',
+            border: `1px solid ${CARD_TYPE_COLORS.claim}`,
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#4a9eff', marginBottom: 4 }}>⚔️ Claim Cards</div>
+            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.claim, marginBottom: 4 }}>⚔️ Claim Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Target a tile on the board to claim it. Each has a Power value — highest power wins
               the tile. This is how you expand your territory and contest opponents.
@@ -134,9 +135,9 @@ const PAGES = [
             padding: '14px 18px',
             background: '#1a1a40',
             borderRadius: 8,
-            border: '1px solid #ffaa4a',
+            border: `1px solid ${CARD_TYPE_COLORS.engine}`,
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#ffaa4a', marginBottom: 4 }}>⚙️ Engine Cards</div>
+            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.engine, marginBottom: 4 }}>⚙️ Engine Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Support cards that generate resources, draw extra cards, grant actions, or
               provide other effects. They don't claim tiles directly but fuel your strategy.
@@ -146,9 +147,9 @@ const PAGES = [
             padding: '14px 18px',
             background: '#1a1a40',
             borderRadius: 8,
-            border: '1px solid #4aff6a',
+            border: `1px solid ${CARD_TYPE_COLORS.defense}`,
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#4aff6a', marginBottom: 4 }}>🛡️ Defense Cards</div>
+            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.defense, marginBottom: 4 }}>🛡️ Defense Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Protect tiles you own by boosting their defense. A defended tile is harder
               for opponents to take.
@@ -158,9 +159,9 @@ const PAGES = [
             padding: '14px 18px',
             background: '#1a1a40',
             borderRadius: 8,
-            border: '1px solid #aa88cc',
+            border: `1px solid ${CARD_TYPE_COLORS.passive}`,
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: '#aa88cc', marginBottom: 4 }}>📜 Passive Cards</div>
+            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.passive, marginBottom: 4 }}>📜 Passive Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Cards that provide ongoing effects or VP bonuses without being played.
               They take up a hand slot when drawn.
@@ -247,7 +248,7 @@ const PAGES = [
             <div style={{ fontSize: 14, fontWeight: 'bold', color: '#4a9eff', marginBottom: 4 }}>2. Plan</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
               Draw your hand and play cards face-down onto the board. Claim cards target tiles,
-              defense cards protect tiles, and engine cards trigger immediately. You have 3 actions
+              defense cards protect tiles, and engine cards trigger immediately. You start each round with a set number of actions
               to spend (some cards grant more). Press <strong style={{ color: '#fff' }}>Submit</strong> when done.
             </div>
           </div>

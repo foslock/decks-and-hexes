@@ -5,13 +5,7 @@ import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
 import { useShiftKey } from '../hooks/useShiftKey';
-
-const TYPE_COLORS: Record<string, string> = {
-  claim: '#4a9eff',
-  defense: '#4aff6a',
-  engine: '#ffaa4a',
-  passive: '#aa88cc',
-};
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -66,7 +60,7 @@ let browserSortMemory: SortMode = 'cost';
 
 function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolean }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
-  const color = TYPE_COLORS[displayCard.card_type] || '#555';
+  const color = CARD_TYPE_COLORS[displayCard.card_type] || '#555';
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   return (
     <div
@@ -150,9 +144,15 @@ function BrowserCardFull({ card, shiftHeld }: { card: Card; shiftHeld: boolean }
 
 interface CardBrowserProps {
   onClose: () => void;
+  /** Neutral card IDs to include; null/undefined = all */
+  packNeutralIds?: string[] | null;
+  /** Per-archetype card IDs to include; null/undefined = all */
+  packArchetypeIds?: Record<string, string[]> | null;
+  /** Pack name shown in the header */
+  packName?: string;
 }
 
-export default function CardBrowser({ onClose }: CardBrowserProps) {
+export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds, packName }: CardBrowserProps) {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullView, setFullViewRaw] = useState(() => browserViewMemory);
@@ -187,16 +187,37 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
     setCollapsed(prev => ({ ...prev, [archetype]: !prev[archetype] }));
   };
 
+  // Apply pack filtering: keep starters always, filter neutrals and archetype cards by pack
+  const packFilteredCards = useMemo(() => {
+    if (!cards) return [];
+    return cards.filter(c => {
+      // Starters are always shown
+      if (c.starter) return true;
+      // Filter neutral non-starters by pack
+      if (c.archetype === 'neutral' && packNeutralIds != null) {
+        return packNeutralIds.includes(c.id);
+      }
+      // Filter archetype non-starters by pack
+      if (packArchetypeIds != null && c.archetype && c.archetype !== 'neutral') {
+        const allowed = packArchetypeIds[c.archetype];
+        if (allowed != null) {
+          return allowed.includes(c.id);
+        }
+      }
+      return true;
+    });
+  }, [cards, packNeutralIds, packArchetypeIds]);
+
   // Filter cards by search query (partial match on name or description)
   const filteredCards = useMemo(() => {
-    if (!cards) return [];
-    if (!searchQuery.trim()) return cards;
+    if (!packFilteredCards.length) return [];
+    if (!searchQuery.trim()) return packFilteredCards;
     const q = searchQuery.toLowerCase();
-    return cards.filter(c =>
+    return packFilteredCards.filter(c =>
       c.name.toLowerCase().includes(q) ||
       (c.description && c.description.toLowerCase().includes(q))
     );
-  }, [cards, searchQuery]);
+  }, [packFilteredCards, searchQuery]);
 
   // Group cards by archetype in display order
   const groups = ARCHETYPE_ORDER.map(arch => ({
@@ -205,7 +226,7 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
     cards: sortCards(filteredCards.filter(c => c.archetype === arch), sortMode),
   })).filter(g => g.cards.length > 0);
 
-  const totalCount = cards?.length ?? 0;
+  const totalCount = packFilteredCards.length;
 
   return (
     <div
@@ -239,7 +260,7 @@ export default function CardBrowser({ onClose }: CardBrowserProps) {
           flexShrink: 0,
         }}>
           <span style={{ fontWeight: 'bold', fontSize: 15, color: '#fff' }}>
-            📖 Card Browser
+            📖 Card Browser{packName ? ` — ${packName}` : ''}
           </span>
           {cards && (
             <span style={{ fontSize: 12, color: '#888' }}>

@@ -39,7 +39,7 @@ All players flip their played cards face-up simultaneously.
 ### Resolution Order
 1. **Claim resolution** – all tiles with at least one Claim card played on them are resolved:
    - Each Claim card contributes its **power value** to that tile.
-   - A player may only play **one Claim card per tile per round**, unless they have a **stacking exception card** (Coordinated Push, Dog Pile, Overwhelming Force).
+   - A player may only play **one Claim card per tile per round**, unless they have a **stacking exception card** (Coordinated Push, Dog Pile, Juggernaut).
    - The player with the **highest total power** on a tile wins it. Ties go to the **current owner** (defender wins ties). Neutral tiles (no owner) have a defense value of **0**.
    - Claimed tiles must be **adjacent to a tile the player already owns**, unless the card specifically states otherwise (e.g. Overrun, Proliferate, Eminent Domain).
    - Players cannot claim blocked terrain tiles unless they have the **Pathfinder** passive.

@@ -3,13 +3,7 @@ import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
 import { renderWithKeywords, extractKeywordsFromText } from './Keywords';
 import { useTooltips } from './SettingsContext';
-
-const TYPE_COLORS: Record<string, string> = {
-  claim: '#4a9eff',
-  defense: '#4aff6a',
-  engine: '#ffaa4a',
-  passive: '#aa88cc',
-};
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
 /** Fallback emoji per card type (used when no per-card art is defined) */
 const TYPE_EMOJI: Record<string, string> = {
@@ -169,7 +163,7 @@ function extractKeywords(card: Card): { keyword: string; definition: string }[] 
 }
 
 export default function CardFull({ card, effectiveCost, remaining, style, showKeywordHints }: CardFullProps) {
-  const typeColor = TYPE_COLORS[card.card_type] || '#555';
+  const typeColor = CARD_TYPE_COLORS[card.card_type] || '#555';
   const displayCost = effectiveCost ?? card.buy_cost;
   const tooltipsEnabled = useTooltips();
 

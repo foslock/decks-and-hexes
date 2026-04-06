@@ -5,6 +5,14 @@ import { useSettings, type AnimationMode } from './SettingsContext';
 import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
+import CardBrowser from './CardBrowser';
+
+interface CardPackDef {
+  id: string;
+  name: string;
+  neutral_card_ids: string[] | null;
+  archetype_card_ids: Record<string, string[]> | null;
+}
 
 const PLAYER_COLOR_OPTIONS = [
   '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4',
@@ -35,6 +43,51 @@ const DIFFICULTIES = [
   { id: 'hard', name: 'Hard' },
 ];
 
+// ── Recent seeds (localStorage) ────────────────────────────
+const RECENT_SEEDS_KEY = 'cardclash_recent_seeds';
+const MAX_RECENT_SEEDS = 10;
+
+interface RecentSeed {
+  seed: string;
+  gridSize: string;
+  date: string;
+}
+
+function getRecentSeeds(): RecentSeed[] {
+  try {
+    const raw = localStorage.getItem(RECENT_SEEDS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function addRecentSeed(seed: string, gridSize: string) {
+  const seeds = getRecentSeeds().filter(s => s.seed !== seed);
+  seeds.unshift({ seed, gridSize, date: new Date().toISOString() });
+  if (seeds.length > MAX_RECENT_SEEDS) seeds.length = MAX_RECENT_SEEDS;
+  localStorage.setItem(RECENT_SEEDS_KEY, JSON.stringify(seeds));
+}
+
+function generateClientSeed(): string {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  let s = '';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+function formatRelativeDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString();
+}
+
 interface LobbyScreenProps {
   lobbyCode: string;
   playerId: string;
@@ -57,6 +110,30 @@ export default function LobbyScreen({
   const [showCopied, setShowCopied] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const [cardPacks, setCardPacks] = useState<CardPackDef[]>([]);
+  const [showPackBrowser, setShowPackBrowser] = useState(false);
+  const [showSeedHistory, setShowSeedHistory] = useState(false);
+  const seedHistoryRef = useRef<HTMLDivElement>(null);
+
+  // Close seed history dropdown on outside click
+  useEffect(() => {
+    if (!showSeedHistory) return;
+    const handleClick = (e: MouseEvent) => {
+      if (seedHistoryRef.current && !seedHistoryRef.current.contains(e.target as Node)) {
+        setShowSeedHistory(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showSeedHistory]);
+
+  // Fetch card pack definitions on mount
+  useEffect(() => {
+    fetch('/api/card-packs')
+      .then(res => res.json())
+      .then((data: { packs: CardPackDef[] }) => setCardPacks(data.packs))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -103,7 +180,15 @@ export default function LobbyScreen({
     if (!lastMessage) return;
 
     if (lastMessage.type === 'lobby_update') {
-      setLobby(lastMessage.lobby as unknown as LobbyState);
+      const lobbyData = lastMessage.lobby as unknown as LobbyState;
+      setLobby(lobbyData);
+      // Reset game start ref when returning to waiting state (e.g. return from game)
+      if (lobbyData.status === 'waiting') {
+        gameStartRef.current = false;
+        setStarting(false);
+        setCountdown(null);
+        setCountdownStart(null);
+      }
     } else if (lastMessage.type === 'countdown') {
       const secs = lastMessage.seconds_remaining as number;
       setCountdown(secs);
@@ -114,6 +199,10 @@ export default function LobbyScreen({
       console.log('[Lobby] WS game_start received, gameStartRef:', gameStartRef.current);
       if (!gameStartRef.current) {
         gameStartRef.current = true;
+        // Save map seed to recent seeds
+        if (lobby.config.map_seed) {
+          addRecentSeed(lobby.config.map_seed, lobby.config.grid_size);
+        }
         // Compute local player IDs from lobby state
         const localIds = computeLocalPlayerIds(lobby, playerId, isHost);
         console.log('[Lobby] calling onGameStart with gameId:', lastMessage.game_id);
@@ -385,6 +474,10 @@ export default function LobbyScreen({
                 0%, 50% { opacity: 1; }
                 100% { opacity: 0; }
               }
+              @keyframes pulse {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.5; }
+              }
             `}</style>
           </div>
           <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
@@ -398,132 +491,316 @@ export default function LobbyScreen({
         {/* Game Settings (host editable, non-host read-only) */}
         <div style={{ marginBottom: 24 }}>
           <h3 style={{ marginBottom: 8 }}>Game Settings</h3>
-          {/* Grid size */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            {GRID_SIZES.map((size) => (
+          {/* Settings rows — consistent style */}
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 1,
+            background: '#333', borderRadius: 8, overflow: 'hidden',
+          }}>
+            {/* Card Pack */}
+            <div style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <div style={{ width: 90, flexShrink: 0 }}>
+                <Tooltip content="Decides which cards will be available in the game.">
+                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Card Pack</span>
+                </Tooltip>
+              </div>
+              {isHost && cardPacks.length > 0 ? (
+                <select
+                  value={lobby.config.card_pack || 'everything'}
+                  onChange={(e) => handleConfigChange('card_pack', e.target.value)}
+                  style={{
+                    background: '#2a2a3e', color: '#fff', border: '1px solid #555',
+                    borderRadius: 4, padding: '0 8px', height: 26, fontSize: 13, cursor: 'pointer',
+                  }}
+                >
+                  {cardPacks.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <strong style={{ color: '#fff' }}>
+                  {cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything'))?.name || lobby.config.card_pack || 'Everything'}
+                </strong>
+              )}
               <button
-                key={size.id}
-                onClick={() => isHost && handleConfigChange('grid_size', size.id)}
+                onClick={() => setShowPackBrowser(true)}
                 style={{
-                  flex: 1, padding: '10px 8px',
-                  background: lobby.config.grid_size === size.id ? '#3a3a6e' : '#2a2a3e',
-                  border: lobby.config.grid_size === size.id ? '2px solid #4a9eff' : '1px solid #444',
-                  borderRadius: 8, color: '#fff',
-                  cursor: isHost ? 'pointer' : 'default',
-                  opacity: isHost ? 1 : 0.8,
+                  fontSize: 13, padding: '0 8px', height: 26,
+                  background: '#2a2a3e', border: '1px solid #555',
+                  borderRadius: 4, color: '#aaa', cursor: 'pointer',
                 }}
               >
-                <div style={{ fontWeight: 'bold', fontSize: 16 }}>{size.name}</div>
-                <div style={{ fontSize: 12, color: '#aaa' }}>{size.players} players</div>
+                View Cards
               </button>
-            ))}
-          </div>
-          {/* VP Target + Granted Actions */}
-          <div style={{
-            fontSize: 13, color: '#aaa', marginBottom: 12,
-            padding: '8px 12px', background: '#1e1e36',
-            borderRadius: 8, border: '1px solid #333',
-            display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
-          }}>
-            <span style={{ color: '#ffcc00', fontWeight: 'bold' }}>🏆</span>
-            <span>VP Target:</span>
-            {isHost ? (
-              <>
-                <input
-                  type="number"
-                  min={1}
-                  value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val > 0) {
-                      handleConfigChange('vp_target', val);
-                    }
-                  }}
-                  style={{
-                    width: 52, padding: '3px 6px',
-                    background: '#2a2a3e', border: '1px solid #555',
-                    borderRadius: 4, color: '#fff', fontSize: 13,
-                    fontWeight: 'bold', textAlign: 'center',
-                  }}
-                />
-                {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size) && (
-                  <button
-                    onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size))}
-                    style={{
-                      fontSize: 11, padding: '2px 8px',
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#888', cursor: 'pointer',
-                    }}
-                  >
-                    Reset ({computeRecommendedVp(lobby.config.grid_size)})
-                  </button>
-                )}
-              </>
-            ) : (
-              <strong style={{ color: '#fff' }}>
-                {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
-              </strong>
-            )}
+            </div>
 
-            <span style={{ color: '#555', margin: '0 4px' }}>|</span>
-            <span style={{ color: '#6ab4ff', fontWeight: 'bold' }}>⚡</span>
-            <span>Actions:</span>
-            {isHost ? (
-              <>
-                <input
-                  type="number"
-                  min={1}
-                  max={10}
-                  value={lobby.config.granted_actions ?? 5}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value, 10);
-                    if (!isNaN(val) && val >= 1 && val <= 10) {
-                      handleConfigChange('granted_actions', val);
-                    }
-                  }}
-                  style={{
-                    width: 42, padding: '3px 6px',
-                    background: '#2a2a3e', border: '1px solid #555',
-                    borderRadius: 4, color: '#fff', fontSize: 13,
-                    fontWeight: 'bold', textAlign: 'center',
-                  }}
-                />
-                {lobby.config.granted_actions !== null && lobby.config.granted_actions !== 5 && (
+            {/* Map Size */}
+            <div style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <div style={{ width: 90, flexShrink: 0 }}>
+                <Tooltip content="The size of the hex grid.">
+                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Map Size</span>
+                </Tooltip>
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {GRID_SIZES.map((size) => (
                   <button
-                    onClick={() => handleConfigChange('granted_actions', 5)}
+                    key={size.id}
+                    onClick={() => isHost && handleConfigChange('grid_size', size.id)}
                     style={{
-                      fontSize: 11, padding: '2px 8px',
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#888', cursor: 'pointer',
+                      padding: '0 10px', height: 26,
+                      fontSize: 13,
+                      background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
+                      border: '1px solid #555',
+                      borderRadius: 4,
+                      color: '#fff',
+                      cursor: isHost ? 'pointer' : 'default',
+                      fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
                     }}
                   >
-                    Reset (5)
+                    {size.name}
                   </button>
-                )}
-              </>
-            ) : (
-              <strong style={{ color: '#fff' }}>
-                {lobby.config.granted_actions ?? 5}
-              </strong>
+                ))}
+              </div>
+            </div>
+
+            {/* Map Seed */}
+            <div ref={seedHistoryRef} style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+              position: 'relative',
+            }}>
+              <div style={{ width: 90, flexShrink: 0 }}>
+                <Tooltip content="Determines the layout of the grid.">
+                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Map Seed</span>
+                </Tooltip>
+              </div>
+              {isHost ? (
+                <>
+                  <input
+                    type="text"
+                    value={lobby.config.map_seed || ''}
+                    onChange={(e) => {
+                      const val = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6);
+                      if (val.length === 6) handleConfigChange('map_seed', val);
+                    }}
+                    onBlur={(e) => {
+                      const val = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '');
+                      if (val.length !== 6) {
+                        e.target.value = lobby.config.map_seed || '';
+                      }
+                    }}
+                    maxLength={6}
+                    style={{
+                      width: 72, padding: '0 6px', height: 26,
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#fff', fontSize: 13,
+                      fontWeight: 'bold', textAlign: 'center',
+                      fontFamily: 'monospace', letterSpacing: 1,
+                    }}
+                  />
+                  <button
+                    onClick={() => handleConfigChange('map_seed', generateClientSeed())}
+                    title="Random seed"
+                    style={{
+                      fontSize: 14, padding: '0 6px', height: 26,
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, cursor: 'pointer', lineHeight: 1,
+                    }}
+                  >
+                    🎲
+                  </button>
+                  {getRecentSeeds().length > 0 && (
+                    <button
+                      onClick={() => setShowSeedHistory(p => !p)}
+                      title="Recent seeds"
+                      style={{
+                        fontSize: 13, padding: '0 8px', height: 26,
+                        background: showSeedHistory ? '#3a3a6e' : '#2a2a3e',
+                        border: '1px solid #555',
+                        borderRadius: 4, color: '#aaa', cursor: 'pointer',
+                      }}
+                    >
+                      History ▾
+                    </button>
+                  )}
+                  {showSeedHistory && (
+                    <div style={{
+                      position: 'absolute', top: '100%', left: 80, zIndex: 100,
+                      background: '#1a1a2e', border: '1px solid #555', borderRadius: 6,
+                      padding: 4, minWidth: 200, marginTop: 4,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                    }}>
+                      {getRecentSeeds().map((s, i) => (
+                        <div
+                          key={i}
+                          onClick={() => {
+                            handleConfigChange('map_seed', s.seed);
+                            setShowSeedHistory(false);
+                          }}
+                          style={{
+                            padding: '4px 8px', cursor: 'pointer', borderRadius: 4,
+                            display: 'flex', justifyContent: 'space-between', gap: 12,
+                            fontSize: 12,
+                          }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = '#2a2a4e')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          <span style={{ fontFamily: 'monospace', color: '#fff', fontWeight: 'bold' }}>{s.seed}</span>
+                          <span style={{ color: '#666' }}>{s.gridSize} · {formatRelativeDate(s.date)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <span style={{ fontFamily: 'monospace', color: '#fff', fontWeight: 'bold', letterSpacing: 1 }}>
+                  {lobby.config.map_seed || '------'}
+                </span>
+              )}
+            </div>
+
+            {/* VP Target */}
+            <div style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <div style={{ width: 90, flexShrink: 0 }}>
+                <Tooltip content="The number of Victory Points a player needs to win.">
+                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>VP Target</span>
+                </Tooltip>
+              </div>
+              {isHost ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val > 0) {
+                        handleConfigChange('vp_target', val);
+                      }
+                    }}
+                    style={{
+                      width: 52, padding: '0 6px', height: 26,
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#fff', fontSize: 13,
+                      fontWeight: 'bold', textAlign: 'center',
+                    }}
+                  />
+                  {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size) && (
+                    <button
+                      onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size))}
+                      style={{
+                        fontSize: 13, padding: '0 8px', height: 26,
+                        background: '#2a2a3e', border: '1px solid #555',
+                        borderRadius: 4, color: '#888', cursor: 'pointer',
+                      }}
+                    >
+                      Reset ({computeRecommendedVp(lobby.config.grid_size)})
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <strong style={{ color: '#fff' }}>
+                  {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
+                </strong>
+              )}
+            </div>
+
+            {/* Actions */}
+            <div style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <div style={{ width: 90, flexShrink: 0 }}>
+                <Tooltip content="The number of actions each player starts their turn with.">
+                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Actions</span>
+                </Tooltip>
+              </div>
+              {isHost ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={lobby.config.granted_actions ?? 5}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val >= 1 && val <= 10) {
+                        handleConfigChange('granted_actions', val);
+                      }
+                    }}
+                    style={{
+                      width: 52, padding: '0 6px', height: 26,
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#fff', fontSize: 13,
+                      fontWeight: 'bold', textAlign: 'center',
+                    }}
+                  />
+                  {lobby.config.granted_actions !== null && lobby.config.granted_actions !== 5 && (
+                    <button
+                      onClick={() => handleConfigChange('granted_actions', 5)}
+                      style={{
+                        fontSize: 13, padding: '0 8px', height: 26,
+                        background: '#2a2a3e', border: '1px solid #555',
+                        borderRadius: 4, color: '#888', cursor: 'pointer',
+                      }}
+                    >
+                      Reset (5)
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <strong style={{ color: '#fff' }}>
+                  {lobby.config.granted_actions ?? 5}
+                </strong>
+              )}
+            </div>
+
+            {/* Test Mode (host only) */}
+            {isHost && (
+              <div style={{
+                fontSize: 13, color: '#aaa',
+                padding: '8px 12px', background: '#1e1e36',
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <div style={{ width: 90, flexShrink: 0 }}>
+                  <Tooltip content="Enables game-breaking settings for testing.">
+                    <span style={{ color: lobby.config.test_mode ? '#ffaa4a' : '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Test Mode</span>
+                  </Tooltip>
+                </div>
+                {([false, true] as const).map((on) => (
+                  <button
+                    key={String(on)}
+                    onClick={() => handleConfigChange('test_mode', on)}
+                    style={{
+                      padding: '0 8px', height: 26,
+                      fontSize: 13,
+                      background: lobby.config.test_mode === on ? (on ? '#ffaa4a' : '#4a9eff') : '#2a2a3e',
+                      border: '1px solid #555',
+                      borderRadius: 4,
+                      color: lobby.config.test_mode === on ? (on ? '#000' : '#fff') : '#fff',
+                      cursor: 'pointer',
+                      fontWeight: lobby.config.test_mode === on ? 'bold' : 'normal',
+                    }}
+                  >
+                    {on ? 'On' : 'Off'}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
-          {/* Test mode (host only) */}
-          {isHost && (
-            <label style={{
-              fontSize: 12,
-              color: lobby.config.test_mode ? '#ffaa4a' : '#666',
-              cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              <input
-                type="checkbox"
-                checked={lobby.config.test_mode}
-                onChange={(e) => handleConfigChange('test_mode', e.target.checked)}
-                style={{ accentColor: '#ffaa4a' }}
-              />
-              Test Mode
-            </label>
-          )}
         </div>
 
         {/* Players list */}
@@ -760,6 +1037,15 @@ export default function LobbyScreen({
                     LOCAL
                   </span>
                 )}
+                {!p.has_returned && !p.is_cpu && (
+                  <span style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
+                    background: '#555', color: '#ffaa4a', fontWeight: 'bold',
+                    animation: 'pulse 2s ease-in-out infinite',
+                  }}>
+                    WAITING
+                  </span>
+                )}
 
                 {/* Remove button (host can remove non-self) */}
                 {isHost && !p.is_host && (
@@ -919,21 +1205,26 @@ export default function LobbyScreen({
           >
             {isHost ? 'Close Lobby' : 'Leave Lobby'}
           </button>
-          {isHost && (
-            <button
-              onClick={handleStart}
-              disabled={players.length < 2 || starting}
-              style={{
-                flex: 2, padding: 14,
-                background: players.length < 2 || starting ? '#333' : lobby.config.test_mode ? '#ffaa4a' : '#4a9eff',
-                border: 'none', borderRadius: 8,
-                color: '#fff', fontSize: 16, fontWeight: 'bold',
-                cursor: players.length < 2 || starting ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {starting ? 'Starting...' : lobby.config.test_mode ? 'Start Test Game' : 'Start Game'}
-            </button>
-          )}
+          {isHost && (() => {
+            const waitingForReturn = players.some(p => !p.is_cpu && !p.has_returned);
+            const cantStart = players.length < 2 || starting || waitingForReturn;
+            return (
+              <button
+                onClick={handleStart}
+                disabled={cantStart}
+                title={waitingForReturn ? 'Waiting for all players to return' : undefined}
+                style={{
+                  flex: 2, padding: 14,
+                  background: cantStart ? '#333' : lobby.config.test_mode ? '#ffaa4a' : '#4a9eff',
+                  border: 'none', borderRadius: 8,
+                  color: '#fff', fontSize: 16, fontWeight: 'bold',
+                  cursor: cantStart ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {starting ? 'Starting...' : waitingForReturn ? 'Waiting for Players...' : lobby.config.test_mode ? 'Start Test Game' : 'Start Game'}
+              </button>
+            );
+          })()}
         </div>
 
         {/* Non-host waiting message */}
@@ -943,6 +1234,17 @@ export default function LobbyScreen({
           </div>
         )}
       </div>
+      {showPackBrowser && (() => {
+        const pack = cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything'));
+        return (
+          <CardBrowser
+            onClose={() => setShowPackBrowser(false)}
+            packNeutralIds={pack?.neutral_card_ids}
+            packArchetypeIds={pack?.archetype_card_ids}
+            packName={pack?.name}
+          />
+        );
+      })()}
     </div>
   );
 }

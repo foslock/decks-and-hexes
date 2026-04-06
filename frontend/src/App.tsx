@@ -54,8 +54,8 @@ export default function App() {
     return { type: 'home' };
   });
   const [multiplayerGameState, setMultiplayerGameState] = useState<GameState | null>(null);
-  const [replayVotes, setReplayVotes] = useState<Set<string>>(new Set());
-  const [replayDisabled, setReplayDisabled] = useState(false);
+  // Track if this player was removed from lobby (e.g. kicked by host while viewing game over)
+  const [removedFromLobby, setRemovedFromLobby] = useState(false);
   // Track if this session was restored from storage (skip intro on reconnect)
   const [isReconnect, setIsReconnect] = useState(() => !!loadSession());
 
@@ -88,28 +88,29 @@ export default function App() {
       console.log('[App] game_ended → going home');
       setScreen({ type: 'home' });
       setMultiplayerGameState(null);
-      setReplayVotes(new Set());
-      setReplayDisabled(false);
+      setRemovedFromLobby(false);
       saveSession(null);
-    } else if (gameWsMessage.type === 'game_start') {
-      // Replay restart — new game created with same players
-      const newGameId = gameWsMessage.game_id as string;
-      const newState = gameWsMessage.state as unknown as GameState;
-      setMultiplayerGameState(newState);
-      setReplayVotes(new Set());
-      setReplayDisabled(false);
-      setIsReconnect(false);
-      if (screen.type === 'game') {
+    } else if (gameWsMessage.type === 'removed_from_lobby') {
+      // Player was kicked from the lobby by the host (e.g. while still on game-over screen)
+      console.log('[App] removed_from_lobby → disabling return-to-lobby');
+      setRemovedFromLobby(true);
+    } else if (gameWsMessage.type === 'lobby_update') {
+      // Return-to-lobby: server sends lobby_update when lobby is reset
+      const lobbyState = gameWsMessage.lobby as unknown as LobbyState;
+      if (lobbyState && screen.type === 'game') {
+        console.log('[App] lobby_update during game → returning to lobby');
+        setMultiplayerGameState(null);
+        setRemovedFromLobby(false);
+        setIsReconnect(false);
         setScreen({
-          ...screen,
-          gameId: newGameId,
+          type: 'lobby',
+          code: screen.lobbyCode || lobbyState.code,
+          playerId: screen.playerId,
+          token: screen.token,
+          isHost: screen.isHost || false,
+          lobby: lobbyState,
         });
       }
-    } else if (gameWsMessage.type === 'replay_vote') {
-      const votes = (gameWsMessage.votes as string[]) || [];
-      setReplayVotes(new Set(votes));
-    } else if (gameWsMessage.type === 'replay_disabled') {
-      setReplayDisabled(true);
     }
   }, [gameWsMessage, screen]);
 
@@ -214,8 +215,6 @@ export default function App() {
     console.log('[App] handleLeaveGame → going home');
     setScreen({ type: 'home' });
     setMultiplayerGameState(null);
-    setReplayVotes(new Set());
-    setReplayDisabled(false);
     api.setAuthToken(null);
     saveSession(null);
   }, []);
@@ -277,9 +276,7 @@ export default function App() {
           }
           onLeaveGame={handleLeaveGame}
           skipIntro={isReconnect}
-          replayVotes={replayVotes}
-          replayDisabled={replayDisabled}
-          onReplayVotesUpdate={setReplayVotes}
+          removedFromLobby={removedFromLobby}
         />
       </SettingsProvider>
     );

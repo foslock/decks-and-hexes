@@ -16,7 +16,9 @@ from pydantic import BaseModel
 
 from app.api.ws_manager import manager
 from app.data_loader.loader import load_all_cards
+from app.game_engine.card_packs import CARD_PACKS, DEFAULT_PACK_ID
 from app.game_engine.cards import Archetype
+from app.game_engine.game_state import generate_map_seed
 from app.game_engine.game_state import (
     GameState,
     create_game,
@@ -61,6 +63,7 @@ class LobbyPlayer:
     cpu_noise: float = 0.15
     is_host: bool = False
     is_local: bool = False  # local human player (controlled by host's browser)
+    has_returned: bool = True  # True by default; False when returning from a game
     token: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -72,6 +75,7 @@ class LobbyPlayer:
             "is_cpu": self.is_cpu,
             "is_host": self.is_host,
             "is_local": self.is_local,
+            "has_returned": self.has_returned,
             "cpu_difficulty": (
                 "easy" if self.cpu_noise >= 0.25 else
                 "medium" if self.cpu_noise >= 0.10 else
@@ -82,12 +86,18 @@ class LobbyPlayer:
 
 @dataclass
 class LobbyConfig:
-    grid_size: str = "small"
+    grid_size: str = "medium"
     speed: str = "normal"
     max_players: int = 3
     test_mode: bool = False
     vp_target: Optional[int] = None  # None = use computed default
     granted_actions: Optional[int] = None  # None = use archetype default (currently 5)
+    card_pack: str = DEFAULT_PACK_ID
+    map_seed: str = ""  # 6-char lowercase alphanumeric; "" = generate on init
+
+    def __post_init__(self) -> None:
+        if not self.map_seed:
+            self.map_seed = generate_map_seed()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -97,6 +107,8 @@ class LobbyConfig:
             "test_mode": self.test_mode,
             "vp_target": self.vp_target,
             "granted_actions": self.granted_actions,
+            "card_pack": self.card_pack,
+            "map_seed": self.map_seed,
         }
 
 
@@ -134,8 +146,8 @@ class Lobby:
 _lobbies: dict[str, Lobby] = {}     # code → Lobby
 _tokens: dict[str, str] = {}        # player_id → token
 _game_to_lobby: dict[str, str] = {} # game_id → lobby code (for auth lookups)
-_replay_votes: dict[str, set[str]] = {}   # game_id → set of player_ids who voted
-_replay_disabled: dict[str, bool] = {}    # game_id → True if someone exited
+# Track which games have had their lobby reset for return-to-lobby
+_return_to_lobby_done: dict[str, bool] = {}  # game_id → True if lobby was already reset
 
 # Reference to the games dict from routes.py (set by init_lobby_games_ref)
 _games_ref: dict[str, GameState] | None = None
@@ -265,6 +277,8 @@ class UpdateConfigRequest(BaseModel):
     test_mode: Optional[bool] = None
     vp_target: Optional[int] = None
     granted_actions: Optional[int] = None
+    card_pack: Optional[str] = None
+    map_seed: Optional[str] = None
 
 
 class UpdatePlayerRequest(BaseModel):
@@ -456,6 +470,18 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
             raise HTTPException(400, "granted_actions must be between 1 and 10")
         lobby.config.granted_actions = req.granted_actions
 
+    if req.card_pack is not None:
+        if req.card_pack not in CARD_PACKS:
+            raise HTTPException(400, f"Invalid card pack: {req.card_pack}")
+        lobby.config.card_pack = req.card_pack
+
+    if req.map_seed is not None:
+        seed = req.map_seed.lower().strip()
+        import re
+        if not re.fullmatch(r'[a-z0-9]{6}', seed):
+            raise HTTPException(400, "Map seed must be exactly 6 lowercase alphanumeric characters")
+        lobby.config.map_seed = seed
+
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
 
@@ -615,7 +641,11 @@ async def remove_player(code: str, target_player_id: str, req: RemovePlayerReque
     lobby.touch()
 
     await manager.broadcast_lobby(code, lobby.to_dict())
-    # Disconnect the removed player's WebSocket
+    # Notify the removed player before disconnecting their WebSocket
+    await manager.send_to_player(code, target_player_id, {
+        "type": "removed_from_lobby",
+        "reason": "You have been removed from the lobby by the host.",
+    })
     manager.disconnect(code, target_player_id)
 
     return {"lobby": lobby.to_dict()}
@@ -673,6 +703,11 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
     if len(lobby.players) < 2:
         raise HTTPException(400, "Need at least 2 players to start")
 
+    # Block start if any human player hasn't returned from a previous game
+    waiting_players = [p.name for p in lobby.players.values() if not p.is_cpu and not p.has_returned]
+    if waiting_players:
+        raise HTTPException(400, f"Waiting for players to return: {', '.join(waiting_players)}")
+
     # Send countdown to all connected players
     lobby.status = "countdown"
     for seconds in [3, 2, 1]:
@@ -705,6 +740,8 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
         speed=lobby.config.speed,
         vp_target=lobby.config.vp_target,
         granted_actions=lobby.config.granted_actions,
+        card_pack=lobby.config.card_pack,
+        map_seed=lobby.config.map_seed,
     )
     game.host_id = lobby.host_id
     game.lobby_code = code
@@ -931,147 +968,69 @@ async def handle_end_game(game_id: str, player_id: str, token: str) -> dict[str,
     return {"message": "Game ended"}
 
 
-# ── Replay Voting ────────────────────────────────────────
+# ── Return to Lobby ─────────────────────────────────────
 
 
-async def handle_replay_vote(game_id: str, player_id: str, token: str) -> dict[str, Any]:
-    """Handle a player voting to replay."""
+async def handle_return_to_lobby(game_id: str, player_id: str, token: str) -> dict[str, Any]:
+    """Handle a player returning to the lobby after a game ends."""
     _require_token(player_id, token)
-    games = _get_games()
-    game = games.get(game_id)
-    if not game:
-        raise HTTPException(404, "Game not found")
 
-    if _replay_disabled.get(game_id):
-        raise HTTPException(400, "Replay has been disabled")
-
-    # Add vote
-    votes = _replay_votes.setdefault(game_id, set())
-    votes.add(player_id)
-
-    # Count human players (exclude those who left)
-    human_ids = [pid for pid, p in game.players.items() if not p.is_cpu and not p.has_left]
-    all_voted = all(pid in votes for pid in human_ids)
-
-    if all_voted:
-        # Everyone voted — restart the game
-        return await _restart_game(game_id, game)
-
-    # Broadcast vote update to all players
-    await manager.broadcast(game_id, {
-        "type": "replay_vote",
-        "votes": list(votes),
-        "total_humans": len(human_ids),
-    })
-
-    return {"message": f"Vote recorded ({len(votes)}/{len(human_ids)})", "votes": list(votes)}
-
-
-async def handle_replay_exit(game_id: str, player_id: str, token: str) -> dict[str, Any]:
-    """Handle a player exiting, which disables replay for everyone."""
-    _require_token(player_id, token)
-    games = _get_games()
-    game = games.get(game_id)
-    if not game:
-        raise HTTPException(404, "Game not found")
-
-    _replay_disabled[game_id] = True
-
-    # Broadcast that replay is disabled
-    await manager.broadcast(game_id, {
-        "type": "replay_disabled",
-        "player_id": player_id,
-    })
-
-    return {"message": "Replay disabled"}
-
-
-async def _restart_game(game_id: str, old_game: GameState) -> dict[str, Any]:
-    """Create a new game with the same players and settings, then redirect everyone."""
     lobby = get_lobby_for_game(game_id)
     if not lobby:
-        raise HTTPException(400, "Cannot restart — no lobby associated")
+        raise HTTPException(400, "No lobby associated with this game")
 
-    # Reset lobby status so we can start again
-    lobby.status = "waiting"
-    lobby.game_id = None
-
-    # Clean up old game replay state
-    _replay_votes.pop(game_id, None)
-    _replay_disabled.pop(game_id, None)
-
-    # Migrate connections back from game to lobby
-    manager.migrate_group(game_id, lobby.code)
-
-    # Clean up old game
     games = _get_games()
-    old_lobby_code = _game_to_lobby.pop(game_id, None)
-    games.pop(game_id, None)
+    game = games.get(game_id)  # May be None if already cleaned up by a prior call
 
-    # Remove players who left from the lobby so they aren't in the new game
-    left_pids = {pid for pid, p in old_game.players.items() if p.has_left}
-    for pid in left_pids:
-        lobby.players.pop(pid, None)
-        if lobby.player_order and pid in lobby.player_order:
-            lobby.player_order.remove(pid)
+    # First call: reset lobby state, clean up game, migrate connections
+    if not _return_to_lobby_done.get(game_id):
+        _return_to_lobby_done[game_id] = True
 
-    # Create new game using the lobby (reuse start_lobby logic)
-    registry = _get_registry()
-    ordered_pids = lobby.player_order if lobby.player_order else list(lobby.players.keys())
-    player_configs = []
-    for pid in ordered_pids:
-        p = lobby.players.get(pid)
-        if not p:
-            continue  # player may have left
-        player_configs.append({
-            "id": pid,
-            "name": p.name,
-            "archetype": p.archetype,
-            "color": p.color,
-            "is_cpu": p.is_cpu,
-            "cpu_noise": p.cpu_noise,
-        })
+        # Preserve the map seed from the finished game
+        if game:
+            lobby.config.map_seed = game.map_seed
 
-    try:
-        grid_size = GridSize(lobby.config.grid_size)
-    except ValueError:
-        raise HTTPException(400, f"Invalid grid size: {lobby.config.grid_size}")
+        # Reset lobby
+        lobby.status = "waiting"
+        lobby.game_id = None
 
-    game = create_game(
-        grid_size, player_configs, registry,
-        test_mode=lobby.config.test_mode,
-        speed=lobby.config.speed,
-        vp_target=lobby.config.vp_target,
-        granted_actions=lobby.config.granted_actions,
-    )
-    game.host_id = lobby.host_id
-    game.lobby_code = lobby.code
-    execute_start_of_turn(game)
+        # Mark all human players as not-returned, CPUs as returned
+        for p in lobby.players.values():
+            p.has_returned = p.is_cpu
 
-    games[game.id] = game
-    lobby.game_id = game.id
-    lobby.status = "started"
-    _game_to_lobby[game.id] = lobby.code
+        # Remove players who left during the game
+        left_pids = {pid for pid, p in game.players.items() if p.has_left} if game else set()
+        for pid in left_pids:
+            lobby.players.pop(pid, None)
+            if lobby.player_order and pid in lobby.player_order:
+                lobby.player_order.remove(pid)
 
-    # Migrate connections from lobby back to new game
-    manager.migrate_group(lobby.code, game.id)
+        # Clean up old game
+        _game_to_lobby.pop(game_id, None)
+        games.pop(game_id, None)
 
-    # Broadcast game_start to each player
-    group = manager.connections.get(game.id, {})
-    for pid, ws in list(group.items()):
-        try:
-            visible = get_visible_player_ids(game.id, pid)
-            state = game.to_dict(for_player_id=pid, visible_player_ids=visible)
-            await ws.send_json({"type": "game_start", "game_id": game.id, "state": state})
-        except Exception:
-            manager.disconnect(game.id, pid)
+        # Migrate WS connections from game group to lobby group
+        manager.migrate_group(game_id, lobby.code)
 
-    host_visible = get_visible_player_ids(game.id, lobby.host_id)
-    return {
-        "message": "Game restarted",
-        "game_id": game.id,
-        "state": game.to_dict(for_player_id=lobby.host_id, visible_player_ids=host_visible),
-    }
+        # Re-register lobby→game mapping is not needed since game is gone
+        # But we need to track the mapping from old game_id for subsequent calls
+        _game_to_lobby[game_id] = lobby.code  # keep for subsequent return calls
+
+    # Mark this player as returned
+    lp = lobby.players.get(player_id)
+    if lp:
+        lp.has_returned = True
+
+    lobby.touch()
+
+    # Only send lobby_update to players who have returned (so others stay on game-over screen)
+    lobby_dict = lobby.to_dict()
+    lobby_msg = {"type": "lobby_update", "lobby": lobby_dict}
+    for pid, p in lobby.players.items():
+        if p.has_returned:
+            await manager.send_to_player(lobby.code, pid, lobby_msg)
+
+    return {"message": "Returned to lobby", "lobby": lobby_dict}
 
 
 # ── Lobby expiry background task ──────────────────────────

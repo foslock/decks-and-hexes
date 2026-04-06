@@ -118,11 +118,11 @@ cards:
     name: Slow Advance
     name_upgraded: Slow Advance+
     type: Claim
-    buy_cost: 3
+    buy_cost: 2
     action_return: 0
-    power: 3
-    effect: "Claim: Power 3. If the target is a neutral tile, claim it automatically."
-    effect_upgraded: "Claim: Power 4. If the target is a neutral tile, claim it automatically and draw 1 card next turn."
+    power: 2
+    effect: "Claim: Power 2. If the target is a neutral tile, claim it automatically."
+    effect_upgraded: "Claim: Power 3. If the target is a neutral tile, claim it automatically and draw 1 card next turn."
     secondary_effect: null
     secondary_timing: null
 
@@ -171,8 +171,8 @@ cards:
         metadata: {upgraded_value: 2}
 
   - id: fortress_war_of_attrition
-    name: War of Attrition
-    name_upgraded: War of Attrition+
+    name: Attrition
+    name_upgraded: Attrition+
     type: Claim
     buy_cost: 3
     action_return: 0
@@ -208,8 +208,8 @@ cards:
         timing: immediate
 
   - id: fortress_overwhelming_force
-    name: Overwhelming Force
-    name_upgraded: Overwhelming Force+
+    name: Juggernaut
+    name_upgraded: Juggernaut+
     type: Claim
     buy_cost: 4
     action_return: 0
@@ -285,8 +285,8 @@ cards:
         metadata: {upgraded_value: 5}
 
   - id: fortress_war_council
-    name: War Council
-    name_upgraded: War Council+
+    name: Grand Strategy
+    name_upgraded: Grand Strategy+
     type: Engine
     buy_cost: 3
     action_return: 1
@@ -316,8 +316,8 @@ cards:
 
 
   - id: fortress_fortified_position
-    name: Fortified Position
-    name_upgraded: Fortified Position+
+    name: Ironclad
+    name_upgraded: Ironclad+
     type: Passive
     buy_cost: 3
     action_return: 0
@@ -350,8 +350,8 @@ cards:
         target: chosen_player
 
   - id: fortress_catch_up
-    name: Catch Up
-    name_upgraded: Catch Up+
+    name: Resilience
+    name_upgraded: Resilience+
     type: Engine
     buy_cost: 2
     action_return: 1

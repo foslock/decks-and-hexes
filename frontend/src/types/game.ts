@@ -167,6 +167,8 @@ export interface GameState {
     source: string;
     cost: number;
   }>>;
+  card_pack?: string;
+  map_seed?: string;
 }
 
 // ── Lobby types ──────────────────────────────────────────
@@ -179,6 +181,7 @@ export interface LobbyPlayer {
   is_cpu: boolean;
   is_host: boolean;
   is_local: boolean;
+  has_returned: boolean;
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
 }
 
@@ -189,6 +192,8 @@ export interface LobbyConfig {
   test_mode: boolean;
   vp_target: number | null;
   granted_actions: number | null;
+  card_pack: string;
+  map_seed: string;
 }
 
 export interface LobbyState {

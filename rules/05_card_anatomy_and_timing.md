@@ -70,7 +70,7 @@ The following cards are exceptions and allow multiple Claim cards to be played o
 
 - **Vanguard:** Coordinated Push
 - **Swarm:** Dog Pile
-- **Fortress:** Overwhelming Force
+- **Fortress:** Juggernaut
 
 These cards must be played in the same round as the additional Claim cards they stack with. The stacking exception card itself counts as the "unlock" — all combined power is resolved together at the Reveal Phase.
 

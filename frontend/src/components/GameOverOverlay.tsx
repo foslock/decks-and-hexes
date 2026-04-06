@@ -3,14 +3,6 @@ import type { GameState, Player, Card } from '../types/game';
 import { CardViewPopup } from './CardHand';
 import { useSound } from '../audio/useSound';
 
-const PLAYER_COLORS: Record<string, string> = {
-  player_0: '#4a9eff',
-  player_1: '#ff4a4a',
-  player_2: '#4aff6a',
-  player_3: '#ffaa4a',
-  player_4: '#aa4aff',
-  player_5: '#ff4aaa',
-};
 
 interface LeaderboardEntry {
   playerId: string;
@@ -28,22 +20,20 @@ interface GameOverOverlayProps {
   gameState: GameState;
   playerId: string;
   isVictory: boolean;
-  replayVotes: Set<string>;
-  replayDisabled: boolean;
-  humanPlayerCount: number;
-  onReplayVote: () => void;
+  onReturnToLobby: () => void;
   onExitGame: () => void;
+  isMultiplayer?: boolean;
+  removedFromLobby?: boolean;
 }
 
 export default function GameOverOverlay({
   gameState,
   playerId,
   isVictory,
-  replayVotes,
-  replayDisabled,
-  humanPlayerCount,
-  onReplayVote,
+  onReturnToLobby,
   onExitGame,
+  isMultiplayer,
+  removedFromLobby,
 }: GameOverOverlayProps) {
   const [bannerVisible, setBannerVisible] = useState(false);
   const [rowsVisible, setRowsVisible] = useState(0);
@@ -51,7 +41,7 @@ export default function GameOverOverlay({
   const [viewingDeck, setViewingDeck] = useState<string | null>(null);
   const sound = useSound();
 
-  const hasVoted = replayVotes.has(playerId);
+  const [returnedToLobby, setReturnedToLobby] = useState(false);
 
   const leaderboard: LeaderboardEntry[] = useMemo(() => {
     const tiles = gameState.grid.tiles;
@@ -73,7 +63,7 @@ export default function GameOverOverlay({
         deckSize: p.deck_size + p.discard_count + p.hand_count,
         isWinner: pid === gameState.winner,
         hasLeft: p.has_left,
-        color: PLAYER_COLORS[pid] || '#888',
+        color: p.color || '#888',
       };
     }).sort((a, b) => {
       if (a.isWinner) return -1;
@@ -260,26 +250,33 @@ export default function GameOverOverlay({
         transform: buttonsVisible ? 'translateY(0)' : 'translateY(10px)',
         transition: 'opacity 0.4s ease, transform 0.4s ease',
       }}>
-        <button
-          onClick={onReplayVote}
-          disabled={replayDisabled || humanPlayerCount < 2 || hasVoted}
-          style={{
-            padding: '12px 32px',
-            fontSize: 16,
-            fontWeight: 'bold',
-            background: replayDisabled || humanPlayerCount < 2 ? '#333' : hasVoted ? '#2a4a3e' : '#2a6e3e',
-            border: `1px solid ${replayDisabled || humanPlayerCount < 2 ? '#444' : hasVoted ? '#3a6a4e' : '#3a8e5e'}`,
-            borderRadius: 8,
-            color: replayDisabled || humanPlayerCount < 2 ? '#666' : '#fff',
-            cursor: replayDisabled || humanPlayerCount < 2 || hasVoted ? 'default' : 'pointer',
-          }}
-        >
-          {replayDisabled || humanPlayerCount < 2
-            ? 'Replay Unavailable'
-            : hasVoted
-              ? `Waiting... (${replayVotes.size}/${humanPlayerCount})`
-              : 'Replay'}
-        </button>
+        {isMultiplayer && (() => {
+          const disabled = returnedToLobby || removedFromLobby;
+          const label = removedFromLobby
+            ? 'Removed from Lobby'
+            : returnedToLobby
+              ? 'Returning...'
+              : 'Return to Lobby';
+          return (
+            <button
+              onClick={() => { if (!disabled) { setReturnedToLobby(true); onReturnToLobby(); } }}
+              disabled={disabled}
+              style={{
+                padding: '12px 32px',
+                fontSize: 16,
+                fontWeight: 'bold',
+                background: removedFromLobby ? '#3a2a2a' : disabled ? '#2a4a3e' : '#2a6e3e',
+                border: `1px solid ${removedFromLobby ? '#5a3a3a' : disabled ? '#3a6a4e' : '#3a8e5e'}`,
+                borderRadius: 8,
+                color: removedFromLobby ? '#ff6666' : '#fff',
+                cursor: disabled ? 'default' : 'pointer',
+                opacity: removedFromLobby ? 0.8 : 1,
+              }}
+            >
+              {label}
+            </button>
+          );
+        })()}
         <button
           onClick={onExitGame}
           style={{

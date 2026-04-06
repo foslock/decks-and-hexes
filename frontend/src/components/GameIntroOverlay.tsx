@@ -7,25 +7,10 @@ interface GameIntroOverlayProps {
   onReady: () => void;
 }
 
-const ARCHETYPE_ICONS: Record<string, string> = {
-  vanguard: '⚔️',
-  swarm: '🐝',
-  fortress: '🏰',
-};
-
 const ARCHETYPE_LABELS: Record<string, string> = {
   vanguard: 'Vanguard',
   swarm: 'Swarm',
   fortress: 'Fortress',
-};
-
-const PLAYER_COLORS: Record<string, string> = {
-  player_0: '#2a6ecc',
-  player_1: '#cc2a2a',
-  player_2: '#2aaa4a',
-  player_3: '#cc7a2a',
-  player_4: '#7a2acc',
-  player_5: '#cc2a7a',
 };
 
 const GRID_SIZE_LABELS: Record<string, string> = {
@@ -71,10 +56,10 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
 
     // VP target slides in
     timers.push(setTimeout(() => setVpVisible(true), t));
-    t += Math.round((1000 + 1000) * s); // animation + pause
+    t += Math.round(600 * s); // pause after VP
 
     // Each player row slides in
-    const perPlayerMs = Math.round((playerCount > 3 ? 350 : 500) * s);
+    const perPlayerMs = Math.round((playerCount > 3 ? 250 : 350) * s);
     for (let i = 0; i < playerCount; i++) {
       const idx = i;
       timers.push(setTimeout(() => {
@@ -86,11 +71,11 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       }, t));
       t += perPlayerMs;
     }
-    t += Math.round(1000 * s); // pause after final player
+    t += Math.round(400 * s); // pause after final player
 
     // Settings slide in
     timers.push(setTimeout(() => setSettingsVisible(true), t));
-    t += Math.round((1000 + 500) * s); // animation + pause
+    t += Math.round(500 * s); // pause after settings
 
     // Ready button appears
     timers.push(setTimeout(() => setReadyVisible(true), t));
@@ -163,8 +148,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       <div style={{ marginBottom: 48, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {gameState.player_order.map((pid, i) => {
           const player = gameState.players[pid];
-          const color = PLAYER_COLORS[pid] || '#888';
-          const archIcon = ARCHETYPE_ICONS[player.archetype] || '?';
+          const color = player.color || '#888';
           const archLabel = ARCHETYPE_LABELS[player.archetype] || player.archetype;
           return (
             <div
@@ -173,7 +157,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
                 ...slideStyle(playersVisible[i]),
                 display: 'flex',
                 alignItems: 'center',
-                gap: 16,
+                justifyContent: 'space-between',
                 padding: '12px 32px',
                 background: 'rgba(30, 30, 50, 0.8)',
                 borderRadius: 10,
@@ -181,23 +165,23 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
                 minWidth: 360,
               }}
             >
-              {/* Archetype icon */}
-              <span style={{ fontSize: 28 }}>{archIcon}</span>
-
-              {/* Name & archetype */}
-              <div style={{ flex: 1 }}>
-                <div style={{
-                  fontSize: 18,
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{
+                  fontSize: 20,
                   fontWeight: 'bold',
                   color,
                 }}>
                   {player.name}
-                </div>
-                <div style={{ fontSize: 13, color: '#aaa' }}>
-                  {archLabel}
-                </div>
+                </span>
+                {player.is_cpu && player.cpu_difficulty && (
+                  <span style={{ fontSize: 13, color: '#555' }}>
+                    ({player.cpu_difficulty})
+                  </span>
+                )}
               </div>
-
+              <div style={{ fontSize: 14, color: '#aaa', textTransform: 'capitalize' }}>
+                {archLabel}
+              </div>
             </div>
           );
         })}

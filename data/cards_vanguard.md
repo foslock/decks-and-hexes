@@ -145,8 +145,8 @@ cards:
 
 
   - id: vanguard_rally
-    name: Rally
-    name_upgraded: Rally+
+    name: Regroup
+    name_upgraded: Regroup+
     type: Engine
     buy_cost: 3
     action_return: 1
@@ -183,8 +183,8 @@ cards:
         condition: if_successful
 
   - id: vanguard_war_cache
-    name: War Cache
-    name_upgraded: War Cache+
+    name: Plunder
+    name_upgraded: Plunder+
     type: Engine
     buy_cost: 4
     action_return: 1
@@ -232,8 +232,8 @@ cards:
 
 
   - id: vanguard_surge_protocol
-    name: Surge Protocol
-    name_upgraded: Surge Protocol+
+    name: Battle Cry
+    name_upgraded: Battle Cry+
     type: Engine
     buy_cost: 3
     action_return: 2

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.api.ws_manager import manager
 from app.api.lobby import get_visible_player_ids
 from app.data_loader.loader import load_all_cards
+from app.game_engine.card_packs import CARD_PACKS
 from app.game_engine.cards import Archetype
 from app.game_engine.game_state import (
     GameState,
@@ -373,6 +374,12 @@ async def get_game_log(game_id: str, player_id: Optional[str] = None) -> dict[st
     return {"game_id": game_id, "entries": entries}
 
 
+@router.get("/card-packs")
+async def list_card_packs() -> dict[str, Any]:
+    """List all available card packs with their metadata."""
+    return {"packs": [pack.to_dict() for pack in CARD_PACKS.values()]}
+
+
 @router.get("/cards")
 async def list_cards() -> dict[str, Any]:
     """List all available cards (for debugging/reference)."""
@@ -580,28 +587,16 @@ async def end_game_route(game_id: str, req: EndGameRequest) -> dict[str, Any]:
     return await handle_end_game(game_id, req.player_id, req.token)
 
 
-# ── Replay Voting ─────────────────────────────────────────
+# ── Return to Lobby ───────────────────────────────────────
 
 
-class ReplayVoteRequest(BaseModel):
+class ReturnToLobbyRequest(BaseModel):
     player_id: str
     token: str
 
 
-class ReplayExitRequest(BaseModel):
-    player_id: str
-    token: str
-
-
-@router.post("/games/{game_id}/replay-vote")
-async def replay_vote_route(game_id: str, req: ReplayVoteRequest) -> dict[str, Any]:
-    """Vote to replay the game. When all human players vote, game restarts."""
-    from app.api.lobby import handle_replay_vote
-    return await handle_replay_vote(game_id, req.player_id, req.token)
-
-
-@router.post("/games/{game_id}/replay-exit")
-async def replay_exit_route(game_id: str, req: ReplayExitRequest) -> dict[str, Any]:
-    """Exit the game, disabling replay for all players."""
-    from app.api.lobby import handle_replay_exit
-    return await handle_replay_exit(game_id, req.player_id, req.token)
+@router.post("/games/{game_id}/return-to-lobby")
+async def return_to_lobby_route(game_id: str, req: ReturnToLobbyRequest) -> dict[str, Any]:
+    """Return a player to the lobby after a game ends."""
+    from app.api.lobby import handle_return_to_lobby
+    return await handle_return_to_lobby(game_id, req.player_id, req.token)

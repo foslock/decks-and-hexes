@@ -165,8 +165,8 @@ cards:
         metadata: {optional: true, gates_draw: true}
 
   - id: swarm_numbers_game
-    name: Numbers Game
-    name_upgraded: Numbers Game+
+    name: Strength in Numbers
+    name_upgraded: Strength in Numbers+
     type: Claim
     buy_cost: 3
     action_return: 0
@@ -221,8 +221,8 @@ cards:
 
 
   - id: swarm_blitz_rush
-    name: Blitz Rush
-    name_upgraded: Blitz Rush+
+    name: Stampede
+    name_upgraded: Stampede+
     type: Engine
     buy_cost: 4
     action_return: 2
@@ -275,8 +275,8 @@ cards:
         timing: on_resolution
 
   - id: swarm_safety_in_numbers
-    name: Safety in Numbers
-    name_upgraded: Safety in Numbers+
+    name: Phalanx
+    name_upgraded: Phalanx+
     type: Defense
     buy_cost: 3
     action_return: 0
@@ -347,8 +347,8 @@ cards:
         metadata: {divisor_based: true, replaces_base_power: true}
 
   - id: swarm_war_trophies
-    name: War Trophies
-    name_upgraded: War Trophies+
+    name: Spoils Hoard
+    name_upgraded: Spoils Hoard+
     type: Passive
     buy_cost: 3
     action_return: 0

@@ -221,8 +221,8 @@ cards:
     trash_on_use: false
 
   - id: neutral_fortified_post
-    name: Fortified Post
-    name_upgraded: Fortified Post+
+    name: Barricade
+    name_upgraded: Barricade+
     type: Defense
     buy_cost: 3
     copies: 3
@@ -269,8 +269,8 @@ cards:
         timing: immediate
 
   - id: neutral_war_bonds
-    name: War Bonds
-    name_upgraded: War Bonds+
+    name: Tithe
+    name_upgraded: Tithe+
     type: Engine
     buy_cost: 3
     copies: 4
@@ -281,8 +281,8 @@ cards:
     trash_on_use: false
 
   - id: neutral_reduce
-    name: Reduce
-    name_upgraded: Reduce+
+    name: Cull
+    name_upgraded: Cull+
     type: Engine
     buy_cost: 1
     copies: 4
@@ -300,8 +300,8 @@ cards:
         metadata: {optional: true}
 
   - id: neutral_recruit
-    name: Recruit
-    name_upgraded: Recruit+
+    name: Levy
+    name_upgraded: Levy+
     type: Claim
     buy_cost: 2
     copies: 5
@@ -312,8 +312,8 @@ cards:
     trash_on_use: false
 
   - id: neutral_conscription
-    name: Conscription
-    name_upgraded: Conscription+
+    name: Muster
+    name_upgraded: Muster+
     type: Engine
     buy_cost: 4
     copies: 4

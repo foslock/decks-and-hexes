@@ -8,12 +8,7 @@ import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
 import { useSound } from '../audio/useSound';
-
-const TYPE_COLORS: Record<string, string> = {
-  claim: '#4a9eff',
-  defense: '#4aff6a',
-  engine: '#ffaa4a',
-};
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -195,7 +190,7 @@ function CompactShopCard({
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
-  const typeColor = TYPE_COLORS[card.card_type] || '#4a9eff';
+  const typeColor = CARD_TYPE_COLORS[card.card_type] || '#555';
   const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
   const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase

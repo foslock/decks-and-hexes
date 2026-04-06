@@ -12,6 +12,7 @@ import PhaseBanner from './PhaseBanner';
 import ResolveOverlay from './ResolveOverlay';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } from './SettingsContext';
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
@@ -33,9 +34,7 @@ interface GameScreenProps {
   isHost?: boolean;
   onLeaveGame?: () => void;
   skipIntro?: boolean;     // skip intro overlay + draw animation (e.g. reconnection)
-  replayVotes?: Set<string>;
-  replayDisabled?: boolean;
-  onReplayVotesUpdate?: (votes: Set<string>) => void;
+  removedFromLobby?: boolean;  // player was kicked from lobby while viewing game over
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -193,7 +192,7 @@ function computePlayerVpPaths(
   return result;
 }
 
-export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, localPlayerIds: localPlayerIdsProp, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, replayVotes: replayVotesProp, replayDisabled: replayDisabledProp, onReplayVotesUpdate }: GameScreenProps) {
+export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, localPlayerIds: localPlayerIdsProp, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby }: GameScreenProps) {
   // Sync player colors from game state into the shared PLAYER_COLORS map
   syncPlayerColors(gameState.players);
   const animated = useAnimated();
@@ -221,6 +220,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [showDeckViewer, setShowDeckViewer] = useState(false);
   const [showShopOverlay, setShowShopOverlay] = useState(false);
   const [showCardBrowser, setShowCardBrowser] = useState(false);
+  const [cardPackDefs, setCardPackDefs] = useState<{ id: string; name: string; neutral_card_ids: string[] | null; archetype_card_ids: Record<string, string[]> | null }[]>([]);
   const [discardingAll, setDiscardingAll] = useState(false);
   const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
   const [trashedCardIds, setTrashedCardIds] = useState<Set<string>>(new Set());
@@ -260,9 +260,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [bannerLabelOverride, setBannerLabelOverride] = useState<string | null>(null);
   // Game over state
   const [showGameOver, setShowGameOver] = useState(false);
-  const [localReplayVotes, setLocalReplayVotes] = useState<Set<string>>(new Set());
-  const replayVotes = replayVotesProp ?? localReplayVotes;
-  const replayDisabled = replayDisabledProp ?? false;
   // Settings gear dropdown state
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -285,6 +282,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const check = () => setNarrowTop(window.innerWidth < 700);
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
+  }, []);
+  // Fetch card pack definitions (once) for CardBrowser filtering
+  useEffect(() => {
+    fetch('/api/card-packs')
+      .then(r => r.json())
+      .then((d: { packs: typeof cardPackDefs }) => setCardPackDefs(d.packs))
+      .catch(() => {});
   }, []);
   // Detect mobile browser — disable double-tap shortcuts
   const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
@@ -1958,37 +1962,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [gameState.player_order, gameState.players]);
 
   // ── Game Over handlers ─────────────────────────────────────
-  const humanPlayerCount = useMemo(
-    () => gameState.player_order.filter(pid => {
-      const p = gameState.players[pid];
-      return p && !p.is_cpu && !p.has_left;
-    }).length,
-    [gameState.player_order, gameState.players],
-  );
 
-  const handleReplayVote = useCallback(async () => {
+  const handleReturnToLobby = useCallback(async () => {
     if (!mpPlayerId || !mpToken) return;
     try {
-      const result = await api.replayVote(gameState.id, mpPlayerId, mpToken);
-      if (result.votes) {
-        const votes = new Set(result.votes);
-        onReplayVotesUpdate?.(votes);
-        setLocalReplayVotes(votes);
-      }
-      // If game restarted, the game_start WS message will handle navigation
+      await api.returnToLobby(gameState.id, mpPlayerId, mpToken);
+      // The lobby_update WS message will handle screen transition
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState.id, mpPlayerId, mpToken, onReplayVotesUpdate]);
+  }, [gameState.id, mpPlayerId, mpToken]);
 
   const handleExitGame = useCallback(async () => {
-    if (isMultiplayer && mpPlayerId && mpToken) {
-      try {
-        await api.replayExit(gameState.id, mpPlayerId, mpToken);
-      } catch { /* ignore — we're leaving anyway */ }
-    }
     onLeaveGame?.();
-  }, [gameState.id, mpPlayerId, mpToken, isMultiplayer, onLeaveGame]);
+  }, [onLeaveGame]);
 
   const selectedCard = selectedCardIndex !== null ? activePlayer?.hand[selectedCardIndex] : null;
 
@@ -2706,6 +2693,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   <SettingsPanel
                     isMultiplayer={isMultiplayer}
                     isHost={mpIsHost}
+                    mapSeed={gameState.map_seed}
                     onLeaveGame={isMultiplayer && onLeaveGame ? async () => {
                       if (mpPlayerId && mpToken) {
                         try { await import('../api/client').then(api => api.leaveGame(gameState.id, mpPlayerId, mpToken)); } catch (e) { console.warn('leaveGame failed:', e); }
@@ -3339,9 +3327,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           onClose={() => setShowDeckViewer(false)}
         />
       )}
-      {showCardBrowser && (
-        <CardBrowser onClose={() => setShowCardBrowser(false)} />
-      )}
+      {showCardBrowser && (() => {
+        const pack = cardPackDefs.find(p => p.id === (gameState.card_pack || 'everything'));
+        return (
+          <CardBrowser
+            onClose={() => setShowCardBrowser(false)}
+            packNeutralIds={pack?.neutral_card_ids}
+            packArchetypeIds={pack?.archetype_card_ids}
+            packName={pack?.name}
+          />
+        );
+      })()}
 
       {/* Resolve overlay — power numbers over grid */}
       {resolving && resolutionSteps.length > 0 && !phaseBanner && !chevronRevealPhase && (
@@ -3360,7 +3356,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const POPUP_W = 180;
         const left = Math.min(reviewTilePopupPos.x + 16, window.innerWidth - POPUP_W - 12);
         const top = Math.min(reviewTilePopupPos.y - 20, window.innerHeight - cards.length * 70 - 20);
-        const REVIEW_TYPE_COLORS: Record<string, string> = { claim: '#4a9eff', defense: '#4aff6a', engine: '#ffaa4a', passive: '#aa88cc' };
+        const REVIEW_TYPE_COLORS = CARD_TYPE_COLORS;
         const REVIEW_EMOJI: Record<string, string> = { claim: '⚔️', defense: '🛡️', engine: '⚙️', passive: '📜' };
         return (
           <div style={{
@@ -3428,7 +3424,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (!rowEl) return null;
         const rect = rowEl.getBoundingClientRect();
         const POPUP_W = 180;
-        const REVIEW_TYPE_COLORS: Record<string, string> = { claim: '#4a9eff', defense: '#4aff6a', engine: '#ffaa4a', passive: '#aa88cc' };
+        const REVIEW_TYPE_COLORS = CARD_TYPE_COLORS;
         const REVIEW_EMOJI: Record<string, string> = { claim: '⚔️', defense: '🛡️', engine: '⚙️', passive: '📜' };
         return (
           <div style={{
@@ -3614,11 +3610,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           gameState={gameState}
           playerId={mpPlayerId || activePlayerId}
           isVictory={gameState.winner === (mpPlayerId || activePlayerId)}
-          replayVotes={replayVotes}
-          replayDisabled={replayDisabled}
-          humanPlayerCount={humanPlayerCount}
-          onReplayVote={handleReplayVote}
+          onReturnToLobby={handleReturnToLobby}
           onExitGame={handleExitGame}
+          isMultiplayer={isMultiplayer}
+          removedFromLobby={removedFromLobby}
         />
       )}
 

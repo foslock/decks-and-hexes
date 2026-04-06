@@ -63,12 +63,7 @@ interface CardHandProps {
   trashedCardIds?: Set<string>;
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  claim: '#4a9eff',
-  defense: '#4aff6a',
-  engine: '#ffaa4a',
-  passive: '#aa88cc',
-};
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -138,7 +133,7 @@ function Flag({ text, color }: { text: string; color: string }) {
 
 function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; shiftHeld: boolean }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
-  const color = TYPE_COLORS[displayCard.card_type] || '#555';
+  const color = CARD_TYPE_COLORS[displayCard.card_type] || '#555';
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const upgradeLabel = shiftHeld && hasUpgradePreview(card) ? (
     <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 4 }}>
@@ -1132,7 +1127,7 @@ export default function CardHand({
             if (!card) return null;
             const isBeingDragged = draggingIndex === localIdx;
             const isSelected = selectedIndex === cardIdx;
-            const typeColor = TYPE_COLORS[card.card_type] || '#555';
+            const typeColor = CARD_TYPE_COLORS[card.card_type] || '#555';
             const isDropBefore = dropTargetIndex === localIdx;
             const isDropAfter = dropTargetIndex === localOrder.length && localIdx === localOrder.length - 1;
 
@@ -1234,7 +1229,6 @@ export default function CardHand({
                       }
                     }}>
                       {card.name}
-                      {card.action_return > 0 && <>{' '}<ActionReturnBadge value={card.action_return} /></>}
                       {card.current_vp !== undefined && (
                         <span style={{
                           fontSize: 11,
@@ -1338,7 +1332,7 @@ export default function CardHand({
       {/* Drag ghost */}
       {draggingIndex !== null && dragPos && cards[localOrder[draggingIndex]] && (() => {
         const dragCard = cards[localOrder[draggingIndex]];
-        const dragColor = TYPE_COLORS[dragCard.card_type] || '#fff';
+        const dragColor = CARD_TYPE_COLORS[dragCard.card_type] || '#fff';
         return (
           <div style={{
             position: 'fixed',
@@ -1395,7 +1389,7 @@ export default function CardHand({
       {departingAnims.size > 0 && createPortal(
         <>
           {[...departingAnims.values()].flatMap(d => {
-            const typeColor = TYPE_COLORS[d.card.card_type] || '#555';
+            const typeColor = CARD_TYPE_COLORS[d.card.card_type] || '#555';
             const durMs = Math.round(500 * animSpeed);
             const fadeDurMs = Math.round(300 * animSpeed);
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import string
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -27,6 +28,7 @@ from .effect_resolver import (
     resolve_immediate_effects,
     resolve_on_resolution_effects,
 )
+from .card_packs import get_pack
 from .hex_grid import BASE_DEFENSE, GRID_CONFIG, GridSize, HexGrid, generate_hex_grid
 
 
@@ -48,6 +50,19 @@ SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33
 REROLL_COST = 2
 RETAIN_COST = 1
 UPGRADE_CREDIT_COST = 5
+
+_SEED_CHARS = string.ascii_lowercase + string.digits  # a-z0-9
+_SEED_LENGTH = 6
+
+
+def generate_map_seed() -> str:
+    """Generate a random 6-character lowercase alphanumeric seed."""
+    return "".join(random.choices(_SEED_CHARS, k=_SEED_LENGTH))
+
+
+def _seed_to_int(seed_str: str) -> int:
+    """Convert a 6-char alphanumeric seed to an integer for RNG seeding."""
+    return int(seed_str, 36)
 
 
 def tiles_per_vp(grid_size: GridSize) -> int:
@@ -291,6 +306,8 @@ class GameState:
     current_buyer_index: int = 0
     # Cards purchased by each player this round: {player_id: [{card_id, card_name, source, cost}]}
     buy_phase_purchases: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    card_pack: str = "everything"
+    map_seed: str = ""
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None) -> None:
@@ -365,6 +382,8 @@ class GameState:
                 else None
             ),
             "buy_phase_purchases": self.buy_phase_purchases,
+            "card_pack": self.card_pack,
+            "map_seed": self.map_seed,
         }
         if self.resolution_steps:
             result["resolution_steps"] = self.resolution_steps
@@ -468,13 +487,27 @@ def create_game(
     vp_target: Optional[int] = None,
     speed: str = "normal",
     granted_actions: Optional[int] = None,
+    card_pack: str = "everything",
+    map_seed: Optional[str] = None,
 ) -> GameState:
     """Create a new game with the given configuration."""
+    # Map seed: user-visible 6-char seed that controls grid layout only
+    if not map_seed:
+        if seed is not None:
+            # Derive a deterministic map seed from the game seed (for simulations)
+            _tmp = random.Random(seed)
+            map_seed = "".join(_tmp.choices(_SEED_CHARS, k=_SEED_LENGTH))
+        else:
+            map_seed = generate_map_seed()
+    grid_rng = random.Random(_seed_to_int(map_seed))
+
+    # Game RNG: random each session, controls shuffling/draws/first-player/etc.
     rng = random.Random(seed)
     num_players = len(player_configs)
 
-    game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode)
-    game.grid = generate_hex_grid(grid_size, num_players, rng)
+    game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode, card_pack=card_pack, map_seed=map_seed)
+    pack = get_pack(card_pack)
+    game.grid = generate_hex_grid(grid_size, num_players, grid_rng)
 
     # Set VP target: explicit override > dynamic computation
     if vp_target is not None:
@@ -508,6 +541,12 @@ def create_game(
             c for c in card_registry.values()
             if c.archetype == archetype and not c.starter and c.buy_cost is not None
         ]
+        # Filter by pack if it restricts this archetype's cards
+        if pack.archetype_card_ids is not None:
+            arch_ids = pack.archetype_card_ids.get(archetype.value)
+            if arch_ids is not None:
+                arch_id_set = set(arch_ids)
+                archetype_cards = [c for c in archetype_cards if c.id in arch_id_set]
         player.archetype_deck = [_copy_card(c, f"market_{j}") for j, c in enumerate(archetype_cards)]
         rng.shuffle(player.archetype_deck)
 
@@ -534,7 +573,7 @@ def create_game(
     game.first_player_index = rng.randint(0, num_players - 1)
 
     # Set up neutral market (N*2 copies per card, where N = player count)
-    _setup_neutral_market(game, card_registry, num_players)
+    _setup_neutral_market(game, card_registry, num_players, pack)
 
     game._log(f"Game created with {num_players} players on {grid_size.value} grid")
     game.current_phase = Phase.START_OF_TURN
@@ -545,15 +584,22 @@ def create_game(
 
 def _setup_neutral_market(
     game: GameState, card_registry: dict[str, Card], num_players: int,
+    pack: Any = None,
 ) -> None:
     """Set up the shared neutral market stacks.
 
     Each neutral card gets N*2 copies where N is the number of players.
+    Filtered by the active card pack's neutral_card_ids if specified.
     """
     neutral_cards = [
         c for c in card_registry.values()
         if c.archetype == Archetype.NEUTRAL and not c.starter and c.buy_cost is not None
     ]
+
+    # Filter by pack if it restricts neutral cards
+    if pack is not None and pack.neutral_card_ids is not None:
+        allowed = set(pack.neutral_card_ids)
+        neutral_cards = [c for c in neutral_cards if c.id in allowed]
 
     copies_count = num_players * 2
     for card in neutral_cards:
