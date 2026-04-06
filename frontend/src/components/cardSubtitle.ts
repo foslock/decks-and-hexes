@@ -1,21 +1,62 @@
 import type { Card } from '../types/game';
 
 /**
+ * Optional game context for resolving dynamic card values.
+ * When provided, cards like War Tithe show their resolved resource gain
+ * instead of generic text.
+ */
+export interface CardSubtitleContext {
+  /** Number of tiles the player successfully claimed last round */
+  claimsWonLastRound?: number;
+  /** Total tiles the player currently owns */
+  tileCount?: number;
+  /** Number of cards currently in the player's hand */
+  handSize?: number;
+  /** Number of cards in the player's trash pile */
+  trashCount?: number;
+  /** Total cards in the player's deck (draw + hand + discard) */
+  totalDeckCards?: number;
+  /** When true, card.power is already the frozen effective value — skip dynamic power resolution */
+  powerFrozen?: boolean;
+  /** Override for dynamic resource gain (e.g. War Tithe), snapshotted at play time */
+  effectiveResourceGain?: number;
+}
+
+/** A single segment of a card subtitle. */
+export interface SubtitlePart {
+  text: string;
+  /** True when this value was resolved from live game context (e.g. tile count). */
+  dynamic?: boolean;
+}
+
+/**
  * Build the compact stat-line parts for a card (e.g. "⚔️3 · +2💰 · 🗑️").
- * Returns an array of string segments to be joined with " · ".
+ * Returns an array of SubtitlePart segments to be joined with " · ".
  *
  * This is the single source of truth for card subtitle rendering —
  * used by ShopOverlay, CardBrowser, CardHand, MarketPanel, GameScreen, etc.
+ *
+ * When `ctx` is provided, dynamic values (e.g. War Tithe resource gain,
+ * tile-scaling power) are resolved to their current effective values.
  */
-export function buildCardSubtitle(card: Card): string[] {
-  const parts: string[] = [];
+export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): SubtitlePart[] {
+  const parts: SubtitlePart[] = [];
   const isUpgraded = card.is_upgraded;
+
+  const p = (text: string, dynamic?: boolean): SubtitlePart =>
+    dynamic ? { text, dynamic: true } : { text };
 
   // VP
   if (card.passive_vp !== undefined && card.passive_vp !== 0) {
-    parts.push(`${card.passive_vp > 0 ? '+' : ''}${card.passive_vp}★`);
+    parts.push(p(`${card.passive_vp > 0 ? '+' : ''}${card.passive_vp}★`));
   } else if (card.vp_formula) {
-    parts.push('+★');
+    // Try to resolve dynamic VP from context
+    const resolvedVP = ctx ? _resolveVPFormula(card, ctx) : undefined;
+    if (resolvedVP !== undefined && resolvedVP > 0) {
+      parts.push(p(`${resolvedVP}★`, true));
+    } else {
+      parts.push(p('+★'));
+    }
   }
 
   // Defense cards
@@ -27,19 +68,19 @@ export function buildCardSubtitle(card: Card): string[] {
     const dtc = card.defense_target_count || 1;
     const tileSuffix = dtc >= 2 ? ` · ${dtc}🔷` : '';
     if (hasImmunity) {
-      parts.push('Immune');
+      parts.push(p('Immune'));
     } else if (hasPerAdj) {
       const mod = card.effects?.find(e => e.type === 'defense_per_adjacent');
       const perVal = mod ? (isUpgraded ? (mod.upgraded_value ?? mod.value) : mod.value) : 1;
-      parts.push(`🛡️${perVal}+${tileSuffix}`);
+      parts.push(p(`🛡️${perVal}+${tileSuffix}`));
     } else if (hasPermanent) {
       const mod = card.effects?.find(e => e.type === 'permanent_defense');
       const permVal = mod
         ? (isUpgraded ? ((mod.metadata?.upgraded_value as number) ?? mod.value) : mod.value)
         : defBase;
-      parts.push(`🛡️${permVal}${tileSuffix}`);
+      parts.push(p(`🛡️${permVal}${tileSuffix}`));
     } else if (defBase > 0) {
-      parts.push(`🛡️${defBase}${tileSuffix}`);
+      parts.push(p(`🛡️${defBase}${tileSuffix}`));
     }
   } else if (card.power > 0 || card.card_type === 'claim') {
     // Claim / power cards
@@ -53,17 +94,42 @@ export function buildCardSubtitle(card: Card): string[] {
     );
     const mtc = 1 + (card.multi_target_count || 0);
     const claimTileSuffix = mtc >= 2 ? ` · ${mtc}🔷` : '';
-    if (isUnbounded) {
-      const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
-      const minPow = handMod
-        ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
-        : card.power;
-      parts.push(`⚔️${minPow}+${claimTileSuffix}`);
+    const stackIcon = card.stackable ? '↑' : '';
+
+    if (ctx?.powerFrozen) {
+      // Power already overridden with effective value — show as-is
+      parts.push(p(`⚔️${card.power}${stackIcon}${claimTileSuffix}`));
+    } else if (hasTileScaling && ctx?.tileCount !== undefined) {
+      // Resolve tile-scaling power (Mob Rule, Locust Swarm)
+      const tileEff = card.effects?.find(e => e.type === 'power_per_tiles_owned');
+      if (tileEff) {
+        const divisor = isUpgraded ? (tileEff.upgraded_value ?? tileEff.value) : tileEff.value;
+        const replaces = tileEff.metadata?.replaces_base_power;
+        const scaledPow = Math.floor(ctx.tileCount / divisor);
+        const totalPow = replaces ? scaledPow : card.power + scaledPow;
+        parts.push(p(`⚔️${totalPow}${stackIcon}${claimTileSuffix}`, totalPow > 0));
+      } else {
+        parts.push(p(`⚔️${card.power}+${stackIcon}${claimTileSuffix}`));
+      }
+    } else if (isUnbounded) {
+      if (powerMods.some(e => e.condition === 'cards_in_hand') && ctx?.handSize !== undefined) {
+        // Resolve hand-size power (Strength in Numbers)
+        const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
+        const bonus = isUpgraded ? (handMod?.upgraded_value ?? handMod?.value ?? 0) : (handMod?.value ?? 0);
+        const handPow = Math.max(0, ctx.handSize - 1) + bonus;
+        parts.push(p(`⚔️${handPow}${stackIcon}${claimTileSuffix}`, handPow > 0));
+      } else {
+        const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
+        const minPow = handMod
+          ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
+          : card.power;
+        parts.push(p(`⚔️${minPow}+${stackIcon}${claimTileSuffix}`));
+      }
     } else if (fixedBonus) {
       const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
-      parts.push(`⚔️${card.power}/${card.power + bonusVal}${claimTileSuffix}`);
+      parts.push(p(`⚔️${card.power}/${card.power + bonusVal}${stackIcon}${claimTileSuffix}`));
     } else {
-      parts.push(`⚔️${card.power}${claimTileSuffix}`);
+      parts.push(p(`⚔️${card.power}${stackIcon}${claimTileSuffix}`));
     }
   }
 
@@ -71,44 +137,130 @@ export function buildCardSubtitle(card: Card): string[] {
   if (card.effects) {
     for (const eff of card.effects) {
       if (eff.type === 'grant_stackable') {
-        parts.push('⚙️');
-        if (isUpgraded) parts.push('+⚔️');
+        parts.push(p(isUpgraded ? '⚔️+1↑' : '⚔️↑'));
       }
     }
   }
 
-  // Stat icons
-  if (card.resource_gain > 0) parts.push(`+${card.resource_gain}💰`);
-  if (card.draw_cards > 0) parts.push(`+${card.draw_cards}🃏`);
-  if (card.action_return > 0) parts.push(`+${card.action_return}⚡`);
-  if (card.forced_discard > 0) parts.push(`🎯-${card.forced_discard}🃏`);
+  // Stat icons (defer resource_gain for self_discard cards — shown after discard+action)
+  const hasSelfDiscard = card.effects?.some(e => e.type === 'self_discard');
+  if (card.resource_gain > 0 && !hasSelfDiscard) parts.push(p(`+${card.resource_gain}💰`));
+
+  // Dynamic resource gain (War Tithe: resources per claims last round)
+  if (card.effects) {
+    const warTitheEff = card.effects.find(e => e.type === 'resources_per_claims_last_round');
+    if (warTitheEff) {
+      if (ctx?.effectiveResourceGain !== undefined) {
+        // Use frozen snapshot from play time
+        const gained = ctx.effectiveResourceGain;
+        parts.push(p(`${gained}💰`, gained > 0));
+      } else if (ctx?.claimsWonLastRound !== undefined) {
+        const perClaim = isUpgraded ? (warTitheEff.upgraded_value ?? warTitheEff.value) : warTitheEff.value;
+        const maxRes = (isUpgraded
+          ? (warTitheEff.metadata?.upgraded_max_resources as number)
+          : (warTitheEff.metadata?.max_resources as number)) ?? 999;
+        const gained = Math.min(ctx.claimsWonLastRound * perClaim, maxRes);
+        parts.push(p(`${gained}💰`, gained > 0));
+      } else {
+        // No context — show range
+        const maxRes = (isUpgraded
+          ? (warTitheEff.metadata?.upgraded_max_resources as number)
+          : (warTitheEff.metadata?.max_resources as number)) ?? '?';
+        parts.push(p(`0-${maxRes}💰`));
+      }
+    }
+  }
+
+  // Check if card has a trash-conditional effect (self_trash or trash_gain_buy_cost)
+  // These cards use "✂️N → bonuses" format where bonuses are conditional on trashing
+  const trashEffect = card.effects?.find(e => e.type === 'self_trash' || e.type === 'trash_gain_buy_cost');
+  const hasTrashConditional = !!trashEffect;
+
+  // For trash-conditional cards, draw/action are shown after the → arrow, not here
+  // For draw_per_connected_vp cards (Toll Road), draw_cards is dynamic — skip flat display
+  const hasDrawPerVP = card.effects?.some(e => e.type === 'draw_per_connected_vp');
+  // Defer action icon when a later effect should appear first (to match description order)
+  const hasDelayedDraw = card.effects?.some(e => e.type === 'draw_next_turn' || e.type === 'cease_fire');
+  const deferAction = hasDelayedDraw || hasSelfDiscard;
+  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP) parts.push(p(`+${card.draw_cards}🃏`));
+  if (card.action_return > 0 && !hasTrashConditional && !deferAction) parts.push(p(`+${card.action_return}⚡`));
+  if (card.forced_discard > 0) parts.push(p(`🎯-${card.forced_discard}🃏`));
 
   // Effect-based icons
   if (card.effects) {
     for (const eff of card.effects) {
       if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        parts.push(`✂️${val}`);
+        // Build conditional bonuses after →
+        const conditionalParts: string[] = [];
         if (eff.type === 'trash_gain_buy_cost') {
           const bonus = isUpgraded && eff.metadata?.upgrade_bonus ? Number(eff.metadata.upgrade_bonus) : 0;
-          parts.push(bonus > 0 ? `${bonus}+💰` : '+💰');
+          conditionalParts.push(bonus > 0 ? `${bonus}+💰` : '+💰');
+        }
+        if (card.draw_cards > 0) conditionalParts.push(`+${card.draw_cards}🃏`);
+        if (eff.type !== 'trash_gain_buy_cost' && card.action_return > 0) conditionalParts.push(`+${card.action_return}⚡`);
+        if (conditionalParts.length > 0) {
+          parts.push(p(`✂️${val} → ${conditionalParts.join(', ')}`));
+        } else {
+          parts.push(p(`✂️${val}`));
+        }
+      }
+      if (eff.type === 'self_discard') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        parts.push(p(`🃏↘${val}`));
+        // Emit deferred action + resource icons after discard (e.g. Regroup: +2🃏 · 🃏↘1 · +1⚡)
+        if (card.action_return > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.action_return}⚡`));
+        }
+        if (card.resource_gain > 0) {
+          parts.push(p(`+${card.resource_gain}💰`));
         }
       }
       if (eff.type === 'gain_resources' && eff.condition) {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        if (val > 0) parts.push(`+${val}💰`);
+        if (val > 0) parts.push(p(`+${val}💰`));
       }
       if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        parts.push(`+${val}⏰🃏`);
+        parts.push(p(`+${val}⏰🃏`));
+        // Emit deferred action icon after delayed draw (e.g. Plunder: +3💰 · +1⏰🃏 · +1⚡)
+        if (hasDelayedDraw && card.action_return > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.action_return}⚡`));
+        }
       }
-      if (eff.type === 'enhance_vp_tile') parts.push('🔷+★');
-      if (eff.type === 'free_reroll' || eff.type === 'grant_land_grants') parts.push('⚙️');
+      if (eff.type === 'enhance_vp_tile') parts.push(p('🔷+★'));
+      if (eff.type === 'draw_per_connected_vp') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        parts.push(p(`+${val}🃏/★🔷`));
+      }
+      if (eff.type === 'free_reroll') parts.push(p('+1🎲'));
+      if (eff.type === 'grant_land_grants') {
+        parts.push(p(isUpgraded ? '↓2🃏' : '↓🃏'));
+        parts.push(p('↑🃏'));
+      }
     }
   }
 
   // Trash on use
-  if (card.trash_on_use) parts.push('🗑️');
+  if (card.trash_on_use) parts.push(p('🗑️'));
 
   return parts;
+}
+
+/** Resolve a VP formula to a concrete number given game context. */
+function _resolveVPFormula(card: Card, ctx: CardSubtitleContext): number | undefined {
+  const formula = card.vp_formula;
+  const isUpgraded = card.is_upgraded;
+
+  if (formula === 'trash_div_5' && ctx.trashCount !== undefined) {
+    const divisor = isUpgraded ? 4 : 5;
+    return Math.floor(ctx.trashCount / divisor);
+  }
+  if (formula === 'deck_div_10' && ctx.totalDeckCards !== undefined) {
+    const divisor = isUpgraded ? 8 : 10;
+    return Math.floor(ctx.totalDeckCards / divisor);
+  }
+  // Colony, Warden, Ironclad — complex formulas that depend on board state
+  // not easily resolved client-side; leave as generic +★
+  return undefined;
 }

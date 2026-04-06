@@ -10,6 +10,9 @@ When committing changes, bump the patch version in the relevant file(s):
 
 Bump frontend version when frontend files change, backend version when backend files change, both when both change. Use semver patch bumps (e.g. 0.1.0 → 0.1.1).
 
+## Safety Rules
+- **NEVER run `git checkout` on files without explicit manual approval from the user.** This is a destructive operation that discards uncommitted work.
+
 ## Development Commands
 
 ### Backend (Python)
@@ -93,16 +96,16 @@ Bump frontend version when frontend files change, backend version when backend f
 - Active player must name target opponent when card is played
 - Never from current hand
 
-### Starting Decks (10 cards each, cycles once before first purchase appears)
-| Archetype | Archetype Cards | Explore | Gather | Total | Hand Size | Action Slots |
-|---|---|---|---|---|---|---|
-| Vanguard | 2× War Chest | 4 | 4 | 10 | 5 | 3 |
-| Swarm | 2× Scout | 5 | 3 | 10 | 5 | 3 |
-| Fortress | 2× Bunker | 3 | 5 | 10 | 5 | 3 |
+### Starting Decks (10 cards each, uniform across all archetypes)
+| Archetype | Explore | Gather | Total | Hand Size | Action Slots |
+|---|---|---|---|---|---|
+| Vanguard | 5 | 5 | 10 | 5 | 5 |
+| Swarm | 5 | 5 | 10 | 5 | 5 |
+| Fortress | 5 | 5 | 10 | 5 | 5 |
 
 ### Explore & Gather (starter cards — NOT purchasable from market)
 - **Explore:** Claim: Power 1 on any adjacent tile
-- **Gather:** Gain 2 resources
+- **Gather:** Gain 1 resource
 
 ### Objectives
 - Revealed at end of round 3 (Small), 4 (Medium), or 5 (Large)
@@ -180,7 +183,7 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Re-roll cost: **2 resources**
 - Retain cost: **1 resource**
 - Upgrade credit cost: **5 resources**
-- Starting resources: **3**
+- Starting resources: **0**
 - Action slot hard cap: **6**
 - Objective VP reward: **2**
 - Objective reveal rounds: **3 / 4 / 5** (Small / Medium / Large)

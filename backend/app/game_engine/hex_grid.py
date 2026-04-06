@@ -47,6 +47,7 @@ class HexTile:
     base_defense: int = 0  # intrinsic defense set at generation; defense resets to this on capture
     permanent_defense_bonus: int = 0  # Entrench: persists until tile is captured
     held_since_turn: Optional[int] = None  # track when ownership started
+    capture_count: int = 0  # number of times this tile has changed hands between players
     is_base: bool = False  # True for starting corner tiles (permanently owned)
     base_owner: Optional[str] = None  # player_id of the base's permanent owner
 
@@ -180,6 +181,7 @@ def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
         "defense_power": tile.defense_power,
         "base_defense": tile.base_defense,
         "held_since_turn": tile.held_since_turn,
+        "capture_count": tile.capture_count,
         "is_base": tile.is_base,
         "base_owner": tile.base_owner,
     }

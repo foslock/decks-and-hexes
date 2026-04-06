@@ -7,6 +7,7 @@ import CardFull, { CARD_FULL_WIDTH } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
+import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
 import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
@@ -48,6 +49,8 @@ interface ShopOverlayProps {
   buyPhasePurchases?: Record<string, Array<{ card_id: string; card_name: string; source: string; cost: number }>>;
   /** Player map for looking up names */
   players?: Record<string, { name: string }>;
+  /** Number of free re-rolls remaining (from Surveyor) */
+  freeRerolls?: number;
 }
 
 interface HoverState {
@@ -137,6 +140,7 @@ function FullShopCard({
         onClick={onBuy}
         disabled={disabled || !canAfford}
         tooltip={buyTooltip}
+        tooltipDelay={upkeepWarning ? 0 : undefined}
         style={{
           width: CARD_FULL_WIDTH,
           padding: '4px 0',
@@ -248,11 +252,7 @@ function CompactShopCard({
               el.style.setProperty('--sub-scale', String(scale));
             }
           }}>
-          {buildCardSubtitle(card).map((part, i) => {
-            const isVp = part.endsWith('★');
-            const vpColor = card.passive_vp !== undefined && card.passive_vp < 0 ? '#ff6666' : '#ffd700';
-            return <span key={i} style={isVp ? { color: vpColor } : undefined}>{i > 0 ? ' · ' : ''}{part}</span>;
-          })}
+          {buildCardSubtitle(card).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp }))}
           </span>
         </div>
       </div>
@@ -261,6 +261,7 @@ function CompactShopCard({
         onClick={onBuy}
         disabled={disabled || !canAfford}
         tooltip={buyTooltip}
+        tooltipDelay={upkeepWarning ? 0 : undefined}
         style={{
           width: COMPACT_CARD_WIDTH,
           padding: '3px 0',
@@ -298,6 +299,7 @@ export default function ShopOverlay({
   currentPlayerId,
   buyPhasePurchases,
   players,
+  freeRerolls = 0,
 }: ShopOverlayProps) {
   const [fullView, setFullViewRaw] = useState(() => shopViewMemory ?? false);
   const setFullView = useCallback((v: boolean) => { setFullViewRaw(v); shopViewMemory = v; }, []);
@@ -552,21 +554,25 @@ export default function ShopOverlay({
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
-                <Tooltip content="Re-rolling replaces your market cards and spends 2 resources.">
+                <Tooltip content={freeRerolls > 0
+                  ? `You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`
+                  : 'Re-rolling replaces your market cards and spends 2 resources.'
+                }>
                   <button
                     onClick={onReroll}
-                    disabled={disabled || (!testMode && playerResources < 2)}
+                    disabled={disabled || (!testMode && freeRerolls <= 0 && playerResources < 2)}
                     style={{
                       fontSize: 11,
                       padding: '2px 8px',
-                      background: '#2a2a3e',
-                      border: '1px solid #555',
+                      background: freeRerolls > 0 ? '#2a5a2e' : '#2a2a3e',
+                      border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : '#555'}`,
                       borderRadius: 4,
-                      color: (testMode || playerResources >= 2) && !disabled ? '#fff' : '#555',
-                      cursor: disabled || (!testMode && playerResources < 2) ? 'not-allowed' : 'pointer',
+                      color: (testMode || freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
+                      cursor: disabled || (!testMode && freeRerolls <= 0 && playerResources < 2) ? 'not-allowed' : 'pointer',
+                      ...(freeRerolls > 0 && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
                     }}
                   >
-                    Re-roll (2💰)
+                    {freeRerolls > 0 ? `Re-roll (${freeRerolls} free)` : 'Re-roll (2💰)'}
                   </button>
                 </Tooltip>
               </div>

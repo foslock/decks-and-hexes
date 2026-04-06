@@ -66,6 +66,7 @@ CARD_PACKS: dict[str, CardPack] = {
                 "vanguard_spoils_of_war",      # trashes opponent's card
                 "vanguard_war_cache",          # economy + action engine
                 "vanguard_counterattack",      # defensive draw engine
+                "vanguard_war_tithe",          # resources from last round's claims
             ],
             "swarm": [
                 "swarm_surge",                 # multi-target aggression
@@ -121,6 +122,7 @@ CARD_PACKS: dict[str, CardPack] = {
                 "vanguard_rearguard",          # defense + economy
                 "vanguard_battle_glory",       # VP from contested wins
                 "vanguard_arsenal",            # VP from deck size
+                "vanguard_war_tithe",          # resources from last round's claims
             ],
             "swarm": [
                 "swarm_surge",                 # multi-target expansion
@@ -133,6 +135,7 @@ CARD_PACKS: dict[str, CardPack] = {
                 "swarm_consecrate",            # enhance VP tile value
                 "swarm_nest",                  # adjacency defense
                 "swarm_war_trophies",          # VP from trashed cards
+                "swarm_colony",               # VP from disconnected groups
             ],
             "fortress": [
                 "fortress_slow_advance",       # auto-claim neutrals
@@ -143,8 +146,9 @@ CARD_PACKS: dict[str, CardPack] = {
                 "fortress_stronghold",         # tile immunity 2 rounds
                 "fortress_twin_cities",        # massive permanent defense
                 "fortress_supply_line",        # economy engine
-                "fortress_diplomacy",          # Land Grants for VP
+                "fortress_toll_road",          # draw per connected VP hex
                 "fortress_fortified_position", # VP from defense stacking
+                "fortress_warden",            # VP from uncaptured tiles
             ],
         },
     ),

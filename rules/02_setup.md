@@ -38,13 +38,13 @@ Multiple players may choose the same archetype.
 
 ### Starting Deck Composition
 
-| Archetype | Archetype Cards | Advance | Gather | Total | Hand Size | Action Slots |
-|---|---|---|---|---|---|---|
-| Vanguard | 2× Blitz | 4 | 2 | 8 | 4 | 4 |
-| Swarm | 2× Scout, 1× Swarm Tactics | 5 | 2 | 10 | 5 | 4 |
-| Fortress | 1× Garrison, 1× Fortify | 2 | 2 | 6 | 3 | 3 |
+All archetypes start with the same 10-card deck:
 
-Advance (Claim: Power 1 on any adjacent tile) and Gather (Gain 2 resources) are shared starter cards present in every archetype's starting deck. They establish a common baseline before archetype identity takes over. The deck is sized at exactly 2 × hand size so it cycles once before any purchased card can appear.
+| Explore | Gather | Total | Hand Size | Action Slots |
+|---|---|---|---|---|
+| 5 | 5 | 10 | 5 | 5 |
+
+Explore (Claim: Power 1 on any adjacent tile) and Gather (Gain 1 resource) are shared starter cards present in every archetype's starting deck. They establish a common baseline before archetype identity takes over via market purchases. The deck is sized at exactly 2 × hand size so it cycles once before any purchased card can appear.
 
 ## Step 6: Prepare the Markets
 

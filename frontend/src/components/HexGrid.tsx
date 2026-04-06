@@ -207,10 +207,11 @@ const ARCHETYPE_LABELS: Record<string, string> = {
 
 import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
-function PlannedCardTooltip({ card, x, y }: { card: Card; x: number; y: number }) {
+function PlannedCardTooltip({ card, x, y, totalPower, displayName }: { card: Card; x: number; y: number; totalPower?: number; displayName?: string }) {
   const typeColor = CARD_TYPE_COLORS[card.card_type] || '#888';
   const parts: string[] = [];
-  if (card.power > 0) parts.push(`Power ${card.power}`);
+  const displayPower = totalPower ?? card.power;
+  if (displayPower > 0) parts.push(`Power ${displayPower}`);
   if (card.resource_gain > 0) parts.push(`+${card.resource_gain} Res`);
   if (card.draw_cards > 0) parts.push(`+${card.draw_cards} Card${card.draw_cards !== 1 ? 's' : ''}`);
   if (card.defense_bonus > 0) parts.push(`+${card.defense_bonus} Def`);
@@ -245,7 +246,16 @@ function PlannedCardTooltip({ card, x, y }: { card: Card; x: number; y: number }
           </span>
         )}
       </div>
-      <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 4 }}>{card.name}</div>
+      <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+          if (el) {
+            const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+            el.style.setProperty('--title-scale', String(scale));
+          }
+        }}>
+          {displayName ?? card.name}
+        </span>
+      </div>
       {parts.length > 0 && (
         <div style={{ fontSize: 10, color: '#aaa', marginBottom: card.description ? 5 : 0 }}>
           {parts.join(' · ')}
@@ -290,13 +300,15 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const hexContainerRef = useRef<Container | null>(null);
   const vpPathGraphicsRef = useRef<Graphics | null>(null);
   const vpInsertIndexRef = useRef<number>(0);
+  const highlightGlowRef = useRef<Graphics | null>(null);
+  const highlightEdgesRef = useRef<Graphics[]>([]);
   const hoveredTileRef = useRef<string | null>(null);
   const hoverEdgeGraphicsRef = useRef<Graphics | null>(null);
   const previewLabelRef = useRef<Text | null>(null);
   const tileLabelRef = useRef<Map<string, Text>>(new Map());
   const hiddenLabelKeyRef = useRef<string | null>(null);
   const tileGraphicsRef = useRef<Map<string, { g: Graphics; baseColor: number; isBlocked: boolean; baseAlpha: number }>>(new Map());
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card } | null>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card; totalPower?: number; displayName?: string } | null>(null);
   const tooltipsEnabled = useTooltips();
   const tooltipsEnabledRef = useRef(tooltipsEnabled);
   tooltipsEnabledRef.current = tooltipsEnabled;
@@ -428,6 +440,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     };
 
     // === PASS 1: Glow rings for highlighted tiles (behind fills) ===
+    // Stored in ref so the Pixi ticker can pulse its alpha
+    highlightGlowRef.current = null;
     if (highlights && highlights.size > 0) {
       const glowG = new Graphics();
       for (const key of highlights) {
@@ -439,6 +453,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         glowG.fill();
       }
       hexContainer.addChild(glowG);
+      highlightGlowRef.current = glowG;
     }
 
     // === PASS 2: Hex fills (no stroke) ===
@@ -557,7 +572,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         // Planned action card tooltip (always shown — critical gameplay info)
         const plannedAction = plannedActionsRef.current?.get(key);
         if (plannedAction) {
-          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card });
+          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name });
         } else if (tooltipsEnabledRef.current) {
           // Non-critical info tooltips (gated by Tooltips setting)
           const lines: string[] = [];
@@ -565,9 +580,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             lines.push('This tile cannot be claimed.');
           } else {
             if (tile.is_base) {
-              lines.push(`Base tile — Defense ${tile.defense_power}. Cannot be captured, but can be raided for Rubble.`);
+              lines.push(`Base tile — Defense ${tile.defense_power}. Can be raided for Spoils and Rubble.`);
             } else if (tile.is_vp) {
-              lines.push(`VP hex — adds ${tile.vp_value} bonus VP when connected to your base.`);
+              lines.push(`VP hex — worth ${tile.vp_value} VP when connected to your base.`);
             }
             if (tile.defense_power > 0) {
               lines.push(`Claiming this tile requires at least ${tile.defense_power} power.`);
@@ -791,7 +806,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       hexContainer.addChild(vpEdgeG);
     }
 
-    // === PASS 4: Highlighted tile outlines ===
+    // === PASS 4: Highlighted tile outlines (pulsed via ticker) ===
+    highlightEdgesRef.current = [];
     if (highlights && highlights.size > 0) {
       if (building) {
         // Per-tile outlines during build animation
@@ -813,6 +829,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           g.stroke();
           g.alpha = tAlpha;
           hexContainer.addChild(g);
+          highlightEdgesRef.current.push(g);
         }
       } else {
         const hlEdgeG = new Graphics();
@@ -831,6 +848,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         }
         hlEdgeG.stroke();
         hexContainer.addChild(hlEdgeG);
+        highlightEdgesRef.current.push(hlEdgeG);
       }
     }
 
@@ -1057,6 +1075,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             fill: starColor,
             letterSpacing: isPremium ? 1 : 0,
             fontWeight: 'bold',
+            ...(tile.owner ? { stroke: { color: 0x000000, width: 1 } } : {}),
           }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
@@ -1218,7 +1237,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           // Breathing pulse (or steady if noPulse)
           const breathe = path.noPulse ? 0.7 : 0.5 + 0.5 * Math.sin((time / PULSE_PERIOD) * Math.PI * 2);
           const pulseAlpha = path.noPulse ? path.alpha * 0.75 : path.alpha * (0.20 + 0.80 * breathe);
-          const pulseWidth = path.noPulse ? 3 : 2.5 + 1.5 * breathe;
+          const pulseWidth = path.noPulse ? 4.5 : 3.5 + 2 * breathe;
 
           // Convert hex coords to pixel positions
           const pts = path.points.map(([q, r]) => axialToPixel(q, r));
@@ -1257,6 +1276,25 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         }
       };
       app.ticker.add(vpTickerFn);
+
+      // Highlight pulse ticker (yellow outlines + glow on selectable tiles)
+      const highlightPulseFn = () => {
+        const t = performance.now() / 1000;
+
+        const glowG = highlightGlowRef.current;
+        if (glowG) {
+          glowG.alpha = 0.6 + 0.4 * Math.sin(t * 3);
+        }
+
+        const edges = highlightEdgesRef.current;
+        if (edges.length > 0) {
+          const edgeBreathe = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 4));
+          for (const edgeG of edges) {
+            edgeG.alpha = edgeBreathe;
+          }
+        }
+      };
+      app.ticker.add(highlightPulseFn);
 
       // Re-fit whenever the canvas is resized
       app.renderer.on('resize', fitGrid);
@@ -1310,10 +1348,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     }
     container.addChild(g);
 
-    const pulseTickerFn = () => {
+    const reviewPulseFn = () => {
+      const t = performance.now() / 1000;
       const pulseSet = reviewPulseTilesRef.current;
       if (!pulseSet || pulseSet.size === 0) { g!.clear(); return; }
-      const t = performance.now() / 1000;
       const alpha = 0.3 + 0.4 * (0.5 + 0.5 * Math.sin(t * 2.5));
       g!.clear();
       g!.setStrokeStyle({ width: 3, color: 0xffffff, alpha, cap: 'round' });
@@ -1325,10 +1363,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       }
       g!.stroke();
     };
-    app.ticker.add(pulseTickerFn);
+    app.ticker.add(reviewPulseFn);
 
     return () => {
-      app.ticker.remove(pulseTickerFn);
+      app.ticker.remove(reviewPulseFn);
       if (reviewPulseGraphicsRef.current && container) {
         container.removeChild(reviewPulseGraphicsRef.current);
         reviewPulseGraphicsRef.current.destroy();
@@ -1344,7 +1382,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
       />
       {tooltip && tooltip.card && (
-        <PlannedCardTooltip card={tooltip.card} x={tooltip.x} y={tooltip.y} />
+        <PlannedCardTooltip card={tooltip.card} x={tooltip.x} y={tooltip.y} totalPower={tooltip.totalPower} displayName={tooltip.displayName} />
       )}
       {tooltip && tooltip.text && (
         <div style={{

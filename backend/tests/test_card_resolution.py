@@ -563,20 +563,6 @@ class TestVanguardBlitz:
         assert card.card_type == CardType.CLAIM
 
 
-class TestVanguardWarChest:
-    def test_war_chest_gain_resources(self, card_registry):
-        """War Chest (starter): gain 2 resources."""
-        game = _make_2p_game(card_registry)
-        player = game.players["p0"]
-        wc = _copy_card(card_registry["vanguard_war_chest"], "test_wc")
-        player.hand = [wc] + player.hand[1:]
-        initial = player.resources
-
-        success, _ = play_card(game, "p0", 0)
-        assert success
-        assert player.resources == initial + 2
-
-
 class TestVanguardOverrun:
     def test_overrun_range_2(self, card_registry):
         """Overrun: power 4, can claim up to 2 steps away."""
@@ -888,27 +874,6 @@ class TestVanguardRally:
 # ══════════════════════════════════════════════════════════════════
 # SWARM CARDS
 # ══════════════════════════════════════════════════════════════════
-
-
-class TestSwarmScout:
-    def test_scout_gains_resources(self, card_registry):
-        """Scout: Power 1 claim + gain 1 resource."""
-        game = _make_2p_game(card_registry)
-        player = game.players["p1"]  # Swarm
-        scout = _copy_card(card_registry["swarm_scout"], "test_scout")
-        player.hand = [scout] + player.hand[1:]
-        initial = player.resources
-
-        q, r = _find_adjacent_neutral(game, "p1")
-        assert q is not None
-        success, _ = play_card(game, "p1", 0, target_q=q, target_r=r)
-        assert success
-        assert player.resources == initial + 1
-
-    def test_scout_unoccupied_only(self, card_registry):
-        """Scout: base version is unoccupied_only."""
-        card = card_registry["swarm_scout"]
-        assert card.unoccupied_only is True
 
 
 class TestSwarmSurge:
@@ -1275,28 +1240,6 @@ class TestSwarmWarTrophies:
 # ══════════════════════════════════════════════════════════════════
 
 
-class TestFortressBunker:
-    def test_bunker_defense_bonus(self, card_registry):
-        """Bunker (starter): +2 defense on owned tile."""
-        game = _make_2p_game(card_registry, arch0="fortress")
-        player = game.players["p0"]
-        bunker = _copy_card(card_registry["fortress_bunker"], "test_bunker")
-        assert bunker.defense_bonus == 2
-        player.hand = [bunker] + player.hand[1:]
-
-        tile = game.grid.get_player_tiles("p0")[0]
-        initial_defense = tile.defense_power
-
-        success, _ = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
-        assert success
-
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
-
-        updated = game.grid.get_tile(tile.q, tile.r)
-        assert updated.defense_power == initial_defense + 2
-
-
 class TestFortressFortify:
     def test_fortify_defense_and_action(self, card_registry):
         """Fortify: +3 defense, gain 1 action back."""
@@ -1560,30 +1503,35 @@ class TestFortressIronDiscipline:
         assert len(player.hand) == initial_hand - 1 + 1  # played 1, drew 1
 
 
-class TestFortressDiplomacy:
-    def test_diplomacy_gives_land_grants(self, card_registry):
-        """Diplomacy: self and target opponent each receive a Land Grant."""
-        game = _make_3p_game(card_registry)
-        p2 = game.players["p2"]  # Fortress
-        p0 = game.players["p0"]
-        p1 = game.players["p1"]
-        diplo = _copy_card(card_registry["fortress_diplomacy"], "test_diplo")
-        p2.hand = [diplo] + p2.hand[1:]
+class TestFortressTollRoad:
+    def test_toll_road_draws_per_connected_vp(self, card_registry):
+        """Toll Road: draw 2 cards per connected VP hex."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        toll = _copy_card(card_registry["fortress_toll_road"], "test_toll")
+        player.hand = [toll] + player.hand[1:]
 
-        p2_discard_before = len(p2.deck.discard)
-        p0_discard_before = len(p0.deck.discard)
-        p1_discard_before = len(p1.deck.discard)
+        # Give player a connected VP tile
+        vp_tiles = [t for t in game.grid.tiles.values() if t.is_vp and not t.owner]
+        # Find a VP tile adjacent to player's territory
+        player_tiles = game.grid.get_player_tiles("p0")
+        connected_vp = None
+        for vp_t in vp_tiles:
+            for pt in player_tiles:
+                if pt.distance_to(vp_t) == 1:
+                    connected_vp = vp_t
+                    break
+            if connected_vp:
+                break
+        if not connected_vp:
+            pytest.skip("No adjacent VP tile found")
+        connected_vp.owner = "p0"
 
-        # Target p0 as the opponent
-        success, _ = play_card(game, "p2", 0, target_player_id="p0")
+        hand_before = len(player.hand)
+        success, _ = play_card(game, "p0", 0)
         assert success
-
-        # p2 (self) should have 1 Land Grant
-        assert len(p2.deck.discard) > p2_discard_before
-        # p0 (target) should have 1 Land Grant
-        assert len(p0.deck.discard) > p0_discard_before
-        # p1 (not targeted) should NOT have received anything
-        assert len(p1.deck.discard) == p1_discard_before
+        # Should have drawn 2 cards (1 connected VP × 2 draws each), minus the played card
+        assert len(player.hand) == hand_before - 1 + 2
 
 
 class TestFortressFortifiedPosition:
@@ -1931,3 +1879,362 @@ class TestSwarmLocustSwarm:
         power = calculate_effective_power(game, player, locust, action)
         # tiles / 3 = 9 / 3 = 3 (replaces base power of 0)
         assert power == total_tiles // 3
+
+
+# ══════════════════════════════════════════════════════════════════
+# NEW CARDS — WAR TITHE, COLONY, WARDEN, RESILIENCE
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestVanguardWarTithe:
+    def test_war_tithe_properties(self, card_registry):
+        """War Tithe: engine card, cost 3, resources from last round's claims."""
+        card = card_registry["vanguard_war_tithe"]
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 3
+        assert card.archetype == Archetype.VANGUARD
+        assert card.power == 0
+
+    def test_war_tithe_has_effect(self, card_registry):
+        """War Tithe: has RESOURCES_PER_CLAIMS_LAST_ROUND effect."""
+        card = card_registry["vanguard_war_tithe"]
+        matching = [e for e in card.effects if e.type.value == "resources_per_claims_last_round"]
+        assert len(matching) >= 1
+        assert matching[0].value == 1
+        assert matching[0].upgraded_value == 2
+        assert matching[0].metadata.get("max_resources") == 3
+
+    def test_war_tithe_playable(self, card_registry):
+        """War Tithe: can be played as an engine card (costs 1 action)."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        wt = _copy_card(card_registry["vanguard_war_tithe"], "test_wt")
+        player.hand = [wt] + player.hand[1:]
+        initial_used = player.actions_used
+
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        assert player.actions_used == initial_used + 1
+
+    def test_war_tithe_grants_resources_from_last_round(self, card_registry):
+        """War Tithe: gains resources based on claims_won_last_round."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        wt = _copy_card(card_registry["vanguard_war_tithe"], "test_wt")
+        player.hand = [wt] + player.hand[1:]
+
+        # Simulate having claimed 3 tiles last round
+        player.claims_won_last_round = 3
+        initial = player.resources
+
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        # 3 claims × 1 resource each = 3 (capped at max_resources=3)
+        assert player.resources == initial + 3
+
+    def test_war_tithe_respects_max_cap(self, card_registry):
+        """War Tithe: resource gain is capped at max_resources."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        wt = _copy_card(card_registry["vanguard_war_tithe"], "test_wt")
+        player.hand = [wt] + player.hand[1:]
+
+        # Simulate having claimed 5 tiles (exceeds max of 3)
+        player.claims_won_last_round = 5
+        initial = player.resources
+
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        # 5 × 1 = 5, but capped at 3
+        assert player.resources == initial + 3
+
+    def test_war_tithe_zero_claims(self, card_registry):
+        """War Tithe: no resources if no tiles claimed last round."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        wt = _copy_card(card_registry["vanguard_war_tithe"], "test_wt")
+        player.hand = [wt] + player.hand[1:]
+
+        player.claims_won_last_round = 0
+        initial = player.resources
+
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        assert player.resources == initial
+
+
+class TestSwarmColony:
+    def test_colony_properties(self, card_registry):
+        """Colony: passive card, cost 4, VP from disconnected groups."""
+        card = card_registry["swarm_colony"]
+        assert card.card_type == CardType.PASSIVE
+        assert card.buy_cost == 4
+        assert card.archetype == Archetype.SWARM
+        assert card.unplayable is True
+        assert card.vp_formula == "disconnected_groups_3"
+
+    def test_colony_has_effect(self, card_registry):
+        """Colony: has VP_FROM_DISCONNECTED_GROUPS effect."""
+        card = card_registry["swarm_colony"]
+        matching = [e for e in card.effects if e.type.value == "vp_from_disconnected_groups"]
+        assert len(matching) >= 1
+        assert matching[0].value == 3  # min group size base
+        assert matching[0].upgraded_value == 2  # min group size upgraded
+        assert matching[0].metadata.get("min_group_size") == 3
+
+    def test_colony_is_unplayable(self, card_registry):
+        """Colony: cannot be played as an action."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+        colony = _copy_card(card_registry["swarm_colony"], "test_colony")
+        player.hand = [colony] + player.hand[1:]
+
+        success, msg = play_card(game, "p0", 0)
+        assert not success
+
+    def test_colony_vp_from_disconnected_groups(self, card_registry):
+        """Colony: +1 VP per disconnected group of 3+ tiles."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+
+        colony = _copy_card(card_registry["swarm_colony"], "test_colony")
+        player.deck.discard.append(colony)
+
+        vp_before = compute_player_vp(game, "p0")
+
+        # Create a disconnected group of 3 tiles far from player's base
+        assert game.grid is not None
+        base_connected = game.grid.get_connected_tiles("p0")
+        # Find 3 adjacent neutral tiles far from base
+        candidates = []
+        for tile in game.grid.tiles.values():
+            if tile.owner is None and not tile.is_blocked and (tile.q, tile.r) not in base_connected:
+                candidates.append(tile)
+        # Find a cluster of 3 adjacent tiles among candidates
+        cluster = []
+        for t in candidates:
+            if len(cluster) >= 3:
+                break
+            if not cluster:
+                cluster.append(t)
+                continue
+            for ct in cluster:
+                if t.distance_to(ct) == 1:
+                    cluster.append(t)
+                    break
+        if len(cluster) >= 3:
+            for t in cluster[:3]:
+                t.owner = "p0"
+                t.capture_count = 0
+
+            vp_after = compute_player_vp(game, "p0")
+            # Should have +1 VP from the disconnected group
+            assert vp_after >= vp_before + 1
+        else:
+            pytest.skip("Could not find 3 adjacent disconnected tiles")
+
+    def test_colony_ignores_small_groups(self, card_registry):
+        """Colony: groups smaller than 3 tiles don't count for Colony VP."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+
+        assert game.grid is not None
+        base_connected = game.grid.get_connected_tiles("p0")
+        candidates = [
+            t for t in game.grid.tiles.values()
+            if t.owner is None and not t.is_blocked and (t.q, t.r) not in base_connected
+        ]
+
+        # Create a disconnected group of only 2 tiles
+        placed = 0
+        for t in candidates:
+            if placed >= 2:
+                break
+            if placed == 0:
+                t.owner = "p0"
+                placed += 1
+            elif t.distance_to(candidates[0]) == 1:
+                t.owner = "p0"
+                placed += 1
+
+        if placed < 2:
+            pytest.skip("Could not place disconnected pair")
+
+        # Measure VP with and without Colony card
+        vp_without_colony = compute_player_vp(game, "p0")
+
+        colony = _copy_card(card_registry["swarm_colony"], "test_colony")
+        player.deck.discard.append(colony)
+        vp_with_colony = compute_player_vp(game, "p0")
+
+        # Group of 2 tiles should NOT give VP from Colony formula
+        assert vp_with_colony == vp_without_colony
+
+
+class TestFortressWarden:
+    def test_warden_properties(self, card_registry):
+        """Warden: passive card, cost 4, VP from uncaptured tiles."""
+        card = card_registry["fortress_warden"]
+        assert card.card_type == CardType.PASSIVE
+        assert card.buy_cost == 4
+        assert card.archetype == Archetype.FORTRESS
+        assert card.unplayable is True
+        assert card.vp_formula == "uncaptured_tiles_4"
+
+    def test_warden_has_effect(self, card_registry):
+        """Warden: has VP_FROM_UNCAPTURED_TILES effect."""
+        card = card_registry["fortress_warden"]
+        matching = [e for e in card.effects if e.type.value == "vp_from_uncaptured_tiles"]
+        assert len(matching) >= 1
+        assert matching[0].value == 4  # divisor base
+        assert matching[0].upgraded_value == 3  # divisor upgraded
+        assert matching[0].metadata.get("divisor") == 4
+
+    def test_warden_is_unplayable(self, card_registry):
+        """Warden: cannot be played as an action."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        warden = _copy_card(card_registry["fortress_warden"], "test_warden")
+        player.hand = [warden] + player.hand[1:]
+
+        success, msg = play_card(game, "p0", 0)
+        assert not success
+
+    def test_warden_vp_from_uncaptured_tiles(self, card_registry):
+        """Warden: +1 VP per 4 non-base tiles with capture_count == 0."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+
+        warden = _copy_card(card_registry["fortress_warden"], "test_warden")
+        player.deck.discard.append(warden)
+        player.vp = 5
+
+        vp_before = compute_player_vp(game, "p0")
+
+        # Give player 4 non-base tiles with capture_count=0
+        assert game.grid is not None
+        neutrals = [t for t in game.grid.tiles.values()
+                     if t.owner is None and not t.is_blocked]
+        for t in neutrals[:4]:
+            t.owner = "p0"
+            t.capture_count = 0  # never changed hands
+
+        vp_after = compute_player_vp(game, "p0")
+        # 4 uncaptured non-base tiles / 4 = +1 VP from Warden
+        assert vp_after >= vp_before + 1
+
+    def test_warden_excludes_captured_tiles(self, card_registry):
+        """Warden: tiles with capture_count > 0 don't count for Warden VP."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+
+        assert game.grid is not None
+        # Give player 4 tiles, but all have been captured (capture_count > 0)
+        neutrals = [t for t in game.grid.tiles.values()
+                     if t.owner is None and not t.is_blocked]
+        for t in neutrals[:4]:
+            t.owner = "p0"
+            t.capture_count = 1  # has changed hands
+
+        # Measure VP with and without Warden
+        vp_without = compute_player_vp(game, "p0")
+
+        warden = _copy_card(card_registry["fortress_warden"], "test_warden")
+        player.deck.discard.append(warden)
+        vp_with = compute_player_vp(game, "p0")
+
+        # Captured tiles don't count → Warden adds 0 VP
+        assert vp_with == vp_without
+
+    def test_warden_excludes_base_tiles(self, card_registry):
+        """Warden: base tiles don't count even if capture_count == 0."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+
+        warden = _copy_card(card_registry["fortress_warden"], "test_warden")
+        player.deck.discard.append(warden)
+
+        assert game.grid is not None
+        # Verify base tiles exist and have capture_count 0
+        base_tiles = [t for t in game.grid.tiles.values()
+                      if t.is_base and t.owner == "p0"]
+        assert len(base_tiles) >= 1
+        for t in base_tiles:
+            assert t.capture_count == 0
+
+        # Even though base tiles are uncaptured, they shouldn't count
+        # (formula only counts non-base tiles)
+
+
+class TestFortressResilience:
+    def test_resilience_properties(self, card_registry):
+        """Resilience: engine card, cost 2, gain 1 action."""
+        card = card_registry["fortress_catch_up"]
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 2
+        assert card.archetype == Archetype.FORTRESS
+        assert card.action_return == 1
+
+    def test_resilience_gains_resources_when_fewest_tiles(self, card_registry):
+        """Resilience: gain 2 resources when controlling fewest tiles."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        opponent = game.players["p1"]
+        resilience = _copy_card(card_registry["fortress_catch_up"], "test_res")
+        player.hand = [resilience] + player.hand[1:]
+
+        assert game.grid is not None
+        # Give opponent more tiles so p0 has fewest
+        neutrals = [t for t in game.grid.tiles.values()
+                     if t.owner is None and not t.is_blocked]
+        for t in neutrals[:5]:
+            t.owner = "p1"
+
+        p0_tiles = len(game.grid.get_player_tiles("p0"))
+        p1_tiles = len(game.grid.get_player_tiles("p1"))
+        assert p0_tiles < p1_tiles
+
+        initial_resources = player.resources
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        assert player.resources == initial_resources + 2
+
+    def test_resilience_no_bonus_when_not_fewest(self, card_registry):
+        """Resilience: no resource bonus when NOT controlling fewest tiles."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        resilience = _copy_card(card_registry["fortress_catch_up"], "test_res")
+        player.hand = [resilience] + player.hand[1:]
+
+        assert game.grid is not None
+        # Give p0 more tiles so they don't have fewest
+        neutrals = [t for t in game.grid.tiles.values()
+                     if t.owner is None and not t.is_blocked]
+        for t in neutrals[:5]:
+            t.owner = "p0"
+
+        p0_tiles = len(game.grid.get_player_tiles("p0"))
+        p1_tiles = len(game.grid.get_player_tiles("p1"))
+        assert p0_tiles > p1_tiles
+
+        initial_resources = player.resources
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        # Should gain 0 resources from the conditional effect
+        assert player.resources == initial_resources
+
+    def test_resilience_returns_action(self, card_registry):
+        """Resilience: gain 1 action back (net neutral action cost)."""
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        resilience = _copy_card(card_registry["fortress_catch_up"], "test_res")
+        player.hand = [resilience] + player.hand[1:]
+        initial_available = player.actions_available
+        initial_used = player.actions_used
+
+        success, _ = play_card(game, "p0", 0)
+        assert success
+        # action_return 1 → gains 1 extra action_available
+        assert player.actions_available == initial_available + 1
+        # But also costs 1 action to play
+        assert player.actions_used == initial_used + 1

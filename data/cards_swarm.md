@@ -11,23 +11,27 @@
 
 cards:
 
-  - id: swarm_scout
-    name: Scout
-    name_upgraded: Scout+
-    type: Claim
-    buy_cost: null
-    starter: true
+  - id: swarm_colony
+    name: Colony
+    name_upgraded: Colony+
+    type: Passive
+    buy_cost: 4
     action_return: 0
-    power: 1
-    resource_gain: 1
-    upgraded_resource_gain: 2
-    unoccupied_only: true
-    upgraded_unoccupied_only: false
-    effect: "Claim: Power 1 on any adjacent unoccupied tile. Gain 1 resource."
-    effect_upgraded: "Claim: Power 2. Gain 2 resources."
+    power: 0
+    unplayable: true
+    vp_formula: disconnected_groups_3
+    effect: "+1 VP for each group of 3+ tiles you own that is disconnected from your base."
+    effect_upgraded: "+1 VP for each group of 2+ tiles you own that is disconnected from your base."
     secondary_effect: null
     secondary_timing: null
+    note: "Rewards scattered expansion via Proliferate and other non-adjacency plays. Stronger on larger maps with more room to spread. Takes up a hand slot when drawn."
 
+    effects:
+      - type: vp_from_disconnected_groups
+        value: 3
+        upgraded_value: 2
+        timing: on_resolution
+        metadata: {min_group_size: 3, upgraded_min_group_size: 2}
 
   - id: swarm_surge
     name: Surge
@@ -152,8 +156,8 @@ cards:
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Trash 1 card from your hand. If you did, draw 1 card. Gain 1 action."
-    effect_upgraded: "Trash 1 card from your hand. If you did, draw 2 cards. Gain 1 action."
+    effect: "Trash 1 card from your hand. If you did, draw 1 card and gain 1 action."
+    effect_upgraded: "Trash 1 card from your hand. If you did, draw 2 cards and gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -171,8 +175,8 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 0
-    effect: "Claim: Power equal to the number of cards in your hand when this card is played."
-    effect_upgraded: "Claim: Power equal to the number of cards in your hand +2 when this card is played."
+    effect: "Claim: Power equal to the number of other cards in your hand (not including this card)."
+    effect_upgraded: "Claim: Power equal to the number of other cards in your hand +2 (not including this card)."
     secondary_effect: null
     secondary_timing: null
 
@@ -190,8 +194,8 @@ cards:
     buy_cost: 3
     action_return: 2
     power: 0
-    effect: "Gain 2 actions. Discard 1 card."
-    effect_upgraded: "Gain 2 actions. Discard 1 card. Gain 1 resource."
+    effect: "Discard 1 card. Gain 2 actions."
+    effect_upgraded: "Discard 1 card. Gain 2 actions. Gain 1 resource."
     secondary_effect: null
     secondary_timing: null
 

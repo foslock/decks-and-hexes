@@ -73,6 +73,7 @@ def resolve_immediate_effects(
     discard_card_indices: Optional[list[int]] = None,
     trash_card_indices: Optional[list[int]] = None,
     extra_targets: Optional[list[tuple[int, int]]] = None,
+    skip_discard: bool = False,
 ) -> None:
     """Resolve all IMMEDIATE-timing effects on a card. Called from play_card()."""
     ctx = EffectContext(
@@ -90,6 +91,9 @@ def resolve_immediate_effects(
 
     for effect in card.effects:
         if effect.timing == Timing.IMMEDIATE:
+            # Skip self_discard when deferred (draw-then-discard cards like Regroup)
+            if skip_discard and effect.type == EffectType.SELF_DISCARD:
+                continue
             if effect.condition != ConditionType.ALWAYS:
                 if not check_condition(effect.condition, game, player, card, action):
                     continue
@@ -102,7 +106,16 @@ def calculate_effective_power(
     card: Card,
     action: PlannedAction,
 ) -> int:
-    """Calculate total power for a claim card including conditional modifiers."""
+    """Calculate total power for a claim card including conditional modifiers.
+
+    If the action already has a snapshotted effective_power (computed at play
+    time), returns that directly — dynamic values are frozen once when played.
+    Otherwise computes from the current game state (used at play time itself).
+    """
+    # Return the frozen snapshot if available (used during resolve phase)
+    if action.effective_power is not None:
+        return action.effective_power
+
     base_power = card.effective_power
     bonus = 0
 
@@ -136,8 +149,8 @@ def calculate_effective_power(
         ev = effect.effective_value(is_upgraded)
 
         if effect.condition == ConditionType.CARDS_IN_HAND:
-            # Numbers Game: power = hand size (replaces base power)
-            return int(len(player.hand) + ev)
+            # Strength in Numbers: power = other cards in hand (not including this card)
+            return int(max(0, len(player.hand) - 1) + ev)
 
         if effect.condition == ConditionType.IF_ADJACENT_OWNED_GTE:
             if effect.metadata.get("per_tile"):
@@ -868,3 +881,46 @@ register_handler(EffectType.FREE_REROLL, _handle_free_reroll)
 register_handler(EffectType.RESOURCE_DRAIN, _handle_resource_drain)
 register_handler(EffectType.DYNAMIC_BUY_COST, _handle_dynamic_buy_cost)
 register_handler(EffectType.TRASH_OPPONENT_CARD, _handle_trash_opponent_card)
+
+
+def _handle_resources_per_claims_last_round(effect: Effect, ctx: EffectContext) -> None:
+    """War Tithe: gain resources based on tiles claimed last round."""
+    claims = ctx.player.claims_won_last_round
+    per_claim = effect.upgraded_value if ctx.card.is_upgraded and effect.upgraded_value else effect.value
+    max_res = effect.metadata.get("upgraded_max_resources" if ctx.card.is_upgraded else "max_resources", 999)
+    gained = min(claims * per_claim, max_res)
+    if gained > 0:
+        ctx.player.resources += gained
+        ctx.game._log(f"{ctx.player.name} gains {gained} resources from War Tithe ({claims} tiles claimed last round)")
+    # Upgraded: draw 1 card
+    if ctx.card.is_upgraded and effect.metadata.get("upgraded_draw"):
+        draw_count = effect.metadata["upgraded_draw"]
+        ctx.player.turn_modifiers.extra_draws_next_turn += draw_count
+
+
+register_handler(EffectType.RESOURCES_PER_CLAIMS_LAST_ROUND, _handle_resources_per_claims_last_round)
+
+
+def _handle_draw_per_connected_vp(effect: Effect, ctx: EffectContext) -> None:
+    """Toll Road: draw cards based on connected VP hexes."""
+    draw_per = effect.effective_value(ctx.card.is_upgraded)
+    connected_count = 0
+    if ctx.game.grid:
+        connected_coords = ctx.game.grid.get_connected_tiles(ctx.player.id)
+        for tile in ctx.game.grid.tiles.values():
+            if tile.is_vp and tile.owner == ctx.player.id and (tile.q, tile.r) in connected_coords:
+                connected_count += 1
+    total_draw = connected_count * draw_per
+    if total_draw > 0:
+        drawn = ctx.player.deck.draw(total_draw, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        ctx.game._log(
+            f"{ctx.player.name} draws {len(drawn)} card(s) from Toll Road ({connected_count} connected VP bonus tile{'s' if connected_count != 1 else ''})",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+register_handler(EffectType.DRAW_PER_CONNECTED_VP, _handle_draw_per_connected_vp)
+
+# VP formula passive effects — no handler needed (computed in _compute_formula_vp)
+register_handler(EffectType.VP_FROM_DISCONNECTED_GROUPS, _handle_stub)
+register_handler(EffectType.VP_FROM_UNCAPTURED_TILES, _handle_stub)

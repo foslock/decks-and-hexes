@@ -328,7 +328,7 @@ class CPUPlayer:
                     if tile.defense_power > 0 or tile.permanent_defense_bonus > 0:
                         power += ev
                 elif effect.condition.value == "cards_in_hand":
-                    power = len(player.hand) + ev
+                    power = max(0, len(player.hand) - 1) + ev
 
         return power
 

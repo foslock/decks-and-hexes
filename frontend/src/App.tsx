@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, Component, type ReactNode } from 'react';
 import type { GameState, LobbyState } from './types/game';
 import { SettingsProvider } from './components/SettingsContext';
 import SetupScreen from './components/SetupScreen';
@@ -7,6 +7,34 @@ import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
 import { useWebSocket } from './hooks/useWebSocket';
 import * as api from './api/client';
+
+/** Catches render-time crashes so the whole app doesn't white-screen. */
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('[ErrorBoundary] Caught render crash:', error, info.componentStack);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ textAlign: 'center', maxWidth: 400 }}>
+            <div style={{ fontSize: 20, marginBottom: 12 }}>Something went wrong</div>
+            <div style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>{this.state.error.message}</div>
+            <button
+              onClick={() => { this.setState({ error: null }); window.location.reload(); }}
+              style={{ padding: '8px 20px', background: '#4a9eff', border: 'none', borderRadius: 6, color: '#fff', fontSize: 14, cursor: 'pointer' }}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // Check for ?preview= query parameter
 const urlParams = new URLSearchParams(window.location.search);
@@ -39,6 +67,14 @@ function saveSession(screen: AppScreen | null) {
 }
 
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner />
+    </ErrorBoundary>
+  );
+}
+
+function AppInner() {
   const [error, setError] = useState<string | null>(null);
 
   // Multiplayer state machine — restore from session storage on mount

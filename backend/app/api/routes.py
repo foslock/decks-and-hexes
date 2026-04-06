@@ -28,6 +28,7 @@ from app.game_engine.game_state import (
     play_card,
     reroll_market,
     spend_upgrade_credit,
+    submit_pending_discard,
     submit_plan,
 )
 from app.game_engine.hex_grid import GridSize
@@ -83,6 +84,11 @@ class PlayCardRequest(BaseModel):
     discard_card_indices: Optional[list[int]] = None
     trash_card_indices: Optional[list[int]] = None
     extra_targets: Optional[list[list[int]]] = None
+
+
+class SubmitDiscardRequest(BaseModel):
+    player_id: str
+    discard_card_indices: list[int]
 
 
 class SubmitPlanRequest(BaseModel):
@@ -181,6 +187,23 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
         trash_card_indices=req.trash_card_indices,
         extra_targets=extra_targets,
     )
+    if not success:
+        raise HTTPException(400, msg)
+
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
+
+
+@router.post("/games/{game_id}/submit-discard")
+async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[str, Any]:
+    """Submit deferred discard choices (e.g. Regroup: draw first, then discard)."""
+    game = _games.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    success, msg = submit_pending_discard(game, req.player_id, req.discard_card_indices)
     if not success:
         raise HTTPException(400, msg)
 

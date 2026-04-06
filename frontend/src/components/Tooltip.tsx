@@ -85,8 +85,9 @@ export default function Tooltip({ content, delay = 0, children }: TooltipProps) 
 export function IrreversibleButton({
   children,
   tooltip,
+  tooltipDelay = 1000,
   ...buttonProps
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tooltip?: string }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tooltip?: string; tooltipDelay?: number }) {
   const [showWarning, setShowWarning] = useState(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,8 +95,12 @@ export function IrreversibleButton({
   const handleEnter = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     setPosition({ x: rect.left + rect.width / 2, y: rect.top });
-    timerRef.current = setTimeout(() => setShowWarning(true), 1000);
-  }, []);
+    if (tooltipDelay > 0) {
+      timerRef.current = setTimeout(() => setShowWarning(true), tooltipDelay);
+    } else {
+      setShowWarning(true);
+    }
+  }, [tooltipDelay]);
 
   const handleLeave = useCallback(() => {
     if (timerRef.current) {

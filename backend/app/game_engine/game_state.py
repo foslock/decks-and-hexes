@@ -43,7 +43,7 @@ class Phase(str, Enum):
     GAME_OVER = "game_over"
 
 
-STARTING_RESOURCES = 3
+STARTING_RESOURCES = 0
 UPKEEP_FREE_TILES = 4
 VP_TARGET = 10  # legacy default; use compute_vp_target() for new games
 SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33}
@@ -121,6 +121,14 @@ class PlannedAction:
     target_r: Optional[int] = None
     target_player_id: Optional[str] = None  # for forced discards
     extra_targets: list[tuple[int, int]] = field(default_factory=list)  # Surge multi-targets
+    # Effective power computed once at play time — accounts for dynamic modifiers
+    # (hand size, tile count, adjacency, etc.) frozen at the moment the card was
+    # played.  Used for all display and for claim resolution.  None for non-claim
+    # cards or cards without dynamic modifiers (they just use base card power).
+    effective_power: Optional[int] = None
+    # Dynamic resource gain snapshotted at play time (e.g. War Tithe).
+    # None when the card has no dynamic resource effects.
+    effective_resource_gain: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -131,6 +139,10 @@ class PlannedAction:
         }
         if self.extra_targets:
             d["extra_targets"] = [[q, r] for q, r in self.extra_targets]
+        if self.effective_power is not None:
+            d["effective_power"] = self.effective_power
+        if self.effective_resource_gain is not None:
+            d["effective_resource_gain"] = self.effective_resource_gain
         return d
 
 
@@ -163,6 +175,8 @@ class Player:
     cpu_noise: float = 0.15  # default Medium difficulty
     has_left: bool = False  # player disconnected/left mid-game
     left_vp: int = 0  # frozen VP at time of leaving (for leaderboard)
+    claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
+    pending_discard: int = 0  # deferred discard count (e.g. Regroup: draw first, then discard)
 
     @property
     def hand_size(self) -> int:
@@ -219,6 +233,8 @@ class Player:
             "has_acknowledged_resolve": self.has_acknowledged_resolve,
             "has_ended_turn": self.has_ended_turn,
             "trash": [c.to_dict() for c in self.trash],
+            "claims_won_last_round": self.claims_won_last_round,
+            "tile_count": len(game.grid.get_player_tiles(self.id)) if game and game.grid else 0,
             "last_upkeep_paid": self.last_upkeep_paid,
             "upkeep_cost": self.upkeep_cost,
             "tiles_lost_to_upkeep": self.tiles_lost_to_upkeep,
@@ -230,6 +246,8 @@ class Player:
                 "hard"
             ) if self.is_cpu else None,
             "has_left": self.has_left,
+            "free_rerolls": self.turn_modifiers.free_rerolls,
+            "pending_discard": self.pending_discard,
         }
 
 
@@ -394,7 +412,8 @@ class GameState:
             entry for entry in self.neutral_purchase_log
             if entry["round"] == self.current_round - 1
         ]
-        # During REVEAL phase, expose all players' planned actions for review
+        # During REVEAL phase, expose all players' planned actions for review.
+        # effective_power is already snapshotted on each PlannedAction at play time.
         if self.current_phase == Phase.REVEAL:
             result["revealed_actions"] = {
                 pid: [a.to_dict() for a in p.planned_actions]
@@ -474,6 +493,51 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
         all_cards = player.deck.cards + player.hand + player.deck.discard
         divisor = 8 if is_upgraded else 10
         return len(all_cards) // divisor
+
+    elif formula == "disconnected_groups_3":
+        # Colony: 1 VP per disconnected group of 3+ tiles (2+ upgraded)
+        if not game.grid:
+            return 0
+        min_size = 2 if is_upgraded else 3
+        connected = game.grid.get_connected_tiles(player.id)
+        all_owned = {
+            (t.q, t.r) for t in game.grid.tiles.values()
+            if t.owner == player.id
+        }
+        disconnected = all_owned - connected
+        if not disconnected:
+            return 0
+        # BFS to find groups among disconnected tiles
+        remaining = set(disconnected)
+        groups = 0
+        while remaining:
+            start = remaining.pop()
+            group = {start}
+            queue = [start]
+            while queue:
+                cq, cr = queue.pop()
+                tile = game.grid.get_tile(cq, cr)
+                if not tile:
+                    continue
+                for nq, nr in tile.neighbors():
+                    if (nq, nr) in remaining:
+                        remaining.discard((nq, nr))
+                        group.add((nq, nr))
+                        queue.append((nq, nr))
+            if len(group) >= min_size:
+                groups += 1
+        return groups
+
+    elif formula == "uncaptured_tiles_4":
+        # Warden: 1 VP per 4 tiles (3 upgraded) that have never changed hands
+        if not game.grid:
+            return 0
+        divisor = 3 if is_upgraded else 4
+        count = sum(
+            1 for t in game.grid.tiles.values()
+            if t.owner == player.id and not t.is_base and t.capture_count == 0
+        )
+        return count // divisor
 
     return 0
 
@@ -839,6 +903,10 @@ def play_card(game: GameState, player_id: str, card_index: int,
     if card.unplayable:
         return False, f"{card.name} cannot be played"
 
+    # Block card play while a deferred discard is pending
+    if player.pending_discard > 0:
+        return False, "Must discard before playing another card"
+
     # Check action availability (skip in test mode)
     net_cost = 1 - card.effective_action_return
     if not game.test_mode:
@@ -935,16 +1003,54 @@ def play_card(game: GameState, player_id: str, card_index: int,
     # Trashing is always optional — player may decline to trash (but forfeits the bonus).
     # Discarding is required if the player has other cards in hand.
     from .effects import EffectType as _EffectType
+    defer_discard = False
     for effect in card.effects:
         if not effect.requires_choice:
             continue
         if effect.type == _EffectType.SELF_DISCARD:
+            # If the card also draws, defer the discard until after the draw
+            # so the player can choose from their expanded hand
+            if card.effective_draw_cards > 0:
+                defer_discard = True
+                continue
             max_discardable = len(player.hand) - 1
             required = min(effect.effective_value(card.is_upgraded), max_discardable)
             if required > 0 and (not discard_card_indices or len(discard_card_indices) < required):
                 return False, f"{card.name} requires discarding {required} card(s)"
 
     # Remove card from hand and create planned action
+    # Compute effective power BEFORE removing the card so dynamic modifiers
+    # (hand size, tile count, adjacency) reflect the game state at play time.
+    # This value is frozen for the rest of the turn.
+    snapshotted_power: Optional[int] = None
+    if card.card_type in (CardType.CLAIM, CardType.DEFENSE) and card.effects:
+        # Build a temporary action to pass to calculate_effective_power
+        _tmp_action = PlannedAction(
+            card=card,
+            target_q=target_q,
+            target_r=target_r,
+            extra_targets=validated_extra if (
+                card.card_type == CardType.CLAIM and target_q is not None and card.effective_multi_target_count > 0
+            ) or (
+                card.card_type == CardType.DEFENSE and card.effective_defense_target_count > 1
+            ) else [],
+        )
+        computed = calculate_effective_power(game, player, card, _tmp_action)
+        # Only store if it differs from the base power (i.e. a dynamic modifier applied)
+        if computed != card.effective_power:
+            snapshotted_power = computed
+
+    # Snapshot dynamic resource gain (War Tithe) before removing card from hand
+    snapshotted_resource_gain: Optional[int] = None
+    if card.effects:
+        for eff in card.effects:
+            if eff.type == EffectType.RESOURCES_PER_CLAIMS_LAST_ROUND:
+                per_claim = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
+                max_key = "upgraded_max_resources" if card.is_upgraded else "max_resources"
+                max_res = eff.metadata.get(max_key, 999)
+                snapshotted_resource_gain = min(player.claims_won_last_round * per_claim, max_res)
+                break
+
     player.hand.pop(card_index)
     has_extra = (
         (card.card_type == CardType.CLAIM and target_q is not None and card.effective_multi_target_count > 0)
@@ -956,6 +1062,8 @@ def play_card(game: GameState, player_id: str, card_index: int,
         target_r=target_r,
         target_player_id=target_player_id,
         extra_targets=validated_extra if has_extra else [],
+        effective_power=snapshotted_power,
+        effective_resource_gain=snapshotted_resource_gain,
     )
     player.planned_actions.append(action)
     player.actions_used += 1
@@ -991,11 +1099,55 @@ def play_card(game: GameState, player_id: str, card_index: int,
             discard_card_indices=discard_card_indices,
             trash_card_indices=trash_card_indices,
             extra_targets=[(t[0], t[1]) for t in (extra_targets or [])],
+            skip_discard=defer_discard,
         )
+
+    # Set pending discard if the discard was deferred (card draws first, then player picks)
+    if defer_discard:
+        discard_effect = next(
+            (e for e in card.effects if e.type == _EffectType.SELF_DISCARD), None
+        )
+        if discard_effect:
+            count = discard_effect.effective_value(card.is_upgraded)
+            required = min(count, len(player.hand))
+            if required > 0:
+                player.pending_discard = required
+                game._log(f"{player.name} must discard {required} card(s)",
+                          visible_to=[player_id], actor=player_id)
 
     game._log(f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})",
               visible_to=[player_id], actor=player_id)
     return True, f"Played {card.name}"
+
+
+def submit_pending_discard(
+    game: GameState, player_id: str, discard_card_indices: list[int],
+) -> tuple[bool, str]:
+    """Resolve a deferred discard (e.g. Regroup: draw first, then pick cards to discard)."""
+    player = game.players.get(player_id)
+    if not player:
+        return False, "Player not found"
+    if player.pending_discard <= 0:
+        return False, "No pending discard"
+
+    required = min(player.pending_discard, len(player.hand))
+    if required > 0 and len(discard_card_indices) < required:
+        return False, f"Must discard {required} card(s)"
+
+    # Validate and remove (process in reverse to preserve indices)
+    discarded: list[Card] = []
+    for idx in sorted(discard_card_indices[:required], reverse=True):
+        if 0 <= idx < len(player.hand):
+            discarded.append(player.hand.pop(idx))
+
+    if discarded:
+        player.deck.add_to_discard(discarded)
+        names = ", ".join(c.name for c in discarded)
+        game._log(f"{player.name} discards {names} from hand",
+                  visible_to=[player_id], actor=player_id)
+
+    player.pending_discard = 0
+    return True, f"Discarded {len(discarded)} card(s)"
 
 
 def submit_plan(game: GameState, player_id: str) -> tuple[bool, str]:
@@ -1003,6 +1155,8 @@ def submit_plan(game: GameState, player_id: str) -> tuple[bool, str]:
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
+    if player.pending_discard > 0:
+        return False, "Must discard before submitting plan"
     player.has_submitted_plan = True
     game._log(f"{player.name} submits plan ({len(player.planned_actions)} actions)",
               actor=player_id)
@@ -1237,6 +1391,8 @@ def execute_reveal(game: GameState) -> GameState:
                     game._log(f"{game.players[winner_id].name} fails to raid {defender.name}'s base")
             else:
                 old_owner = tile.owner
+                if old_owner is not None:
+                    tile.capture_count += 1  # tile changed hands between players
                 tile.owner = winner_id
                 tile.held_since_turn = game.current_round
                 tile.defense_power = tile.base_defense  # reset to intrinsic defense, not 0
@@ -1307,7 +1463,7 @@ def execute_reveal(game: GameState) -> GameState:
                                           claim_results=claim_results)
 
         # Trash on use
-        if card.trash_on_use:
+        if card.effective_trash_on_use:
             player.trash.append(card)
             game._log(f"{card.name} is trashed after use")
         else:
@@ -1373,12 +1529,20 @@ def execute_reveal(game: GameState) -> GameState:
                 )
                 break  # Only trigger once per card
 
+    # Track claims won this round (for War Tithe next round)
+    for pid in game.player_order:
+        won = sum(
+            1 for results in claim_results.values()
+            if pid in results and results[pid]
+        )
+        game.players[pid].claims_won_last_round = won
+
     # Discard planned claim cards (or trash if trash_on_use)
     for pid in game.player_order:
         player = game.players[pid]
         for action in player.planned_actions:
             if action.card.card_type == CardType.CLAIM:
-                if action.card.trash_on_use:
+                if action.card.effective_trash_on_use:
                     player.trash.append(action.card)
                 else:
                     player.deck.add_to_discard([action.card])
@@ -1777,6 +1941,10 @@ def auto_play_cpu_plans(game: GameState) -> None:
             )
             if not success:
                 break
+            # Auto-resolve deferred discard for CPU players
+            if player.pending_discard > 0:
+                discard_indices = cpu._pick_cards_to_discard(player, player.pending_discard)
+                submit_pending_discard(game, pid, discard_indices)
 
         submit_plan(game, pid)
 

@@ -9,7 +9,6 @@ import pytest
 from app.game_engine.cards import (
     ARCHETYPE_SLOTS,
     HAND_SIZE,
-    STARTER_DECK_COMPOSITION,
     Archetype,
     Card,
     CardType,
@@ -139,35 +138,15 @@ class TestStartingDecks:
             deck = build_starting_deck(archetype, card_registry)
             assert deck.total_cards == 2 * HAND_SIZE[archetype]
 
-    def test_vanguard_starter_composition(self, card_registry: dict[str, Card]) -> None:
-        """Vanguard: 4× Explore, 4× Gather, 2× War Chest."""
-        deck = build_starting_deck(Archetype.VANGUARD, card_registry)
-        war_chests = [c for c in deck.cards if "war_chest" in c.id]
-        explores = [c for c in deck.cards if "explore" in c.id]
-        gathers = [c for c in deck.cards if "gather" in c.id]
-        assert len(war_chests) == 2
-        assert len(explores) == 4
-        assert len(gathers) == 4
-
-    def test_swarm_starter_composition(self, card_registry: dict[str, Card]) -> None:
-        """Swarm: 5× Explore, 3× Gather, 2× Scout."""
-        deck = build_starting_deck(Archetype.SWARM, card_registry)
-        scouts = [c for c in deck.cards if "scout" in c.id]
-        explores = [c for c in deck.cards if "explore" in c.id]
-        gathers = [c for c in deck.cards if "gather" in c.id]
-        assert len(scouts) == 2
-        assert len(explores) == 5
-        assert len(gathers) == 3
-
-    def test_fortress_starter_composition(self, card_registry: dict[str, Card]) -> None:
-        """Fortress: 3× Explore, 5× Gather, 2× Bunker."""
-        deck = build_starting_deck(Archetype.FORTRESS, card_registry)
-        bunkers = [c for c in deck.cards if "bunker" in c.id]
-        explores = [c for c in deck.cards if "explore" in c.id]
-        gathers = [c for c in deck.cards if "gather" in c.id]
-        assert len(bunkers) == 2
-        assert len(explores) == 3
-        assert len(gathers) == 5
+    def test_uniform_starter_composition(self, card_registry: dict[str, Card]) -> None:
+        """All archetypes: 5× Explore, 5× Gather (uniform starting decks)."""
+        for archetype in [Archetype.VANGUARD, Archetype.SWARM, Archetype.FORTRESS]:
+            deck = build_starting_deck(archetype, card_registry)
+            explores = [c for c in deck.cards if "explore" in c.id]
+            gathers = [c for c in deck.cards if "gather" in c.id]
+            assert len(explores) == 5, f"{archetype.value} has {len(explores)} explores"
+            assert len(gathers) == 5, f"{archetype.value} has {len(gathers)} gathers"
+            assert deck.total_cards == 10, f"{archetype.value} has {deck.total_cards} cards"
 
 
 class TestArchetypeConstants:

@@ -74,11 +74,11 @@ class TestCardLoading:
         assert blitz.power == 2
         assert blitz.archetype == Archetype.VANGUARD
 
-    def test_scout_properties(self, card_registry: dict[str, Card]) -> None:
-        scout = card_registry.get("swarm_scout")
-        assert scout is not None
-        assert scout.name == "Scout"
-        assert scout.archetype == Archetype.SWARM
+    def test_colony_properties(self, card_registry: dict[str, Card]) -> None:
+        colony = card_registry.get("swarm_colony")
+        assert colony is not None
+        assert colony.name == "Colony"
+        assert colony.archetype == Archetype.SWARM
 
     def test_no_duplicate_ids(self, card_registry: dict[str, Card]) -> None:
         """Each card should have a unique ID."""

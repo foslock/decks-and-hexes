@@ -18,8 +18,36 @@ import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandl
 import * as api from '../api/client';
 import CardFull from './CardFull';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
-import { buildCardSubtitle } from './cardSubtitle';
+import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
+import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
+
+/**
+ * Compute effective power for a card still in hand, accounting for dynamic
+ * modifiers (hand-size scaling, tile-count scaling).  Returns a copy of the
+ * card with `power` overridden if applicable.  Used only for the drag
+ * preview — once a card is played, the backend snapshots effective_power on
+ * the PlannedAction and the frontend uses that instead.
+ */
+function withEffectivePower(card: Card, handSize: number, tileCount: number): Card {
+  if (!card.effects) return card;
+  const isUpgraded = card.is_upgraded;
+
+  for (const eff of card.effects) {
+    if (eff.type === 'power_per_tiles_owned') {
+      const divisor = (isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value) || 3;
+      const scaledPow = Math.floor(tileCount / divisor);
+      const totalPow = eff.metadata?.replaces_base_power ? scaledPow : card.power + scaledPow;
+      return { ...card, power: totalPow };
+    }
+    if (eff.type === 'power_modifier' && eff.condition === 'cards_in_hand') {
+      const ev = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+      return { ...card, power: Math.max(0, handSize - 1) + ev };
+    }
+  }
+
+  return card;
+}
 
 // Hex geometry constants (must match HexGrid.tsx)
 const HEX_SIZE = 32;
@@ -102,6 +130,8 @@ function getCardChoiceRequirement(card: Card): {
       };
     }
     if (effect.type === 'self_discard') {
+      // If the card also draws cards, discard is deferred (draw first, then pick discard)
+      if (card.draw_cards > 0) return null;
       const count = card.is_upgraded && effect.upgraded_value != null ? effect.upgraded_value : effect.value;
       // Discarding is required if there are cards in hand
       return {
@@ -245,6 +275,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     minCards: number;
     maxCards: number;
     label: string;  // "Trash" or "Discard"
+    pendingDiscard?: boolean;  // true when resolving a deferred discard (not during card play)
   } | null>(null);
   const [trashSelectedIndices, setTrashSelectedIndices] = useState<Set<number>>(new Set());
   // Intro overlay state — skip on reconnection or when animations are off
@@ -265,6 +296,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const settingsRef = useRef<HTMLDivElement>(null);
   // Player panel expand-on-hover
   const [playerPanelExpanded, setPlayerPanelExpanded] = useState(false);
+  // In-play card list hover preview
+  const [inPlayHoverIndex, setInPlayHoverIndex] = useState<number | null>(null);
+  const inPlayContainerRef = useRef<HTMLDivElement>(null);
   // Purchase pill hover preview
   const [purchaseHover, setPurchaseHover] = useState<{ card: import('../types/game').Card; rect: DOMRect } | null>(null);
   const [purchaseHoverVisible, setPurchaseHoverVisible] = useState(false);
@@ -346,6 +380,39 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+  // Build subtitle context for dynamic card value resolution
+  const subtitleContext: CardSubtitleContext = useMemo(() => ({
+    claimsWonLastRound: activePlayer.claims_won_last_round,
+    tileCount: activePlayer.tile_count,
+    handSize: activePlayer.hand.length,
+    trashCount: activePlayer.trash?.length ?? 0,
+    totalDeckCards: activePlayer.deck_size + activePlayer.hand.length + activePlayer.discard_count,
+  }), [activePlayer.claims_won_last_round, activePlayer.tile_count, activePlayer.hand.length, activePlayer.trash, activePlayer.deck_size, activePlayer.discard_count]);
+
+  // Context for played/revealed cards: power is already frozen on card.power, skip re-resolution
+  const frozenSubtitleContext: CardSubtitleContext = useMemo(() => ({
+    ...subtitleContext,
+    powerFrozen: true,
+  }), [subtitleContext]);
+
+  // Restore discard mode on reconnect/refresh if player has a pending discard
+  useEffect(() => {
+    if (!activePlayer || activePlayer.pending_discard <= 0) return;
+    if (trashMode) return;
+    const required = Math.min(activePlayer.pending_discard, activePlayer.hand.length);
+    if (required <= 0) return;
+    setTrashMode({
+      cardIndex: -1,
+      effectType: 'self_discard',
+      minCards: required,
+      maxCards: required,
+      label: 'Discard',
+      pendingDiscard: true,
+    });
+    setTrashSelectedIndices(new Set());
+    setSelectedCardIndex(null);
+  }, [activePlayer?.pending_discard]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Card lookup maps for purchase hover previews
   const { cardById, cardByName } = useMemo(() => {
@@ -881,18 +948,33 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         trashIndices, discardIndices,
       );
       onStateUpdate(result.state);
-      // Auto-select the next card in hand (card to the right, or left if last)
-      const newHand = result.state.players[activePlayerId]?.hand;
-      if (newHand && newHand.length > 0) {
-        setSelectedCardIndex(Math.min(cardIndex, newHand.length - 1));
-      } else {
+      // Check for deferred discard (e.g. Regroup: draw first, then pick discard)
+      const updatedPlayer = result.state.players[activePlayerId];
+      if (updatedPlayer && updatedPlayer.pending_discard > 0) {
+        setTrashMode({
+          cardIndex: -1, // card already played — no card to exclude
+          effectType: 'self_discard',
+          minCards: Math.min(updatedPlayer.pending_discard, updatedPlayer.hand.length),
+          maxCards: Math.min(updatedPlayer.pending_discard, updatedPlayer.hand.length),
+          label: 'Discard',
+          pendingDiscard: true,
+        });
+        setTrashSelectedIndices(new Set());
         setSelectedCardIndex(null);
+      } else {
+        // Auto-select the next card in hand (card to the right, or left if last)
+        const newHand = updatedPlayer?.hand;
+        if (newHand && newHand.length > 0) {
+          setSelectedCardIndex(Math.min(cardIndex, newHand.length - 1));
+        } else {
+          setSelectedCardIndex(null);
+        }
+        setTrashMode(null);
+        setTrashSelectedIndices(new Set());
       }
       setSurgeTargets([]);
       setSurgeCardIndex(null);
       setSurgePrimaryTarget(null);
-      setTrashMode(null);
-      setTrashSelectedIndices(new Set());
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -1199,6 +1281,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const handleConfirmTrash = useCallback(async () => {
     if (!trashMode || !activePlayer) return;
     const { cardIndex, targetQ, targetR, extraTargets, targetPlayerId, effectType } = trashMode;
+
+    // Pending discard (deferred from card play, e.g. Regroup) — use separate API
+    if (trashMode.pendingDiscard) {
+      const indices = [...trashSelectedIndices].sort((a, b) => a - b);
+      try {
+        setError(null);
+        const result = await api.submitDiscard(gameState.id, activePlayerId, indices);
+        onStateUpdate(result.state);
+        setTrashMode(null);
+        setTrashSelectedIndices(new Set());
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+
     // Convert selected hand indices to post-removal indices (after played card is popped)
     const adjustedIndices = [...trashSelectedIndices]
       .map(i => (i > cardIndex ? i - 1 : i))
@@ -1210,7 +1308,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       isDiscard ? undefined : adjustedIndices,
       isDiscard ? adjustedIndices : undefined,
     );
-  }, [trashMode, trashSelectedIndices, activePlayer, executePlayCard]);
+  }, [trashMode, trashSelectedIndices, activePlayer, executePlayCard, gameState.id, activePlayerId, onStateUpdate]);
 
   const handleCancelTrash = useCallback(() => {
     setTrashMode(null);
@@ -1223,6 +1321,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const next = new Set(prev);
       if (next.has(cardIndex)) {
         next.delete(cardIndex);
+      } else if (trashMode.maxCards === 1) {
+        // Single-select replacement: swap to the new card
+        next.clear();
+        next.add(cardIndex);
       } else if (next.size < trashMode.maxCards) {
         next.add(cardIndex);
       }
@@ -2007,7 +2109,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (!reviewing) return null;
     const actions = revealedActionsRef.current;
     if (!actions) return null;
-    const map = new Map<string, { playerId: string; playerName: string; card: import('../types/game').Card }[]>();
+    const map = new Map<string, { playerId: string; playerName: string; card: import('../types/game').Card; effectivePower?: number; effectiveResourceGain?: number }[]>();
     for (const [pid, playerActions] of Object.entries(actions)) {
       const player = gameState.players[pid];
       const name = player?.name ?? pid;
@@ -2015,7 +2117,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const key = actionTileKey(action);
         if (key) {
           if (!map.has(key)) map.set(key, []);
-          map.get(key)!.push({ playerId: pid, playerName: name, card: action.card });
+          map.get(key)!.push({ playerId: pid, playerName: name, card: action.card, effectivePower: action.effective_power, effectiveResourceGain: action.effective_resource_gain });
         }
       }
     }
@@ -2280,7 +2382,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (action.target_q != null && action.target_r != null) {
         const key = `${action.target_q},${action.target_r}`;
         const type = action.card.card_type;
-        const power = type === 'defense' ? action.card.defense_bonus : action.card.power;
+        const effectivePow = action.effective_power ?? action.card.power;
+        const power = type === 'defense' ? action.card.defense_bonus : effectivePow;
         addToMap(key, type, power, action.card.name, action.card);
 
         // Also show defense overlay on extra targets (multi-tile defense like Bulwark)
@@ -2294,7 +2397,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (type === 'claim' && action.extra_targets) {
           for (const [eq, er] of action.extra_targets) {
             const extraKey = `${eq},${er}`;
-            addToMap(extraKey, type, action.card.power, action.card.name, action.card);
+            addToMap(extraKey, type, effectivePow, action.card.name, action.card);
           }
         }
       }
@@ -2391,12 +2494,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               transformRef={gridTransformRef}
               activePlayerId={phase === 'plan' ? activePlayerId : undefined}
               plannedActions={phase === 'plan' ? plannedActions : undefined}
-              previewCard={phase === 'plan' ? (
-                selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
-                : (selectedCard?.card_type === 'engine' && selectedCard?.forced_discard > 0) ? selectedCard
-                : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
-                : null
-              ) : null}
+              previewCard={phase === 'plan' ? (() => {
+                const raw = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
+                  : (selectedCard?.card_type === 'engine' && selectedCard?.forced_discard > 0) ? selectedCard
+                  : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
+                  : null;
+                return raw ? withEffectivePower(raw, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0) : null;
+              })() : null}
               previewValidTiles={(() => {
                 if (phase !== 'plan') return undefined;
                 const card = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
@@ -2588,6 +2692,102 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </div>
               )}
             </div>
+
+            {/* In Play card list — shown during plan phase when active player has played cards */}
+            {phase === 'plan' && activePlayer && activePlayer.planned_actions.length > 0 && !resolving && !showIntro && introSequence === 'done' && (() => {
+              const COL_W = 134;
+              const PAD = 6;
+              const actions = activePlayer.planned_actions;
+              const GAP = 4;
+              return (
+                <div
+                  ref={inPlayContainerRef}
+                  style={{
+                    marginTop: 6,
+                    background: 'rgba(10, 10, 20, 0.85)',
+                    borderRadius: 8,
+                    border: '1px solid #333',
+                    backdropFilter: 'blur(4px)',
+                    padding: PAD,
+                    width: COL_W + PAD * 2 + 2, // card width + padding + border
+                    maxHeight: 'calc(100vh - 300px)',
+                    overflow: 'hidden',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <div style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+                    In Play ({actions.length})
+                  </div>
+                  <div style={{
+                    columnWidth: COL_W,
+                    columnGap: GAP,
+                  }}>
+                    {actions.map((action, i) => {
+                      const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
+                      const typeColor = CARD_TYPE_COLORS[c.card_type] || '#555';
+                      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain };
+                      const statParts = buildCardSubtitle(c, ctx);
+                      return (
+                        <div
+                          key={i}
+                          onPointerEnter={() => setInPlayHoverIndex(i)}
+                          onPointerLeave={() => setInPlayHoverIndex(null)}
+                          style={{
+                            width: COL_W,
+                            padding: '3px 6px',
+                            background: '#2a2a3e',
+                            border: `1px solid ${typeColor}`,
+                            borderRadius: 5,
+                            color: '#fff',
+                            marginBottom: GAP,
+                            breakInside: 'avoid' as const,
+                            cursor: 'default',
+                            transition: 'background 0.1s',
+                            ...(inPlayHoverIndex === i ? { background: '#3a3a5e' } : {}),
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {c.name}
+                            </div>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+                              if (el) {
+                                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                                el.style.setProperty('--sub-scale', String(scale));
+                              }
+                            }}>
+                              {statParts.map((part, j) => renderSubtitlePart(part, j))}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* In Play hover preview — CardFull popup to the right */}
+            {inPlayHoverIndex !== null && activePlayer && activePlayer.planned_actions[inPlayHoverIndex] && inPlayContainerRef.current && (() => {
+              const action = activePlayer.planned_actions[inPlayHoverIndex];
+              const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
+              const containerRect = inPlayContainerRef.current!.getBoundingClientRect();
+              return createPortal(
+                <div style={{
+                  position: 'fixed',
+                  left: containerRect.right + 12,
+                  top: Math.min(containerRect.top, window.innerHeight - 320),
+                  width: 220,
+                  zIndex: 20000,
+                  pointerEvents: 'none',
+                }}>
+                  <CardFull card={c} showKeywordHints />
+                </div>,
+                document.body
+              );
+            })()}
           </div>
 
           {/* Purchase pill hover preview (fixed, portal) */}
@@ -3022,6 +3222,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     {trashMode.label}: {count}/{trashMode.maxCards} card{trashMode.maxCards !== 1 ? 's' : ''} selected
                     {isOptional && <span style={{ color: '#888' }}> (optional)</span>}
                   </span>
+                  {!trashMode.pendingDiscard && (
                   <button
                     onClick={handleCancelTrash}
                     style={{
@@ -3039,6 +3240,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   >
                     Cancel
                   </button>
+                  )}
                   <IrreversibleButton
                     onClick={handleConfirmTrash}
                     disabled={!canConfirm}
@@ -3280,6 +3482,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onSelect={(idx) => { setSelectedCardIndex(idx); }}
               onDragPlay={handleDragPlay}
               onDoubleClick={isMobile ? undefined : (idx) => {
+                if (trashMode) return; // disable double-click during trash/discard selection
                 const card = activePlayer?.hand[idx];
                 if (card?.card_type === 'engine') playCardNoTarget(idx);
               }}
@@ -3303,6 +3506,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 label: trashMode.label,
               } : null}
               onTrashToggle={handleTrashToggle}
+              subtitleContext={subtitleContext}
               closePopups={showShopOverlay || showCardBrowser || showDeckViewer}
               trashedCardIds={trashedCardIds.size > 0 ? trashedCardIds : undefined}
             />
@@ -3377,8 +3581,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 return n != null ? `#${n.toString(16).padStart(6, '0')}` : '#888';
               })();
               const typeColor = REVIEW_TYPE_COLORS[entry.card.card_type] || '#555';
-              const c = entry.card;
-              const statParts = buildCardSubtitle(c);
+              const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
+              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: entry.effectiveResourceGain };
+              const statParts = buildCardSubtitle(c, ctx);
               return (
                 <div key={i} style={{ marginBottom: i < cards.length - 1 ? 6 : 0 }}>
                   <div style={{ fontSize: 10, color: playerColor, fontWeight: 'bold', marginBottom: 2 }}>
@@ -3405,7 +3610,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           el.style.setProperty('--sub-scale', String(scale));
                         }
                       }}>
-                      {statParts.map((part, j) => <span key={j}>{j > 0 ? ' · ' : ''}{part}</span>)}
+                      {statParts.map((part, j) => renderSubtitlePart(part, j))}
                       </span>
                     </div>
                   </div>
@@ -3446,8 +3651,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             </div>
             {actions.map((action, i) => {
               const typeColor = REVIEW_TYPE_COLORS[action.card.card_type] || '#555';
-              const c = action.card;
-              const statParts = buildCardSubtitle(c);
+              const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
+              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain };
+              const statParts = buildCardSubtitle(c, ctx);
               return (
                 <div key={i} style={{
                   width: 154,
@@ -3471,7 +3677,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         el.style.setProperty('--sub-scale', String(scale));
                       }
                     }}>
-                    {statParts.map((part, j) => <span key={j}>{j > 0 ? ' · ' : ''}{part}</span>)}
+                    {statParts.map((part, j) => renderSubtitlePart(part, j))}
                     </span>
                   </div>
                 </div>

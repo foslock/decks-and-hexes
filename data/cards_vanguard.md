@@ -11,19 +11,27 @@
 
 cards:
 
-  - id: vanguard_war_chest
-    name: War Chest
-    name_upgraded: War Chest+
+  - id: vanguard_war_tithe
+    name: War Tithe
+    name_upgraded: War Tithe+
     type: Engine
-    buy_cost: null
-    starter: true
+    buy_cost: 3
     action_return: 0
     power: 0
-    effect: "Gain 2 resources."
-    effect_upgraded: "Gain 3 resources."
-    resource_gain: 2
-    upgraded_resource_gain: 3
-    note: "Vanguard starter economy card. Fuels purchases of expensive high-power claim cards."
+    resource_gain: 0
+    upgraded_resource_gain: 0
+    effect: "Gain 1 resource for each tile you successfully claimed last round (max 3)."
+    effect_upgraded: "Gain 2 resources for each tile you successfully claimed last round (max 6). Draw 1 card."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Rewards sustained aggression across rounds. Creates a virtuous cycle: claim tiles → fund more claims."
+
+    effects:
+      - type: resources_per_claims_last_round
+        value: 1
+        upgraded_value: 2
+        timing: immediate
+        metadata: {max_resources: 3, upgraded_max_resources: 6, upgraded_draw: 1}
 
   - id: vanguard_blitz
     name: Blitz

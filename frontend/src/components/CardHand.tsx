@@ -1,11 +1,12 @@
-import { useRef, useCallback, useState, useEffect, useLayoutEffect, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useCallback, useState, useEffect, useLayoutEffect, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import { useAnimated, useAnimationOff, useAnimationMode, useAnimationSpeed } from './SettingsContext';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
-import { buildCardSubtitle } from './cardSubtitle';
+import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
+import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
 
 export interface PlayTarget {
@@ -13,6 +14,12 @@ export interface PlayTarget {
   /** Screen pixel position for the target tile, or null for non-targeting cards */
   screenX: number | null;
   screenY: number | null;
+  /** Ghost card position at drag release (so animation starts from ghost, not hand) */
+  dragX?: number;
+  dragY?: number;
+  /** Cursor velocity at release (px/ms) for thrown momentum on non-targeting cards */
+  dragVelocityX?: number;
+  dragVelocityY?: number;
 }
 
 /** Trash/discard selection mode state passed from GameScreen */
@@ -34,7 +41,7 @@ interface CardHandProps {
   cards: Card[];
   selectedIndex: number | null;
   onSelect: (index: number) => void;
-  onDragPlay: (cardIndex: number, screenX: number, screenY: number) => void;
+  onDragPlay: (cardIndex: number, screenX: number, screenY: number, dragVelocityX?: number, dragVelocityY?: number) => void;
   onDoubleClick?: (cardIndex: number) => void;
   onDragStart?: (cardIndex: number) => void;
   onDragEnd?: () => void;
@@ -61,6 +68,8 @@ interface CardHandProps {
   closePopups?: boolean;
   /** Card IDs that are being trashed (for tear animation instead of discard) */
   trashedCardIds?: Set<string>;
+  /** Game context for resolving dynamic card subtitle values */
+  subtitleContext?: CardSubtitleContext;
 }
 
 import { CARD_TYPE_COLORS } from '../constants/cardColors';
@@ -186,11 +195,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
                 el.style.setProperty('--sub-scale', String(scale));
               }
             }}>
-            {buildCardSubtitle(displayCard).map((part, i) => {
-              const isVp = part.endsWith('★');
-              const vpColor = displayCard.passive_vp !== undefined && displayCard.passive_vp < 0 ? '#ff6666' : '#ffd700';
-              return <span key={i} style={isVp ? { color: vpColor } : undefined}>{i > 0 ? ' · ' : ''}{part}</span>;
-            })}
+            {buildCardSubtitle(displayCard).map((part, i) => renderSubtitlePart(part, i, { passiveVp: displayCard.passive_vp }))}
             </span>
           </div>
         </div>
@@ -217,6 +222,33 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
       <CardFull card={displayCard} style={{ flexShrink: 0 }} />
       {upgradeLabel}
     </div>
+  );
+}
+
+/** Compact card content (title + subtitle) — shared by card slots, drag ghost, and departing animations. */
+function CompactCardContent({ card, titleSize = 14, subtitleSize = 13, subtitleCtx }: { card: Card; titleSize?: number; subtitleSize?: number; subtitleCtx?: CardSubtitleContext }) {
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+        <div style={{ fontWeight: 'bold', fontSize: titleSize, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+          {card.name}
+          {card.current_vp !== undefined && (
+            <span style={{
+              fontSize: 11,
+              fontWeight: 'bold',
+              color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
+              marginLeft: 4,
+            }}>
+              {card.current_vp > 0 ? '+' : ''}{card.current_vp}★
+            </span>
+          )}
+        </div>
+        <span style={{ fontSize: subtitleSize - 1, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>
+      </div>
+      <div style={{ fontSize: subtitleSize, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        {buildCardSubtitle(card, subtitleCtx).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp, showDynamic: true }))}
+      </div>
+    </>
   );
 }
 
@@ -383,6 +415,10 @@ interface EnteringAnim {
   active: boolean;
   /** false until the card element exists in the DOM and its real offset is computed */
   offsetComputed: boolean;
+  /** Random rotation at draw pile origin (degrees), animates to 0 */
+  startRotation: number;
+  /** Random arc height (px upward) at midpoint of travel */
+  arcHeight: number;
 }
 
 interface DepartingAnim {
@@ -398,6 +434,8 @@ interface DepartingAnim {
   shrink: boolean;
   /** Whether the card is being trashed (tear-apart animation) */
   trash: boolean;
+  /** Random end rotation (degrees) for discard animations */
+  endRotation: number;
 }
 
 export default function CardHand({
@@ -423,6 +461,7 @@ export default function CardHand({
   onTrashToggle,
   closePopups,
   trashedCardIds,
+  subtitleContext,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -463,6 +502,52 @@ export default function CardHand({
   const handContainerRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ x: number; y: number; index: number } | null>(null);
   const isDraggingRef = useRef(false);
+
+  // Drag swing physics — simulates card hanging from cursor top-center
+  const dragSwingRef = useRef({ angle: 0, velocity: 0, lastX: 0, lastTime: 0 });
+  const [dragSwingAngle, setDragSwingAngle] = useState(0);
+  const dragSwingRafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (draggingIndex === null) {
+      // Reset swing when drag ends
+      if (dragSwingRafRef.current) cancelAnimationFrame(dragSwingRafRef.current);
+      dragSwingRafRef.current = null;
+      dragSwingRef.current = { angle: 0, velocity: 0, lastX: 0, lastTime: 0 };
+      setDragSwingAngle(0);
+      return;
+    }
+    // Spring physics loop
+    const DAMPING = 0.92;       // velocity retention per frame
+    const SPRING = 0.05;        // pull back toward center
+    const VELOCITY_SCALE = 0.15; // cursor px/ms → degrees
+    const MAX_ANGLE = 40;
+
+    const tick = () => {
+      const s = dragSwingRef.current;
+      // Spring: pull angle back toward 0
+      s.velocity -= s.angle * SPRING;
+      // Damp
+      s.velocity *= DAMPING;
+      s.angle += s.velocity;
+      // Clamp
+      s.angle = Math.max(-MAX_ANGLE, Math.min(MAX_ANGLE, s.angle));
+      // Snap near-zero to avoid jitter
+      if (Math.abs(s.angle) < 0.1 && Math.abs(s.velocity) < 0.01) {
+        s.angle = 0;
+        s.velocity = 0;
+      }
+      setDragSwingAngle(s.angle);
+      dragSwingRafRef.current = requestAnimationFrame(tick);
+    };
+
+    dragSwingRef.current.lastX = dragPos?.x ?? 0;
+    dragSwingRef.current.lastTime = performance.now();
+    dragSwingRafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (dragSwingRafRef.current) cancelAnimationFrame(dragSwingRafRef.current);
+    };
+  }, [draggingIndex !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Animation refs
   const drawBtnRef = useRef<HTMLButtonElement>(null);
@@ -575,6 +660,8 @@ export default function CardHand({
             delay: Math.round(i * 500 * animSpeed),
             active: false,
             offsetComputed: false,
+            startRotation: (Math.random() - 0.5) * 16, // ±8deg random tilt from draw pile
+            arcHeight: CARD_MIN_HEIGHT + (Math.random() - 0.5) * 20, // ~card height ± jitter
           });
         });
         setEnteringAnims(p => new Map([...p, ...entries]));
@@ -597,21 +684,29 @@ export default function CardHand({
           let toY: number;
           let shrink = false;
           const isTrashed = trashedCardIds?.has(card.id) ?? false;
+          const isPlayed = lastPlayedTarget && lastPlayedTarget.cardId === card.id;
+          const hasDrag = isPlayed && lastPlayedTarget.dragX != null && lastPlayedTarget.dragY != null;
+
+          // Start position: from drag ghost if dragged, otherwise from hand
+          const startX = hasDrag ? lastPlayedTarget.dragX! - rect.width / 2 : rect.left;
+          const startY = hasDrag ? lastPlayedTarget.dragY! - 6 : rect.top;
 
           if (isTrashed) {
             // Trashed cards animate upward from current position
-            toX = rect.left;
-            toY = rect.top - 180;
-          } else if (lastPlayedTarget && lastPlayedTarget.cardId === card.id) {
+            toX = startX;
+            toY = startY - 180;
+          } else if (isPlayed) {
             if (lastPlayedTarget.screenX !== null && lastPlayedTarget.screenY !== null) {
               // Targeting card → animate to tile position
               toX = lastPlayedTarget.screenX - rect.width / 2;
               toY = lastPlayedTarget.screenY - rect.height / 2;
               shrink = true;
             } else {
-              // Non-targeting card (engine) → animate upward toward the grid
-              toX = rect.left;
-              toY = rect.top - 200;
+              // Non-targeting card (engine) → "thrown" with momentum from drag velocity
+              const vx = lastPlayedTarget.dragVelocityX ?? 0;
+              const THROW_DISTANCE = 150; // base px to travel
+              toX = startX + vx * THROW_DISTANCE;
+              toY = startY - 80; // drift upward slightly
               shrink = true;
             }
           } else {
@@ -620,14 +715,18 @@ export default function CardHand({
             toY = discardCy - rect.height / 2;
           }
 
+          // Random rotation for discard animations (cards "tossed" to pile)
+          const endRotation = (Math.random() - 0.5) * 20; // ±10deg
+
           departing.set(card.id, {
             card,
-            startX: rect.left, startY: rect.top,
+            startX, startY,
             toX, toY,
             width: rect.width, height: rect.height,
             active: false,
             shrink,
             trash: isTrashed,
+            endRotation,
           });
         });
 
@@ -760,6 +859,7 @@ export default function CardHand({
         active: false,
         shrink: false,
         trash: false,
+        endRotation: (Math.random() - 0.5) * 20,
       });
     });
 
@@ -868,6 +968,8 @@ export default function CardHand({
               delay: Math.round(i * 500 * animSpeed),
               active: false,
               offsetComputed: false,
+              startRotation: (Math.random() - 0.5) * 16,
+              arcHeight: CARD_MIN_HEIGHT + (Math.random() - 0.5) * 20,
             });
           });
           setEnteringAnims(p => new Map([...p, ...entries]));
@@ -908,6 +1010,19 @@ export default function CardHand({
       }
       setDraggingIndex(dragStartRef.current.index);
       setDragPos({ x: e.clientX, y: e.clientY });
+
+      // Feed horizontal cursor velocity into swing physics
+      {
+        const now = performance.now();
+        const s = dragSwingRef.current;
+        const dt = now - s.lastTime;
+        if (dt > 0 && dt < 200) {
+          const vx = (e.clientX - s.lastX) / dt; // px/ms
+          s.velocity += vx * 0.25; // VELOCITY_SCALE
+        }
+        s.lastX = e.clientX;
+        s.lastTime = now;
+      }
 
       // Compute drop target index for reordering
       const container = handContainerRef.current;
@@ -965,7 +1080,12 @@ export default function CardHand({
           return next;
         });
       } else {
-        onDragPlay(localOrder[localIdx], e.clientX, e.clientY);
+        // Compute cursor velocity for thrown momentum
+        const s = dragSwingRef.current;
+        const now = performance.now();
+        const dt = now - s.lastTime;
+        const vx = dt > 0 && dt < 200 ? (e.clientX - s.lastX) / dt : 0;
+        onDragPlay(localOrder[localIdx], e.clientX, e.clientY, vx, 0);
       }
     } else {
       const cardIdx = localOrder[localIdx];
@@ -982,17 +1102,31 @@ export default function CardHand({
     resetDragState();
   }, [onDragEnd, resetDragState]);
 
-  // Safety net: if a card is removed from the DOM mid-drag, clean up via window listener
+  // Safety net: if pointer capture is lost or card removed mid-drag, handle play via window listener
   useEffect(() => {
-    const cleanup = () => {
-      if (dragStartRef.current) {
-        if (isDraggingRef.current) onDragEnd?.();
-        resetDragState();
+    const cleanup = (e: PointerEvent) => {
+      if (!dragStartRef.current) return;
+      if (isDraggingRef.current) {
+        onDragEnd?.();
+        // Check if pointer is outside the hand — if so, play the card
+        const handRect = handContainerRef.current?.getBoundingClientRect();
+        const isOverHand = handRect
+          && e.clientX >= handRect.left && e.clientX <= handRect.right
+          && e.clientY >= handRect.top - 20 && e.clientY <= handRect.bottom + 20;
+        if (!isOverHand) {
+          const localIdx = dragStartRef.current.index;
+          const s = dragSwingRef.current;
+          const now = performance.now();
+          const dt = now - s.lastTime;
+          const vx = dt > 0 && dt < 200 ? (e.clientX - s.lastX) / dt : 0;
+          onDragPlay(localOrder[localIdx], e.clientX, e.clientY, vx, 0);
+        }
       }
+      resetDragState();
     };
     window.addEventListener('pointerup', cleanup);
     return () => window.removeEventListener('pointerup', cleanup);
-  }, [onDragEnd, resetDragState]);
+  }, [onDragEnd, onDragPlay, localOrder, resetDragState]);
 
   const handlePointerEnter = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (!isDraggingRef.current) {
@@ -1034,6 +1168,64 @@ export default function CardHand({
     alignSelf: 'stretch',
     boxSizing: 'border-box',
   };
+
+  // Generate dynamic keyframes CSS for entering (draw) arc animations
+  // Uses evenly spaced keyframes with smooth interpolation for natural card movement
+  const enterKeyframesCss = useMemo(() => {
+    const lines: string[] = [];
+    for (const [id, anim] of enteringAnims) {
+      if (!anim.active || !anim.offsetComputed) continue;
+      const name = `cardEnter_${id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const ox = anim.offset.x, oy = anim.offset.y;
+      const arc = anim.arcHeight;
+      const rot = anim.startRotation;
+      // Smooth arc: sample points along a parabolic path
+      const p = (t: number) => ({
+        x: ox * (1 - t),
+        y: oy * (1 - t) - arc * 4 * t * (1 - t), // parabolic arc peaking at t=0.5
+        r: rot * (1 - t),
+        o: Math.min(1, t * 5), // fade in over first 20%
+      });
+      const k = [0, 0.25, 0.5, 0.75, 1].map(t => p(t));
+      lines.push(`@keyframes ${name} {
+  0%   { transform: translate(${k[0].x}px, ${k[0].y}px) rotate(${k[0].r}deg); opacity: ${k[0].o}; }
+  25%  { transform: translate(${k[1].x}px, ${k[1].y}px) rotate(${k[1].r}deg); opacity: ${k[1].o}; }
+  50%  { transform: translate(${k[2].x}px, ${k[2].y}px) rotate(${k[2].r}deg); opacity: ${k[2].o}; }
+  75%  { transform: translate(${k[3].x}px, ${k[3].y}px) rotate(${k[3].r}deg); opacity: ${k[3].o}; }
+  100% { transform: translate(0px, 0px) rotate(0deg); opacity: 1; }
+}`);
+    }
+    return lines.join('\n');
+  }, [enteringAnims]);
+
+  // Generate dynamic keyframes CSS for departing (discard) arc animations
+  const departKeyframesCss = useMemo(() => {
+    const lines: string[] = [];
+    for (const [, d] of departingAnims) {
+      if (d.trash || d.shrink) continue; // only arc for discard-pile animations
+      const name = `cardDepart_${d.card.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      const dx = d.toX - d.startX;
+      const dy = d.toY - d.startY;
+      const arc = CARD_MIN_HEIGHT + (Math.abs(d.endRotation) / 10) * 15;
+      const endRot = d.endRotation;
+      // Smooth arc: sample points along a parabolic path
+      const p = (t: number) => ({
+        x: dx * t,
+        y: dy * t - arc * 4 * t * (1 - t), // parabolic arc
+        r: endRot * t,
+        o: Math.max(0, 1 - t * t), // ease out opacity quadratically
+      });
+      const k = [0, 0.25, 0.5, 0.75, 1].map(t => p(t));
+      lines.push(`@keyframes ${name} {
+  0%   { transform: translate(0px, 0px) rotate(0deg); opacity: 1; }
+  25%  { transform: translate(${k[1].x}px, ${k[1].y}px) rotate(${k[1].r}deg); opacity: ${k[1].o.toFixed(2)}; }
+  50%  { transform: translate(${k[2].x}px, ${k[2].y}px) rotate(${k[2].r}deg); opacity: ${k[2].o.toFixed(2)}; }
+  75%  { transform: translate(${k[3].x}px, ${k[3].y}px) rotate(${k[3].r}deg); opacity: ${k[3].o.toFixed(2)}; }
+  100% { transform: translate(${dx}px, ${dy}px) rotate(${endRot}deg); opacity: 0; }
+}`);
+    }
+    return lines.join('\n');
+  }, [departingAnims]);
 
   return (
     <>
@@ -1149,21 +1341,21 @@ export default function CardHand({
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';
 
+            let cardAnimation: string | undefined;
             if (entering) {
               if (!entering.active) {
-                // Placed at draw pile position, no transition yet
-                cardTransform = `translate(${entering.offset.x}px, ${entering.offset.y}px)`;
+                // Placed at draw pile position with random rotation, no transition yet
+                cardTransform = `translate(${entering.offset.x}px, ${entering.offset.y}px) rotate(${entering.startRotation}deg)`;
                 cardOpacity = 0;
                 cardTransition = 'none';
               } else {
-                // Sliding to natural position with stagger delay
+                // Arc animation via @keyframes: draw pile → arc up → hand position
                 const enterDur = Math.round(500 * animSpeed);
-                cardTransition = [
-                  `transform ${enterDur}ms ease-out ${entering.delay}ms`,
-                  `opacity ${enterDur}ms ease-out ${entering.delay}ms`,
-                  'border-color 0.1s',
-                  'box-shadow 0.1s',
-                ].join(', ');
+                const animName = `cardEnter_${card.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+                cardTransform = 'translate(0, 0) rotate(0deg)';
+                cardOpacity = 1;
+                cardTransition = 'none';
+                cardAnimation = `${animName} ${enterDur}ms linear ${entering.delay}ms both`;
               }
             }
 
@@ -1182,14 +1374,14 @@ export default function CardHand({
                 onPointerEnter={(e) => handlePointerEnter(e, localIdx)}
                 onPointerLeave={handlePointerLeave}
                 onDoubleClick={() => {
-                  if (!disabled && onDoubleClick) {
+                  if (!disabled && !trashMode && onDoubleClick) {
                     setHoveredIndex(null);
                     setHoveredRect(null);
                     onDoubleClick(localOrder[localIdx]);
                   }
                 }}
                 role="button"
-                tabIndex={disabled ? -1 : 0}
+                tabIndex={-1}
                 style={{
                   width: CARD_WIDTH,
                   height: CARD_MIN_HEIGHT,
@@ -1205,6 +1397,7 @@ export default function CardHand({
                   opacity: cardOpacity,
                   transition: cardTransition,
                   transform: isTrashSelected ? 'translateY(-8px)' : cardTransform,
+                  animation: cardAnimation ?? 'none',
                   userSelect: 'none' as const,
                   WebkitUserSelect: 'none' as const,
                   overflow: 'hidden',
@@ -1250,11 +1443,7 @@ export default function CardHand({
                       el.style.setProperty('--sub-scale', String(scale));
                     }
                   }}>
-                  {buildCardSubtitle(card).map((part, i) => {
-                    const isVp = part.endsWith('★');
-                    const vpColor = card.passive_vp !== undefined && card.passive_vp < 0 ? '#ff6666' : '#ffd700';
-                    return <span key={i} style={isVp ? { color: vpColor } : undefined}>{i > 0 ? ' · ' : ''}{part}</span>;
-                  })}
+                  {buildCardSubtitle(card, subtitleContext).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp, showDynamic: true }))}
                   </span>
                 </div>
                 {/* Icon overlay — shown when card is selected for trashing/discarding */}
@@ -1271,7 +1460,7 @@ export default function CardHand({
                     <div style={{
                       fontSize: 28,
                       filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.8))',
-                    }}>{trashMode?.label === 'Discard' ? '↪️' : '🗑️'}</div>
+                    }}>{trashMode?.label === 'Discard' ? '🃏↘' : '🗑️'}</div>
                   </div>
                 )}
                 {/* Dark overlay + "Playing" label on the card being played */}
@@ -1337,7 +1526,7 @@ export default function CardHand({
           <div style={{
             position: 'fixed',
             left: dragPos.x - CARD_WIDTH / 2,
-            top: dragPos.y - 28,
+            top: dragPos.y - 6,
             width: CARD_WIDTH,
             height: CARD_MIN_HEIGHT,
             padding: 6,
@@ -1347,17 +1536,13 @@ export default function CardHand({
             color: '#fff',
             pointerEvents: 'none',
             zIndex: 9999,
-            transform: 'rotate(3deg) scale(1.05)',
+            transformOrigin: 'top center',
+            transform: `rotate(${dragSwingAngle}deg) scale(1.05)`,
             boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
             boxSizing: 'border-box',
             overflow: 'hidden',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                {dragCard.name}
-              </div>
-              <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{dragCard.buy_cost != null ? `${dragCard.buy_cost}💰` : '—'}</span>
-            </div>
+            <CompactCardContent card={dragCard} titleSize={12} subtitleSize={12} subtitleCtx={subtitleContext} />
           </div>
         );
       })()}
@@ -1403,12 +1588,7 @@ export default function CardHand({
                   border: `2px solid ${typeColor}`, borderRadius: 6,
                   color: '#fff', boxSizing: 'border-box',
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                    <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                      {d.card.name}
-                    </div>
-                    <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{d.card.buy_cost != null ? `${d.card.buy_cost}💰` : '—'}</span>
-                  </div>
+                  <CompactCardContent card={d.card} titleSize={12} subtitleSize={12} subtitleCtx={subtitleContext} />
                 </div>
               );
               return [
@@ -1448,9 +1628,40 @@ export default function CardHand({
             }
 
             // Standard departing animation (play/discard)
+            const isDiscardArc = !d.shrink; // discard-pile cards use arc animation
+            const departAnimName = `cardDepart_${d.card.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+
+            if (isDiscardArc) {
+              // Discard pile: arc animation via @keyframes
+              return (
+                <div
+                  key={d.card.id}
+                  style={{
+                    position: 'fixed',
+                    left: d.startX,
+                    top: d.startY,
+                    width: d.width,
+                    height: d.height,
+                    animation: d.active ? `${departAnimName} ${durMs}ms linear forwards` : 'none',
+                    pointerEvents: 'none',
+                    zIndex: 9990,
+                    padding: 6,
+                    background: '#2a2a3e',
+                    border: `2px solid ${typeColor}`,
+                    borderRadius: 6,
+                    color: '#fff',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                <CompactCardContent card={d.card} titleSize={12} subtitleSize={12} subtitleCtx={subtitleContext} />
+              </div>
+              );
+            }
+
+            // Played cards (shrink toward tile): CSS transition, no arc
             const dx = d.active ? d.toX - d.startX : 0;
             const dy = d.active ? d.toY - d.startY : 0;
-            const scale = d.active && d.shrink ? 'scale(0.3)' : 'scale(1)';
+            const rot = d.active ? `rotate(${d.endRotation}deg)` : 'rotate(0deg)';
             return (
               <div
                 key={d.card.id}
@@ -1460,7 +1671,7 @@ export default function CardHand({
                   top: d.startY,
                   width: d.width,
                   height: d.height,
-                  transform: `translate(${dx}px, ${dy}px) ${scale}`,
+                  transform: `translate(${dx}px, ${dy}px) ${rot} scale(${d.active ? 0.3 : 1})`,
                   transformOrigin: 'center center',
                   opacity: d.active ? 0 : 1,
                   transition: d.active
@@ -1476,12 +1687,7 @@ export default function CardHand({
                   boxSizing: 'border-box',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                    {d.card.name}
-                  </div>
-                  <span style={{ fontSize: 11, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{d.card.buy_cost != null ? `${d.card.buy_cost}��` : ''}</span>
-                </div>
+                <CompactCardContent card={d.card} titleSize={12} subtitleSize={12} subtitleCtx={subtitleContext} />
               </div>
             );
           })}
@@ -1489,12 +1695,21 @@ export default function CardHand({
         document.body,
       )}
 
-      {/* Keyframes for shuffle animation */}
+      {/* Keyframes for draw/discard arc animations + shuffle */}
       <style>{`
+        ${enterKeyframesCss}
+        ${departKeyframesCss}
         @keyframes shufflePulse {
           0%, 100% { transform: rotate(0deg) scale(1); }
           25% { transform: rotate(-3deg) scale(1.05); }
           75% { transform: rotate(3deg) scale(1.05); }
+        }
+        @keyframes dynamicGlow {
+          0%, 100% { text-shadow: 0 0 4px rgba(255,225,77,0.3); }
+          50% { text-shadow: 0 0 8px rgba(255,225,77,0.8), 0 0 12px rgba(255,200,0,0.4); }
+        }
+        .dynamic-value {
+          animation: dynamicGlow 2s ease-in-out infinite;
         }
       `}</style>
     </>

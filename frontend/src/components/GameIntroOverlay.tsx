@@ -148,6 +148,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
       <div style={{ marginBottom: 48, display: 'flex', flexDirection: 'column', gap: 12 }}>
         {gameState.player_order.map((pid, i) => {
           const player = gameState.players[pid];
+          if (!player) return null;
           const color = player.color || '#888';
           const archLabel = ARCHETYPE_LABELS[player.archetype] || player.archetype;
           return (

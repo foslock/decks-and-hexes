@@ -70,6 +70,20 @@ export async function playCard(
   });
 }
 
+export async function submitDiscard(
+  gameId: string,
+  playerId: string,
+  discardCardIndices: number[],
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/submit-discard`, {
+    method: 'POST',
+    body: JSON.stringify({
+      player_id: playerId,
+      discard_card_indices: discardCardIndices,
+    }),
+  });
+}
+
 export async function submitPlan(
   gameId: string,
   playerId: string,

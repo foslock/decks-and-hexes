@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     task.cancel()
 
 
-app = FastAPI(title="Card Clash", version="0.1.5", lifespan=lifespan)
+app = FastAPI(title="Card Clash", version="0.1.9", lifespan=lifespan)
 
 # CORS — allow frontend origins (dev + Render)
 origins = [

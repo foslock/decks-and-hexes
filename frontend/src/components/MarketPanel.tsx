@@ -1,6 +1,7 @@
 import type { Card, MarketStack } from '../types/game';
 import { IrreversibleButton } from './Tooltip';
 import { buildCardSubtitle } from './cardSubtitle';
+import { renderSubtitleText } from './SubtitlePartRenderer';
 
 interface MarketPanelProps {
   archetypeMarket: Card[];
@@ -138,7 +139,7 @@ function MarketCard({
             }
           }}>
           {card.buy_cost !== null ? `💰 ${card.buy_cost}` : 'Free'}
-          {buildCardSubtitle(card).map((part, i) => <span key={i}> · {part}</span>)}
+          {buildCardSubtitle(card).map((part, i) => <span key={i}> · {renderSubtitleText(part.text)}</span>)}
           {remaining !== null && ` · ×${remaining}`}
           </span>
         </div>

@@ -99,6 +99,14 @@ class EffectType(str, Enum):
     ENHANCE_VP_TILE = "enhance_vp_tile"                # Consecrate: +1 vp_value on a VP tile
     GRANT_LAND_GRANTS = "grant_land_grants"            # Diplomacy: all players get a Land Grant
     VP_FROM_CONTESTED_WINS = "vp_from_contested_wins"  # Battle Glory: +1 passive_vp on card per trigger
+    VP_FROM_DISCONNECTED_GROUPS = "vp_from_disconnected_groups"  # Colony: VP per disconnected group
+    VP_FROM_UNCAPTURED_TILES = "vp_from_uncaptured_tiles"        # Warden: VP per pristine tiles
+
+    # Conditional resource gain
+    RESOURCES_PER_CLAIMS_LAST_ROUND = "resources_per_claims_last_round"  # War Tithe
+
+    # Draw based on connected VP hexes
+    DRAW_PER_CONNECTED_VP = "draw_per_connected_vp"      # Toll Road: draw 2 per connected VP hex
 
 
 class ConditionType(str, Enum):

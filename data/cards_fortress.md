@@ -11,21 +11,27 @@
 
 cards:
 
-  - id: fortress_bunker
-    name: Bunker
-    name_upgraded: Bunker+
-    type: Defense
-    buy_cost: null
-    starter: true
+  - id: fortress_warden
+    name: Warden
+    name_upgraded: Warden+
+    type: Passive
+    buy_cost: 4
     action_return: 0
     power: 0
-    defense_bonus: 2
-    upgraded_defense_bonus: 3
-    effect: "One tile you own gains +2 defense this round."
-    effect_upgraded: "One tile you own gains +3 defense this round. Gain 1 resource."
-    resource_gain: 0
-    upgraded_resource_gain: 1
-    note: "Fortress starter. Pure defensive positioning; upgrade adds economy."
+    unplayable: true
+    vp_formula: uncaptured_tiles_4
+    effect: "+1 VP for every 4 tiles you own that have never changed hands since you claimed them."
+    effect_upgraded: "+1 VP for every 3 tiles you own that have never changed hands since you claimed them."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Rewards holding ground permanently. Tiles lost and recaptured don't count. Takes up a hand slot when drawn."
+
+    effects:
+      - type: vp_from_uncaptured_tiles
+        value: 4
+        upgraded_value: 3
+        timing: on_resolution
+        metadata: {divisor: 4, upgraded_divisor: 3}
 
   - id: fortress_fortify
     name: Fortify
@@ -232,8 +238,8 @@ cards:
     buy_cost: 4
     action_return: 0
     power: 0
-    effect: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down). Draw 1 card."
-    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) +2. Draw 1 card."
+    effect: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) and draw 1 card."
+    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) +2 and draw 1 card."
     secondary_effect: null
     secondary_timing: null
 
@@ -330,24 +336,24 @@ cards:
     secondary_timing: null
     note: "Rewards Entrench investment. Fluctuates as tiles are lost or captured. Takes up a hand slot when drawn."
 
-  - id: fortress_diplomacy
-    name: Diplomacy
-    name_upgraded: Diplomacy+
+  - id: fortress_toll_road
+    name: Toll Road
+    name_upgraded: Toll Road+
     type: Engine
-    buy_cost: 2
+    buy_cost: 5
     action_return: 0
     power: 0
-    trash_on_use: true
-    effect: "You receive a Land Grant in your discard pile. Then, target opponent receives a Land Grant in their discard pile. Trash this card."
-    effect_upgraded: "You receive 2 Land Grants in your discard pile. Then, target opponent receives a Land Grant in their discard pile. Trash this card."
+    effect: "Draw 2 cards for each VP bonus tile you own that is connected to your base."
+    effect_upgraded: "Draw 3 cards for each VP bonus tile you own that is connected to your base."
     secondary_effect: null
     secondary_timing: null
-    note: "You get VP, but must give one to an opponent too. Upgraded version nets +1 VP advantage."
+    note: "Rewards VP hex connectivity with massive card draw. Upgraded version draws 3 per tile."
 
     effects:
-      - type: grant_land_grants
+      - type: draw_per_connected_vp
         timing: immediate
-        target: chosen_player
+        value: 2
+        upgraded_value: 3
 
   - id: fortress_catch_up
     name: Resilience

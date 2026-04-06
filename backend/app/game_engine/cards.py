@@ -91,8 +91,15 @@ class Card:
     upgraded_multi_target_count: Optional[int] = None
     upgraded_defense_target_count: Optional[int] = None
     upgraded_unoccupied_only: Optional[bool] = None
+    upgraded_trash_on_use: Optional[bool] = None
 
     name_upgraded: str = ""
+
+    @property
+    def effective_trash_on_use(self) -> bool:
+        if self.is_upgraded and self.upgraded_trash_on_use is not None:
+            return self.upgraded_trash_on_use
+        return self.trash_on_use
 
     @property
     def effective_power(self) -> int:
@@ -154,7 +161,7 @@ class Card:
             "timing": self.timing.value,
             "buy_cost": self.buy_cost,
             "is_upgraded": self.is_upgraded,
-            "trash_on_use": self.trash_on_use,
+            "trash_on_use": self.effective_trash_on_use,
             "stackable": self.stackable,
             "forced_discard": self.forced_discard,
             "draw_cards": self.effective_draw_cards,
@@ -198,6 +205,8 @@ class Card:
             upgraded["multi_target_count"] = self.upgraded_multi_target_count
         if self.upgraded_defense_target_count is not None:
             upgraded["defense_target_count"] = self.upgraded_defense_target_count
+        if self.upgraded_trash_on_use is not None:
+            upgraded["trash_on_use"] = self.upgraded_trash_on_use
         if upgraded:
             return {"upgraded_stats": upgraded}
         return {}
@@ -290,48 +299,22 @@ class Deck:
         return len(self.cards) + len(self.discard)
 
 
-STARTER_CARD_IDS = {
-    Archetype.VANGUARD: "vanguard_war_chest",
-    Archetype.SWARM: "swarm_scout",
-    Archetype.FORTRESS: "fortress_bunker",
-}
-
-
-# Starting deck composition per archetype: (explores, gathers)
-# All archetypes get 2× archetype starter, total = explores + gathers + 2 = 10
-STARTER_DECK_COMPOSITION: dict[Archetype, tuple[int, int]] = {
-    Archetype.VANGUARD: (4, 4),   # balanced
-    Archetype.SWARM: (5, 3),      # more explores → faster expansion
-    Archetype.FORTRESS: (3, 5),   # more gathers → more resources for defense
-}
-
-
 def build_starting_deck(archetype: Archetype, card_registry: dict[str, Card]) -> Deck:
     """Build a starting deck for the given archetype.
 
-    Swarm:    5× Explore, 3× Gather, 2× Scout     = 10 cards
-    Vanguard: 4× Explore, 4× Gather, 2× War Chest = 10 cards
-    Fortress: 3× Explore, 5× Gather, 2× Bunker    = 10 cards
+    All archetypes: 5× Explore, 5× Gather = 10 cards.
     """
-    cards = []
-    num_explores, num_gathers = STARTER_DECK_COMPOSITION.get(archetype, (4, 4))
+    cards: list[Card] = []
 
-    # 2× archetype-specific starter card
-    starter_id = STARTER_CARD_IDS.get(archetype)
-    if starter_id:
-        starter = card_registry.get(starter_id)
-        if starter:
-            cards.extend([_copy_card(starter, f"start_{i}") for i in range(2)])
-
-    # Explores
+    # 5× Explores
     explore = card_registry.get("neutral_explore")
     if explore:
-        cards.extend([_copy_card(explore, f"start_adv_{i}") for i in range(num_explores)])
+        cards.extend([_copy_card(explore, f"start_adv_{i}") for i in range(5)])
 
-    # Gathers
+    # 5× Gathers
     gather = card_registry.get("neutral_gather")
     if gather:
-        cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(num_gathers)])
+        cards.extend([_copy_card(gather, f"start_gat_{i}") for i in range(5)])
 
     deck = Deck(cards=cards)
     return deck

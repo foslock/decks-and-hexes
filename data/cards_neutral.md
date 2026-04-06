@@ -42,7 +42,7 @@ cards:
     starter: true
     action_return: 0
     power: 0
-    effect: "Gain 1 resources."
+    effect: "Gain 1 resource."
     effect_upgraded: "Gain 3 resources."
     resource_gain: 1
     upgraded_resource_gain: 3
@@ -243,13 +243,13 @@ cards:
     action_return: 2
     power: 0
     effect: "Gain 2 actions. All other players gain 1 extra action next turn."
-    effect_upgraded: "Gain 2 actions. All other players gain 2 extra actions next turn."
+    effect_upgraded: "Gain 2 actions."
     trash_on_use: false
-    note: "The shared action gain creates diplomatic tension — helping opponents may be worth the tempo."
+    note: "The shared action gain creates diplomatic tension — upgrading removes the downside entirely."
     effects:
       - type: grant_actions_next_turn
         value: 1
-        upgraded_value: 2
+        upgraded_value: 0
         timing: immediate
         target: all_others
 
@@ -261,8 +261,8 @@ cards:
     copies: 2
     action_return: 0
     power: 0
-    effect: "All Claim cards in your hand gain Stackable this turn."
-    effect_upgraded: "All Claim cards in your hand gain Stackable and +1 power this turn. Draw 1 card."
+    effect: "All Claim cards in your hand gain Stackable this turn. Trash this card."
+    effect_upgraded: "All Claim cards in your hand gain Stackable and +1 power this turn. Draw 1 card. Trash this card."
     trash_on_use: true
     effects:
       - type: grant_stackable

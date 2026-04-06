@@ -66,9 +66,13 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     upkeep_cost: 0,
     tiles_lost_to_upkeep: 0,
     rubble_count: 0,
+    claims_won_last_round: 0,
+    tile_count: 0,
     is_cpu: false,
     cpu_difficulty: null,
     has_left: false,
+    free_rerolls: 0,
+    pending_discard: 0,
     ...overrides,
   };
 }

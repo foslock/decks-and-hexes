@@ -4,6 +4,7 @@ import type { Card } from '../types/game';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
+import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { CARD_TYPE_COLORS } from '../constants/cardColors';
 
@@ -107,11 +108,7 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
               el.style.setProperty('--sub-scale', String(scale));
             }
           }}>
-          {buildCardSubtitle(displayCard).map((part, i) => {
-            const isVp = part.endsWith('★');
-            const vpColor = displayCard.passive_vp !== undefined && displayCard.passive_vp < 0 ? '#ff6666' : '#ffd700';
-            return <span key={i} style={isVp ? { color: vpColor } : undefined}>{i > 0 ? ' · ' : ''}{part}</span>;
-          })}
+          {buildCardSubtitle(displayCard).map((part, i) => renderSubtitlePart(part, i, { passiveVp: displayCard.passive_vp }))}
           </span>
         </div>
       </div>

@@ -39,6 +39,7 @@ from app.game_engine.game_state import (
     execute_reveal,
     execute_start_of_turn,
     play_card,
+    submit_pending_discard,
     submit_plan,
 )
 from app.game_engine.hex_grid import GridSize
@@ -211,7 +212,7 @@ class TestCardsLoadEffects:
 
 class TestSelfDiscard:
     def test_rally_draw_then_discard(self, small_2p_game, card_registry):
-        """Rally: Draw 2 cards, discard 1 of player's choice."""
+        """Rally (Regroup): Draw 2 cards first, then player picks 1 to discard."""
         game = small_2p_game
         player = game.players["p0"]
 
@@ -220,16 +221,23 @@ class TestSelfDiscard:
         player.hand = [rally] + player.hand
         initial_hand_size = len(player.hand)
 
-        # Play Rally with discard choice (discard index 1 = first card after draw)
-        # Rally draws 2, so after draw player has (initial - 1 + 2) cards
-        # Then discard 1 -> net = initial - 1 + 2 - 1 = initial
-        # But index is relative to hand AFTER draw
-        success, msg = play_card(game, "p0", 0, discard_card_indices=[0])
+        # Step 1: Play Rally — draws 2 cards, sets pending_discard
+        # No discard_card_indices needed (deferred)
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+
+        # After play: hand = initial - 1 (played rally) + 2 (drew) = initial + 1
+        assert len(player.hand) == initial_hand_size - 1 + 2
+        assert player.pending_discard == 1
+
+        # Step 2: Submit the deferred discard choice
+        success, msg = submit_pending_discard(game, "p0", [0])
         assert success, msg
 
         # Hand should be: initial_hand - 1 (played rally) + 2 (drew) - 1 (discarded)
         expected = initial_hand_size - 1 + 2 - 1
         assert len(player.hand) == expected
+        assert player.pending_discard == 0
 
     def test_discard_with_empty_hand_skips(self, small_2p_game, card_registry):
         """If player has no cards after playing, discard is skipped."""
@@ -575,7 +583,7 @@ class TestConditionalPower:
                 break
 
     def test_numbers_game_power_equals_hand(self, small_2p_game, card_registry):
-        """Numbers Game: power = cards in hand."""
+        """Numbers Game: power = other cards in hand (not including this card)."""
         game = small_2p_game
         player = game.players["p1"]  # Swarm
 
@@ -584,8 +592,8 @@ class TestConditionalPower:
 
         action = PlannedAction(card=numbers, target_q=0, target_r=0)
         effective = calculate_effective_power(game, player, numbers, action)
-        # Hand has 4 cards (including numbers game itself)
-        assert effective == 4
+        # Hand has 4 cards; power = 3 (other cards, not including this card)
+        assert effective == 3
 
 
 # ── On-Resolution Effect Tests ────────────────────────────────────

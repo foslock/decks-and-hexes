@@ -20,6 +20,7 @@ from .game_state import (
     execute_start_of_turn,
     execute_upkeep,
     play_card,
+    submit_pending_discard,
     submit_plan,
     advance_resolve,
     buy_card,
@@ -248,6 +249,11 @@ def _run_plan_phase(game: GameState, cpus: dict[str, CPUPlayer],
                 card_name = msg.replace("Played ", "")
                 if verbose:
                     print(f"  {player.name} plays {card_name}")
+
+                # Auto-resolve deferred discard for CPU players
+                if player.pending_discard > 0:
+                    discard_indices = cpu._pick_cards_to_discard(player, player.pending_discard)
+                    submit_pending_discard(game, pid, discard_indices)
 
                 # Track claims
                 if action.get("target_q") is not None:

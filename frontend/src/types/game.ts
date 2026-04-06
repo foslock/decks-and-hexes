@@ -42,7 +42,7 @@ export interface Card {
   upgrade_description?: string;
   name_upgraded?: string;
   starter: boolean;
-  effects?: { type: string; condition: string; value: number; upgraded_value?: number; metadata?: Record<string, unknown> }[];
+  effects?: { type: string; condition: string; value: number; upgraded_value?: number; target?: string; metadata?: Record<string, unknown> }[];
   upgraded_stats?: {
     power?: number;
     resource_gain?: number;
@@ -61,6 +61,10 @@ export interface PlannedAction {
   target_r: number | null;
   target_player_id: string | null;
   extra_targets?: [number, number][];
+  /** Computed effective power at resolve time (accounts for hand size, tile count, etc.) */
+  effective_power?: number;
+  /** Dynamic resource gain snapshotted at play time (e.g. War Tithe) */
+  effective_resource_gain?: number;
 }
 
 export interface Player {
@@ -91,9 +95,13 @@ export interface Player {
   upkeep_cost: number;
   tiles_lost_to_upkeep: number;
   rubble_count: number;
+  claims_won_last_round: number;
+  tile_count: number;
   is_cpu: boolean;
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
   has_left: boolean;
+  free_rerolls: number;
+  pending_discard: number;
 }
 
 export interface MarketStack {

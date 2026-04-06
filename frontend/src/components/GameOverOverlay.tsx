@@ -52,7 +52,7 @@ export default function GameOverOverlay({
       }
     }
 
-    return gameState.player_order.map((pid) => {
+    return gameState.player_order.filter(pid => gameState.players[pid]).map((pid) => {
       const p: Player = gameState.players[pid];
       return {
         playerId: pid,

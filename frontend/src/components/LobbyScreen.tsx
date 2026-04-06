@@ -224,7 +224,7 @@ export default function LobbyScreen({
   const orderedPlayerIds = lobby.player_order?.length
     ? lobby.player_order.filter(pid => pid in lobby.players)
     : Object.keys(lobby.players);
-  const players = orderedPlayerIds.map(pid => lobby.players[pid]);
+  const players = orderedPlayerIds.map(pid => lobby.players[pid]).filter(Boolean);
 
   // ── Host actions ─────────────────────────────────────────
 
@@ -494,13 +494,14 @@ export default function LobbyScreen({
           {/* Settings rows — consistent style */}
           <div style={{
             display: 'flex', flexDirection: 'column', gap: 1,
-            background: '#333', borderRadius: 8, overflow: 'hidden',
+            background: '#333', borderRadius: 8,
           }}>
             {/* Card Pack */}
             <div style={{
               fontSize: 13, color: '#aaa',
               padding: '8px 12px', background: '#1e1e36',
               display: 'flex', alignItems: 'center', gap: 8,
+              borderRadius: '8px 8px 0 0',
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
                 <Tooltip content="Decides which cards will be available in the game.">
@@ -722,6 +723,7 @@ export default function LobbyScreen({
               fontSize: 13, color: '#aaa',
               padding: '8px 12px', background: '#1e1e36',
               display: 'flex', alignItems: 'center', gap: 8,
+              borderRadius: isHost ? undefined : '0 0 8px 8px',
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
                 <Tooltip content="The number of actions each player starts their turn with.">
@@ -774,6 +776,7 @@ export default function LobbyScreen({
                 fontSize: 13, color: '#aaa',
                 padding: '8px 12px', background: '#1e1e36',
                 display: 'flex', alignItems: 'center', gap: 8,
+                borderRadius: '0 0 8px 8px',
               }}>
                 <div style={{ width: 90, flexShrink: 0 }}>
                   <Tooltip content="Enables game-breaking settings for testing.">
