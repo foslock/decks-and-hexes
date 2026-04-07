@@ -18,7 +18,7 @@ Players collectively agree on a grid size (Small / Medium / Large). This determi
 ## Step 3: Determine Initial Turn Order
 Roll or randomly determine the **first player** for Round 1. Seat order is fixed for the entire game, but the **first player token rotates clockwise each round** — every player will eventually act first.
 
-> **Why this matters:** Being first player affects tie-breaking in conflict resolution and sets the rhythm of the plan phase. Rotating it ensures no player holds a sustained advantage.
+> **Why this matters:** Being first player affects tie-breaking in conflict resolution and sets the rhythm of the play phase. Rotating it ensures no player holds a sustained advantage.
 
 ## Step 4: Passive Draft
 1. Randomly draw **n+2 passives** from the passive pool (where n = number of active players).

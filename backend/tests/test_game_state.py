@@ -23,7 +23,7 @@ from app.game_engine.game_state import (
     execute_upkeep,
     play_card,
     reroll_market,
-    submit_plan,
+    submit_play,
 )
 from app.game_engine.hex_grid import GridSize
 
@@ -125,8 +125,8 @@ class TestStartOfTurn:
         for p in small_2p_game.players.values():
             assert len(p.hand) == p.hand_size
 
-    def test_phase_is_plan_after_start(self, small_2p_game: GameState) -> None:
-        assert small_2p_game.current_phase == Phase.PLAN
+    def test_phase_is_play_after_start(self, small_2p_game: GameState) -> None:
+        assert small_2p_game.current_phase == Phase.PLAY
 
     def test_archetype_market_populated(self, small_2p_game: GameState) -> None:
         for p in small_2p_game.players.values():
@@ -140,9 +140,9 @@ class TestStartOfTurn:
     def test_round_2_enters_upkeep_phase(self, small_2p_game: GameState) -> None:
         """After advancing to round 2, game should enter UPKEEP phase with data populated."""
         game = small_2p_game
-        # Submit plans for all players (play nothing)
+        # Submit plays for all players (play nothing)
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         # End turn to advance — round 2 start_of_turn computes upkeep, then enters UPKEEP
         execute_end_of_turn(game)
         assert game.current_phase == Phase.UPKEEP
@@ -153,10 +153,10 @@ class TestStartOfTurn:
             assert p.resources == STARTING_RESOURCES  # no upkeep charged
         # Advance to PLAN
         execute_upkeep(game)
-        assert game.current_phase == Phase.PLAN
+        assert game.current_phase == Phase.PLAY
 
 
-class TestPlanPhase:
+class TestPlayPhase:
     def test_play_claim_card(self, small_2p_game: GameState) -> None:
         game = small_2p_game
         p0 = game.players["p0"]
@@ -281,22 +281,22 @@ class TestPlanPhase:
             assert "stackable" in msg2.lower()
 
 
-class TestSubmitPlan:
-    def test_submit_plan(self, small_2p_game: GameState) -> None:
-        ok, msg = submit_plan(small_2p_game, "p0")
+class TestSubmitPlay:
+    def test_submit_play(self, small_2p_game: GameState) -> None:
+        ok, msg = submit_play(small_2p_game, "p0")
         assert ok
-        assert small_2p_game.players["p0"].has_submitted_plan
+        assert small_2p_game.players["p0"].has_submitted_play
 
-    def test_all_plans_triggers_reveal(self, small_2p_game: GameState) -> None:
+    def test_all_plays_triggers_reveal(self, small_2p_game: GameState) -> None:
         game = small_2p_game
-        submit_plan(game, "p0")
-        assert game.current_phase == Phase.PLAN  # Still waiting for p1
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        assert game.current_phase == Phase.PLAY  # Still waiting for p1
+        submit_play(game, "p1")
         assert game.current_phase == Phase.REVEAL  # Reveal phase, awaiting advance_resolve
 
     def test_cannot_play_after_submit(self, small_2p_game: GameState) -> None:
         game = small_2p_game
-        submit_plan(game, "p0")
+        submit_play(game, "p0")
         ok, msg = play_card(game, "p0", 0)
         assert not ok
 
@@ -327,8 +327,8 @@ class TestRevealPhase:
         play_card(game, "p0", claim_idx, target.q, target.r)
 
         # Both submit
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # After reveal, p0 should own the target tile (undefended = 0 defense)
         tile = game.grid.get_tile(target.q, target.r)
@@ -371,8 +371,8 @@ class TestRevealPhase:
         target.defense_power = claim_card.effective_power
         play_card(game, "p0", claim_idx, target.q, target.r)
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # Defender should win (1 attack vs 1 defense = tie = defender wins)
         tile = game.grid.get_tile(target.q, target.r)
@@ -384,7 +384,7 @@ class TestBuyPhase:
     def _advance_to_buy(self, game: GameState) -> None:
         """Helper to advance game to Buy phase with p0 as current buyer."""
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         assert game.current_phase == Phase.REVEAL
         for pid in game.player_order:
             advance_resolve(game, pid)
@@ -450,7 +450,7 @@ class TestBuyPhase:
         assert not ok
 
     def test_buy_wrong_phase(self, small_2p_game: GameState) -> None:
-        """Cannot buy during Plan phase."""
+        """Cannot buy during Play phase."""
         ok, msg = buy_card(small_2p_game, "p0", "neutral", "some_card")
         assert not ok
 
@@ -459,7 +459,7 @@ class TestEndOfTurn:
     def test_end_turn_advances_round(self, small_2p_game: GameState) -> None:
         game = small_2p_game
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         execute_end_of_turn(game)
         assert game.current_round == 2
 
@@ -467,7 +467,7 @@ class TestEndOfTurn:
         game = small_2p_game
         first_before = game.first_player_index
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         execute_end_of_turn(game)
         assert game.first_player_index == (first_before + 1) % len(game.player_order)
 
@@ -477,7 +477,7 @@ class TestEndOfTurn:
         for p in game.players.values():
             assert len(p.hand) > 0
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         execute_end_of_turn(game)
         # After end_of_turn calls start_of_turn, players draw new hands
         for p in game.players.values():
@@ -486,12 +486,12 @@ class TestEndOfTurn:
     def test_full_round_cycle(self, small_2p_game: GameState) -> None:
         """Play through an entire round."""
         game = small_2p_game
-        assert game.current_phase == Phase.PLAN
+        assert game.current_phase == Phase.PLAY
         assert game.current_round == 1
 
-        # Plan phase — both submit empty plans
+        # Play phase — both submit empty plays
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         assert game.current_phase == Phase.REVEAL
 
         # Advance through reveal phase
@@ -504,7 +504,7 @@ class TestEndOfTurn:
         assert game.current_round == 2
         assert game.current_phase == Phase.UPKEEP  # round 2+ enters UPKEEP
         execute_upkeep(game)
-        assert game.current_phase == Phase.PLAN
+        assert game.current_phase == Phase.PLAY
 
 
 class TestVPScoring:
@@ -550,7 +550,7 @@ class TestVPScoring:
                   target_q=vp_tile.q, target_r=vp_tile.r)
 
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
 
         # After reveal, derived VP should be higher (from tile count + VP hex bonus)
         vp_after = compute_player_vp(game, "p0")
@@ -598,7 +598,7 @@ class TestForcedDiscards:
 
         # Advance to next round
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         execute_end_of_turn(game)
 
         # p1 should draw fewer cards
@@ -634,10 +634,10 @@ class TestGameSerialization:
 
 class TestAdvanceResolve:
     def test_advance_resolve_transitions_to_buy(self, small_2p_game: GameState) -> None:
-        """Submit plans -> REVEAL, advance all players -> BUY."""
+        """Submit plays -> REVEAL, advance all players -> BUY."""
         game = small_2p_game
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         assert game.current_phase == Phase.REVEAL
 
         for pid in game.player_order:
@@ -647,7 +647,7 @@ class TestAdvanceResolve:
     def test_advance_resolve_wrong_phase(self, small_2p_game: GameState) -> None:
         """advance_resolve during PLAN phase should fail."""
         game = small_2p_game
-        assert game.current_phase == Phase.PLAN
+        assert game.current_phase == Phase.PLAY
         ok, msg = advance_resolve(game, "p0")
         assert not ok
         assert "reveal" in msg.lower()
@@ -656,7 +656,7 @@ class TestAdvanceResolve:
         """Calling advance_resolve twice for the same player should fail."""
         game = small_2p_game
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         assert game.current_phase == Phase.REVEAL
 
         ok1, _ = advance_resolve(game, "p0")
@@ -682,7 +682,7 @@ class TestAdvanceResolve:
         execute_start_of_turn(game)
 
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         assert game.current_phase == Phase.REVEAL
 
         # Only p0 advances — should still be REVEAL
@@ -709,7 +709,7 @@ class TestAdvanceResolve:
         execute_start_of_turn(game)
 
         for pid in game.player_order:
-            submit_plan(game, pid)
+            submit_play(game, pid)
         assert game.current_phase == Phase.REVEAL
 
         # Only human player needs to advance

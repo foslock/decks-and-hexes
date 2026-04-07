@@ -15,11 +15,11 @@ Performed individually, simultaneously by all players:
    - If your deck is empty, shuffle your discard pile to form a new deck, then draw.
    - Apply any **"draw X cards next turn"** bonuses earned last round now.
 5. **Reveal archetype market:** Three cards are drawn face-up from your archetype deck. These are available for purchase this turn only.
-6. **Apply upgrade credits:** If you hold any upgrade credit tokens, you may upgrade one card in your hand (see Upgrade Rules). Maximum one upgrade per turn. Upgrades happen before the Plan Phase.
+6. **Apply upgrade credits:** If you hold any upgrade credit tokens, you may upgrade one card in your hand (see Upgrade Rules). Maximum one upgrade per turn. Upgrades happen before the Play Phase.
 
 ---
 
-## Phase 2: Plan Phase (Simultaneous, ~60 seconds)
+## Phase 2: Play Phase (Simultaneous, ~60 seconds)
 
 All players simultaneously and secretly select cards from their hand to play this round.
 
@@ -81,7 +81,7 @@ After the buy phase, any unpurchased archetype market cards are **discarded** (u
 3. **Rotate the first player token** clockwise to the next active player.
 4. Pass to next round.
 
-> **First Player Rotation:** The first player token rotates every round. This affects conflict tie-breaking order and plan phase rhythm. Every player will act first an approximately equal number of times over the course of the game. The passive draft at setup uses reverse Round 1 order specifically to offset Round 1's first player advantage — after that, rotation handles fairness automatically.
+> **First Player Rotation:** The first player token rotates every round. This affects conflict tie-breaking order and play phase rhythm. Every player will act first an approximately equal number of times over the course of the game. The passive draft at setup uses reverse Round 1 order specifically to offset Round 1's first player advantage — after that, rotation handles fairness automatically.
 
 ---
 
@@ -99,7 +99,7 @@ After the buy phase, any unpurchased archetype market cards are **discarded** (u
 
 ## Upgrade Rules
 
-- A player may spend **1 upgrade credit token** during Phase 1 (Start of Turn, before the Plan Phase) to upgrade any one card in their current hand.
+- A player may spend **1 upgrade credit token** during Phase 1 (Start of Turn, before the Play Phase) to upgrade any one card in their current hand.
 - The upgraded version (marked with +) replaces the base card for this turn and all future turns.
 - Physically mark the card (e.g. a sticker or marker) to indicate it is permanently upgraded.
 - **Maximum one upgrade per turn.**

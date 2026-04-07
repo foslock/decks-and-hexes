@@ -55,7 +55,7 @@ Bump frontend version when frontend files change, backend version when backend f
 
 ### Turn Structure (5 phases)
 1. **Start of Turn** — Pay upkeep (skip round 1), score VP hexes held since last turn, check win (20 VP), draw hand, reveal archetype market (3 random cards from player's archetype deck)
-2. **Plan Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
+2. **Play Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
 4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards (unlimited per turn), or upgrade credits (5 resources). Purchases are visible to all players.
 5. **End of Turn** — Discard hand. Check objective reveal threshold. Rotate first player token clockwise.
@@ -65,7 +65,7 @@ Bump frontend version when frontend files change, backend version when backend f
 - All archetypes: 3 starting actions per turn
 - Some cards grant extra actions when played (e.g. "Gain 1 action" or "Gain 2 actions")
 - No hard cap on actions — chaining action-granting cards can exceed 3
-- Immediate effects (action gains, card draws) resolve during Plan Phase as cards are played
+- Immediate effects (action gains, card draws) resolve during Play Phase as cards are played
 
 ### Claiming Tiles
 - All board interaction uses unified Claim cards — neutral tiles have implicit defense 0
@@ -158,7 +158,7 @@ Bump frontend version when frontend files change, backend version when backend f
 14. Passive ability system
 
 ### Phase 3 — Polish
-15. UI for simultaneous plan phase
+15. UI for simultaneous play phase
 16. Animations and visual feedback
 17. Game state persistence
 18. Multiplayer networking (if desired)

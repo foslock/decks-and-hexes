@@ -35,12 +35,13 @@ from app.game_engine.game_state import (
     advance_resolve,
     buy_card,
     create_game,
+    end_buy_phase,
     execute_end_of_turn,
     execute_reveal,
     execute_start_of_turn,
     play_card,
     submit_pending_discard,
-    submit_plan,
+    submit_play,
 )
 from app.game_engine.hex_grid import GridSize
 
@@ -393,12 +394,18 @@ class TestBuyRestriction:
         assert player.turn_modifiers.buy_locked is True
 
         # Submit plans and advance to buy phase
-        submit_plan(game, "p1")
-        submit_plan(game, "p0")
+        submit_play(game, "p1")
+        submit_play(game, "p0")
         assert game.current_phase == Phase.REVEAL
         for pid in game.player_order:
             advance_resolve(game, pid)
         assert game.current_phase == Phase.BUY
+
+        # Advance to p1's buy turn (p0 may be the current buyer first)
+        current_buyer = game.player_order[game.current_buyer_index]
+        if current_buyer != "p1":
+            end_buy_phase(game, current_buyer)
+        assert game.player_order[game.current_buyer_index] == "p1"
 
         # Try to buy — should be blocked
         player.resources = 100  # plenty of resources
@@ -451,8 +458,8 @@ class TestTileImmunity:
         assert success  # play succeeds (played face down)
 
         # Submit both plans and resolve
-        submit_plan(game, "f0")
-        submit_plan(game, "a0")
+        submit_play(game, "f0")
+        submit_play(game, "a0")
 
         # Tile should still belong to Fort (immune)
         tile = game.grid.get_tile(tile_q, tile_r)
@@ -627,8 +634,8 @@ class TestOnResolutionEffects:
         assert success
 
         # Submit both plans
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # If blitz succeeded, player should have extra draws queued
         # Check tile ownership
@@ -665,8 +672,8 @@ class TestOnResolutionEffects:
         success, msg = play_card(game, "a0", 0, target_q=target.q, target_r=target.r)
         assert success, msg
 
-        submit_plan(game, "a0")
-        submit_plan(game, "f0")
+        submit_play(game, "a0")
+        submit_play(game, "f0")
 
         # If defender held (likely since WoA only has power 2), they should be penalized
         tile = game.grid.get_tile(target.q, target.r)
@@ -793,8 +800,8 @@ class TestBreakthrough:
         success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # If breakthrough succeeded, player should own the target tile
         # PLUS one additional adjacent neutral tile
@@ -842,8 +849,8 @@ class TestFullTurnIntegration:
         player.hand = [blitz_rush] + player.hand[1:]
 
         play_card(game, "p1", 0)
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # Advance through reveal
         for pid in game.player_order:
@@ -860,3 +867,161 @@ class TestFullTurnIntegration:
         # Buy lock should be cleared after turn reset
         player = game.players["p1"]
         assert player.turn_modifiers.buy_locked is False
+
+
+class TestAdjacencyBridge:
+    """Road Builder: must target a tile that connects two disconnected territory groups."""
+
+    def _make_road_builder(self) -> Card:
+        return _make_card(
+            card_id="neutral_road_builder",
+            name="Road Builder",
+            card_type=CardType.CLAIM,
+            power=5,
+            timing=Timing.ON_RESOLUTION,
+            effects=[
+                Effect(type=EffectType.ADJACENCY_BRIDGE, value=0, timing=Timing.ON_RESOLUTION),
+            ],
+        )
+
+    def test_road_builder_rejects_non_bridging_tile(self, small_2p_game: GameState) -> None:
+        """Road Builder can't target a tile that doesn't connect two groups."""
+        game = small_2p_game
+        game.test_mode = True
+        p0 = game.players["p0"]
+        assert game.grid is not None
+
+        # Give the player a Road Builder
+        rb = self._make_road_builder()
+        p0.hand.insert(0, rb)
+
+        # Find a tile adjacent to player territory — this is a normal adjacent tile,
+        # NOT bridging two groups (player only has one contiguous group at start)
+        target = None
+        for tile in game.grid.get_player_tiles("p0"):
+            for adj in game.grid.get_adjacent(tile.q, tile.r):
+                if adj.owner is None and not adj.is_blocked:
+                    target = adj
+                    break
+            if target:
+                break
+        assert target is not None
+
+        ok, msg = play_card(game, "p0", 0, target.q, target.r)
+        assert not ok
+        assert "disconnected" in msg.lower() or "connect" in msg.lower()
+
+    def test_road_builder_accepts_bridging_tile(self, small_2p_game: GameState) -> None:
+        """Road Builder succeeds when targeting a tile that connects two disconnected groups."""
+        game = small_2p_game
+        game.test_mode = True
+        p0 = game.players["p0"]
+        assert game.grid is not None
+
+        # Create a disconnected territory: find a tile that is NOT adjacent to
+        # any of player's tiles and assign it to the player.
+        owned_coords = {(t.q, t.r) for t in game.grid.get_player_tiles("p0")}
+        adj_coords = set()
+        for t in game.grid.get_player_tiles("p0"):
+            for nq, nr in t.neighbors():
+                adj_coords.add((nq, nr))
+
+        # Find a tile 2+ steps away to create an isolated group
+        isolated_tile = None
+        for t in game.grid.tiles.values():
+            if (t.q, t.r) not in owned_coords and (t.q, t.r) not in adj_coords and not t.is_blocked:
+                isolated_tile = t
+                break
+        assert isolated_tile is not None, "Could not find a tile far enough for isolated group"
+
+        # Assign that tile to p0 — now p0 has two disconnected groups
+        isolated_tile.owner = "p0"
+
+        # Now find a tile that would bridge the two groups:
+        # It must be adjacent to both the main territory and the isolated tile's group.
+        # Walk a path from main territory toward the isolated tile and find a gap tile.
+        from collections import deque
+
+        # BFS from isolated tile's neighbors to find one that is also adjacent to main territory
+        # Simpler approach: find a tile adjacent to BOTH groups
+        main_group = game.grid.get_connected_tiles("p0")
+        iso_group = {(isolated_tile.q, isolated_tile.r)}
+
+        # Expand iso_group neighbors
+        iso_adj = set()
+        for nq, nr in isolated_tile.neighbors():
+            n = game.grid.get_tile(nq, nr)
+            if n and not n.is_blocked and n.owner is None:
+                iso_adj.add((nq, nr))
+
+        # Expand main_group neighbors
+        main_adj = set()
+        for mq, mr in main_group:
+            mt = game.grid.get_tile(mq, mr)
+            if mt:
+                for nq, nr in mt.neighbors():
+                    n = game.grid.get_tile(nq, nr)
+                    if n and not n.is_blocked and n.owner is None:
+                        main_adj.add((nq, nr))
+
+        # Find a tile in both adjacency sets — that's our bridge
+        bridge_coords = iso_adj & main_adj
+        if not bridge_coords:
+            # If no direct bridge, place the isolated tile closer — on a tile adjacent
+            # to main territory, then skip one, then place the island
+            # Reset and do a simpler setup
+            isolated_tile.owner = None
+
+            # Find two tiles A and B where A is adjacent to main territory,
+            # B is adjacent to A but NOT adjacent to main territory.
+            # Assign B to p0, then A is the bridge tile.
+            for tile_a in game.grid.tiles.values():
+                if tile_a.owner is not None or tile_a.is_blocked:
+                    continue
+                if (tile_a.q, tile_a.r) not in main_adj:
+                    continue
+                for nq, nr in tile_a.neighbors():
+                    tile_b = game.grid.get_tile(nq, nr)
+                    if not tile_b or tile_b.is_blocked or tile_b.owner is not None:
+                        continue
+                    if (nq, nr) in main_adj or (nq, nr) in main_group:
+                        continue
+                    # tile_a bridges main group and tile_b
+                    tile_b.owner = "p0"
+                    bridge_coords = {(tile_a.q, tile_a.r)}
+                    break
+                if bridge_coords:
+                    break
+
+        assert bridge_coords, "Could not find a bridge tile setup"
+        bq, br = next(iter(bridge_coords))
+
+        # Give the player a Road Builder
+        rb = self._make_road_builder()
+        p0.hand.insert(0, rb)
+
+        ok, msg = play_card(game, "p0", 0, bq, br)
+        assert ok, f"Road Builder should succeed on bridging tile: {msg}"
+
+    def test_road_builder_rejects_when_only_one_group(self, small_2p_game: GameState) -> None:
+        """Road Builder can't target anything when player has only one contiguous territory."""
+        game = small_2p_game
+        game.test_mode = True
+        p0 = game.players["p0"]
+        assert game.grid is not None
+
+        rb = self._make_road_builder()
+        p0.hand.insert(0, rb)
+
+        # Try every adjacent neutral tile — none should work because there's only one group
+        found_any_target = False
+        for tile in game.grid.get_player_tiles("p0"):
+            for adj in game.grid.get_adjacent(tile.q, tile.r):
+                if adj.owner is None and not adj.is_blocked:
+                    ok, _ = play_card(game, "p0", 0, adj.q, adj.r)
+                    if ok:
+                        found_any_target = True
+                        break
+            if found_any_target:
+                break
+        assert not found_any_target, "Road Builder should not be playable with a single contiguous territory"

@@ -560,7 +560,7 @@ def _handle_auto_claim_if_neutral(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_immediate_resolve(effect: Effect, ctx: EffectContext) -> None:
-    """Spearhead: resolve this claim immediately during plan phase."""
+    """Spearhead: resolve this claim immediately during play phase."""
     if ctx.target_tile_key:
         ctx.player.turn_modifiers.immediate_resolve_tiles.add(ctx.target_tile_key)
         ctx.game._log(
@@ -593,6 +593,11 @@ def _handle_conditional_action_return(effect: Effect, ctx: EffectContext) -> Non
 def _handle_stub(effect: Effect, ctx: EffectContext) -> None:
     """Placeholder for not-yet-implemented effects."""
     ctx.game._log(f"[STUB] {effect.type.value} effect not yet implemented")
+
+
+def _handle_noop(effect: Effect, ctx: EffectContext) -> None:
+    """No-op handler for effects that are enforced elsewhere (e.g. targeting constraints)."""
+    pass
 
 
 # ── Register all handlers ─────────────────────────────────────────
@@ -876,7 +881,7 @@ register_handler(EffectType.POWER_PER_TILES_OWNED, _handle_power_per_tiles_owned
 register_handler(EffectType.IGNORE_DEFENSE_OVERRIDE, _handle_ignore_defense_override)
 
 register_handler(EffectType.CEASE_FIRE, _handle_cease_fire)
-register_handler(EffectType.ADJACENCY_BRIDGE, _handle_stub)
+register_handler(EffectType.ADJACENCY_BRIDGE, _handle_noop)  # targeting-only constraint, resolved in play_card
 register_handler(EffectType.FREE_REROLL, _handle_free_reroll)
 register_handler(EffectType.RESOURCE_DRAIN, _handle_resource_drain)
 register_handler(EffectType.DYNAMIC_BUY_COST, _handle_dynamic_buy_cost)

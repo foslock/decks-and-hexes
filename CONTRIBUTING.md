@@ -152,8 +152,8 @@ The loader (`data_loader/loader.py`) parses these with PyYAML. To add or rebalan
 Tests are in `backend/tests/`. Fixtures are in `conftest.py`:
 
 - `card_registry` -- All cards loaded from data files
-- `small_2p_game` -- A 2-player small game in Plan phase (seed 42)
-- `medium_3p_game` -- A 3-player medium game in Plan phase (seed 99)
+- `small_2p_game` -- A 2-player small game in Play phase (seed 42)
+- `medium_3p_game` -- A 3-player medium game in Play phase (seed 99)
 
 ```python
 def test_my_feature(small_2p_game: GameState) -> None:
@@ -214,7 +214,7 @@ The game log (`game_state.py: LogEntry`) supports per-player visibility:
 - `visible_to: []` -- Entry is public (everyone sees it)
 - `visible_to: ["p0"]` -- Only player p0 sees it
 
-Plan phase card plays are private to the acting player. Phase transitions, claim resolutions, and buy actions are public. The `GET /api/games/{id}/log?player_id=X` endpoint filters accordingly.
+Play phase card plays are private to the acting player. Phase transitions, claim resolutions, and buy actions are public. The `GET /api/games/{id}/log?player_id=X` endpoint filters accordingly.
 
 ## Deployment
 

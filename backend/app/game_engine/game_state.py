@@ -36,7 +36,7 @@ class Phase(str, Enum):
     SETUP = "setup"
     START_OF_TURN = "start_of_turn"
     UPKEEP = "upkeep"
-    PLAN = "plan"
+    PLAY = "play"
     REVEAL = "reveal"
     BUY = "buy"
     END_OF_TURN = "end_of_turn"
@@ -98,24 +98,106 @@ def compute_upkeep_cost(tile_count: int, grid_size: GridSize = GridSize.SMALL) -
 
 def _draw_archetype_market(
     deck: list[Card], count: int, rng: random.Random,
+    player: "Player | None" = None,
 ) -> list[Card]:
     """Draw up to `count` random purchasable cards from the archetype deck.
 
     All cards with a buy_cost are eligible regardless of the player's current
-    resources — the player may gain resources during the Plan phase before
+    resources — the player may gain resources during the Play phase before
     buying in the Buy phase.
+
+    When *player* is provided, hidden heuristics improve roll quality:
+      1. No consecutive repeats — cards from the previous roll are excluded.
+      2. Affordability guarantee — if the player has >= 2 resources, at least
+         one card in the result will be affordable.
+      3. Type diversity correction — if the previous roll was mono-type, at
+         most one card of that type appears in this roll.
+      4. Cost spread — if the result is mono-cost (all same buy_cost),
+         resample once.
     """
     eligible = [c for c in deck if c.buy_cost is not None]
     if len(eligible) <= count:
         result = list(eligible)
         rng.shuffle(result)
+        if player is not None:
+            player._prev_market_ids = [c.id for c in result]
+            player._prev_market_types = [c.card_type.value for c in result]
         return result
-    return rng.sample(eligible, count)
+
+    # --- Step 1: apply exclusion filters ---
+    restricted = list(eligible)
+
+    if player is not None:
+        # Heuristic 1: no consecutive repeats
+        prev_ids = set(player._prev_market_ids)
+        if prev_ids:
+            filtered = [c for c in restricted if c.id not in prev_ids]
+            if len(filtered) >= count:
+                restricted = filtered
+
+        # Heuristic 3: type diversity correction after mono-type roll
+        prev_types = player._prev_market_types
+        if len(prev_types) == count and len(set(prev_types)) == 1:
+            oversaturated = prev_types[0]
+            filtered = [c for c in restricted if c.card_type.value != oversaturated]
+            if len(filtered) >= count:
+                restricted = filtered
+            elif len(filtered) >= count - 1:
+                # Allow at most 1 of the oversaturated type
+                others = filtered
+                same = [c for c in restricted if c.card_type.value == oversaturated]
+                restricted = others + same[:1]
+                if len(restricted) < count:
+                    restricted = list(eligible)  # fallback
+
+    # --- Step 2: select with affordability guarantee ---
+    result = _select_with_affordability(restricted, count, rng, player)
+
+    # --- Step 3: cost spread check (bounded single retry) ---
+    if len(result) == count and len(result) >= 2:
+        costs = {c.buy_cost for c in result}
+        pool_costs = {c.buy_cost for c in restricted}
+        if len(costs) == 1 and len(pool_costs) >= 2:
+            retry = _select_with_affordability(restricted, count, rng, player)
+            retry_costs = {c.buy_cost for c in retry}
+            if len(retry_costs) > 1:
+                result = retry
+
+    # --- Step 4: record state for next roll ---
+    if player is not None:
+        player._prev_market_ids = [c.id for c in result]
+        player._prev_market_types = [c.card_type.value for c in result]
+
+    return result
+
+
+def _select_with_affordability(
+    pool: list[Card], count: int, rng: random.Random,
+    player: "Player | None",
+) -> list[Card]:
+    """Sample *count* cards from *pool*, guaranteeing at least one affordable
+    card when the player has >= 2 resources and an affordable option exists."""
+    if len(pool) <= count:
+        result = list(pool)
+        rng.shuffle(result)
+        return result
+
+    if player is not None and player.resources >= 2:
+        affordable = [c for c in pool if c.buy_cost is not None and c.buy_cost <= player.resources]
+        if affordable:
+            pick = rng.choice(affordable)
+            remainder = [c for c in pool if c.id != pick.id]
+            rest = rng.sample(remainder, count - 1)
+            result = [pick] + rest
+            rng.shuffle(result)
+            return result
+
+    return rng.sample(pool, count)
 
 
 @dataclass
 class PlannedAction:
-    """A card placed face-down during Plan phase."""
+    """A card placed face-down during Play phase."""
     card: Card
     target_q: Optional[int] = None
     target_r: Optional[int] = None
@@ -163,7 +245,7 @@ class Player:
     archetype_deck: list[Card] = field(default_factory=list)  # remaining buyable cards
     upgrade_credits: int = 0
     forced_discard_next_turn: int = 0
-    has_submitted_plan: bool = False
+    has_submitted_play: bool = False
     has_acknowledged_resolve: bool = False
     has_ended_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
@@ -177,6 +259,9 @@ class Player:
     left_vp: int = 0  # frozen VP at time of leaving (for leaderboard)
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
     pending_discard: int = 0  # deferred discard count (e.g. Regroup: draw first, then discard)
+    # Smart roll state — hidden heuristics for archetype market draws (not serialized)
+    _prev_market_ids: list[str] = field(default_factory=list)
+    _prev_market_types: list[str] = field(default_factory=list)
 
     @property
     def hand_size(self) -> int:
@@ -229,7 +314,7 @@ class Player:
             "deck_cards": [_card_dict(c) for c in self.deck.cards],
             "planned_action_count": len(self.planned_actions),
             "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
-            "has_submitted_plan": self.has_submitted_plan,
+            "has_submitted_play": self.has_submitted_play,
             "has_acknowledged_resolve": self.has_acknowledged_resolve,
             "has_ended_turn": self.has_ended_turn,
             "trash": [c.to_dict() for c in self.trash],
@@ -684,7 +769,7 @@ def execute_start_of_turn(game: GameState) -> GameState:
 
         if player.has_left:
             # Left players are frozen — skip everything
-            player.has_submitted_plan = True
+            player.has_submitted_play = True
             player.has_acknowledged_resolve = True
             player.has_ended_turn = True
             continue
@@ -735,19 +820,16 @@ def execute_start_of_turn(game: GameState) -> GameState:
                       visible_to=[pid], actor=pid)
             player.turn_modifiers.extra_actions_next_turn = 0
         player.planned_actions = []
-        player.has_submitted_plan = False
+        player.has_submitted_play = False
         player.has_acknowledged_resolve = False
         player.has_ended_turn = False
 
-        # Reveal archetype market (3 random, or all in test mode)
+        # Reveal archetype market (3 random cards from archetype deck)
         player.archetype_market = []
         if player.archetype_deck:
-            if game.test_mode:
-                player.archetype_market = list(player.archetype_deck)
-            else:
-                player.archetype_market = _draw_archetype_market(
-                    player.archetype_deck, 3, game.rng,
-                )
+            player.archetype_market = _draw_archetype_market(
+                player.archetype_deck, 3, game.rng, player,
+            )
 
     # Round 1 skips upkeep; round 2+ computes and applies upkeep, then pauses
     # at UPKEEP phase so the frontend can display the banner before advancing to PLAN
@@ -755,8 +837,8 @@ def execute_start_of_turn(game: GameState) -> GameState:
         _apply_upkeep(game)
         game.current_phase = Phase.UPKEEP
     else:
-        game.current_phase = Phase.PLAN
-        game._log("Plan phase begins — place cards face-down on tiles")
+        game.current_phase = Phase.PLAY
+        game._log("Play phase begins — place cards face-down on tiles")
     return game
 
 
@@ -871,9 +953,65 @@ def execute_upkeep(game: GameState) -> GameState:
     Upkeep has already been computed and applied during execute_start_of_turn.
     This just transitions the phase so the frontend can move on.
     """
-    game.current_phase = Phase.PLAN
-    game._log("Plan phase begins — place cards face-down on tiles")
+    game.current_phase = Phase.PLAY
+    game._log("Play phase begins — place cards face-down on tiles")
     return game
+
+
+def _tile_bridges_territory(grid: 'HexGrid', player_id: str, q: int, r: int) -> bool:
+    """Return True if claiming tile (q, r) would connect two or more disconnected
+    groups of the player's territory.
+
+    Algorithm: find how many distinct groups of the player's owned tiles are
+    adjacent to (q, r). If >= 2, the tile bridges them.
+    """
+    from collections import deque
+
+    tile = grid.get_tile(q, r)
+    if not tile:
+        return False
+
+    # Collect player-owned neighbors of the target tile
+    owned_neighbors: list[tuple[int, int]] = []
+    for nq, nr in tile.neighbors():
+        n = grid.get_tile(nq, nr)
+        if n and n.owner == player_id:
+            owned_neighbors.append((nq, nr))
+
+    if len(owned_neighbors) < 2:
+        return False
+
+    # BFS among ALL player-owned tiles (excluding the target, which isn't owned yet)
+    # to see how many distinct groups touch the target tile.
+    all_owned = {
+        (t.q, t.r) for t in grid.tiles.values()
+        if t.owner == player_id
+    }
+
+    visited: set[tuple[int, int]] = set()
+    groups_touching_target = 0
+
+    for start in owned_neighbors:
+        if start in visited:
+            continue
+        # BFS from this neighbor through owned tiles
+        group: set[tuple[int, int]] = set()
+        queue = deque([start])
+        group.add(start)
+        while queue:
+            cq, cr = queue.popleft()
+            ct = grid.get_tile(cq, cr)
+            if not ct:
+                continue
+            for nnq, nnr in ct.neighbors():
+                if (nnq, nnr) in group or (nnq, nnr) not in all_owned:
+                    continue
+                group.add((nnq, nnr))
+                queue.append((nnq, nnr))
+        visited |= group
+        groups_touching_target += 1
+
+    return groups_touching_target >= 2
 
 
 def play_card(game: GameState, player_id: str, card_index: int,
@@ -883,15 +1021,15 @@ def play_card(game: GameState, player_id: str, card_index: int,
               trash_card_indices: Optional[list[int]] = None,
               extra_targets: Optional[list[tuple[int, int]]] = None,
               ) -> tuple[bool, str]:
-    """Play a card from hand during Plan phase. Returns (success, message)."""
-    if game.current_phase != Phase.PLAN:
-        return False, "Not in Plan phase"
+    """Play a card from hand during Play phase. Returns (success, message)."""
+    if game.current_phase != Phase.PLAY:
+        return False, "Not in Play phase"
 
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
 
-    if player.has_submitted_plan:
+    if player.has_submitted_play:
         return False, "Plan already submitted"
 
     if card_index < 0 or card_index >= len(player.hand):
@@ -954,6 +1092,11 @@ def play_card(game: GameState, player_id: str, card_index: int,
             ]
             if existing_claims and not card.stackable:
                 return False, "This card is not Stackable"
+
+            # Adjacency bridge: target must connect two disconnected territory groups
+            if any(e.type == EffectType.ADJACENCY_BRIDGE for e in card.effects):
+                if not _tile_bridges_territory(game.grid, player_id, target_q, _target_r):
+                    return False, f"{card.name} must target a tile that connects two of your disconnected territory groups"
 
     # Validate target for defense cards — must target a tile the player owns
     if card.card_type == CardType.DEFENSE and target_q is not None:
@@ -1150,19 +1293,19 @@ def submit_pending_discard(
     return True, f"Discarded {len(discarded)} card(s)"
 
 
-def submit_plan(game: GameState, player_id: str) -> tuple[bool, str]:
-    """Mark a player as done planning."""
+def submit_play(game: GameState, player_id: str) -> tuple[bool, str]:
+    """Mark a player as done playing."""
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
     if player.pending_discard > 0:
         return False, "Must discard before submitting plan"
-    player.has_submitted_plan = True
+    player.has_submitted_play = True
     game._log(f"{player.name} submits plan ({len(player.planned_actions)} actions)",
               actor=player_id)
 
     # Check if all players have submitted
-    if all(p.has_submitted_plan for p in game.players.values()):
+    if all(p.has_submitted_play for p in game.players.values()):
         execute_reveal(game)
 
     return True, "Plan submitted"
@@ -1648,6 +1791,8 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 player.resources -= effective_cost
         player.archetype_market.remove(target)
         player.archetype_deck.remove(target)
+        player._prev_market_ids = []
+        player._prev_market_types = []
         player.deck.add_to_discard([target])
         game.buy_phase_purchases.setdefault(player_id, []).append({
             "card_id": target.id, "card_name": target.name,
@@ -1694,10 +1839,10 @@ def spend_upgrade_credit(
 ) -> tuple[bool, str]:
     """Spend an upgrade credit to permanently upgrade a card in hand.
 
-    Can be done during the Plan phase, multiple times per turn.
+    Can be done during the Play phase, multiple times per turn.
     """
-    if game.current_phase != Phase.PLAN:
-        return False, "Can only upgrade cards during the Plan phase"
+    if game.current_phase != Phase.PLAY:
+        return False, "Can only upgrade cards during the Play phase"
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
@@ -1832,7 +1977,7 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
     game.rng.shuffle(all_available)
     player.archetype_deck = all_available
     player.archetype_market = _draw_archetype_market(
-        all_available, 3, game.rng,
+        all_available, 3, game.rng, player,
     )
 
     game._log(f"{player.name} re-rolls archetype market")
@@ -1914,18 +2059,18 @@ def execute_end_of_turn(game: GameState) -> GameState:
 # ── CPU Auto-Play Helpers ────────────────────────────────────────
 
 
-def auto_play_cpu_plans(game: GameState) -> None:
-    """Auto-play plan phase for all CPU players who haven't submitted."""
+def auto_play_cpu_plays(game: GameState) -> None:
+    """Auto-play play phase for all CPU players who haven't submitted."""
     from .cpu_player import CPUPlayer
 
     for pid in game.player_order:
         player = game.players[pid]
-        if not player.is_cpu or player.has_submitted_plan:
+        if not player.is_cpu or player.has_submitted_play:
             continue
 
         cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
 
-        # Play cards (same loop pattern as simulation._run_plan_phase)
+        # Play cards (same loop pattern as simulation._run_play_phase)
         for _ in range(20):  # safety limit
             action = cpu.pick_next_action(game)
             if action is None:
@@ -1946,7 +2091,7 @@ def auto_play_cpu_plans(game: GameState) -> None:
                 discard_indices = cpu._pick_cards_to_discard(player, player.pending_discard)
                 submit_pending_discard(game, pid, discard_indices)
 
-        submit_plan(game, pid)
+        submit_play(game, pid)
 
 
 def auto_play_cpu_buys(game: GameState) -> None:

@@ -23,7 +23,7 @@ def card_registry() -> dict[str, Card]:
 
 @pytest.fixture
 def small_2p_game(card_registry: dict[str, Card]) -> GameState:
-    """A 2-player small game after start-of-turn (in Plan phase)."""
+    """A 2-player small game after start-of-turn (in Play phase)."""
     game = create_game(
         GridSize.SMALL,
         [

@@ -19,7 +19,7 @@ from app.game_engine.game_state import (
     Phase,
     advance_resolve,
     auto_play_cpu_buys,
-    auto_play_cpu_plans,
+    auto_play_cpu_plays,
     buy_card,
     create_game,
     end_buy_phase,
@@ -29,7 +29,7 @@ from app.game_engine.game_state import (
     reroll_market,
     spend_upgrade_credit,
     submit_pending_discard,
-    submit_plan,
+    submit_play,
 )
 from app.game_engine.hex_grid import GridSize
 
@@ -171,7 +171,7 @@ async def get_game(game_id: str, player_id: Optional[str] = None) -> dict[str, A
 
 @router.post("/games/{game_id}/play")
 async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
-    """Play a card during Plan phase."""
+    """Play a card during Play phase."""
     game = _games.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
@@ -213,20 +213,20 @@ async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[
     return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
-@router.post("/games/{game_id}/submit-plan")
-async def submit_plan_route(game_id: str, req: SubmitPlanRequest) -> dict[str, Any]:
+@router.post("/games/{game_id}/submit-play")
+async def submit_play_route(game_id: str, req: SubmitPlanRequest) -> dict[str, Any]:
     """Submit plan for a player."""
     game = _games.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
-    success, msg = submit_plan(game, req.player_id)
+    success, msg = submit_play(game, req.player_id)
     if not success:
         raise HTTPException(400, msg)
 
-    # Auto-play CPU plans if any CPU players haven't submitted yet
-    if any(p.is_cpu and not p.has_submitted_plan for p in game.players.values()):
-        auto_play_cpu_plans(game)
+    # Auto-play CPU plays if any CPU players haven't submitted yet
+    if any(p.is_cpu and not p.has_submitted_play for p in game.players.values()):
+        auto_play_cpu_plays(game)
 
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
@@ -270,7 +270,7 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
 
 @router.post("/games/{game_id}/upgrade-card")
 async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str, Any]:
-    """Spend an upgrade credit to upgrade a card in hand during Plan phase."""
+    """Spend an upgrade credit to upgrade a card in hand during Play phase."""
     game = _games.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
@@ -349,7 +349,7 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
 
 @router.post("/games/{game_id}/advance-upkeep")
 async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
-    """Advance past the Upkeep phase to Plan phase."""
+    """Advance past the Upkeep phase to Play phase."""
     game = _games.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")

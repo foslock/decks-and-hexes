@@ -97,7 +97,7 @@ interface HexGridProps {
   previewCard?: Card | null;
   /** All tiles the preview card can legally be played on (superset of highlightTiles — includes own tiles for defensive claims) */
   previewValidTiles?: Set<string>;
-  /** Claim direction chevrons shown during plan/reveal phases */
+  /** Claim direction chevrons shown during play/reveal phases */
   claimChevrons?: ClaimChevron[];
   /** VP connection paths shown during resolve phase */
   vpPaths?: VpPath[];
@@ -591,6 +591,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
               const info = playerInfoRef.current[tile.owner];
               const label = ARCHETYPE_LABELS[info.archetype] || info.archetype;
               lines.push(`${info.name} (${label})`);
+              if (!tile.is_base && tile.held_since_turn != null) {
+                lines.push(`Occupied since Round ${tile.held_since_turn}`);
+              }
             }
           }
           if (lines.length > 0) {

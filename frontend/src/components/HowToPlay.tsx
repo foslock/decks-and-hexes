@@ -43,7 +43,7 @@ const PAGES = [
       <>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa' }}>
           You start with a <strong style={{ color: '#fff' }}>10-card deck</strong> of basic cards.
-          Each round you draw a hand of 5 cards, play some during the Plan phase, then discard
+          Each round you draw a hand of 5 cards, play some during the Play phase, then discard
           the rest. When your deck runs out, your discard pile is reshuffled into a new deck.
         </p>
         <div style={{
@@ -244,7 +244,7 @@ const PAGES = [
             </div>
           </div>
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
-            <div style={{ fontSize: 14, fontWeight: 'bold', color: '#4a9eff', marginBottom: 4 }}>2. Plan</div>
+            <div style={{ fontSize: 14, fontWeight: 'bold', color: '#4a9eff', marginBottom: 4 }}>2. Play</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
               Draw your hand and play cards face-down onto the board. Claim cards target tiles,
               defense cards protect tiles, and engine cards trigger immediately. You start each round with a set number of actions

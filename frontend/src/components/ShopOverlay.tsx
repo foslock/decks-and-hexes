@@ -310,6 +310,30 @@ export default function ShopOverlay({
   const shiftHeld = useShiftKey();
   const sound = useSound();
 
+  // Track archetype market slots so purchased cards show a placeholder instead of disappearing
+  const [archetypeSlots, setArchetypeSlots] = useState<Array<{ card: Card; purchased: boolean }>>([]);
+
+  useEffect(() => {
+    setArchetypeSlots(prev => {
+      const currentIds = new Set(archetypeMarket.map(c => c.id));
+      const prevIds = new Set(prev.map(s => s.card.id));
+
+      // Check if current market is a subset of previous slots (a purchase happened,
+      // or a re-render with the same reduced market — keep purchased placeholders)
+      const isSubset = prev.length > 0 && archetypeMarket.every(c => prevIds.has(c.id));
+
+      if (isSubset && archetypeMarket.length < prev.length) {
+        return prev.map(s => ({
+          ...s,
+          purchased: s.purchased || !currentIds.has(s.card.id),
+        }));
+      }
+
+      // New set (reroll, new turn, initial load) — reset
+      return archetypeMarket.map(c => ({ card: c, purchased: false }));
+    });
+  }, [archetypeMarket]);
+
   const buyArchetypeWithSound = useCallback((cardId: string) => {
     sound.cardPurchase();
     onBuyArchetype(cardId);
@@ -320,9 +344,17 @@ export default function ShopOverlay({
     onBuyNeutral(cardId);
   }, [onBuyNeutral, sound]);
 
+  // Floating "+1 Credit" animation state
+  const [showCreditFloat, setShowCreditFloat] = useState(false);
+  const creditFloatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const buyUpgradeWithSound = useCallback(() => {
     sound.cardPurchase();
     onBuyUpgrade();
+    // Trigger floating "+1 Credit" animation
+    setShowCreditFloat(true);
+    if (creditFloatTimerRef.current) clearTimeout(creditFloatTimerRef.current);
+    creditFloatTimerRef.current = setTimeout(() => setShowCreditFloat(false), 1000);
   }, [onBuyUpgrade, sound]);
 
   // Build lookup: neutral card_id → purchaser name (from other players last round)
@@ -468,14 +500,14 @@ export default function ShopOverlay({
         <div
           onClick={(e) => e.stopPropagation()}
           style={{
-          width: 'min(92vw, 800px)',
+          width: 'min(92vw, 850px)',
           background: '#12122a',
           border: '2px solid #4a4a6a',
           borderRadius: 12,
           boxShadow: '0 8px 40px rgba(0,0,0,0.8)',
           display: 'flex',
           flexDirection: 'column',
-          maxHeight: '70vh',
+          maxHeight: '85vh',
           opacity: visible ? 1 : 0,
           transform: visible ? 'scale(1)' : 'scale(0.95)',
           transition: panelTransition,
@@ -552,93 +584,157 @@ export default function ShopOverlay({
           <div style={{ overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Archetype Market */}
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
-                <Tooltip content={freeRerolls > 0
-                  ? `You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`
-                  : 'Re-rolling replaces your market cards and spends 2 resources.'
-                }>
-                  <button
-                    onClick={onReroll}
-                    disabled={disabled || (!testMode && freeRerolls <= 0 && playerResources < 2)}
-                    style={{
-                      fontSize: 11,
-                      padding: '2px 8px',
-                      background: freeRerolls > 0 ? '#2a5a2e' : '#2a2a3e',
-                      border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : '#555'}`,
-                      borderRadius: 4,
-                      color: (testMode || freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
-                      cursor: disabled || (!testMode && freeRerolls <= 0 && playerResources < 2) ? 'not-allowed' : 'pointer',
-                      ...(freeRerolls > 0 && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
-                    }}
-                  >
-                    {freeRerolls > 0 ? `Re-roll (${freeRerolls} free)` : 'Re-roll (2💰)'}
-                  </button>
+              <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                <Tooltip content="These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.">
+                  <span style={{ fontSize: 20, fontWeight: 'bold', color: '#ccc', cursor: 'help' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
                 </Tooltip>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                {archetypeMarket.length === 0 && (
-                  <span style={{ color: '#666', fontSize: 12 }}>No cards available</span>
-                )}
-                {[...archetypeMarket].sort((a, b) => (a.buy_cost ?? 0) - (b.buy_cost ?? 0)).map((card) => {
-                  const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
-                  const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
-                  const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
-                  return fullView ? (
-                    <FullShopCard
-                      key={card.id}
-                      card={card}
-                      remaining={null}
-                      canAfford={canAfford}
-                      effectiveCost={effCost}
-                      upkeepWarning={wouldDipBelowUpkeep}
-                      onBuy={() => buyArchetypeWithSound(card.id)}
-                      onHover={handleCardHover}
-                      onLeave={handleCardLeave}
-                      disabled={disabled}
-                      shiftHeld={shiftHeld}
-                    />
-                  ) : (
-                    <CompactShopCard
-                      key={card.id}
-                      card={card}
-                      remaining={null}
-                      canAfford={canAfford}
-                      effectiveCost={effCost}
-                      upkeepWarning={wouldDipBelowUpkeep}
-                      onBuy={() => buyArchetypeWithSound(card.id)}
-                      onHover={handleCardHover}
-                      onLeave={handleCardLeave}
-                      disabled={disabled}
-                    />
-                  );
-                })}
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                {/* Left spacer — 1/5 */}
+                <div style={{ flex: '0 0 20%' }} />
+                {/* Archetype cards — centered 3/5 */}
+                <div style={{ flex: '0 0 60%', display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'flex-start' }}>
+                  {archetypeSlots.length === 0 && (
+                    <span style={{ color: '#666', fontSize: 12 }}>No cards available</span>
+                  )}
+                  {[...archetypeSlots].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map(({ card, purchased }) => {
+                    if (purchased) {
+                      // Render the real card invisibly to preserve exact dimensions,
+                      // with a "Purchased!" overlay on top
+                      const cardW = fullView ? CARD_FULL_WIDTH : COMPACT_CARD_WIDTH;
+                      return (
+                        <div key={card.id} style={{
+                          width: cardW,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 4,
+                        }}>
+                          <div style={{ position: 'relative', width: cardW }}>
+                            {/* Invisible card — preserves height */}
+                            <div style={{ visibility: 'hidden' }}>
+                              {fullView
+                                ? <CardFull card={card} />
+                                : <div style={{
+                                    width: COMPACT_CARD_WIDTH,
+                                    padding: 6,
+                                    background: '#2a2a3e',
+                                    border: '2px solid #333',
+                                    borderRadius: 6,
+                                    boxSizing: 'border-box',
+                                    overflow: 'hidden',
+                                  }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+                                      <div style={{ fontWeight: 'bold', fontSize: 16 }}>{card.name}</div>
+                                    </div>
+                                    <div style={{ fontSize: 15, color: '#aaa' }}>&nbsp;</div>
+                                  </div>
+                              }
+                            </div>
+                            {/* Overlay — exact same size */}
+                            <div style={{
+                              position: 'absolute',
+                              inset: 0,
+                              background: '#1a1a2e',
+                              border: '2px dashed #333',
+                              borderRadius: fullView ? 12 : 6,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              boxSizing: 'border-box',
+                            }}>
+                              <span style={{ color: '#4a9eff', fontWeight: 'bold', fontSize: fullView ? 16 : 13 }}>Purchased!</span>
+                            </div>
+                          </div>
+                          <button
+                            disabled
+                            style={{
+                              width: cardW,
+                              padding: fullView ? '4px 0' : '3px 0',
+                              background: '#333',
+                              border: 'none',
+                              borderRadius: fullView ? 5 : 4,
+                              color: '#fff',
+                              fontSize: fullView ? 12 : 11,
+                              fontWeight: 'bold',
+                              cursor: 'not-allowed',
+                              opacity: 0.55,
+                            }}
+                          >
+                            Buy
+                          </button>
+                        </div>
+                      );
+                    }
+                    const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
+                    const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
+                    const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
+                    return fullView ? (
+                      <FullShopCard
+                        key={card.id}
+                        card={card}
+                        remaining={null}
+                        canAfford={canAfford}
+                        effectiveCost={effCost}
+                        upkeepWarning={wouldDipBelowUpkeep}
+                        onBuy={() => buyArchetypeWithSound(card.id)}
+                        onHover={handleCardHover}
+                        onLeave={handleCardLeave}
+                        disabled={disabled}
+                        shiftHeld={shiftHeld}
+                      />
+                    ) : (
+                      <CompactShopCard
+                        key={card.id}
+                        card={card}
+                        remaining={null}
+                        canAfford={canAfford}
+                        effectiveCost={effCost}
+                        upkeepWarning={wouldDipBelowUpkeep}
+                        onBuy={() => buyArchetypeWithSound(card.id)}
+                        onHover={handleCardHover}
+                        onLeave={handleCardLeave}
+                        disabled={disabled}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Re-roll button — 1/5 */}
+                <div style={{ flex: '0 0 20%', display: 'flex', justifyContent: 'center' }}>
+                  <Tooltip content={freeRerolls > 0
+                    ? `You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`
+                    : 'Re-rolling replaces your archetype market cards.'
+                  }>
+                    <button
+                      onClick={onReroll}
+                      disabled={disabled || (!testMode && freeRerolls <= 0 && playerResources < 2)}
+                      style={{
+                        fontSize: 14,
+                        padding: '8px 14px',
+                        background: freeRerolls > 0 ? '#2a5a2e' : (testMode || playerResources >= 2) && !disabled ? '#cc7a2a' : '#333',
+                        border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : (testMode || playerResources >= 2) && !disabled ? '#cc7a2a' : '#555'}`,
+                        borderRadius: 6,
+                        color: (testMode || freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
+                        cursor: disabled || (!testMode && freeRerolls <= 0 && playerResources < 2) ? 'not-allowed' : 'pointer',
+                        whiteSpace: 'nowrap',
+                        ...(freeRerolls > 0 && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
+                      }}
+                    >
+                      {freeRerolls > 0 ? `Re-roll (${freeRerolls} free)` : 'Re-roll · 2💰'}
+                    </button>
+                  </Tooltip>
+                </div>
               </div>
             </div>
 
             {/* Neutral Market */}
             <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 'bold', color: '#aaa' }}>Neutral Market</span>
-                <Tooltip content="Upgrade credits can be spent during the Plan phase to upgrade a card in your hand.">
-                  <button
-                    onClick={buyUpgradeWithSound}
-                    disabled={disabled || (!testMode && playerResources < 5)}
-                    style={{
-                      fontSize: 11,
-                      padding: '2px 8px',
-                      background: '#2a2a3e',
-                      border: '1px solid #555',
-                      borderRadius: 4,
-                      color: (testMode || playerResources >= 5) && !disabled ? '#fff' : '#555',
-                      cursor: disabled || (!testMode && playerResources < 5) ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    Buy Upgrade (5💰)
-                  </button>
+              <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                <Tooltip content="Purchases from the shared market are visible to all players. Each card has limited copies — once they're gone, they're gone for the game.">
+                  <span style={{ fontSize: 20, fontWeight: 'bold', color: '#ccc', cursor: 'help' }}>Shared Market</span>
                 </Tooltip>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
                 {[...neutralMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
                   const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
@@ -679,6 +775,56 @@ export default function ShopOverlay({
                   );
                 })}
               </div>
+            </div>
+
+            {/* Upgrade Credit — below shared market */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                {showCreditFloat && (
+                  <>
+                    <style>{`
+                      @keyframes creditFloatUp {
+                        0% { opacity: 1; transform: translate(-50%, 0); }
+                        100% { opacity: 0; transform: translate(-50%, -32px); }
+                      }
+                    `}</style>
+                    <span style={{
+                      position: 'absolute',
+                      top: -4,
+                      left: '50%',
+                      color: '#4aff6a',
+                      fontWeight: 'bold',
+                      fontSize: 14,
+                      pointerEvents: 'none',
+                      animation: 'creditFloatUp 1s ease-out forwards',
+                      zIndex: 10,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      +1 Credit
+                    </span>
+                  </>
+                )}
+              <button
+                onClick={buyUpgradeWithSound}
+                disabled={disabled || (!testMode && playerResources < 5)}
+                style={{
+                  fontSize: 14,
+                  padding: '8px 16px',
+                  background: (testMode || playerResources >= 5) && !disabled ? '#cc7a2a' : '#333',
+                  border: `1px solid ${(testMode || playerResources >= 5) && !disabled ? '#cc7a2a' : '#555'}`,
+                  borderRadius: 6,
+                  color: (testMode || playerResources >= 5) && !disabled ? '#fff' : '#555',
+                  cursor: disabled || (!testMode && playerResources < 5) ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+              >
+                Buy Upgrade Credit · 5💰
+              </button>
+              </div>
+              <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
+                Upgrade credits can be spent during your play phase to upgrade any card in your hand.
+              </span>
             </div>
           </div>
         </div>

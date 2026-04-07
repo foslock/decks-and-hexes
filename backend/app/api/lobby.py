@@ -884,7 +884,7 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
     player.deck.add_to_discard(player.hand + planned_cards)
     player.planned_actions = []
     player.hand = []
-    player.has_submitted_plan = True
+    player.has_submitted_play = True
     player.has_acknowledged_resolve = True
     player.has_ended_turn = True
     game._log(f"{player.name} has left the game.")
@@ -901,8 +901,8 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
         game._log("All players have left — game over.")
     elif game.current_phase != Phase.GAME_OVER:
         # Check if this unblocks phase advancement
-        if game.current_phase == Phase.PLAN:
-            if all(p.has_submitted_plan for p in game.players.values()):
+        if game.current_phase == Phase.PLAY:
+            if all(p.has_submitted_play for p in game.players.values()):
                 execute_reveal(game)
                 if all(
                     p.has_acknowledged_resolve or p.is_cpu or p.has_left

@@ -21,7 +21,7 @@ from .game_state import (
     execute_upkeep,
     play_card,
     submit_pending_discard,
-    submit_plan,
+    submit_play,
     advance_resolve,
     buy_card,
     reroll_market,
@@ -150,8 +150,8 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
                     print(f"  Game timed out after {config.max_rounds} rounds")
                 break
 
-            if game.current_phase == Phase.PLAN:
-                _run_plan_phase(game, cpus, tracking, config.verbose)
+            if game.current_phase == Phase.PLAY:
+                _run_play_phase(game, cpus, tracking, config.verbose)
             elif game.current_phase == Phase.REVEAL:
                 # Auto-advance all players through resolve (no animations in simulation)
                 for pid in game.player_order:
@@ -211,15 +211,15 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
     return result
 
 
-def _run_plan_phase(game: GameState, cpus: dict[str, CPUPlayer],
+def _run_play_phase(game: GameState, cpus: dict[str, CPUPlayer],
                     tracking: dict[str, PlayerResult],
                     verbose: bool) -> None:
-    """Run the plan phase for all CPU players."""
+    """Run the play phase for all CPU players."""
     for pid in game.player_order:
         player = game.players[pid]
         cpu = cpus[pid]
 
-        if player.has_submitted_plan:
+        if player.has_submitted_play:
             continue
 
         actions_this_turn = 0
@@ -266,7 +266,7 @@ def _run_plan_phase(game: GameState, cpus: dict[str, CPUPlayer],
         tracking[pid].actions_per_turn.append(actions_this_turn)
 
         # Submit plan
-        submit_plan(game, pid)
+        submit_play(game, pid)
 
 
 def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],

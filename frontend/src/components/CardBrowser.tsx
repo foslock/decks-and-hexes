@@ -366,7 +366,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
                 </span>
               </button>
               {!collapsed[group.archetype] && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
                   {group.cards.map((card) => (
                     fullView
                       ? <BrowserCardFull key={card.id} card={card} shiftHeld={shiftHeld} />

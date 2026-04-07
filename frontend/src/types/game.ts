@@ -86,7 +86,7 @@ export interface Player {
   deck_cards: Card[];
   planned_action_count: number;
   planned_actions: PlannedAction[];
-  has_submitted_plan: boolean;
+  has_submitted_play: boolean;
   has_acknowledged_resolve: boolean;
   has_ended_turn: boolean;
   effective_buy_costs?: Record<string, number>;

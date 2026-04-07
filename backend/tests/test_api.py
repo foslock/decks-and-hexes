@@ -42,7 +42,7 @@ class TestCreateGame:
         assert "game_id" in data
         assert "state" in data
         state = data["state"]
-        assert state["current_phase"] == "plan"
+        assert state["current_phase"] == "play"
         assert state["current_round"] == 1
         assert len(state["players"]) == 2
 
@@ -171,7 +171,7 @@ class TestPlayCard:
         assert resp.status_code == 404
 
 
-class TestSubmitPlan:
+class TestSubmitPlay:
     def _create_game(self, client: TestClient) -> str:
         resp = client.post("/api/games", json={
             "grid_size": "small",
@@ -183,17 +183,17 @@ class TestSubmitPlan:
         })
         return resp.json()["game_id"]
 
-    def test_submit_plan(self, client: TestClient) -> None:
+    def test_submit_play(self, client: TestClient) -> None:
         game_id = self._create_game(client)
-        resp = client.post(f"/api/games/{game_id}/submit-plan", json={
+        resp = client.post(f"/api/games/{game_id}/submit-play", json={
             "player_id": "p0",
         })
         assert resp.status_code == 200
 
     def test_both_submit_advances_phase(self, client: TestClient) -> None:
         game_id = self._create_game(client)
-        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
-        resp = client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p0"})
+        resp = client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p1"})
         state = resp.json()["state"]
         assert state["current_phase"] == "reveal"
 
@@ -215,8 +215,8 @@ class TestBuyAndEndTurn:
             "seed": 42,
         })
         game_id = resp.json()["game_id"]
-        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
-        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p0"})
+        client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p1"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
         return game_id
@@ -344,7 +344,7 @@ class TestGameLog:
         p0_messages = [e["message"] for e in p0_log["entries"]]
         assert any("plays" in m for m in p0_messages)
 
-        # p1's log should NOT contain p0's plan phase actions
+        # p1's log should NOT contain p0's play phase actions
         p1_log = client.get(f"/api/games/{game_id}/log?player_id=p1").json()
         p1_messages = [e["message"] for e in p1_log["entries"]]
         p0_play_msgs = [m for m in p1_messages if "plays" in m and "Alice" in m]
@@ -357,8 +357,8 @@ class TestGameLog:
     def test_log_persists_across_rounds(self, client: TestClient) -> None:
         game_id = self._create_game(client)
         # Play through a round
-        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
-        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p0"})
+        client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p1"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
         # End buy phase in sequential buyer order
@@ -390,8 +390,8 @@ class TestAdvanceResolveAPI:
     def test_advance_resolve_endpoint(self, client: TestClient) -> None:
         game_id = self._create_game(client)
         # Submit plans to enter REVEAL
-        client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p0"})
-        resp = client.post(f"/api/games/{game_id}/submit-plan", json={"player_id": "p1"})
+        client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p0"})
+        resp = client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p1"})
         assert resp.json()["state"]["current_phase"] == "reveal"
 
         # First player advances — still REVEAL

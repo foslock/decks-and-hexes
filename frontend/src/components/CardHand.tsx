@@ -474,11 +474,35 @@ export default function CardHand({
   // Local display order — indices into the `cards` prop array
   const [localOrder, setLocalOrder] = useState<number[]>(() => cards.map((_, i) => i));
 
+  const prevCardsForOrderRef = useRef(cards);
   useEffect(() => {
+    const oldCards = prevCardsForOrderRef.current;
+    prevCardsForOrderRef.current = cards;
     setLocalOrder(prev => {
-      const prevOrder = prev.filter(i => i < cards.length);
-      if (prevOrder.length === cards.length) return prevOrder;
-      return cards.map((_, i) => i);
+      // Build a lookup from card ID → new index in updated cards array
+      const idToNewIdx = new Map<string, number>();
+      cards.forEach((c, i) => idToNewIdx.set(c.id, i));
+
+      // Remap old indices through card IDs to preserve user-arranged order
+      const remapped: number[] = [];
+      for (const oldIdx of prev) {
+        const card = oldCards[oldIdx];
+        if (!card) continue;
+        const newIdx = idToNewIdx.get(card.id);
+        if (newIdx != null) {
+          remapped.push(newIdx);
+          idToNewIdx.delete(card.id); // prevent duplicates
+        }
+      }
+
+      // Append any newly added cards that weren't in previous order
+      for (const newIdx of idToNewIdx.values()) {
+        remapped.push(newIdx);
+      }
+
+      // Sanity check: if sizes don't match, reset to natural order
+      if (remapped.length !== cards.length) return cards.map((_, i) => i);
+      return remapped;
     });
   }, [cards]);
 
@@ -486,9 +510,15 @@ export default function CardHand({
   const [hoveredRect, setHoveredRect] = useState<DOMRect | null>(null);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
-  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndexState] = useState<number | null>(null);
+  const dropTargetIndexRef = useRef<number | null>(null);
+  const setDropTargetIndex = useCallback((v: number | null) => {
+    dropTargetIndexRef.current = v;
+    setDropTargetIndexState(v);
+  }, []);
   const [showDeckPopup, setShowDeckPopup] = useState(false);
   const [showDiscardPopup, setShowDiscardPopup] = useState(false);
+  // Card reflow animation is handled via direct DOM manipulation — see useLayoutEffect blocks.
 
   // Close draw/discard popups when parent signals (e.g. shop/browser opened)
   useEffect(() => {
@@ -554,6 +584,8 @@ export default function CardHand({
   const discardBtnRef = useRef<HTMLButtonElement>(null);
   const cardElRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const cardPosSnapshot = useRef<Map<string, DOMRect>>(new Map());
+  /** Pending FLIP old positions from rearrange — consumed by useLayoutEffect on localOrder change */
+  const pendingReflowPositions = useRef<Map<string, number> | null>(null);
   const prevCardsRef = useRef<Card[]>(cards);
   const prevPlayerIdRef = useRef(playerId);
 
@@ -571,6 +603,8 @@ export default function CardHand({
   const discardAllFiredRef = useRef(false);
   // Cards drawn during a shuffle — held back until shuffle animation finishes
   const deferredDrawnCardsRef = useRef<Set<string>>(new Set());
+  // Bumped when deferred cards need Phase 2 re-computation after shuffle ends
+  const [phase2Trigger, setPhase2Trigger] = useState(0);
   // Separate prev-cards tracking for shuffle detection (useLayoutEffect updates prevCardsRef before useEffect)
   const prevCardsForShuffleRef = useRef(cards);
 
@@ -610,12 +644,37 @@ export default function CardHand({
     return () => observer.disconnect();
   }, [cards.length]);
 
-  // Snapshot card positions every render so departing cards know where they were
+  // Shuffle detection: discard pile was moved to draw pile during a draw.
+  // MUST be declared before Phase 1 so it runs first in the same commit,
+  // setting deferredDrawnCardsRef before Phase 1 checks it.
   useLayoutEffect(() => {
-    for (const [id, el] of cardElRefs.current.entries()) {
-      cardPosSnapshot.current.set(id, el.getBoundingClientRect());
+    const prevDeck = prevDeckSizeRef.current;
+    const prevDiscard = prevDiscardCountRef.current;
+    prevDeckSizeRef.current = deckSize;
+    prevDiscardCountRef.current = discardCount;
+
+    const prev = prevCardsForShuffleRef.current;
+    prevCardsForShuffleRef.current = cards;
+
+    // A shuffle happened when:
+    // - Draw pile was empty (or nearly so) and is now replenished
+    // - Discard pile shrank (cards moved from discard → draw pile)
+    // - New cards appeared in hand (a draw was attempted)
+    const newCardIds = cards.filter(c => !prev.some(p => p.id === c.id)).map(c => c.id);
+    const hasNewCards = newCardIds.length > 0;
+    const discardMovedToDraw = prevDiscard > 0 && discardCount < prevDiscard;
+    const deckReplenished = deckSize > prevDeck || (prevDeck === 0 && deckSize >= 0 && discardMovedToDraw);
+
+    if (hasNewCards && discardMovedToDraw && deckReplenished && !animationOff) {
+      // Mark the newly drawn cards as deferred — they'll animate in after shuffle completes
+      deferredDrawnCardsRef.current = new Set(newCardIds);
+      setShuffling(true);
+      setShuffleDisplayCount(0);
+      sound.deckShuffle();
+      const duration = Math.round(2500 * (animSpeed || 0.5));
+      shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
     }
-  });
+  }, [deckSize, discardCount, cards, animated, animationOff]);
 
   // Phase 1: Detect hand changes.
   // New cards are registered immediately with a placeholder offset (offsetComputed: false).
@@ -665,6 +724,16 @@ export default function CardHand({
           });
         });
         setEnteringAnims(p => new Map([...p, ...entries]));
+      }
+    }
+
+    // FLIP reflow: snapshot old positions of surviving cards before processing departures
+    // cardPosSnapshot has rects from the previous render (before removal)
+    const survivingOldPositions = new Map<string, number>();
+    if (removedCards.length > 0 && animated) {
+      for (const card of cards) {
+        const oldRect = cardPosSnapshot.current.get(card.id);
+        if (oldRect) survivingOldPositions.set(card.id, oldRect.left);
       }
     }
 
@@ -754,6 +823,40 @@ export default function CardHand({
           }, 560);
         }
       }
+
+      // Simple reflow: snap surviving cards to old positions, then smoothly
+      // transition to new positions using a forced reflow (no rAF needed).
+      if (survivingOldPositions.size > 0) {
+        const flipEntries: { el: HTMLDivElement; dx: number }[] = [];
+        for (const [id, oldLeft] of survivingOldPositions) {
+          const el = cardElRefs.current.get(id);
+          if (!el) continue;
+          const newRect = el.getBoundingClientRect();
+          const dx = oldLeft - newRect.left;
+          if (Math.abs(dx) > 1) flipEntries.push({ el, dx });
+        }
+        if (flipEntries.length > 0) {
+          // 1. Snap to old positions (no transition)
+          for (const { el, dx } of flipEntries) {
+            el.style.transition = 'none';
+            el.style.transform = `translateX(${dx}px)`;
+          }
+          // 2. Force reflow so browser registers the snap
+          void document.body.offsetHeight;
+          // 3. Animate to new positions
+          for (const { el } of flipEntries) {
+            el.style.transition = 'transform 0.25s ease-out';
+            el.style.transform = '';
+          }
+          // 4. Clean up inline styles after animation
+          setTimeout(() => {
+            for (const { el } of flipEntries) {
+              el.style.transition = '';
+              el.style.transform = '';
+            }
+          }, 300);
+        }
+      }
     }
   }, [cards, animated, animationOff, playerId, lastPlayedTarget]);
 
@@ -804,10 +907,13 @@ export default function CardHand({
     }
 
     // Next frame: activate transitions — cards slide from draw pile to their slots
+    // Skip deferred cards (waiting for shuffle to finish) — they'll be activated post-shuffle
     requestAnimationFrame(() => {
+      const deferredNow = deferredDrawnCardsRef.current;
       setEnteringAnims(p => {
         const next = new Map(p);
         for (const [id] of resolved) {
+          if (deferredNow.has(id)) continue; // don't activate during shuffle
           const a = next.get(id);
           if (a?.offsetComputed && !a.active) {
             next.set(id, { ...a, active: true });
@@ -818,15 +924,62 @@ export default function CardHand({
     });
 
     // Clean up after all staggered animations finish
-    const maxDelay = Math.max(...resolved.map(([, a]) => a.delay));
-    setTimeout(() => {
-      setEnteringAnims(p => {
-        const next = new Map(p);
-        for (const [id] of resolved) next.delete(id);
-        return next;
-      });
-    }, maxDelay + 600);
-  }, [localOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Only clean up non-deferred cards; deferred ones will be cleaned up post-shuffle
+    const nonDeferred = resolved.filter(([id]) => !deferred.has(id));
+    if (nonDeferred.length > 0) {
+      const maxDelay = Math.max(...nonDeferred.map(([, a]) => a.delay));
+      setTimeout(() => {
+        setEnteringAnims(p => {
+          const next = new Map(p);
+          for (const [id] of nonDeferred) next.delete(id);
+          return next;
+        });
+      }, maxDelay + 600);
+    }
+  }, [localOrder, phase2Trigger]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reflow for rearrange: when localOrder changes from a drag-reorder,
+  // pendingReflowPositions has the pre-reorder positions.
+  useLayoutEffect(() => {
+    const oldPositions = pendingReflowPositions.current;
+    if (!oldPositions) return;
+    pendingReflowPositions.current = null;
+
+    const flipEntries: { el: HTMLDivElement; dx: number }[] = [];
+    for (const [id, oldLeft] of oldPositions) {
+      const el = cardElRefs.current.get(id);
+      if (!el) continue;
+      const newRect = el.getBoundingClientRect();
+      const dx = oldLeft - newRect.left;
+      if (Math.abs(dx) > 1) flipEntries.push({ el, dx });
+    }
+    if (flipEntries.length > 0) {
+      for (const { el, dx } of flipEntries) {
+        el.style.transition = 'none';
+        el.style.transform = `translateX(${dx}px)`;
+      }
+      void document.body.offsetHeight;
+      for (const { el } of flipEntries) {
+        el.style.transition = 'transform 0.25s ease-out';
+        el.style.transform = '';
+      }
+      setTimeout(() => {
+        for (const { el } of flipEntries) {
+          el.style.transition = '';
+          el.style.transform = '';
+        }
+      }, 300);
+    }
+  }, [localOrder]);
+
+  // Snapshot card positions every render so departing cards and FLIP reflow
+  // know where cards were. Must run AFTER Phase 1 (change detection) and
+  // Phase 2 (offset computation) so it captures post-processing positions.
+  useLayoutEffect(() => {
+    for (const [id, el] of cardElRefs.current.entries()) {
+      cardPosSnapshot.current.set(id, el.getBoundingClientRect());
+    }
+  });
 
   // Discard-all animation: triggered by parent when turn ends
   useEffect(() => {
@@ -897,39 +1050,6 @@ export default function CardHand({
     if (!discardAll) discardAllFiredRef.current = false;
   }, [discardAll]);
 
-  // Shuffle detection: discard pile was moved to draw pile during a draw
-  // Uses useLayoutEffect to run BEFORE the Phase 1 entering-anim detection,
-  // so deferredDrawnCardsRef is set before Phase 1 checks it.
-  useLayoutEffect(() => {
-    const prevDeck = prevDeckSizeRef.current;
-    const prevDiscard = prevDiscardCountRef.current;
-    prevDeckSizeRef.current = deckSize;
-    prevDiscardCountRef.current = discardCount;
-
-    const prev = prevCardsForShuffleRef.current;
-    prevCardsForShuffleRef.current = cards;
-
-    // A shuffle happened when:
-    // - Draw pile was empty (or nearly so) and is now replenished
-    // - Discard pile shrank (cards moved from discard → draw pile)
-    // - New cards appeared in hand (a draw was attempted)
-    const newCardIds = cards.filter(c => !prev.some(p => p.id === c.id)).map(c => c.id);
-    const hasNewCards = newCardIds.length > 0;
-    const discardMovedToDraw = prevDiscard > 0 && discardCount < prevDiscard;
-    const deckReplenished = deckSize > prevDeck || (prevDeck === 0 && deckSize >= 0 && discardMovedToDraw);
-
-    if (hasNewCards && discardMovedToDraw && deckReplenished && !animationOff) {
-      // Mark the newly drawn cards as deferred — they'll animate in after shuffle completes
-      deferredDrawnCardsRef.current = new Set(newCardIds);
-      setShuffling(true);
-      setShuffleDisplayCount(0);
-      sound.deckShuffle();
-      const duration = Math.round(2500 * (animSpeed || 0.5));
-      shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
-      // Shuffle ends when the count-up animation completes (in the rAF tick below)
-    }
-  }, [deckSize, discardCount, cards, animated, animationOff]);
-
   // Animate shuffle count-up
   useEffect(() => {
     if (!shuffling || !shuffleAnimRef.current) return;
@@ -973,6 +1093,8 @@ export default function CardHand({
             });
           });
           setEnteringAnims(p => new Map([...p, ...entries]));
+          // Bump trigger so Phase 2 re-runs to compute offsets for these cards
+          setPhase2Trigger(n => n + 1);
         }
         deferredDrawnCardsRef.current = new Set();
       }
@@ -985,22 +1107,43 @@ export default function CardHand({
     setDraggingIndex(null);
     setDragPos(null);
     setDropTargetIndex(null);
-  }, []);
+  }, [setDropTargetIndex]);
+
+  /** Compute the drop target index from cursor position, or null if not over the hand. */
+  const computeDropTarget = useCallback((clientX: number, clientY: number): { isOverHand: boolean; dropIdx: number | null } => {
+    const container = handContainerRef.current;
+    if (!container) return { isOverHand: false, dropIdx: null };
+    const rect = container.getBoundingClientRect();
+    const isOverHand = clientY >= rect.top - 20 && clientY <= rect.bottom + 20
+      && clientX >= rect.left && clientX <= rect.right;
+    if (!isOverHand) return { isOverHand: false, dropIdx: null };
+    const cardEls = container.querySelectorAll('[data-card-slot]');
+    let best = localOrder.length;
+    let bestDist = Infinity;
+    cardEls.forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      const centerX = r.left + r.width / 2;
+      const dist = Math.abs(clientX - centerX);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = clientX < centerX ? i : i + 1;
+      }
+    });
+    return { isOverHand: true, dropIdx: best };
+  }, [localOrder]);
 
   const handlePointerDown = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (disabled && !trashMode) return;
     e.preventDefault();
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     dragStartRef.current = { x: e.clientX, y: e.clientY, index: localIdx };
     isDraggingRef.current = false;
   }, [disabled, trashMode]);
 
-  const handlePointerMove = useCallback((e: ReactPointerEvent) => {
+  /** Core pointer-move logic, usable from both React and window events. */
+  const processDragMove = useCallback((clientX: number, clientY: number) => {
     if (!dragStartRef.current) return;
-    // Disable dragging in trash selection mode
-    if (trashMode) return;
-    const dx = e.clientX - dragStartRef.current.x;
-    const dy = e.clientY - dragStartRef.current.y;
+    const dx = clientX - dragStartRef.current.x;
+    const dy = clientY - dragStartRef.current.y;
     if (Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
       if (!isDraggingRef.current) {
         isDraggingRef.current = true;
@@ -1009,7 +1152,7 @@ export default function CardHand({
         setHoveredRect(null);
       }
       setDraggingIndex(dragStartRef.current.index);
-      setDragPos({ x: e.clientX, y: e.clientY });
+      setDragPos({ x: clientX, y: clientY });
 
       // Feed horizontal cursor velocity into swing physics
       {
@@ -1017,38 +1160,23 @@ export default function CardHand({
         const s = dragSwingRef.current;
         const dt = now - s.lastTime;
         if (dt > 0 && dt < 200) {
-          const vx = (e.clientX - s.lastX) / dt; // px/ms
+          const vx = (clientX - s.lastX) / dt; // px/ms
           s.velocity += vx * 0.25; // VELOCITY_SCALE
         }
-        s.lastX = e.clientX;
+        s.lastX = clientX;
         s.lastTime = now;
       }
 
       // Compute drop target index for reordering
-      const container = handContainerRef.current;
-      if (container) {
-        const rect = container.getBoundingClientRect();
-        const isOverHand = e.clientY >= rect.top - 20 && e.clientY <= rect.bottom + 20;
-        if (isOverHand) {
-          const cardEls = container.querySelectorAll('[data-card-slot]');
-          let best = localOrder.length;
-          let bestDist = Infinity;
-          cardEls.forEach((el, i) => {
-            const r = el.getBoundingClientRect();
-            const centerX = r.left + r.width / 2;
-            const dist = Math.abs(e.clientX - centerX);
-            if (dist < bestDist) {
-              bestDist = dist;
-              best = e.clientX < centerX ? i : i + 1;
-            }
-          });
-          setDropTargetIndex(best);
-        } else {
-          setDropTargetIndex(null);
-        }
-      }
+      const { isOverHand, dropIdx } = computeDropTarget(clientX, clientY);
+      setDropTargetIndex(isOverHand ? dropIdx : null);
     }
-  }, [onDragStart, localOrder]);
+  }, [onDragStart, localOrder, computeDropTarget, setDropTargetIndex]);
+
+  const handlePointerMove = useCallback((e: ReactPointerEvent) => {
+    if (trashMode) return; // Disable dragging in trash selection mode
+    processDragMove(e.clientX, e.clientY);
+  }, [trashMode, processDragMove]);
 
   const handlePointerUp = useCallback((e: ReactPointerEvent) => {
     if (!dragStartRef.current) return;
@@ -1066,16 +1194,23 @@ export default function CardHand({
 
     if (isDraggingRef.current) {
       onDragEnd?.();
-      const handRect = handContainerRef.current?.getBoundingClientRect();
-      const isOverHand = handRect
-        && e.clientX >= handRect.left && e.clientX <= handRect.right
-        && e.clientY >= handRect.top - 20 && e.clientY <= handRect.bottom + 20;
+      // Compute drop target fresh from cursor position to avoid stale React state
+      const { isOverHand, dropIdx } = computeDropTarget(e.clientX, e.clientY);
 
-      if (isOverHand && dropTargetIndex !== null) {
+      if (isOverHand && dropIdx !== null) {
+        // FLIP reflow: snapshot old positions before reorder (consumed by useLayoutEffect)
+        if (animated) {
+          const oldPositions = new Map<string, number>();
+          for (const card of cards) {
+            const el = cardElRefs.current.get(card.id);
+            if (el) oldPositions.set(card.id, el.getBoundingClientRect().left);
+          }
+          pendingReflowPositions.current = oldPositions;
+        }
         setLocalOrder(prev => {
           const next = [...prev];
           const [moved] = next.splice(localIdx, 1);
-          const insertAt = dropTargetIndex > localIdx ? dropTargetIndex - 1 : dropTargetIndex;
+          const insertAt = dropIdx > localIdx ? dropIdx - 1 : dropIdx;
           next.splice(insertAt, 0, moved);
           return next;
         });
@@ -1092,29 +1227,50 @@ export default function CardHand({
       onSelect(cardIdx);
     }
     resetDragState();
-  }, [onSelect, onDragPlay, onDragEnd, selectedIndex, cards, localOrder, dropTargetIndex, resetDragState, trashMode, onTrashToggle]);
+  }, [onSelect, onDragPlay, onDragEnd, selectedIndex, cards, localOrder, computeDropTarget, resetDragState, trashMode, onTrashToggle]);
 
-  // If pointer capture is lost (e.g. card removed from DOM mid-drag), clean up
+  // If pointer capture is lost (e.g. card removed from DOM mid-drag) without
+  // a preceding pointerup, reset drag state. The window pointerup listener will
+  // handle the action if the user is still dragging and releases later.
   const handleLostPointerCapture = useCallback(() => {
-    if (isDraggingRef.current) {
-      onDragEnd?.();
-    }
-    resetDragState();
-  }, [onDragEnd, resetDragState]);
+    // Don't reset if the drag already completed (dragStartRef cleared by handlePointerUp)
+    if (!dragStartRef.current) return;
+    // Pointer capture lost mid-drag — the window pointerup listener will
+    // handle the actual drop when the user releases. Nothing to do here.
+  }, []);
 
-  // Safety net: if pointer capture is lost or card removed mid-drag, handle play via window listener
+  // Window-level pointer listeners: since we don't use setPointerCapture (it can be
+  // lost during React re-renders), we track pointermove/pointerup on window during drags.
   useEffect(() => {
-    const cleanup = (e: PointerEvent) => {
+    const onMove = (e: PointerEvent) => {
+      if (!dragStartRef.current) return;
+      processDragMove(e.clientX, e.clientY);
+    };
+    const onUp = (e: PointerEvent) => {
       if (!dragStartRef.current) return;
       if (isDraggingRef.current) {
         onDragEnd?.();
-        // Check if pointer is outside the hand — if so, play the card
-        const handRect = handContainerRef.current?.getBoundingClientRect();
-        const isOverHand = handRect
-          && e.clientX >= handRect.left && e.clientX <= handRect.right
-          && e.clientY >= handRect.top - 20 && e.clientY <= handRect.bottom + 20;
-        if (!isOverHand) {
-          const localIdx = dragStartRef.current.index;
+        const localIdx = dragStartRef.current.index;
+        const { isOverHand, dropIdx } = computeDropTarget(e.clientX, e.clientY);
+        if (isOverHand && dropIdx !== null) {
+          // Reorder within hand
+          if (animated) {
+            const oldPositions = new Map<string, number>();
+            for (const card of cards) {
+              const el = cardElRefs.current.get(card.id);
+              if (el) oldPositions.set(card.id, el.getBoundingClientRect().left);
+            }
+            pendingReflowPositions.current = oldPositions;
+          }
+          setLocalOrder(prev => {
+            const next = [...prev];
+            const [moved] = next.splice(localIdx, 1);
+            const insertAt = dropIdx > localIdx ? dropIdx - 1 : dropIdx;
+            next.splice(insertAt, 0, moved);
+            return next;
+          });
+        } else {
+          // Play to grid
           const s = dragSwingRef.current;
           const now = performance.now();
           const dt = now - s.lastTime;
@@ -1124,9 +1280,13 @@ export default function CardHand({
       }
       resetDragState();
     };
-    window.addEventListener('pointerup', cleanup);
-    return () => window.removeEventListener('pointerup', cleanup);
-  }, [onDragEnd, onDragPlay, localOrder, resetDragState]);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [onDragEnd, onDragPlay, localOrder, computeDropTarget, resetDragState, processDragMove, cards, animated]);
 
   const handlePointerEnter = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (!isDraggingRef.current) {
@@ -1335,7 +1495,9 @@ export default function CardHand({
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
             const isAnimating = (!!entering && !entering.active) || isDiscardingAll || isDeferredDuringShuffle;
             const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode && !isAnimating;
-            let cardTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'none';
+            // FLIP reflow transforms are applied directly to DOM elements (not via React state)
+            const baseTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'translateY(0)';
+            let cardTransform = baseTransform;
             let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
@@ -1361,7 +1523,7 @@ export default function CardHand({
 
             return (
               <div
-                key={`${card.id}-${cardIdx}`}
+                key={card.id}
                 ref={el => {
                   if (el) cardElRefs.current.set(card.id, el);
                   else cardElRefs.current.delete(card.id);

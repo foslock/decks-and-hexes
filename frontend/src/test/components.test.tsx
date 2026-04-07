@@ -15,7 +15,7 @@ function WithSettings({ children }: { children: ReactNode }) {
 }
 
 describe('PlayerHud', () => {
-  const hudProps = { phase: 'plan', totalCards: 8, tileCount: 2 };
+  const hudProps = { phase: 'play', totalCards: 8, tileCount: 2 };
 
   it('renders player name and archetype', () => {
     const player = makePlayer({ name: 'Alice', archetype: 'vanguard' });
@@ -35,16 +35,16 @@ describe('PlayerHud', () => {
     expect(screen.getByText(/7/)).toBeInTheDocument();
   });
 
-  it('shows status for submitted plan', () => {
-    const player = makePlayer({ has_submitted_plan: true, planned_action_count: 3 });
+  it('shows status for submitted play', () => {
+    const player = makePlayer({ has_submitted_play: true, planned_action_count: 3 });
     render(<PlayerHud player={player} isActive={true} isCurrent={true} {...hudProps} />);
     expect(screen.getByText(/Ready/)).toBeInTheDocument();
   });
 
-  it('shows Planning status when not submitted', () => {
-    const player = makePlayer({ has_submitted_plan: false });
+  it('shows Playing status when not submitted', () => {
+    const player = makePlayer({ has_submitted_play: false });
     render(<PlayerHud player={player} isActive={true} isCurrent={false} {...hudProps} />);
-    expect(screen.getByText(/Planning/)).toBeInTheDocument();
+    expect(screen.getByText(/Playing/)).toBeInTheDocument();
   });
 
   it('reduces opacity when not active', () => {

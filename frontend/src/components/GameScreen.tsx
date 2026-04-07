@@ -253,6 +253,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [cardPackDefs, setCardPackDefs] = useState<{ id: string; name: string; neutral_card_ids: string[] | null; archetype_card_ids: Record<string, string[]> | null }[]>([]);
   const [discardingAll, setDiscardingAll] = useState(false);
   const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
+  /** Temporarily stores drag release position/velocity so executePlayCard can include it in lastPlayedTarget */
+  const dragReleaseRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [trashedCardIds, setTrashedCardIds] = useState<Set<string>>(new Set());
   // Test mode state
   const [showTestPanel, setShowTestPanel] = useState(false);
@@ -308,7 +310,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [interactionBlocked, setInteractionBlocked] = useState(false);
   const [submitButtonVisible, setSubmitButtonVisible] = useState(false);
   const [buyButtonVisible, setBuyButtonVisible] = useState(false);
-  const submitPlanRef = useRef<HoldToSubmitHandle>(null);
+  const submitPlayRef = useRef<HoldToSubmitHandle>(null);
   const endTurnRef = useRef<HoldToSubmitHandle>(null);
   // Responsive: stack top-right buttons vertically when screen is narrow
   const [narrowTop, setNarrowTop] = useState(() => window.innerWidth < 700);
@@ -380,6 +382,33 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+  // "Drag a card" hint — shown once per round if no card played after 5s in play phase
+  const [showDragHint, setShowDragHint] = useState(false);
+  const dragHintShownRoundRef = useRef<number>(-1);
+
+  useEffect(() => {
+    if (phase !== 'play' || !activePlayer || activePlayer.has_submitted_play || resolving || phaseBanner || showIntro || introSequence !== 'done') {
+      setShowDragHint(false);
+      return;
+    }
+    if (dragHintShownRoundRef.current === gameState.current_round) return;
+    if (activePlayer.planned_actions.length > 0) {
+      setShowDragHint(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setShowDragHint(true);
+      dragHintShownRoundRef.current = gameState.current_round;
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [phase, activePlayer, resolving, phaseBanner, showIntro, introSequence, gameState.current_round]);
+
+  useEffect(() => {
+    if (activePlayer && activePlayer.planned_actions.length > 0) {
+      setShowDragHint(false);
+    }
+  }, [activePlayer?.planned_actions.length]);
 
   // Build subtitle context for dynamic card value resolution
   const subtitleContext: CardSubtitleContext = useMemo(() => ({
@@ -528,8 +557,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     prevPhaseRef.current = phase;
     prevTilesRef.current = gameState.grid.tiles;
 
-    // plan → reveal: set up resolve animation (works for both hotseat and multiplayer)
-    if (prev === 'plan' && phase === 'reveal') {
+    // play → reveal: set up resolve animation (works for both hotseat and multiplayer)
+    if (prev === 'play' && phase === 'reveal') {
       const steps = gameState.resolution_steps;
       const hasSteps = steps && steps.length > 0;
 
@@ -589,7 +618,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
 
     // Show banners for main phases (all animation modes including off)
-    const bannerPhases = ['upkeep', 'plan', 'buy'];
+    const bannerPhases = ['upkeep', 'play', 'buy'];
     if (bannerPhases.includes(phase)) {
       // Set subtitle per phase
       if (phase === 'upkeep') {
@@ -607,7 +636,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         } else {
           setBannerSubtitle('No upkeep due');
         }
-      } else if (phase === 'plan') {
+      } else if (phase === 'play') {
         setBannerSubtitle('Choose Wisely');
       } else if (phase === 'buy') {
         setBannerSubtitle('Grow Your Deck');
@@ -621,7 +650,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   // Submit button fade-in: hide when phase changes, fade in after banner clears
   useEffect(() => {
-    if (phase === 'plan' && !phaseBanner && !resolving && !showIntro) {
+    if (phase === 'play' && !phaseBanner && !resolving && !showIntro) {
       // Banner just cleared — trigger fade-in after a brief delay
       const timer = setTimeout(() => setSubmitButtonVisible(true), 50);
       return () => clearTimeout(timer);
@@ -755,30 +784,26 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [breakingCount]);
 
-  // Show pulsing VP paths for the active player during plan phase
+  // Show VP paths for ALL players during all phases (except while resolve animation is active)
   useEffect(() => {
-    if (phase !== 'plan' || resolving) {
-      // If we just left plan phase (not into resolve — resolve handles its own paths),
-      // fade out plan-phase paths
-      if (vpPathPhase !== 'off' && !resolving) {
-        vpPathFadeStartAlphaRef.current = vpPaths[0]?.alpha ?? 1;
-        setVpPathPhase('fading_out');
-      }
-      return;
-    }
+    if (resolving) return; // resolve animation manages its own VP paths
     const tiles = gameState.grid?.tiles;
-    if (!tiles || !activePlayerId) return;
-    const color = PLAYER_COLORS[activePlayerId] ?? 0xffffff;
-    const paths = computePlayerVpPaths(tiles, activePlayerId, color);
-    if (paths.length > 0) {
-      setVpPaths(paths);
+    if (!tiles) return;
+    const allPaths: VpPath[] = [];
+    for (const pid of gameState.player_order) {
+      const color = PLAYER_COLORS[pid] ?? 0xffffff;
+      const playerPaths = computePlayerVpPaths(tiles, pid, color);
+      allPaths.push(...playerPaths);
+    }
+    if (allPaths.length > 0) {
+      setVpPaths(allPaths);
       setVpPathPhase('fading_in');
     } else {
       setVpPaths([]);
       setVpPathPhase('off');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, activePlayerId, resolving]);
+  }, [phase, gameState.grid?.tiles, resolving]);
 
   // Compute which VP tiles are connected to their owner's base (for star rendering)
   const connectedVpTiles = useMemo(() => {
@@ -908,7 +933,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     trashIndices?: number[],
     discardIndices?: number[],
   ) => {
-    if (phase !== 'plan' || !activePlayer) return;
+    if (phase !== 'play' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
     setTrashedCardIds(new Set());
@@ -927,6 +952,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (trashing.size > 0) setTrashedCardIds(trashing);
 
     // Compute screen position for card animation
+    const drag = dragReleaseRef.current;
+    dragReleaseRef.current = null;
     if (q != null && r != null) {
       const transform = gridTransformRef.current;
       const gRect = gridContainerRef.current?.getBoundingClientRect();
@@ -934,10 +961,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const local = axialToPixel(q, r);
         const screenX = local.x * transform.scale + transform.offsetX + gRect.left;
         const screenY = local.y * transform.scale + transform.offsetY + gRect.top;
-        setLastPlayedTarget({ cardId: card.id, screenX, screenY });
+        setLastPlayedTarget({
+          cardId: card.id, screenX, screenY,
+          ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
+        });
       }
     } else {
-      setLastPlayedTarget({ cardId: card.id, screenX: null, screenY: null });
+      setLastPlayedTarget({
+        cardId: card.id, screenX: null, screenY: null,
+        ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
+      });
     }
 
     try {
@@ -1010,7 +1043,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [activePlayer]);
 
   const playCardAtTile = useCallback(async (cardIndex: number, q: number, r: number, extraTargets?: [number, number][], targetPlayerId?: string) => {
-    if (phase !== 'plan' || !activePlayer) return;
+    if (phase !== 'play' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
 
@@ -1024,7 +1057,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode]);
 
   const playCardNoTarget = useCallback(async (cardIndex: number) => {
-    if (phase !== 'plan' || !activePlayer) return;
+    if (phase !== 'play' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
 
@@ -1038,10 +1071,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode]);
 
   // Convert screen coords from card drag to hex grid coords
-  const handleDragPlay = useCallback((cardIndex: number, screenX: number, screenY: number) => {
+  const handleDragPlay = useCallback((cardIndex: number, screenX: number, screenY: number, dragVelocityX?: number, dragVelocityY?: number) => {
     if (!gridContainerRef.current || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
+
+    // Store drag release info so executePlayCard can pass it to the departing animation
+    dragReleaseRef.current = { x: screenX, y: screenY, vx: dragVelocityX ?? 0, vy: dragVelocityY ?? 0 };
 
     // Player-targeting engine cards (e.g. Sabotage): must drop on an opponent's tile
     if (card.card_type === 'engine' && card.forced_discard > 0) {
@@ -1063,10 +1099,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return;
     }
 
-    // Non-targeting cards (engine): just release anywhere on the board
+    // Non-targeting cards (engine): release anywhere roughly over the board
     if (card.card_type === 'engine') {
       const rect = gridContainerRef.current.getBoundingClientRect();
-      if (screenX >= rect.left && screenX <= rect.right && screenY >= rect.top && screenY <= rect.bottom) {
+      // Generous 60px tolerance so slight overshoots still register
+      const tolerance = 60;
+      if (screenX >= rect.left - tolerance && screenX <= rect.right + tolerance && screenY >= rect.top - tolerance && screenY <= rect.bottom + tolerance) {
         playCardNoTarget(cardIndex);
       }
       return;
@@ -1074,13 +1112,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
     // Targeting cards (claim/defense): convert screen → canvas → hex-local → axial
     const rect = gridContainerRef.current.getBoundingClientRect();
-    const canvasX = screenX - rect.left;
-    const canvasY = screenY - rect.top;
+    // Generous tolerance — accept drops slightly outside the grid container
+    const tolerance = 60;
+    const clampedX = Math.max(rect.left, Math.min(rect.right, screenX));
+    const clampedY = Math.max(rect.top, Math.min(rect.bottom, screenY));
+    // Only clamp if within tolerance; if way outside, let it fall through
+    const effectiveX = (screenX >= rect.left - tolerance && screenX <= rect.right + tolerance) ? clampedX : screenX;
+    const effectiveY = (screenY >= rect.top - tolerance && screenY <= rect.bottom + tolerance) ? clampedY : screenY;
+    const canvasX = effectiveX - rect.left;
+    const canvasY = effectiveY - rect.top;
     const transform = gridTransformRef.current;
     if (!transform) return;
     const localX = (canvasX - transform.offsetX) / transform.scale;
     const localY = (canvasY - transform.offsetY) / transform.scale;
     const { q, r } = pixelToAxial(localX, localY);
+
+    // Verify the resolved hex actually exists on the grid
+    const resolvedKey = `${q},${r}`;
+    if (!gameState.grid?.tiles[resolvedKey]) return;
 
     // Validate defense card restrictions — must target own tile
     if (card.card_type === 'defense') {
@@ -1164,7 +1213,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return;
     }
 
-    if (phase !== 'plan' || !activePlayer) return;
+    if (phase !== 'play' || !activePlayer) return;
 
     // Multi-target mode (Surge or multi-tile Defense): adding extra targets
     if (surgeCardIndex !== null && surgePrimaryTarget) {
@@ -1332,20 +1381,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     });
   }, [trashMode]);
 
-  const handleSubmitPlan = useCallback(async () => {
+  const handleSubmitPlay = useCallback(async () => {
     try {
       setError(null);
-      const result = await api.submitPlan(gameState.id, activePlayerId);
+      const result = await api.submitPlay(gameState.id, activePlayerId);
 
       // Apply the state — if phase is now 'reveal', the phase change effect
-      // will detect plan→reveal and set up the resolve animation automatically.
+      // will detect play→reveal and set up the resolve animation automatically.
       onStateUpdate(result.state);
 
       if (result.state.current_phase !== 'reveal') {
         // Not all plans submitted yet — cycle to next local player
         if (shouldCycle) {
           const nextIndex = gameState.player_order.findIndex(
-            (pid, i) => i !== activePlayerIndex && localPlayerIds.includes(pid) && !gameState.players[pid].has_submitted_plan && !gameState.players[pid].is_cpu,
+            (pid, i) => i !== activePlayerIndex && localPlayerIds.includes(pid) && !gameState.players[pid].has_submitted_play && !gameState.players[pid].is_cpu,
           );
           if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
         }
@@ -1483,7 +1532,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return () => clearTimeout(timer);
   }, [gameState.current_buyer_id, gameState.current_phase, gameState.id, gameState.players, onStateUpdate]);
 
-  // Submit Plan button state
+  // Submit Play button state
   const submitHasCardsLeft = activePlayer ? activePlayer.hand.length > 0 : false;
   const submitActionsLeft = activePlayer ? activePlayer.actions_available - activePlayer.actions_used : 0;
   const submitCanStillPlay = submitHasCardsLeft && submitActionsLeft > 0;
@@ -1501,6 +1550,30 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (showShopOverlay) { setShowShopOverlay(false); return; }
         if (showFullLog) { setShowFullLog(false); return; }
         if (selectedCardIndex !== null) { setSelectedCardIndex(null); return; }
+        return;
+      }
+
+      // Tab: cycle through cards in hand during Play phase
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (
+          phase === 'play' && activePlayer && !activePlayer.has_submitted_play &&
+          !interactionBlocked && !resolving && activePlayer.hand.length > 0 &&
+          surgeCardIndex === null && !trashMode
+        ) {
+          const len = activePlayer.hand.length;
+          if (e.shiftKey) {
+            // Shift+Tab: cycle backward
+            setSelectedCardIndex(prev =>
+              prev === null || prev === 0 ? len - 1 : prev - 1
+            );
+          } else {
+            // Tab: cycle forward
+            setSelectedCardIndex(prev =>
+              prev === null || prev >= len - 1 ? 0 : prev + 1
+            );
+          }
+        }
         return;
       }
 
@@ -1526,7 +1599,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         // Priority 1: Play selected engine card
         if (
-          phase === 'plan' && activePlayer && !resolving &&
+          phase === 'play' && activePlayer && !resolving &&
           selectedCardIndex !== null && surgeCardIndex === null && !trashMode
         ) {
           const card = activePlayer.hand[selectedCardIndex];
@@ -1536,9 +1609,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           }
         }
 
-        // Priority 2: Submit Plan (only when no Play Card button is available)
+        // Priority 2: Submit Play (only when no Play Card button is available)
         if (
-          phase === 'plan' && activePlayer && !activePlayer.has_submitted_plan &&
+          phase === 'play' && activePlayer && !activePlayer.has_submitted_play &&
           !resolving && activePlayerEffects.length === 0 &&
           surgeCardIndex === null && !trashMode
         ) {
@@ -1546,9 +1619,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             activePlayer.hand[selectedCardIndex]?.card_type === 'engine';
           if (!hasPlayableEngine) {
             if (submitCanStillPlay) {
-              submitPlanRef.current?.startKeyboardHold();
+              submitPlayRef.current?.startKeyboardHold();
             } else {
-              handleSubmitPlan();
+              handleSubmitPlay();
             }
             return;
           }
@@ -1577,14 +1650,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
       if (trashMode) {
         handleTrashToggle(cardIndex);
-      } else if (phase === 'plan' && !activePlayer.has_submitted_plan && !interactionBlocked) {
+      } else if (phase === 'play' && !activePlayer.has_submitted_play && !interactionBlocked) {
         setSelectedCardIndex(prev => prev === cardIndex ? null : cardIndex);
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Enter') {
-        submitPlanRef.current?.stopKeyboardHold();
+        submitPlayRef.current?.stopKeyboardHold();
         endTurnRef.current?.stopKeyboardHold();
       }
     };
@@ -1595,7 +1668,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, activePlayerEffects, submitCanStillPlay, handleSubmitPlan, phaseBanner, showIntro, introSequence, showGameOver]);
+  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -1607,7 +1680,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setSelectedCardIndex(null);
   }, [onStateUpdate, homePlayerIndex]);
 
-  // Intro overlay dismissed — start shuffle → draw → plan banner sequence
+  // Intro overlay dismissed — start shuffle → draw → play banner sequence
   const handleIntroReady = useCallback(() => {
     setShowIntro(false);
     if (animationOff) {
@@ -1665,7 +1738,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setBannerSubtitle(null);
         setBannerLabelOverride('Begin!');
         sound.beginJingle();
-        setPhaseBanner('plan');
+        setPhaseBanner('play');
         setBannerKey(k => k + 1);
       }, drawDuration);
       return () => clearTimeout(timer);
@@ -1776,14 +1849,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setBannerLabelOverride(null);
     const bannerPhase = phaseBanner;
 
-    // Upkeep banner finished → advance to PLAN via API, then show PLAN banner
+    // Upkeep banner finished → advance to PLAY via API, then show PLAY banner
     if (bannerPhase === 'upkeep') {
       api.advanceUpkeep(gameState.id).then(result => {
         onStateUpdate(result.state);
-        // Chain into the plan banner — sync ref so phase effect doesn't re-trigger
+        // Chain into the play banner — sync ref so phase effect doesn't re-trigger
         prevPhaseRef.current = result.state.current_phase;
         setBannerSubtitle('Choose Wisely');
-        setPhaseBanner('plan');
+        setPhaseBanner('play');
         setBannerKey(k => k + 1);
       }).catch(() => {
         setPhaseBanner(null);
@@ -1847,10 +1920,21 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setCurrentStepFade(1);
     resolveChevronCacheRef.current = [];
     setActivePlayerIndex(homePlayerIndex);
-    // Fade out VP paths and clear resolve log
-    if (vpPaths.length > 0) {
-      vpPathFadeStartAlphaRef.current = vpPaths[0]?.alpha ?? 1;
-      setVpPathPhase('fading_out');
+    // Recompute VP paths for all players after resolve and clear resolve log
+    const postResolveTiles = gameState.grid?.tiles;
+    if (postResolveTiles) {
+      const allPaths: VpPath[] = [];
+      for (const pid of gameState.player_order) {
+        const color = PLAYER_COLORS[pid] ?? 0xffffff;
+        allPaths.push(...computePlayerVpPaths(postResolveTiles, pid, color));
+      }
+      if (allPaths.length > 0) {
+        setVpPaths(allPaths);
+        setVpPathPhase('fading_in');
+      } else {
+        setVpPaths([]);
+        setVpPathPhase('off');
+      }
     }
     setResolveLogEntries([]);
 
@@ -2124,7 +2208,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return map;
   }, [reviewing, gameState.players, actionTileKey]);
 
-  // Submit Plan button state (used by keyboard handler and UI)
+  // Submit Play button state (used by keyboard handler and UI)
   // NOTE: declared here so it's available to the keyboard effect above
 
   // Upkeep indicator calculations — tiles_per_vp is a constant 3 for all grid sizes
@@ -2279,9 +2363,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return closest;
   }, [hexDistance]);
 
-  // Build claim chevrons for the active player during plan phase
+  // Build claim chevrons for the active player during play phase
   const planChevrons = useMemo((): ClaimChevron[] => {
-    if (phase !== 'plan' || !activePlayer?.planned_actions || resolving) return [];
+    if (phase !== 'play' || !activePlayer?.planned_actions || resolving) return [];
     const tiles = gameState.grid?.tiles;
     if (!tiles) return [];
 
@@ -2350,7 +2434,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return chevrons;
   }, [resolving, resolutionSteps, chevronAlpha, resolvedUpToStep, currentStepFade]);
 
-  // Active chevrons: plan phase or resolve reveal
+  // Active chevrons: play phase or resolve reveal
   const activeChevrons = resolving ? resolveChevrons : planChevrons;
 
   const playerInfo = useMemo(() => {
@@ -2405,10 +2489,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return map.size > 0 ? map : undefined;
   }, [activePlayer?.planned_actions]);
 
-  // Cards currently placed on the board during plan phase (shown as "In Play" in deck viewer)
-  // After resolve, these cards move to discard, so only show during plan/reveal.
+  // Cards currently placed on the board during play phase (shown as "In Play" in deck viewer)
+  // After resolve, these cards move to discard, so only show during play/reveal.
   const inPlayCards = useMemo(() => {
-    if (phase !== 'plan' && phase !== 'reveal') return [];
+    if (phase !== 'play' && phase !== 'reveal') return [];
     if (!activePlayer?.planned_actions) return [];
     return activePlayer.planned_actions.map(a => a.card);
   }, [activePlayer?.planned_actions, phase]);
@@ -2443,7 +2527,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               tiles={displayState.grid.tiles}
               onTileClick={handleTileClick}
               highlightTiles={(() => {
-                if (phase !== 'plan') return undefined;
+                if (phase !== 'play') return undefined;
                 if (surgeCardIndex !== null) {
                   const surgeCard = activePlayer?.hand[surgeCardIndex];
                   const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
@@ -2489,12 +2573,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 ...(surgePrimaryTarget ? [surgePrimaryTarget] : []),
                 ...surgeTargets,
               ] : undefined}
-              borderTiles={phase === 'plan' ? adjacentTiles : undefined}
+              borderTiles={phase === 'play' ? adjacentTiles : undefined}
               playerInfo={playerInfo}
               transformRef={gridTransformRef}
-              activePlayerId={phase === 'plan' ? activePlayerId : undefined}
-              plannedActions={phase === 'plan' ? plannedActions : undefined}
-              previewCard={phase === 'plan' ? (() => {
+              activePlayerId={phase === 'play' ? activePlayerId : undefined}
+              plannedActions={phase === 'play' ? plannedActions : undefined}
+              previewCard={phase === 'play' ? (() => {
                 const raw = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
                   : (selectedCard?.card_type === 'engine' && selectedCard?.forced_discard > 0) ? selectedCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
@@ -2502,7 +2586,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 return raw ? withEffectivePower(raw, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0) : null;
               })() : null}
               previewValidTiles={(() => {
-                if (phase !== 'plan') return undefined;
+                if (phase !== 'play') return undefined;
                 const card = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
                   : null;
@@ -2512,7 +2596,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
-              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving)}
+              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !(dc?.forced_discard > 0); })()))}
               reviewPulseTiles={reviewPulseTiles}
               onTileHover={reviewing ? (q, r, sx, sy) => {
                 setReviewHoveredTile(`${q},${r}`);
@@ -2523,7 +2607,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           )}
 
           {/* ── Top-left overlay: round info + upkeep + expandable player panel ── */}
-          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 210, maxWidth: 280, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
+          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 210, width: 'fit-content', opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
             {/* Round / Phase / VP target */}
             <div style={{
               background: 'rgba(10, 10, 20, 0.85)',
@@ -2532,14 +2616,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               marginBottom: 6,
               backdropFilter: 'blur(4px)',
               border: '1px solid #333',
+              width: 'fit-content',
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, whiteSpace: 'nowrap' }}>
                 <span style={{ fontSize: 16, fontWeight: 'bold', color: '#fff' }}>
                   Round {gameState.current_round}
                 </span>
                 <span style={{
                   fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                  background: phase === 'plan' ? '#2a6e3e' : phase === 'buy' ? '#2a4a6e' : phase === 'reveal' ? '#4a2a6e' : '#333',
+                  background: phase === 'play' ? '#2a6e3e' : phase === 'buy' ? '#2a4a6e' : phase === 'reveal' ? '#4a2a6e' : '#333',
                   color: '#fff', fontWeight: 'bold', textTransform: 'uppercase',
                 }}>
                   {phase.replace(/_/g, ' ')}
@@ -2549,11 +2634,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 ★ {gameState.vp_target} VP to win
               </div>
               {/* Upkeep indicator — inside round info box */}
-              {(phase === 'plan' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (() => {
+              {(phase === 'play' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (() => {
                 const cantAfford = activePlayer.resources < currentUpkeep;
                 const tooltipText = cantAfford
                   ? `⚠ You can't afford ${currentUpkeep} 💰 upkeep! Tiles will be lost next round.`
-                  : `Upkeep: ${currentUpkeep} 💰 paid before each Plan phase for ${playerTileCount} tile${playerTileCount !== 1 ? 's' : ''}. If you can't pay, your most distant tiles are lost.`;
+                  : `Upkeep: ${currentUpkeep} 💰 paid before each Play phase for ${playerTileCount} tile${playerTileCount !== 1 ? 's' : ''}. If you can't pay, your most distant tiles are lost.`;
                 return (
                   <div
                     style={{ marginTop: 4, cursor: 'help', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
@@ -2616,8 +2701,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 borderRadius: 8,
                 border: '1px solid #333',
                 backdropFilter: 'blur(4px)',
-                overflow: 'hidden',
                 transition: 'all 0.2s ease',
+                width: 200,
+                maxHeight: 'calc(100vh - 300px)',
+                overflowY: 'auto',
               }}
             >
               {(playerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp) ? (
@@ -2625,7 +2712,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
                     const p = gameState.players[pid];
-                    const pInPlay = phase === 'plan' ? (p.planned_action_count ?? 0) : 0;
+                    const pInPlay = phase === 'play' ? (p.planned_action_count ?? 0) : 0;
                     const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
                     const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
                     const isCpu = p.is_cpu;
@@ -2670,7 +2757,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 /* Collapsed: active player only */
                 <div style={{ padding: 6 }}>
                   {activePlayer && (() => {
-                    const pInPlay = phase === 'plan' ? (activePlayer.planned_action_count ?? 0) : 0;
+                    const pInPlay = phase === 'play' ? (activePlayer.planned_action_count ?? 0) : 0;
                     const pTotal = activePlayer.hand_count + activePlayer.deck_size + activePlayer.discard_count + pInPlay;
                     return (
                       <PlayerHud
@@ -2693,8 +2780,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               )}
             </div>
 
-            {/* In Play card list — shown during plan phase when active player has played cards */}
-            {phase === 'plan' && activePlayer && activePlayer.planned_actions.length > 0 && !resolving && !showIntro && introSequence === 'done' && (() => {
+            {/* In Play card list — shown during play phase when active player has played cards */}
+            {phase === 'play' && activePlayer && activePlayer.planned_actions.length > 0 && !resolving && !showIntro && introSequence === 'done' && (() => {
               const COL_W = 134;
               const PAD = 6;
               const actions = activePlayer.planned_actions;
@@ -2702,6 +2789,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               return (
                 <div
                   ref={inPlayContainerRef}
+                  className="in-play-list"
                   style={{
                     marginTop: 6,
                     background: 'rgba(10, 10, 20, 0.85)',
@@ -2710,11 +2798,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     backdropFilter: 'blur(4px)',
                     padding: PAD,
                     width: COL_W + PAD * 2 + 2, // card width + padding + border
-                    maxHeight: 'calc(100vh - 300px)',
-                    overflow: 'hidden',
+                    maxHeight: 'calc(100vh - 420px)',
+                    overflowY: 'auto',
                     boxSizing: 'border-box',
                   }}
                 >
+                  <style>{`
+                    .in-play-list::-webkit-scrollbar { width: 4px; }
+                    .in-play-list::-webkit-scrollbar-track { background: transparent; }
+                    .in-play-list::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
+                    .in-play-list { scrollbar-width: thin; scrollbar-color: #555 transparent; }
+                  `}</style>
                   <div style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
                     In Play ({actions.length})
                   </div>
@@ -3056,7 +3150,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             <div style={{ flex: 1 }} />
             {/* Buttons — right aligned */}
             {/* Test-mode Discard & Trash buttons */}
-            {gameState.test_mode && phase === 'plan' && activePlayer && !resolving &&
+            {gameState.test_mode && phase === 'play' && activePlayer && !resolving &&
               selectedCard && selectedCardIndex !== null && surgeCardIndex === null && (
               <>
                 <button
@@ -3097,8 +3191,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </>
             )}
-            {/* Upgrade button — shown when a card is selected during plan phase */}
-            {phase === 'plan' && activePlayer && !resolving && selectedCard && selectedCardIndex !== null &&
+            {/* Upgrade button — shown when a card is selected during play phase */}
+            {phase === 'play' && activePlayer && !resolving && selectedCard && selectedCardIndex !== null &&
               !selectedCard.is_upgraded && hasUpgradePreview(selectedCard) &&
               (activePlayer.upgrade_credits > 0 || gameState.test_mode) && surgeCardIndex === null && !trashMode && (
               <div
@@ -3139,7 +3233,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </div>
             )}
-            {phase === 'plan' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && surgeCardIndex === null && !trashMode && (
+            {phase === 'play' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && surgeCardIndex === null && !trashMode && (
               <IrreversibleButton
                 onClick={handlePlayEngine}
                 tooltip="Playing a card uses an action and cannot be undone."
@@ -3160,7 +3254,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               </IrreversibleButton>
             )}
             {/* Multi-target confirm/cancel (Surge or Defense) */}
-            {phase === 'plan' && surgeCardIndex !== null && surgePrimaryTarget && (() => {
+            {phase === 'play' && surgeCardIndex !== null && surgePrimaryTarget && (() => {
               const surgeCard = activePlayer?.hand[surgeCardIndex];
               const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
               const maxTotal = isDefenseMulti
@@ -3211,7 +3305,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               );
             })()}
             {/* Trash/Discard selection confirm/cancel */}
-            {phase === 'plan' && trashMode && (() => {
+            {phase === 'play' && trashMode && (() => {
               const card = activePlayer?.hand[trashMode.cardIndex];
               const count = trashSelectedIndices.size;
               const canConfirm = count >= trashMode.minCards && count <= trashMode.maxCards;
@@ -3264,18 +3358,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </>
               );
             })()}
-            {phase === 'plan' && !resolving && !phaseBanner && !showIntro && introSequence === 'done' && activePlayer && !activePlayer.has_submitted_plan && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
+            {phase === 'play' && !resolving && !phaseBanner && !showIntro && introSequence === 'done' && activePlayer && !activePlayer.has_submitted_play && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
               <div style={{
                 opacity: submitButtonVisible ? 1 : 0,
                 transition: 'opacity 0.4s ease-in',
               }}>
                 <HoldToSubmitButton
-                  ref={submitPlanRef}
+                  ref={submitPlayRef}
                   key={activePlayerId}
-                  onConfirm={handleSubmitPlan}
+                  onConfirm={handleSubmitPlay}
                   requireHold={submitCanStillPlay}
                   warning={`You still have ${activePlayer.hand.length} card(s) and ${submitActionsLeft} action(s) remaining.`}
-                  tooltip="Submitting locks your plan for this round. You cannot change it after."
+                  tooltip="Submitting locks your play for this round. You cannot change it after."
                   style={{
                     padding: '6px 16px',
                     background: submitCanStillPlay ? '#ff8844' : '#2a9a3e',
@@ -3289,7 +3383,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                   }}
                 >
-                  Submit Plan{submitCanStillPlay ? ' →' : ' ✓'}
+                  Submit Play{submitCanStillPlay ? ' →' : ' ✓'}
                 </HoldToSubmitButton>
               </div>
             )}
@@ -3378,7 +3472,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             )}
             {/* Multiplayer: waiting for other players indicator */}
             {isMultiplayer && activePlayer && (
-              (phase === 'plan' && activePlayer.has_submitted_plan && !resolving) ||
+              (phase === 'play' && activePlayer.has_submitted_play && !resolving) ||
               (phase === 'reveal' && activePlayer.has_acknowledged_resolve && !resolving && !phaseBanner)
             ) && (
               <div style={{
@@ -3419,7 +3513,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         </div>
 
         {/* Action counter — above hand panel (only when submit button is visible) */}
-        {phase === 'plan' && activePlayer && !resolving && !phaseBanner && !showIntro && !activePlayer.has_submitted_plan && introSequence === 'done' && (
+        {phase === 'play' && activePlayer && !resolving && !phaseBanner && !showIntro && !activePlayer.has_submitted_play && introSequence === 'done' && (
           <div style={{ position: 'relative', zIndex: 30 }}>
             <div
               className="action-counter-wrap"
@@ -3474,6 +3568,36 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         {/* Bottom panel: hand */}
         <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
+          {/* Drag hint tooltip — right above the card hand */}
+          {showDragHint && (
+            <div style={{
+              position: 'absolute',
+              top: -24,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 35,
+              pointerEvents: 'none',
+              animation: 'dragHintFadeIn 0.6s ease-out both',
+            }}>
+              <style>{`
+                @keyframes dragHintFadeIn {
+                  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
+                  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+                }
+              `}</style>
+              <span style={{
+                background: 'rgba(10, 10, 30, 0.9)',
+                border: '1px solid #555',
+                borderRadius: 8,
+                padding: '6px 14px',
+                fontSize: 12,
+                color: '#aaa',
+                whiteSpace: 'nowrap',
+              }}>
+                Drag a card to the grid to play it.
+              </span>
+            </div>
+          )}
           {activePlayer && introSequence !== 'overlay' && introSequence !== 'hud_fadein' && introSequence !== 'grid_build' && (
             <CardHand
               playerId={activePlayerId}
@@ -3488,7 +3612,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               }}
               onDragStart={setDraggingCardIndex}
               onDragEnd={() => setDraggingCardIndex(null)}
-              disabled={phase !== 'plan' || activePlayer.has_submitted_plan || interactionBlocked}
+              disabled={phase !== 'play' || activePlayer.has_submitted_play || interactionBlocked}
               deckSize={activePlayer.deck_size}
               discardCount={activePlayer.discard_count}
               discardCards={activePlayer.discard}

@@ -126,9 +126,9 @@ const ARCHETYPE_ICONS: Record<string, string> = {
 
 function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { label: string; color: string } {
   if (player.has_left) return { label: 'Left', color: '#666' };
-  if (phase === 'plan') {
-    if (player.has_submitted_plan) return { label: 'Ready', color: '#4aff6a' };
-    return { label: 'Planning', color: '#ffaa4a' };
+  if (phase === 'play') {
+    if (player.has_submitted_play) return { label: 'Ready', color: '#4aff6a' };
+    return { label: 'Playing', color: '#ffaa4a' };
   }
   if (phase === 'buy') {
     if (isCurrentBuyer) return { label: 'Buying', color: '#ffaa4a' };
@@ -178,7 +178,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
       onPointerEnter={hasReachedVpTarget ? () => setShowVpTooltip(true) : undefined}
       onPointerLeave={hasReachedVpTarget ? () => setShowVpTooltip(false) : undefined}
       style={{
-        padding: '8px 12px',
+        padding: '8px 10px',
         background: player.has_left ? '#111' : isActive ? '#2a2a4e' : '#1a1a2e',
         border: borderStyle,
         borderRadius: 8,
@@ -221,11 +221,26 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           background: player.color || '#666',
           flexShrink: 0,
         }} />
-        <ShrinkText
-          text={player.name}
-          maxWidth={90}
-          style={{ fontSize: 13 }}
-        />
+        <span style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }}>
+          <span
+            style={{
+              display: 'inline-block',
+              whiteSpace: 'nowrap',
+              fontSize: 13,
+              maxWidth: '100%',
+              transformOrigin: 'left center',
+              transform: 'scaleX(var(--name-scale, 1))',
+            }}
+            ref={(el) => {
+              if (el) {
+                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+                el.style.setProperty('--name-scale', String(scale));
+              }
+            }}
+          >
+            {player.name}
+          </span>
+        </span>
         {/* Always reserve space for the 1st badge so width doesn't shift */}
         <span
           title={isFirstPlayer ? 'First player — resolves first this round' : undefined}
@@ -259,7 +274,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
       </div>
 
       {/* Stats row */}
-      <div style={{ fontSize: 12, display: 'flex', gap: 10, color: '#bbb' }}>
+      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', color: '#bbb' }}>
         <StatTip label="Victory Points">
           <span style={hasReachedVpTarget ? {
             color: '#ffd700',

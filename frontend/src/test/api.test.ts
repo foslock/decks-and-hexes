@@ -30,7 +30,7 @@ describe('API client', () => {
       ]);
 
       expect(result.game_id).toBe('abc');
-      expect(result.state.current_phase).toBe('plan');
+      expect(result.state.current_phase).toBe('play');
       expect(mockFetch).toHaveBeenCalledWith('/api/games', expect.objectContaining({
         method: 'POST',
       }));
@@ -86,11 +86,11 @@ describe('API client', () => {
     });
   });
 
-  describe('submitPlan', () => {
+  describe('submitPlay', () => {
     it('sends submit request', async () => {
       mockJsonResponse({ message: 'ok', state: makeGameState() });
-      await api.submitPlan('abc', 'p0');
-      expect(mockFetch).toHaveBeenCalledWith('/api/games/abc/submit-plan', expect.anything());
+      await api.submitPlay('abc', 'p0');
+      expect(mockFetch).toHaveBeenCalledWith('/api/games/abc/submit-play', expect.anything());
     });
   });
 
@@ -123,7 +123,7 @@ describe('API client', () => {
 
   describe('getGameLog', () => {
     it('fetches game log', async () => {
-      mockJsonResponse({ game_id: 'abc', entries: [{ message: 'test', round: 1, phase: 'plan', actor: null }] });
+      mockJsonResponse({ game_id: 'abc', entries: [{ message: 'test', round: 1, phase: 'play', actor: null }] });
       const result = await api.getGameLog('abc');
       expect(result.entries).toHaveLength(1);
       expect(mockFetch).toHaveBeenCalledWith('/api/games/abc/log', expect.anything());

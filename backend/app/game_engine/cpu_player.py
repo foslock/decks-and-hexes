@@ -98,10 +98,10 @@ class CPUPlayer:
                 return shifted[i][1]
         return shifted[-1][1]
 
-    # ── Plan Phase ────────────────────────────────────────────────
+    # ── Play Phase ────────────────────────────────────────────────
 
     def plan_actions(self, game: Any) -> list[dict[str, Any]]:
-        """Decide which cards to play and in what order during Plan phase.
+        """Decide which cards to play and in what order during Play phase.
 
         Returns a list of action dicts suitable for calling play_card():
             [{"card_index": int, "target_q": int|None, "target_r": int|None,
@@ -129,7 +129,7 @@ class CPUPlayer:
         return actions
 
     def pick_next_action(self, game: Any) -> Optional[dict[str, Any]]:
-        """Pick the single best card to play next. Returns None if done planning."""
+        """Pick the single best card to play next. Returns None if done playing."""
         player = game.players[self.player_id]
         if not player.hand:
             return None

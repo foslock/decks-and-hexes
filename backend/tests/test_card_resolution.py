@@ -41,7 +41,7 @@ from app.game_engine.game_state import (
     execute_reveal,
     execute_start_of_turn,
     play_card,
-    submit_plan,
+    submit_play,
     compute_player_vp,
 )
 from app.game_engine.hex_grid import GridSize
@@ -208,8 +208,8 @@ class TestNeutralMercenary:
         success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         tile = game.grid.get_tile(q, r)
         assert tile.owner == "p0"
@@ -240,8 +240,8 @@ class TestNeutralSabotage:
         success, _ = play_card(game, "p0", 0, target_player_id="p1")
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         target = game.players["p1"]
         assert target.forced_discard_next_turn >= 1
@@ -259,8 +259,8 @@ class TestNeutralCeaseFire:
         assert success
 
         # Submit without any claims — bonus should apply after resolution
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # Cease fire resolves on_resolution, so check after reveal
         assert player.turn_modifiers.extra_draws_next_turn >= 2
@@ -295,8 +295,8 @@ class TestNeutralEminentDomain:
                 success, _ = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
                 assert success, "Eminent Domain should be able to target non-adjacent tiles"
 
-                submit_plan(game, "p0")
-                submit_plan(game, "p1")
+                submit_play(game, "p0")
+                submit_play(game, "p1")
 
                 claimed = game.grid.get_tile(tile.q, tile.r)
                 assert claimed.owner == "p0"
@@ -318,8 +318,8 @@ class TestNeutralFortifiedPost:
         success, _ = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         updated = game.grid.get_tile(tile.q, tile.r)
         assert updated.defense_power >= initial_defense + 4
@@ -694,8 +694,8 @@ class TestVanguardForwardMarch:
         success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         tile = game.grid.get_tile(q, r)
         if tile.owner == "p0":
@@ -781,8 +781,8 @@ class TestVanguardSpoilsOfWar:
         success, _ = play_card(game, "p1", 0, target_q=target_tile.q, target_r=target_tile.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # Opponent's card should be marked trash_on_use
         assert defender_card.trash_on_use is True
@@ -900,8 +900,8 @@ class TestSwarmSurge:
                                extra_targets=[(q2, r2)])
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # Both tiles should be claimed by p1
         t1 = game.grid.get_tile(q1, r1)
@@ -992,8 +992,8 @@ class TestSwarmFlood:
         success, _ = play_card(game, "p1", 0, target_q=target.q, target_r=target.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         tiles_after = len(game.grid.get_player_tiles("p1"))
         # Should have gained at least 1 tile from flood
@@ -1196,8 +1196,8 @@ class TestSwarmConsecrate:
         success, _ = play_card(game, "p1", 0, target_q=vp_tile.q, target_r=vp_tile.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # VP tile value should have increased
         updated = game.grid.get_tile(vp_tile.q, vp_tile.r)
@@ -1275,8 +1275,8 @@ class TestFortressBulwark:
                                extra_targets=[(t2.q, t2.r)])
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         assert game.grid.get_tile(t1.q, t1.r).defense_power == d1_before + 2
         assert game.grid.get_tile(t2.q, t2.r).defense_power == d2_before + 2
@@ -1313,8 +1313,8 @@ class TestFortressEntrench:
         success, _ = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         updated = game.grid.get_tile(tile.q, tile.r)
         assert updated.permanent_defense_bonus > initial_perm
@@ -1348,8 +1348,8 @@ class TestFortressSlowAdvance:
         success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         tile = game.grid.get_tile(q, r)
         assert tile.owner == "p0"
@@ -1391,8 +1391,8 @@ class TestFortressOverwhelmingForce:
         success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         tile = game.grid.get_tile(q, r)
         assert tile.owner == "p0"
@@ -1665,8 +1665,8 @@ class TestContestResolution:
         success, _ = play_card(game, "p1", 0, target_q=target.q, target_r=target.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         tile = game.grid.get_tile(target.q, target.r)
         assert tile.owner == "p1"  # defender wins tie
@@ -1699,8 +1699,8 @@ class TestContestResolution:
         success, _ = play_card(game, "p0", 0, target_q=target.q, target_r=target.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         tile = game.grid.get_tile(target.q, target.r)
         assert tile.owner == "p0"
@@ -1742,8 +1742,8 @@ class TestContestResolution:
         success, _ = play_card(game, "p0", 0, target_q=target.q, target_r=target.r)
         assert success
 
-        submit_plan(game, "p0")
-        submit_plan(game, "p1")
+        submit_play(game, "p0")
+        submit_play(game, "p1")
 
         # p0 defense: 2 (base) + 4 (fortified post) = 6 > 5 attack
         tile = game.grid.get_tile(target.q, target.r)

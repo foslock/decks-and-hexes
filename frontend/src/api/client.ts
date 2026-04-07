@@ -84,11 +84,11 @@ export async function submitDiscard(
   });
 }
 
-export async function submitPlan(
+export async function submitPlay(
   gameId: string,
   playerId: string,
 ): Promise<{ message: string; state: GameState }> {
-  return request(`/games/${gameId}/submit-plan`, {
+  return request(`/games/${gameId}/submit-play`, {
     method: 'POST',
     body: JSON.stringify({ player_id: playerId }),
   });

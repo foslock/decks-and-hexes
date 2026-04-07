@@ -58,7 +58,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     deck_cards: [],
     planned_action_count: 0,
     planned_actions: [],
-    has_submitted_plan: false,
+    has_submitted_play: false,
     has_acknowledged_resolve: false,
     has_ended_turn: false,
     trash: [],
@@ -133,7 +133,7 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
       }),
     },
     player_order: ['player_0', 'player_1'],
-    current_phase: 'plan',
+    current_phase: 'play',
     current_round: 1,
     first_player_index: 0,
     current_buyer_index: 0,
@@ -145,7 +145,7 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
     ],
     vp_target: 10,
     winner: null,
-    log: ['Game created', '=== Round 1, Start of Turn ===', 'Plan phase begins'],
+    log: ['Game created', '=== Round 1, Start of Turn ===', 'Play phase begins'],
     ...overrides,
   };
 }
