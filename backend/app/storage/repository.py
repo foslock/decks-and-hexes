@@ -88,6 +88,7 @@ class GameRepository:
                 player_count=player_count,
             )
             session.add(record)
+            await session.flush()  # Ensure game row exists before FK-dependent inserts
 
             # Insert player records
             if players:
