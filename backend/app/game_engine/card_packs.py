@@ -38,174 +38,122 @@ CARD_PACKS: dict[str, CardPack] = {
         neutral_card_ids=None,
         archetype_card_ids=None,
     ),
+
+    # ── Full packs (10 neutral market cards + all archetype cards) ──────
+
     "iron_and_coin": CardPack(
         id="iron_and_coin",
         name="Iron & Coin",
+        # Theme: Economy fuels combat. Resource generation + strong claims.
+        # Synergies:
+        #   1. Tax Collector + VP tile claims → snowball resources into Siege Tower / Mercenary
+        #   2. Dividends + Prospector/Tithe → compound resource generation
+        #   3. Mobilize + cheap cards (Levy, Cull) → action chaining into big plays
+        #   4. Vanguard War Tithe / Plunder + Mercenary → claims pay for themselves
+        #   5. Swarm Scavenge + Dividends → resource engine even at 0 actions
+        #   6. Fortress Supply Line + Dividends → economy doubling
         neutral_card_ids=[
-            "neutral_reduce",
-            "neutral_prospector",
-            "neutral_war_bonds",
-            "neutral_recruit",
-            "neutral_conscription",
-            "neutral_mercenary",
-            "neutral_militia",
-            "neutral_forced_march",
-            "neutral_siege_tower",
-            "neutral_rally_cry",
+            "neutral_reduce",          # Cull: deck thinning (1💰)
+            "neutral_recruit",         # Levy: cheap claim + action (2💰)
+            "neutral_prospector",      # Prospector: 2 resources (2💰)
+            "neutral_war_bonds",       # Tithe: 2 resources + 1 action (3💰)
+            "neutral_conscription",    # Muster: draw 2 cards (4💰)
+            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
+            "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
+            "neutral_dividends",       # Dividends: resources scale with wealth (4💰)
+            "neutral_mobilize",        # Mobilize: actions per cards played, trash (4💰)
+            "neutral_siege_tower",     # Siege Tower: power 6 finisher (8💰)
         ],
-        archetype_card_ids={
-            # Military aggression + economic power
-            "vanguard": [
-                "vanguard_blitz",              # cheap aggression, draws on success
-                "vanguard_overrun",            # high power, extended range
-                "vanguard_strike_team",        # combo power scaling
-                "vanguard_rapid_assault",      # resource drain on opponent
-                "vanguard_spearhead",          # high-power nuke
-                "vanguard_coordinated_push",   # stackable aggression
-                "vanguard_elite_vanguard",     # expensive powerhouse
-                "vanguard_spoils_of_war",      # trashes opponent's card
-                "vanguard_war_cache",          # economy + action engine
-                "vanguard_counterattack",      # defensive draw engine
-                "vanguard_war_tithe",          # resources from last round's claims
-            ],
-            "swarm": [
-                "swarm_surge",                 # multi-target aggression
-                "swarm_overwhelm",             # adjacency power scaling
-                "swarm_dog_pile",              # stackable, buffs other claims
-                "swarm_mob_rule",              # power from tile count
-                "swarm_rabble",                # cheap spam
-                "swarm_numbers_game",          # hand-size power
-                "swarm_locust_swarm",          # tile-count nuke
-                "swarm_frenzy",                # actions engine
-                "swarm_scavenge",              # economy fallback
-                "swarm_swarm_tactics",         # draw + action engine
-            ],
-            "fortress": [
-                "fortress_siege_engine",       # ignores defense
-                "fortress_garrison",           # defensive power boost
-                "fortress_battering_ram",      # anti-defense powerhouse
-                "fortress_overwhelming_force", # stackable, resource gain
-                "fortress_war_of_attrition",   # forced discard on defend
-                "fortress_supply_line",        # economy + action
-                "fortress_iron_discipline",    # economy + draw
-                "fortress_consolidate",        # trash for resources
-                "fortress_fortify",            # defense + action
-                "fortress_iron_wall",          # tile immunity
-            ],
-        },
+        archetype_card_ids=None,  # all archetype cards
     ),
     "frontier_tactics": CardPack(
         id="frontier_tactics",
         name="Frontier Tactics",
+        # Theme: Board position and strategic territory control.
+        # Synergies:
+        #   1. Road Builder + Eminent Domain → claim disconnected tiles, bridge them together
+        #   2. Diplomat + Land Grant → flood VP passives; Swarm Colony rewards disconnected groups
+        #   3. Cease Fire + Fortress defensive play → draw cards while turtling
+        #   4. Surveyor + archetype market → find key archetype cards faster
+        #   5. Swarm Consecrate + Fortress Toll Road + VP tiles → enhance tiles for massive draw
+        #   6. Reclaim + deck thinning → convert junk cards into economy
         neutral_card_ids=[
-            "neutral_reduce",
-            "neutral_road_builder",
-            "neutral_surveyor",
-            "neutral_reclaim",
-            "neutral_fortified_post",
-            "neutral_watchtower",
-            "neutral_diplomat",
-            "neutral_cease_fire",
-            "neutral_land_grant",
-            "neutral_eminent_domain",
+            "neutral_reduce",          # Cull: deck thinning (1💰)
+            "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
+            "neutral_road_builder",    # Road Builder: bridge territory (2💰)
+            "neutral_reclaim",         # Reclaim: trash for resources (2💰)
+            "neutral_cease_fire",      # Cease Fire: draw if peaceful (3💰)
+            "neutral_fortified_post",  # Barricade: +4 defense (3💰)
+            "neutral_diplomat",        # Diplomat: land grants for all (3💰)
+            "neutral_watchtower",      # Watchtower: +3 defense + draw (3💰)
+            "neutral_eminent_domain",  # Eminent Domain: claim any neutral (5💰)
+            "neutral_land_grant",      # Land Grant: +1 VP passive (5💰)
         ],
-        archetype_card_ids={
-            # Territorial expansion + infrastructure building
-            "vanguard": [
-                "vanguard_forward_march",      # neutral tile expansion
-                "vanguard_breakthrough",       # auto-claims adjacent neutral
-                "vanguard_blitz",              # cheap expansion, draws
-                "vanguard_flanking_strike",    # extended range reach
-                "vanguard_double_time",        # draw + actions engine
-                "vanguard_rally",              # draw cycling engine
-                "vanguard_war_cache",          # economy + future draw
-                "vanguard_rearguard",          # defense + economy
-                "vanguard_battle_glory",       # VP from contested wins
-                "vanguard_arsenal",            # VP from deck size
-                "vanguard_war_tithe",          # resources from last round's claims
-            ],
-            "swarm": [
-                "swarm_surge",                 # multi-target expansion
-                "swarm_proliferate",           # any neutral tile, ignores adjacency
-                "swarm_flood",                 # claims all adjacent
-                "swarm_hive_mind",             # mass multi-target expansion
-                "swarm_overwhelm",             # adjacency power scaling
-                "swarm_swarm_tactics",         # draw + action engine
-                "swarm_thin_the_herd",         # deck thinning
-                "swarm_consecrate",            # enhance VP tile value
-                "swarm_nest",                  # adjacency defense
-                "swarm_war_trophies",          # VP from trashed cards
-                "swarm_colony",               # VP from disconnected groups
-            ],
-            "fortress": [
-                "fortress_slow_advance",       # auto-claim neutrals
-                "fortress_garrison",           # defensive power
-                "fortress_entrench",           # permanent defense
-                "fortress_fortify",            # defense + action
-                "fortress_bulwark",            # multi-tile defense
-                "fortress_stronghold",         # tile immunity 2 rounds
-                "fortress_twin_cities",        # massive permanent defense
-                "fortress_supply_line",        # economy engine
-                "fortress_toll_road",          # draw per connected VP hex
-                "fortress_fortified_position", # VP from defense stacking
-                "fortress_warden",            # VP from uncaptured tiles
-            ],
-        },
+        archetype_card_ids=None,  # all archetype cards
     ),
     "shock_and_awe": CardPack(
         id="shock_and_awe",
         name="Shock & Awe",
+        # Theme: Aggressive tempo, disruption, and overwhelming force.
+        # Synergies:
+        #   1. Rally Cry (stackable all claims) + Coordinated Push / Dog Pile → massive tile stacks
+        #   2. Ambush + aggressive claiming → punish contested tiles with bonus power
+        #   3. Sabotage + Swarm Infestation/Plague → multi-axis opponent disruption
+        #   4. Forced March + Militia → actions for big territorial claims
+        #   5. Vanguard Spoils of War + aggression → trash opponent cards while claiming
+        #   6. Spyglass + action-hungry archetypes → cheap draw when hand is low
         neutral_card_ids=[
-            "neutral_reduce",
-            "neutral_recruit",
-            "neutral_road_builder",
-            "neutral_militia",
-            "neutral_forced_march",
-            "neutral_watchtower",
-            "neutral_sabotage",
-            "neutral_rally_cry",
-            "neutral_mercenary",
-            "neutral_siege_tower",
+            "neutral_reduce",          # Cull: deck thinning (1💰)
+            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
+            "neutral_recruit",         # Levy: cheap claim + action (2💰)
+            "neutral_militia",         # Militia: territorial power claim (3💰)
+            "neutral_forced_march",    # Forced March: 2 actions (3💰)
+            "neutral_ambush",          # Ambush: contested power boost (4💰)
+            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
+            "neutral_rally_cry",       # Rally Cry: all claims stackable (5💰)
+            "neutral_sabotage",        # Sabotage: opponent draws fewer (5💰)
+            "neutral_siege_tower",     # Siege Tower: power 6 finisher (8💰)
         ],
-        archetype_card_ids={
-            # Fast aggressive expansion + overwhelming force
-            "vanguard": [
-                "vanguard_blitz",              # cheap aggression
-                "vanguard_overrun",            # extended range power
-                "vanguard_strike_team",        # combo power scaling
-                "vanguard_rapid_assault",      # resource drain
-                "vanguard_spearhead",          # high-power nuke
-                "vanguard_breakthrough",       # auto-claims adjacent
-                "vanguard_flanking_strike",    # extended range reach
-                "vanguard_coordinated_push",   # stackable aggression
-                "vanguard_double_time",        # actions engine
-                "vanguard_battle_glory",       # VP from contested wins
-            ],
-            "swarm": [
-                "swarm_surge",                 # multi-target flood
-                "swarm_flood",                 # claims all adjacent
-                "swarm_hive_mind",             # mass multi-target nuke
-                "swarm_locust_swarm",          # tile-count power nuke
-                "swarm_rabble",                # cheap spam
-                "swarm_dog_pile",              # stackable, buffs claims
-                "swarm_overwhelm",             # adjacency power
-                "swarm_mob_rule",              # power from tile count
-                "swarm_frenzy",                # actions engine
-                "swarm_blitz_rush",            # mass actions burst
-            ],
-            "fortress": [
-                "fortress_siege_engine",       # ignores defense
-                "fortress_battering_ram",      # anti-defense powerhouse
-                "fortress_overwhelming_force", # stackable claims
-                "fortress_garrison",           # defensive power
-                "fortress_war_of_attrition",   # forced discard
-                "fortress_slow_advance",       # auto-claim neutrals
-                "fortress_war_council",        # draw + action burst
-                "fortress_catch_up",           # comeback mechanic
-                "fortress_iron_wall",          # tile immunity
-                "fortress_fortify",            # defense + action
-            ],
-        },
+        archetype_card_ids=None,  # all archetype cards
+    ),
+
+    # ── Mini packs (5 neutral market cards + all archetype cards) ───────
+
+    "mini_lean_machine": CardPack(
+        id="mini_lean_machine",
+        name="Mini: Lean Machine",
+        # Theme: Deck efficiency — thin, cycle, and optimize every draw.
+        # Synergies:
+        #   1. Cull + Reclaim → trash junk cards AND gain resources from their buy cost
+        #   2. Cartographer + Spyglass → cycle through deck fast, refill hand cheaply
+        #   3. Works great with Swarm Thin the Herd / Spoils Hoard (VP from trash pile)
+        #   4. Fortress Consolidate + Reclaim → double trash-for-value engine
+        neutral_card_ids=[
+            "neutral_reduce",          # Cull: trash cards from hand (1💰)
+            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
+            "neutral_reclaim",         # Reclaim: trash for resources (2💰)
+            "neutral_prospector",      # Prospector: basic economy (2💰)
+            "neutral_cartographer",    # Cartographer: discard 2, draw 2 (3💰)
+        ],
+        archetype_card_ids=None,  # all archetype cards
+    ),
+    "mini_war_economy": CardPack(
+        id="mini_war_economy",
+        name="Mini: War Economy",
+        # Theme: Resources through combat — every claim pays dividends.
+        # Synergies:
+        #   1. Tax Collector + VP tile control → snowball resources for Mercenary purchases
+        #   2. Ambush + Militia → read opponents, punish contested tiles, reward territory
+        #   3. Vanguard War Tithe + Mercenary → claims generate resources to buy more claims
+        #   4. Fortress Robin Hood + losing tiles → economic comeback into Mercenary power
+        neutral_card_ids=[
+            "neutral_militia",         # Militia: territorial power claim (3💰)
+            "neutral_war_bonds",       # Tithe: 2 resources + 1 action (3💰)
+            "neutral_ambush",          # Ambush: contested power boost (4💰)
+            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
+            "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
+        ],
+        archetype_card_ids=None,  # all archetype cards
     ),
 }
 
