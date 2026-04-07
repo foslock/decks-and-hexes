@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import pickle
 from typing import Any, Optional
 
@@ -32,13 +33,30 @@ from app.game_engine.game_state import (
     submit_play,
 )
 from app.game_engine.hex_grid import GridSize
+from app.storage.analytics import AnalyticsRecorder
+from app.storage.game_store import GameStore
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
-# In-memory game store for Phase 1 (will move to Postgres later)
-_games: dict[str, GameState] = {}
-_card_registry = None
+# Game storage — backed by DB with in-memory cache
+_store: GameStore | None = None
+_analytics: AnalyticsRecorder | None = None
+_card_registry: dict[str, Any] | None = None
+
+
+def init_routes(store: GameStore, analytics: AnalyticsRecorder | None = None) -> None:
+    """Initialize routes with the shared GameStore (called from main.py)."""
+    global _store, _analytics
+    _store = store
+    _analytics = analytics
+
+
+def _get_store() -> GameStore:
+    if _store is None:
+        raise RuntimeError("Routes not initialized — call init_routes() first")
+    return _store
 
 
 def _get_card_registry() -> dict[str, Any]:
@@ -152,7 +170,8 @@ async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
     game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode, speed=req.speed)
     # Auto-execute start of turn for round 1
     execute_start_of_turn(game)
-    _games[game.id] = game
+    store = _get_store()
+    await store.put(game)
 
     return {"game_id": game.id, "state": game.to_dict()}
 
@@ -160,7 +179,7 @@ async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
 @router.get("/games/{game_id}")
 async def get_game(game_id: str, player_id: Optional[str] = None) -> dict[str, Any]:
     """Get current game state."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
     if player_id and _is_multiplayer(game):
@@ -172,13 +191,21 @@ async def get_game(game_id: str, player_id: Optional[str] = None) -> dict[str, A
 @router.post("/games/{game_id}/play")
 async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     """Play a card during Play phase."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
     extra_targets = None
     if req.extra_targets:
         extra_targets = [(t[0], t[1]) for t in req.extra_targets if len(t) >= 2]
+
+    # Capture card info before play (play_card removes from hand)
+    player = game.players.get(req.player_id)
+    card_info = None
+    if player and 0 <= req.card_index < len(player.hand):
+        c = player.hand[req.card_index]
+        card_info = (c.id, c.name)
 
     success, msg = play_card(
         game, req.player_id, req.card_index,
@@ -190,6 +217,15 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
+    await store.save(game)
+
+    # Analytics: record card played (fire-and-forget)
+    if _analytics and card_info:
+        _analytics.record_card_played(
+            game_id, req.player_id, game.current_round,
+            card_info[0], card_info[1],
+            target_q=req.target_q, target_r=req.target_r,
+        )
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -199,7 +235,8 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
 @router.post("/games/{game_id}/submit-discard")
 async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[str, Any]:
     """Submit deferred discard choices (e.g. Regroup: draw first, then discard)."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -207,6 +244,7 @@ async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[
     if not success:
         raise HTTPException(400, msg)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -216,7 +254,8 @@ async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[
 @router.post("/games/{game_id}/submit-play")
 async def submit_play_route(game_id: str, req: SubmitPlanRequest) -> dict[str, Any]:
     """Submit plan for a player."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -228,6 +267,7 @@ async def submit_play_route(game_id: str, req: SubmitPlanRequest) -> dict[str, A
     if any(p.is_cpu and not p.has_submitted_play for p in game.players.values()):
         auto_play_cpu_plays(game)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -237,7 +277,8 @@ async def submit_play_route(game_id: str, req: SubmitPlanRequest) -> dict[str, A
 @router.post("/games/{game_id}/advance-resolve")
 async def advance_resolve_route(game_id: str, req: AdvanceResolveRequest) -> dict[str, Any]:
     """Player acknowledges resolve phase (animations done), advance to buy."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -245,6 +286,7 @@ async def advance_resolve_route(game_id: str, req: AdvanceResolveRequest) -> dic
     if not success:
         raise HTTPException(400, msg)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -254,13 +296,25 @@ async def advance_resolve_route(game_id: str, req: AdvanceResolveRequest) -> dic
 @router.post("/games/{game_id}/buy")
 async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
     """Buy a card during Buy phase."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
     success, msg = buy_card(game, req.player_id, req.source, req.card_id or "")
     if not success:
         raise HTTPException(400, msg)
+
+    await store.save(game)
+
+    # Analytics: record card purchase (fire-and-forget)
+    if _analytics and "Bought" in msg:
+        # msg format: "Bought {card_name} for {cost} resources"
+        _analytics.record_card_bought(
+            game_id, req.player_id, game.current_round,
+            req.card_id or "", msg.split("Bought ")[-1].split(" for ")[0],
+            req.source, 0,  # cost is in the message but we don't parse it here
+        )
 
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
@@ -271,7 +325,8 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
 @router.post("/games/{game_id}/upgrade-card")
 async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str, Any]:
     """Spend an upgrade credit to upgrade a card in hand during Play phase."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -279,6 +334,7 @@ async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str,
     if not success:
         raise HTTPException(400, msg)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -288,7 +344,8 @@ async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str,
 @router.post("/games/{game_id}/reroll")
 async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
     """Re-roll archetype market."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -296,6 +353,7 @@ async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -305,7 +363,8 @@ async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
 @router.post("/games/{game_id}/end-buy")
 async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     """End buy phase for a player."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -313,6 +372,7 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -326,7 +386,8 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
     Called by the frontend after a brief delay so the user can see
     the 'Buying...' indicator on CPU players before their purchases appear.
     """
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -341,6 +402,7 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
 
     auto_play_cpu_buys(game)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -350,7 +412,8 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
 @router.post("/games/{game_id}/advance-upkeep")
 async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
     """Advance past the Upkeep phase to Play phase."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -359,6 +422,7 @@ async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
 
     execute_upkeep(game)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -368,7 +432,8 @@ async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
 @router.post("/games/{game_id}/end-turn")
 async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
     """End the current turn for a player (delegates to end_buy_phase)."""
-    game = _games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -376,6 +441,7 @@ async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
     if not success:
         raise HTTPException(400, msg)
 
+    await store.save(game)
     if _is_multiplayer(game):
         await _broadcast_state(game_id, game)
 
@@ -385,7 +451,7 @@ async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
 @router.get("/games/{game_id}/log")
 async def get_game_log(game_id: str, player_id: Optional[str] = None) -> dict[str, Any]:
     """Get the full game log, filtered by player visibility."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -410,6 +476,15 @@ async def list_cards() -> dict[str, Any]:
     return {cid: c.to_dict() for cid, c in registry.items()}
 
 
+@router.get("/stats")
+async def get_stats() -> dict[str, Any]:
+    """Get aggregate game stats for the homepage widget."""
+    if _analytics:
+        stats = await _analytics.get_homepage_stats()
+        return {"stats": stats}
+    return {"stats": {}}
+
+
 # ── Test Mode Endpoints ────────────────────────────────────────
 
 
@@ -427,7 +502,7 @@ class TestSetStatsRequest(BaseModel):
 @router.post("/games/{game_id}/test/give-card")
 async def test_give_card(game_id: str, req: TestGiveCardRequest) -> dict[str, Any]:
     """Test mode: add a copy of any card from the registry to a player's hand."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
     if not game.test_mode:
@@ -448,6 +523,7 @@ async def test_give_card(game_id: str, req: TestGiveCardRequest) -> dict[str, An
     card.id = f"test_{req.card_id}_{len(player.hand)}"
     player.hand.append(card)
     game._log(f"[TEST] {player.name} receives {card.name}", actor=req.player_id)
+    await _get_store().save(game)
 
     return {"message": f"Gave {card.name} to {player.name}", "state": game.to_dict()}
 
@@ -455,7 +531,7 @@ async def test_give_card(game_id: str, req: TestGiveCardRequest) -> dict[str, An
 @router.post("/games/{game_id}/test/set-stats")
 async def test_set_stats(game_id: str, req: TestSetStatsRequest) -> dict[str, Any]:
     """Test mode: set VP and/or resources for a player."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
     if not game.test_mode:
@@ -475,6 +551,7 @@ async def test_set_stats(game_id: str, req: TestSetStatsRequest) -> dict[str, An
 
     if changes:
         game._log(f"[TEST] {player.name}: {', '.join(changes)}", actor=req.player_id)
+    await _get_store().save(game)
 
     return {"message": f"Updated {player.name}: {', '.join(changes)}", "state": game.to_dict()}
 
@@ -487,7 +564,7 @@ class TestTrashCardRequest(BaseModel):
 @router.post("/games/{game_id}/test/trash-card")
 async def test_trash_card(game_id: str, req: TestTrashCardRequest) -> dict[str, Any]:
     """Test mode: trash (permanently remove) a card from a player's hand."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
     if not game.test_mode:
@@ -503,6 +580,7 @@ async def test_trash_card(game_id: str, req: TestTrashCardRequest) -> dict[str, 
     card = player.hand.pop(req.card_index)
     player.trash.append(card)
     game._log(f"[TEST] {player.name} trashes {card.name}", actor=req.player_id)
+    await _get_store().save(game)
 
     return {"message": f"Trashed {card.name}", "state": game.to_dict()}
 
@@ -519,7 +597,7 @@ class TestPlayerRequest(BaseModel):
 @router.post("/games/{game_id}/test/discard-card")
 async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[str, Any]:
     """Test mode: discard a card from a player's hand to their discard pile."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
     if not game.test_mode:
@@ -535,6 +613,7 @@ async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[s
     card = player.hand.pop(req.card_index)
     player.deck.add_to_discard([card])
     game._log(f"[TEST] {player.name} discards {card.name}", actor=req.player_id)
+    await _get_store().save(game)
 
     return {"message": f"Discarded {card.name}", "state": game.to_dict()}
 
@@ -542,7 +621,7 @@ async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[s
 @router.post("/games/{game_id}/test/draw-card")
 async def test_draw_card(game_id: str, req: TestPlayerRequest) -> dict[str, Any]:
     """Test mode: draw a card from the player's draw pile into their hand."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
     if not game.test_mode:
@@ -556,6 +635,7 @@ async def test_draw_card(game_id: str, req: TestPlayerRequest) -> dict[str, Any]
     if drawn:
         player.hand.extend(drawn)
         game._log(f"[TEST] {player.name} draws {drawn[0].name}", actor=req.player_id)
+        await _get_store().save(game)
         return {"message": f"Drew {drawn[0].name}", "state": game.to_dict()}
     else:
         return {"message": "No cards to draw", "state": game.to_dict()}
@@ -564,7 +644,7 @@ async def test_draw_card(game_id: str, req: TestPlayerRequest) -> dict[str, Any]
 @router.post("/games/{game_id}/test/discard-hand")
 async def test_discard_hand(game_id: str, req: TestPlayerRequest) -> dict[str, Any]:
     """Test mode: discard all cards in the player's hand to their discard pile."""
-    game = _games.get(game_id)
+    game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
     if not game.test_mode:
@@ -579,6 +659,7 @@ async def test_discard_hand(game_id: str, req: TestPlayerRequest) -> dict[str, A
         player.deck.add_to_discard(player.hand)
         game._log(f"[TEST] {player.name} discards entire hand ({count} cards)", actor=req.player_id)
         player.hand = []
+    await _get_store().save(game)
 
     return {"message": f"Discarded {count} card(s)", "state": game.to_dict()}
 

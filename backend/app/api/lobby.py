@@ -149,22 +149,23 @@ _game_to_lobby: dict[str, str] = {} # game_id → lobby code (for auth lookups)
 # Track which games have had their lobby reset for return-to-lobby
 _return_to_lobby_done: dict[str, bool] = {}  # game_id → True if lobby was already reset
 
-# Reference to the games dict from routes.py (set by init_lobby_games_ref)
-_games_ref: dict[str, GameState] | None = None
+# Reference to the GameStore (set by init_lobby)
+_store_ref: Any = None  # GameStore | None (avoid circular import)
 _card_registry_ref: Any = None
 
 
-def init_lobby(games: dict[str, GameState], get_registry: Any) -> None:
-    """Initialize lobby module with references to shared game storage."""
-    global _games_ref, _card_registry_ref
-    _games_ref = games
+def init_lobby(store: Any, get_registry: Any) -> None:
+    """Initialize lobby module with shared GameStore and registry factory."""
+    global _store_ref, _card_registry_ref
+    _store_ref = store
     _card_registry_ref = get_registry
 
 
-def _get_games() -> dict[str, GameState]:
-    if _games_ref is None:
+def _get_store() -> Any:
+    """Get the shared GameStore."""
+    if _store_ref is None:
         raise RuntimeError("Lobby not initialized — call init_lobby first")
-    return _games_ref
+    return _store_ref
 
 
 def _get_registry() -> dict[str, Any]:
@@ -747,8 +748,8 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
     game.lobby_code = code
     execute_start_of_turn(game)
 
-    games = _get_games()
-    games[game.id] = game
+    store = _get_store()
+    await store.put(game)
     lobby.game_id = game.id
     lobby.status = "started"
     _game_to_lobby[game.id] = code
@@ -802,8 +803,7 @@ async def lobby_websocket(ws: WebSocket, code: str, player_id: str, token: str) 
     try:
         # Send initial state
         if lobby.game_id:
-            games = _get_games()
-            game = games.get(lobby.game_id)
+            game = await _get_store().get(lobby.game_id)
             if game:
                 visible = get_visible_player_ids(game.id, player_id)
                 state = game.to_dict(for_player_id=player_id, visible_player_ids=visible)
@@ -841,8 +841,8 @@ class EndGameRequest(BaseModel):
 async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[str, Any]:
     """Handle a player leaving a game mid-play."""
     _require_token(player_id, token)
-    games = _get_games()
-    game = games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -923,6 +923,12 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
             elif all(p.has_ended_turn or p.has_left for p in game.players.values()):
                 execute_end_of_turn(game)
 
+    # Persist state before broadcasting
+    if game.current_phase == Phase.GAME_OVER:
+        await store.finish(game)
+    else:
+        await store.save(game)
+
     # Broadcast updated state (includes has_left=True + winner if applicable),
     # then disconnect the leaving player.
     # Note: we do NOT send a separate "player_left" message after the state broadcast,
@@ -937,8 +943,8 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
 async def handle_end_game(game_id: str, player_id: str, token: str) -> dict[str, Any]:
     """Host ends the game for everyone."""
     _require_token(player_id, token)
-    games = _get_games()
-    game = games.get(game_id)
+    store = _get_store()
+    game = await store.get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
 
@@ -956,14 +962,16 @@ async def handle_end_game(game_id: str, player_id: str, token: str) -> dict[str,
         except Exception:
             pass
 
-    # Clean up game and lobby
+    # Mark game as abandoned in DB and evict from cache
+    await store.abandon(game_id)
+
+    # Clean up lobby
     lobby_code = _game_to_lobby.pop(game_id, None)
     if lobby_code:
         lobby = _lobbies.pop(lobby_code, None)
         if lobby:
             for pid in lobby.players:
                 _tokens.pop(pid, None)
-    games.pop(game_id, None)
 
     return {"message": "Game ended"}
 
@@ -979,8 +987,8 @@ async def handle_return_to_lobby(game_id: str, player_id: str, token: str) -> di
     if not lobby:
         raise HTTPException(400, "No lobby associated with this game")
 
-    games = _get_games()
-    game = games.get(game_id)  # May be None if already cleaned up by a prior call
+    store = _get_store()
+    game = await store.get(game_id)  # May be None if already cleaned up by a prior call
 
     # First call: reset lobby state, clean up game, migrate connections
     if not _return_to_lobby_done.get(game_id):
@@ -1005,9 +1013,9 @@ async def handle_return_to_lobby(game_id: str, player_id: str, token: str) -> di
             if lobby.player_order and pid in lobby.player_order:
                 lobby.player_order.remove(pid)
 
-        # Clean up old game
+        # Clean up old game from cache (DB record persists for analytics)
         _game_to_lobby.pop(game_id, None)
-        games.pop(game_id, None)
+        store.evict(game_id)
 
         # Migrate WS connections from game group to lobby group
         manager.migrate_group(game_id, lobby.code)

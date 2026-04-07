@@ -1,28 +1,34 @@
-"""Database configuration and session management."""
+"""Database configuration and session management.
+
+Uses the storage engine factory for SQLite/PostgreSQL auto-detection.
+"""
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from app.storage.engine import create_db_engine
+
+# Module-level singletons — initialized by init_db()
+engine: AsyncEngine | None = None
+async_session: async_sessionmaker[AsyncSession] | None = None
 
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/card_clash",
-)
+def init_db(url: str | None = None) -> tuple[AsyncEngine, async_sessionmaker[AsyncSession]]:
+    """Initialize the database engine and session factory.
 
-# Render.com provides DATABASE_URL with postgres:// prefix, need postgresql+asyncpg://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-engine = create_async_engine(DATABASE_URL, echo=False)
-async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    Call once at application startup. Returns (engine, session_factory).
+    """
+    global engine, async_session
+    engine, async_session = create_db_engine(url)
+    return engine, async_session
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """Yield an async session (for FastAPI dependency injection)."""
+    if async_session is None:
+        raise RuntimeError("Database not initialized — call init_db() first")
     async with async_session() as session:
         yield session

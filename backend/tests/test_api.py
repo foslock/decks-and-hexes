@@ -6,18 +6,26 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.api.routes import _games
+from app.api.routes import _get_store
 
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    # Use lifespan context manager so DB/store are initialized
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture(autouse=True)
-def clear_games() -> None:
+def clear_games(client: TestClient) -> None:
     """Clear in-memory game store between tests."""
-    _games.clear()
+    try:
+        store = _get_store()
+        # Clear all cached games
+        for gid in store.cached_game_ids():
+            store.evict(gid)
+    except RuntimeError:
+        pass  # Store not initialized yet
 
 
 class TestHealthEndpoint:
@@ -259,8 +267,8 @@ class TestBuyAndEndTurn:
     def test_buy_upgrade(self, client: TestClient) -> None:
         game_id = self._create_and_advance_to_buy(client)
         # Find the current buyer and give them enough resources
-        buyer_id = _games[game_id].player_order[_games[game_id].current_buyer_index]
-        _games[game_id].players[buyer_id].resources = 10
+        buyer_id = _get_store().get_cached(game_id).player_order[_get_store().get_cached(game_id).current_buyer_index]
+        _get_store().get_cached(game_id).players[buyer_id].resources = 10
         resp = client.post(f"/api/games/{game_id}/buy", json={
             "player_id": buyer_id,
             "source": "upgrade",
@@ -269,8 +277,8 @@ class TestBuyAndEndTurn:
 
     def test_reroll(self, client: TestClient) -> None:
         game_id = self._create_and_advance_to_buy(client)
-        buyer_id = _games[game_id].player_order[_games[game_id].current_buyer_index]
-        _games[game_id].players[buyer_id].resources = 10
+        buyer_id = _get_store().get_cached(game_id).player_order[_get_store().get_cached(game_id).current_buyer_index]
+        _get_store().get_cached(game_id).players[buyer_id].resources = 10
         resp = client.post(f"/api/games/{game_id}/reroll", json={
             "player_id": buyer_id,
         })
@@ -362,7 +370,7 @@ class TestGameLog:
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p1"})
         # End buy phase in sequential buyer order
-        game = _games[game_id]
+        game = _get_store().get_cached(game_id)
         buyer1 = game.player_order[game.current_buyer_index]
         buyer2 = "p1" if buyer1 == "p0" else "p0"
         client.post(f"/api/games/{game_id}/end-turn", json={"player_id": buyer1})

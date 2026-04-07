@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
@@ -8,20 +9,53 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import router, _games, _get_card_registry
+from app.api.routes import router, _get_card_registry, init_routes
 from app.api.lobby import lobby_router, init_lobby, lobby_expiry_task
+from app.models.game import Base
+from app.storage.engine import create_db_engine, is_sqlite
+from app.storage.analytics import AnalyticsRecorder
+from app.storage.game_store import GameStore
+from app.storage.repository import GameRepository
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # Startup
+    # Startup: initialize DB, run migrations, create GameStore
+    engine, session_factory = create_db_engine()
+
+    # Create tables directly for SQLite (avoids needing alembic for dev).
+    # For PostgreSQL, use `alembic upgrade head` in deployment.
+    if is_sqlite(str(engine.url)):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("SQLite tables created/verified")
+    else:
+        logger.info("PostgreSQL detected — ensure migrations are applied via `alembic upgrade head`")
+
+    # Build card registry, GameStore, and AnalyticsRecorder
+    registry = _get_card_registry()
+    repo = GameRepository(session_factory)
+    store = GameStore(repo, registry)
+    analytics = AnalyticsRecorder(repo)
+
+    # Wire store and analytics into routes and lobby
+    init_routes(store, analytics)
+    init_lobby(store, _get_card_registry)
+
+    # Start lobby expiry background task
     task = asyncio.create_task(lobby_expiry_task())
+    logger.info("Card Clash backend started (DB: %s)", engine.url)
+
     yield
+
     # Shutdown
     task.cancel()
+    await engine.dispose()
 
 
-app = FastAPI(title="Card Clash", version="0.1.11", lifespan=lifespan)
+app = FastAPI(title="Card Clash", version="0.1.12", lifespan=lifespan)
 
 # CORS — allow frontend origins (dev + Render)
 origins = [
@@ -45,9 +79,6 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(lobby_router)
-
-# Initialize lobby module with shared game storage
-init_lobby(_games, _get_card_registry)
 
 
 @app.get("/health")
