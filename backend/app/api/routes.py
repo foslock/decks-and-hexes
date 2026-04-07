@@ -664,6 +664,47 @@ async def test_discard_hand(game_id: str, req: TestPlayerRequest) -> dict[str, A
     return {"message": f"Discarded {count} card(s)", "state": game.to_dict()}
 
 
+class TestSetTileOwnerRequest(BaseModel):
+    q: int
+    r: int
+    owner: str | None = None  # player_id or null to clear
+
+
+@router.post("/games/{game_id}/test/set-tile-owner")
+async def test_set_tile_owner(game_id: str, req: TestSetTileOwnerRequest) -> dict[str, Any]:
+    """Test mode: cycle tile ownership (shift+click from frontend)."""
+    game = await _get_store().get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+    if not game.grid:
+        raise HTTPException(400, "No grid")
+
+    tile = game.grid.get_tile(req.q, req.r)
+    if not tile:
+        raise HTTPException(404, "Tile not found")
+    if tile.is_blocked or tile.is_base:
+        raise HTTPException(400, "Cannot change ownership of blocked or base tiles")
+
+    old_owner = tile.owner
+    tile.owner = req.owner
+    tile.held_since_turn = game.current_round if req.owner else None
+    if req.owner is None:
+        tile.defense_power = tile.base_defense
+        tile.permanent_defense_bonus = 0
+
+    old_name = game.players[old_owner].name if old_owner and old_owner in game.players else "none"
+    new_name = game.players[req.owner].name if req.owner and req.owner in game.players else "none"
+    game._log(f"[TEST] Tile {req.q},{req.r} owner: {old_name} → {new_name}")
+    await _get_store().save(game)
+
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": f"Tile owner set", "state": game.to_dict()}
+
+
 # ── Multiplayer: Leave / End Game ──────────────────────────
 
 

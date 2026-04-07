@@ -707,7 +707,7 @@ class TestCostReduction:
 
         # Should have a cost reduction active
         assert len(player.turn_modifiers.cost_reductions) == 1
-        assert player.turn_modifiers.cost_reductions[0]["amount"] == 2
+        assert player.turn_modifiers.cost_reductions[0]["amount"] == 1
 
 
 # ── Grant Actions Tests ───────────────────────────────────────────

@@ -385,6 +385,18 @@ export async function testSetStats(
   });
 }
 
+export async function testSetTileOwner(
+  gameId: string,
+  q: number,
+  r: number,
+  owner: string | null,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/set-tile-owner`, {
+    method: 'POST',
+    body: JSON.stringify({ q, r, owner }),
+  });
+}
+
 export interface LogEntry {
   message: string;
   round: number;

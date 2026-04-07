@@ -94,7 +94,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     resource_gain = _safe_int(entry.get("resource_gain", 0))
     effect = str(entry.get("effect", ""))
     has_gain_resources_effect = any(
-        e.get("type") in ("gain_resources", "resources_per_claims_last_round")
+        e.get("type") in ("gain_resources", "resources_per_claims_last_round", "resource_scaling", "resource_per_vp_hex", "resources_per_tiles_lost", "next_turn_bonus", "abandon_and_block")
         for e in entry.get("effects", [])
     )
     if resource_gain == 0 and "gain" in effect.lower() and "resource" in effect.lower() and not has_gain_resources_effect:
@@ -103,9 +103,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             resource_gain = int(match.group(1))
 
     # Parse draw_cards from effect text if not explicit
-    # Skip if draw is delayed ("next turn") — those use the draw_next_turn effect instead
+    # Skip if draw is delayed ("next turn") or handled by a cycle/draw effect
     draw_cards = _safe_int(entry.get("draw_cards", 0))
-    if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower():
+    has_cycle_effect = any(
+        e.get("type") in ("cycle", "actions_per_cards_played", "mulligan", "global_claim_ban", "swap_draw_discard") for e in entry.get("effects", [])
+    )
+    if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower() and not has_cycle_effect:
         match = re.search(r'[Dd]raw\s+(\d+)\s+card', effect)
         if match:
             draw_cards = int(match.group(1))
@@ -117,12 +120,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         if match:
             defense_bonus = int(match.group(1))
 
-    # Parse forced_discard from effect text (skip if card has self_discard effect)
+    # Parse forced_discard from effect text (skip if card has self_discard or cycle effect)
     has_self_discard_effect = any(
         e.get("type") == "self_discard" for e in entry.get("effects", [])
     )
     forced_discard = _safe_int(entry.get("forced_discard", 0))
-    if forced_discard == 0 and "discard" in effect.lower() and not has_self_discard_effect:
+    if forced_discard == 0 and "discard" in effect.lower() and not has_self_discard_effect and not has_cycle_effect:
         match = re.search(r'[Dd]iscard\w*\s+(\d+)', effect)
         if match:
             forced_discard = int(match.group(1))
@@ -207,7 +210,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             if m:
                 upgraded_resource_gain = int(m.group(1))
 
-        if upgraded_draw_cards is None and "draw" in effect_upgraded.lower() and "next turn" not in effect_upgraded.lower():
+        if upgraded_draw_cards is None and "draw" in effect_upgraded.lower() and "next turn" not in effect_upgraded.lower() and not has_cycle_effect:
             m = re.search(r'[Dd]raw\s+(\d+)\s+card', effect_upgraded)
             if m:
                 upgraded_draw_cards = int(m.group(1))
@@ -217,7 +220,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             if m:
                 upgraded_defense_bonus = int(m.group(1))
 
-        if upgraded_forced_discard is None and "discard" in effect_upgraded.lower() and not has_self_discard_effect:
+        if upgraded_forced_discard is None and "discard" in effect_upgraded.lower() and not has_self_discard_effect and not has_cycle_effect:
             m = re.search(r'[Dd]iscard\w*\s+(\d+)', effect_upgraded)
             if m:
                 upgraded_forced_discard = int(m.group(1))
@@ -254,7 +257,6 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         description=description,
         upgrade_description=upgrade_description,
         name_upgraded=name_upgraded,
-        copies=_safe_optional_int(entry.get("copies")),
         effects=effects,
         upgraded_power=upgraded_power,
         upgraded_resource_gain=upgraded_resource_gain,

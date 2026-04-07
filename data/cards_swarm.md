@@ -364,3 +364,78 @@ cards:
     secondary_effect: null
     secondary_timing: null
     note: "Rewards aggressive deck thinning. Synergizes with Thin the Herd and trash effects. Takes up a hand slot when drawn."
+
+  - id: swarm_heady_brew
+    name: Heady Brew
+    name_upgraded: Heady Brew+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Swap your draw and discard piles, then shuffle your draw pile. Trash this card."
+    effect_upgraded: "Swap your draw and discard piles, then shuffle your draw pile. Draw 2 cards. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Lets Swarm start a new deck cycle immediately. The upgraded version draws into the freshly shuffled pile."
+
+    effects:
+      - type: swap_draw_discard
+        timing: immediate
+
+  - id: swarm_plague
+    name: Plague
+    name_upgraded: Plague+
+    type: Engine
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    effect: "At the beginning of next turn, every player (including you) trashes a random card from their hand."
+    effect_upgraded: "At the beginning of next turn, every opponent trashes a random card from their hand."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Symmetrical disruption that favors Swarm — their cheap cards are expendable, but opponents may lose key pieces. Upgrade removes self-cost."
+
+    effects:
+      - type: global_random_trash
+        timing: immediate
+        target: all_players
+
+  - id: swarm_infestation
+    name: Infestation
+    name_upgraded: Infestation+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Choose an opponent. Add 3 Rubble cards to their discard pile. Trash this card."
+    effect_upgraded: "Choose an opponent. Add 4 Rubble cards to their discard pile. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Aggressive deck pollution. Rubble clogs the opponent's hand slots, reducing their effective draws."
+
+    effects:
+      - type: inject_rubble
+        timing: on_resolution
+        value: 3
+        upgraded_value: 4
+        target: chosen_opponent
+
+  - id: swarm_exodus
+    name: Exodus
+    name_upgraded: Exodus+
+    type: Engine
+    buy_cost: 3
+    action_return: 2
+    power: 0
+    target_own_tile: true
+    effect: "Abandon a tile you own. Gain 2 actions. Draw 2 cards."
+    effect_upgraded: "Abandon a tile you own. Gain 2 actions. Draw 3 cards."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Converts board position into raw tempo. Swarm can afford to lose a tile because they take three more with the extra actions and cards."
+
+    effects:
+      - type: abandon_tile
+        timing: on_resolution

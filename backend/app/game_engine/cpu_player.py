@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from .cards import Archetype, Card, CardType, Timing
-from .effects import EffectType
+from .effects import ConditionType, EffectType
 from .hex_grid import HexGrid, HexTile
 
 
@@ -161,6 +161,9 @@ class CPUPlayer:
                 continue
 
             if card.card_type == CardType.CLAIM:
+                # Skip claim cards when a global claim ban is active
+                if hasattr(game, "claim_ban_rounds") and game.claim_ban_rounds > 0:
+                    continue
                 tile_actions = self._score_claim_targets(game, player, card, i, weights)
                 scored.extend(tile_actions)
             elif card.card_type == CardType.DEFENSE:
@@ -236,6 +239,32 @@ class CPUPlayer:
                 "card_index": card_index,
                 "target_q": tile.q, "target_r": tile.r,
             }
+
+            # Ambush (if_contested power modifier): prefer enemy-owned tiles
+            has_contested_bonus = any(
+                e.type == EffectType.POWER_MODIFIER
+                and e.condition == ConditionType.IF_CONTESTED
+                for e in card.effects
+            )
+            if has_contested_bonus and tile.owner is not None and tile.owner != self.player_id:
+                score += 4.0 * weights.aggression  # strongly prefer contested tiles
+
+            # Demon Pact (mandatory_self_trash): require enough trash targets
+            has_mandatory_trash = any(
+                e.type == EffectType.MANDATORY_SELF_TRASH for e in card.effects
+            )
+            if has_mandatory_trash:
+                for effect in card.effects:
+                    if effect.type == EffectType.MANDATORY_SELF_TRASH:
+                        trash_count = effect.effective_value(card.is_upgraded)
+                        other_cards = [j for j in range(len(player.hand)) if j != card_index]
+                        if len(other_cards) < trash_count:
+                            continue  # skip — not enough cards to trash
+                        trash_indices = self._pick_cards_to_trash(player, trash_count, card_index)
+                        action_dict["trash_card_indices"] = trash_indices
+                        # Bonus for very high power card when we can afford the trash cost
+                        score += 3.0
+                        break
 
             # For cards with forced_discard, target the leading opponent
             if card.forced_discard > 0:
@@ -329,6 +358,10 @@ class CPUPlayer:
                         power += ev
                 elif effect.condition.value == "cards_in_hand":
                     power = max(0, len(player.hand) - 1) + ev
+                elif effect.condition.value == "if_contested":
+                    # Ambush: bonus power when targeting an opponent-owned tile
+                    if tile.owner is not None and tile.owner != self.player_id:
+                        power += ev
 
         return power
 
@@ -572,6 +605,157 @@ class CPUPlayer:
                 else:
                     score += 1.0  # unlikely but still has long-term value
 
+        # Initialize action_dict early so new effects can attach data to it
+        action_dict: dict[str, Any] = {"card_index": card_index}
+
+        # ── New synergy / medium / complex engine effects ────────────
+        for effect in card.effects:
+            if effect.type == EffectType.CONDITIONAL_ACTION:
+                # Spyglass: gain action if hand_size <= threshold
+                threshold = effect.condition_threshold or 3
+                # Hand shrinks as we play cards; estimate post-play hand size
+                current_hand = len(player.hand) - 1  # minus this card being played
+                if current_hand <= threshold:
+                    score += 3.0  # free action — very valuable
+                else:
+                    score += 0.5  # unlikely to trigger but still draws/resources
+
+            elif effect.type == EffectType.RESOURCE_SCALING:
+                # Dividends: gain resources based on current resources held
+                divisor = effect.effective_value(card.is_upgraded)
+                if divisor > 0:
+                    bonus_res = player.resources // divisor
+                    score += bonus_res * 1.5 * weights.resource_value
+                else:
+                    score += 1.0
+
+            elif effect.type == EffectType.CYCLE:
+                # Cartographer: discard N, draw N — hand improvement
+                score += 2.5 * weights.card_draw_value
+                if effect.requires_choice:
+                    discard_count = effect.effective_value(card.is_upgraded)
+                    cycle_discard = self._pick_cards_to_discard(player, discard_count)
+                    action_dict["discard_card_indices"] = cycle_discard
+
+            elif effect.type == EffectType.RESOURCE_PER_VP_HEX:
+                # Tax Collector: gain resources per VP hex controlled
+                if game.grid:
+                    vp_hexes = [
+                        t for t in game.grid.get_player_tiles(self.player_id)
+                        if t.is_vp
+                    ]
+                    res_per_hex = effect.effective_value(card.is_upgraded)
+                    score += len(vp_hexes) * res_per_hex * 1.5 * weights.resource_value
+                else:
+                    score += 1.0
+
+            elif effect.type == EffectType.RESOURCES_PER_TILES_LOST:
+                # Robin Hood: gain resources per tile lost last round
+                tiles_lost = getattr(player, "tiles_lost_last_round", 0)
+                per_tile = effect.effective_value(card.is_upgraded)
+                score += tiles_lost * per_tile * 1.5 * weights.resource_value
+                if tiles_lost == 0:
+                    score += 0.3  # minimal value if no tiles lost
+
+            elif effect.type == EffectType.ACTIONS_PER_CARDS_PLAYED:
+                # Mobilize: gain actions based on cards already played
+                cards_played = len(player.planned_actions)
+                max_actions = effect.effective_value(card.is_upgraded)
+                actions_gained = min(cards_played, max_actions)
+                score += actions_gained * 3.0
+                # Big bonus: this should be played LAST among engine cards
+                score += cards_played * 1.5
+
+            elif effect.type == EffectType.NEXT_TURN_BONUS:
+                # Supply Depot: invest action now for future benefit
+                score += 3.5  # moderate — delayed payoff
+                # Check metadata for what bonuses are granted
+                bonus_draws = effect.metadata.get("draws", 0)
+                bonus_res = effect.metadata.get("resources", 0)
+                bonus_actions = effect.metadata.get("actions", 0)
+                if card.is_upgraded:
+                    bonus_draws = effect.metadata.get("upgraded_draws", bonus_draws)
+                    bonus_res = effect.metadata.get("upgraded_resources", bonus_res)
+                    bonus_actions = effect.metadata.get("upgraded_actions", bonus_actions)
+                score += bonus_draws * 1.5 * weights.card_draw_value
+                score += bonus_res * 1.0 * weights.resource_value
+                score += bonus_actions * 2.0
+
+            elif effect.type == EffectType.MULLIGAN:
+                # Mulligan: discard hand and redraw — value based on hand quality
+                starter_count = sum(1 for c in player.hand if c.starter)
+                rubble_count = sum(1 for c in player.hand if c.unplayable and c.passive_vp <= 0)
+                bad_cards = starter_count + rubble_count
+                hand_size = len(player.hand)
+                if hand_size > 0 and bad_cards / hand_size >= 0.5:
+                    score += 5.0  # bad hand, mulligan is great
+                elif bad_cards >= 2:
+                    score += 3.0
+                else:
+                    score += 0.5  # good hand, mulligan wastes time
+
+            elif effect.type == EffectType.SWAP_DRAW_DISCARD:
+                # Heady Brew: swap draw and discard piles
+                discard_size = len(player.deck.discard)
+                draw_size = len(player.deck.cards)
+                if discard_size > draw_size + 3:
+                    score += 4.0  # discard is much bigger — good swap
+                elif discard_size > draw_size:
+                    score += 2.0
+                else:
+                    score += 0.5  # not beneficial
+
+            elif effect.type == EffectType.GLOBAL_RANDOM_TRASH:
+                # Plague: all players trash a random card
+                num_opponents = len(game.players) - 1
+                score += num_opponents * 2.5  # hurts opponents more than us in aggregate
+                if card.is_upgraded:
+                    score += 2.0  # upgraded version doesn't cost us a card
+
+            elif effect.type == EffectType.INJECT_RUBBLE:
+                # Infestation: add Rubble to opponent's discard
+                rubble_count = effect.effective_value(card.is_upgraded)
+                score += rubble_count * 2.0
+                # Pick highest-VP opponent as target
+                target_pid = self._pick_forced_discard_target(game, player)
+                if target_pid:
+                    action_dict["target_player_id"] = target_pid
+
+            elif effect.type == EffectType.ABANDON_TILE:
+                # Exodus: give up an owned non-base tile for resources/cards
+                tile_result = self._pick_tile_to_abandon(game, player, weights, allow_vp=False)
+                if tile_result:
+                    score += 3.0 + tile_result[0]
+                    action_dict["target_q"] = tile_result[1]
+                    action_dict["target_r"] = tile_result[2]
+                else:
+                    return None  # no valid tiles to abandon
+
+            elif effect.type == EffectType.ABANDON_AND_BLOCK:
+                # Scorched Retreat: abandon tile + block it
+                # Willing to abandon VP tiles if they're about to be lost
+                tile_result = self._pick_tile_to_abandon(game, player, weights, allow_vp=True)
+                if tile_result:
+                    score += 4.0 + tile_result[0]
+                    action_dict["target_q"] = tile_result[1]
+                    action_dict["target_r"] = tile_result[2]
+                else:
+                    return None  # no valid tiles to abandon
+
+            elif effect.type == EffectType.GLOBAL_CLAIM_BAN:
+                # Snowy Holiday: no claims next round for anyone
+                if game.grid:
+                    my_tiles = len(game.grid.get_player_tiles(self.player_id))
+                    # Good when behind or defensive; bad when ahead and expanding
+                    max_tiles = max(
+                        len(game.grid.get_player_tiles(pid))
+                        for pid in game.players if pid != self.player_id
+                    ) if len(game.players) > 1 else 0
+                    if my_tiles <= max_tiles:
+                        score += 5.0 * weights.defense  # defensive play — slow opponents
+                    else:
+                        score += 1.0  # ahead — slows us too
+
         # Cost reduction
         for effect in card.effects:
             if effect.type == EffectType.COST_REDUCTION:
@@ -620,8 +804,6 @@ class CPUPlayer:
         if score <= 0:
             score = 0.5  # always slightly positive — engine cards are playable
 
-        action_dict: dict[str, Any] = {"card_index": card_index}
-
         # Engine cards that need targets (e.g. Sabotage — pick opponent tile for visual)
         if card.forced_discard > 0:
             target_pid = self._pick_forced_discard_target(game, player)
@@ -644,8 +826,8 @@ class CPUPlayer:
                     action_dict["target_player_id"] = target_pid
 
         # Handle self-discard/trash choices (including Consolidate trash-for-value)
-        discard_indices = None
-        trash_indices = None
+        discard_indices: Optional[list[int]] = None
+        trash_indices: Optional[list[int]] = None
         for effect in card.effects:
             if effect.type == EffectType.SELF_DISCARD and effect.requires_choice:
                 discard_indices = self._pick_cards_to_discard(player, effect.value)
@@ -741,6 +923,61 @@ class CPUPlayer:
 
         scored.sort(key=lambda x: x[0])
         return [idx for _, idx in scored[:count]]
+
+    def _pick_tile_to_abandon(self, game: Any, player: Any,
+                              weights: StrategyWeights,
+                              allow_vp: bool = False) -> Optional[tuple[float, int, int]]:
+        """Pick the best owned non-base tile to abandon.
+
+        Returns (score_bonus, q, r) or None if no valid tile exists.
+        Higher score_bonus = better tile to abandon (i.e. less valuable to us).
+        """
+        if not game.grid:
+            return None
+
+        player_tiles = game.grid.get_player_tiles(self.player_id)
+        candidates: list[tuple[float, int, int]] = []
+
+        for tile in player_tiles:
+            if tile.is_base:
+                continue  # never abandon base tiles
+            if tile.is_vp and not allow_vp:
+                continue  # don't abandon VP tiles unless explicitly allowed
+
+            # Score: lower value tiles are better abandon candidates
+            abandon_score = 0.0
+            adj_tiles = game.grid.get_adjacent(tile.q, tile.r)
+            owned_neighbors = sum(1 for adj in adj_tiles if adj.owner == self.player_id)
+            enemy_neighbors = sum(
+                1 for adj in adj_tiles
+                if adj.owner is not None and adj.owner != self.player_id
+            )
+
+            # Frontier tiles (many enemy neighbors, few friendly) are good abandon targets
+            abandon_score += enemy_neighbors * 1.0
+            abandon_score -= owned_neighbors * 0.5
+
+            # VP tiles are bad to abandon (penalize)
+            if tile.is_vp:
+                # Only reach here if allow_vp=True (Scorched Retreat)
+                # Worth it if tile is heavily threatened
+                if enemy_neighbors >= 2:
+                    abandon_score += 2.0  # about to lose it anyway — deny it
+                else:
+                    abandon_score -= 3.0  # don't abandon safe VP tiles
+
+            # Disconnected tiles (no owned neighbors) are easy to abandon
+            if owned_neighbors == 0:
+                abandon_score += 2.0
+
+            candidates.append((abandon_score, tile.q, tile.r))
+
+        if not candidates:
+            return None
+
+        # Pick the best candidate (highest abandon score)
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0]
 
     # ── Buy Phase ─────────────────────────────────────────────────
 
@@ -882,6 +1119,39 @@ class CPUPlayer:
             for effect in card.effects:
                 if effect.type == EffectType.BUY_RESTRICTION:
                     score -= 1.5  # trade-off for the draw
+
+            # ── New engine effect purchase scoring ──
+            for effect in card.effects:
+                if effect.type == EffectType.CONDITIONAL_ACTION:
+                    score += 2.0  # conditional free action
+                elif effect.type == EffectType.RESOURCE_SCALING:
+                    score += 2.0 * weights.resource_value  # scales with economy
+                elif effect.type == EffectType.CYCLE:
+                    score += 2.5 * weights.card_draw_value  # hand quality
+                elif effect.type == EffectType.RESOURCE_PER_VP_HEX:
+                    score += 2.5 * weights.resource_value  # scales with VP hexes
+                elif effect.type == EffectType.RESOURCES_PER_TILES_LOST:
+                    score += 1.5  # situational
+                elif effect.type == EffectType.ACTIONS_PER_CARDS_PLAYED:
+                    score += 3.0  # combo potential
+                elif effect.type == EffectType.NEXT_TURN_BONUS:
+                    score += 2.5  # investment card
+                elif effect.type == EffectType.MULLIGAN:
+                    score += 2.0 * weights.defense  # hand quality, Fortress likes it
+                elif effect.type == EffectType.SWAP_DRAW_DISCARD:
+                    score += 2.0 * weights.card_draw_value  # deck cycling, Swarm likes it
+                elif effect.type == EffectType.GLOBAL_RANDOM_TRASH:
+                    score += 2.5  # disruption
+                elif effect.type == EffectType.INJECT_RUBBLE:
+                    score += 2.5 * weights.aggression  # disruption, Swarm likes it
+                elif effect.type == EffectType.GLOBAL_CLAIM_BAN:
+                    score += 3.0 * weights.defense  # high defense value, Fortress
+                elif effect.type == EffectType.ABANDON_TILE:
+                    score += 1.0  # niche
+                elif effect.type == EffectType.ABANDON_AND_BLOCK:
+                    score += 1.5  # niche but denial is good
+                elif effect.type == EffectType.MANDATORY_SELF_TRASH:
+                    score += 3.0  # high power ceiling, conditional
 
         # Action return bonus
         if card.effective_action_return >= 1:

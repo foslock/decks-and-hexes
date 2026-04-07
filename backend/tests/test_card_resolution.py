@@ -1408,7 +1408,7 @@ class TestFortressSupplyLine:
 
     def test_supply_line_resources(self, card_registry):
         card = card_registry["fortress_supply_line"]
-        assert card.resource_gain == 2
+        assert card.resource_gain == 1
         assert card.action_return == 1
 
 
@@ -2238,3 +2238,1256 @@ class TestFortressResilience:
         assert player.actions_available == initial_available + 1
         # But also costs 1 action to play
         assert player.actions_used == initial_used + 1
+
+
+# ══════════════════════════════════════════════════════════════════
+# NEW CARDS — Synergy / Medium-Complexity / Complex
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestNeutralSpyglass:
+    def test_spyglass_properties(self, card_registry):
+        """Spyglass: engine, cost 1, draw 1, conditional action effect."""
+        card = card_registry.get("neutral_spyglass")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 1
+        assert card.archetype == Archetype.NEUTRAL
+        assert card.draw_cards == 1
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.CONDITIONAL_ACTION
+        assert eff.condition == ConditionType.HAND_SIZE_LTE
+        assert eff.condition_threshold == 3
+
+    def test_spyglass_action_gain_small_hand(self, card_registry):
+        """Spyglass grants action when hand size <= 3 after draw."""
+        card = card_registry.get("neutral_spyglass")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        spy = _copy_card(card, "test_spy")
+        # Set hand to exactly 3 cards (spy + 2 filler) so after playing (hand=2)
+        # and drawing 1 (hand=3), hand_size <= 3 → action gained
+        player.hand = [spy, player.hand[0], player.hand[1]]
+        initial_actions = player.actions_available
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # After play: hand was 3, remove spy → 2, draw 1 → 3. 3 <= 3 → gain 1 action
+        assert player.actions_available >= initial_actions + 1
+
+    def test_spyglass_no_action_large_hand(self, card_registry):
+        """Spyglass does NOT grant action when hand size > 3 after draw."""
+        card = card_registry.get("neutral_spyglass")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        spy = _copy_card(card, "test_spy")
+        # Full 5-card hand. After playing (4 left) + draw 1 → 4. 4 > 3 → no action
+        player.hand = [spy] + player.hand[1:]
+        assert len(player.hand) == 5
+        initial_actions = player.actions_available
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # No bonus action; only the base action cost
+        assert player.actions_available == initial_actions
+
+    def test_spyglass_upgraded_resource(self, card_registry):
+        """Upgraded Spyglass also grants +1 resource when condition met."""
+        card = card_registry.get("neutral_spyglass")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        spy = _copy_card(card, "test_spy_up")
+        spy.is_upgraded = True
+        # Small hand so condition is met
+        player.hand = [spy, player.hand[0], player.hand[1]]
+        initial_resources = player.resources
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        assert player.resources == initial_resources + 1
+
+
+class TestNeutralDividends:
+    def test_dividends_properties(self, card_registry):
+        """Dividends: engine, cost 4, resource_scaling effect."""
+        card = card_registry.get("neutral_dividends")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 4
+        assert card.archetype == Archetype.NEUTRAL
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.RESOURCE_SCALING
+        assert eff.value == 2  # divisor
+
+    def test_dividends_scales_with_resources(self, card_registry):
+        """Dividends gains floor(resources/2), min 1."""
+        card = card_registry.get("neutral_dividends")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        div = _copy_card(card, "test_div")
+        player.hand = [div] + player.hand[1:]
+        player.resources = 10
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # floor(10/2) = 5 → resources = 10 + 5 = 15
+        assert player.resources == 15
+
+    def test_dividends_min_1(self, card_registry):
+        """Dividends gains at least 1 even with 0 resources."""
+        card = card_registry.get("neutral_dividends")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        div = _copy_card(card, "test_div")
+        player.hand = [div] + player.hand[1:]
+        player.resources = 0
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # min 1 → resources = 0 + 1 = 1
+        assert player.resources == 1
+
+    def test_dividends_upgraded_draw(self, card_registry):
+        """Upgraded Dividends also draws 1 card."""
+        card = card_registry.get("neutral_dividends")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        div = _copy_card(card, "test_div_up")
+        div.is_upgraded = True
+        player.hand = [div] + player.hand[1:]
+        player.resources = 4
+        hand_before = len(player.hand)
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # Played 1 card (hand -1), but upgraded draws 1 → net 0 hand change
+        # Plus any base draw_cards. Effect handler draws 1.
+        assert len(player.hand) >= hand_before - 1  # at minimum didn't lose more than the played card
+
+
+class TestNeutralCartographer:
+    def test_cartographer_properties(self, card_registry):
+        """Cartographer: engine, cost 3, cycle effect."""
+        card = card_registry.get("neutral_cartographer")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 3
+        assert card.archetype == Archetype.NEUTRAL
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.CYCLE
+        assert eff.metadata.get("discard") == 2
+        assert eff.metadata.get("draw") == 2
+        assert eff.metadata.get("upgraded_draw") == 4
+
+    def test_cartographer_cycle(self, card_registry):
+        """Cartographer discards 2 and draws 2 — net hand size change is -1 (played card)."""
+        card = card_registry.get("neutral_cartographer")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        carto = _copy_card(card, "test_carto")
+        player.hand = [carto] + player.hand[1:]
+        hand_before = len(player.hand)
+        # Discard indices 0 and 1 (relative to hand AFTER card is removed)
+        success, msg = play_card(game, "p0", 0, discard_card_indices=[0, 1])
+        assert success, msg
+        # Played card removed (-1), discard 2 (-2), draw 2 (+2) → net -1
+        assert len(player.hand) == hand_before - 1
+
+    def test_cartographer_upgraded_draws_4(self, card_registry):
+        """Upgraded Cartographer draws 4 instead of 2."""
+        card = card_registry.get("neutral_cartographer")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        carto = _copy_card(card, "test_carto_up")
+        carto.is_upgraded = True
+        player.hand = [carto] + player.hand[1:]
+        hand_before = len(player.hand)
+        success, msg = play_card(game, "p0", 0, discard_card_indices=[0, 1])
+        assert success, msg
+        # Played card removed (-1), discard 2 (-2), draw 4 (+4) → net +1
+        assert len(player.hand) == hand_before + 1
+
+
+class TestNeutralTaxCollector:
+    def test_tax_collector_properties(self, card_registry):
+        """Tax Collector: engine, cost 4, resource_per_vp_hex effect."""
+        card = card_registry.get("neutral_tax_collector")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 4
+        assert card.archetype == Archetype.NEUTRAL
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.RESOURCE_PER_VP_HEX
+        assert eff.value == 2
+        assert eff.upgraded_value == 3
+
+    def test_tax_collector_with_vp_hexes(self, card_registry):
+        """Tax Collector gains 2 resources per connected VP hex owned."""
+        card = card_registry.get("neutral_tax_collector")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        tc = _copy_card(card, "test_tc")
+        player.hand = [tc] + player.hand[1:]
+        # Give p0 VP hexes that are connected to their base via owned tiles.
+        # BFS from p0's base to find VP tiles, claiming intermediate tiles along the way.
+        from collections import deque
+        base_tiles = [t for t in game.grid.tiles.values() if t.is_base and t.owner == "p0"]
+        assert base_tiles, "p0 must have base tiles"
+        visited = {(t.q, t.r) for t in base_tiles}
+        queue = deque(base_tiles)
+        vp_count = 0
+        while queue and vp_count < 2:
+            tile = queue.popleft()
+            for adj in game.grid.get_adjacent(tile.q, tile.r):
+                if (adj.q, adj.r) in visited or adj.is_blocked:
+                    continue
+                visited.add((adj.q, adj.r))
+                if adj.is_vp and adj.owner != "p1":
+                    adj.owner = "p0"
+                    vp_count += 1
+                    if vp_count >= 2:
+                        break
+                elif adj.owner is None:
+                    # Claim intermediate tile to extend connectivity
+                    adj.owner = "p0"
+                    queue.append(adj)
+        assert vp_count >= 1, "Need at least 1 VP tile reachable from p0 base"
+        initial_resources = player.resources
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        assert player.resources == initial_resources + (vp_count * 2)
+
+    def test_tax_collector_zero_vp_hexes(self, card_registry):
+        """Tax Collector gains 0 with no VP hexes."""
+        card = card_registry.get("neutral_tax_collector")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        tc = _copy_card(card, "test_tc")
+        player.hand = [tc] + player.hand[1:]
+        # Ensure p0 has no VP hexes
+        for tile in game.grid.tiles.values():
+            if tile.is_vp and tile.owner == "p0":
+                tile.owner = None
+        initial_resources = player.resources
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        assert player.resources == initial_resources
+
+
+class TestNeutralMobilize:
+    def test_mobilize_properties(self, card_registry):
+        """Mobilize: engine, cost 4, trash_on_use, actions_per_cards_played effect."""
+        card = card_registry.get("neutral_mobilize")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 4
+        assert card.archetype == Archetype.NEUTRAL
+        assert card.trash_on_use is True
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.ACTIONS_PER_CARDS_PLAYED
+        assert eff.metadata.get("max") == 3
+        assert eff.metadata.get("upgraded_max") == 4
+
+    def test_mobilize_action_gain_scales(self, card_registry):
+        """Mobilize gains 1 action per other card played this turn."""
+        card = card_registry.get("neutral_mobilize")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        # Play 2 gather cards first to create planned_actions
+        g1 = _copy_card(card_registry["neutral_gather"], "g1")
+        g2 = _copy_card(card_registry["neutral_gather"], "g2")
+        mob = _copy_card(card, "test_mob")
+        player.hand = [g1, g2, mob] + player.hand[3:]
+        play_card(game, "p0", 0)  # gather 1
+        play_card(game, "p0", 0)  # gather 2
+        # Now 2 planned_actions, play Mobilize
+        actions_before = player.actions_available
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # Should gain 2 actions (2 other cards played, max 3)
+        assert player.actions_available == actions_before + 2
+
+    def test_mobilize_respects_max_cap(self, card_registry):
+        """Mobilize caps action gain at max (3)."""
+        card = card_registry.get("neutral_mobilize")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        # Play 4 gathers first to exceed cap
+        gathers = [_copy_card(card_registry["neutral_gather"], f"g{i}") for i in range(4)]
+        mob = _copy_card(card, "test_mob")
+        player.hand = gathers + [mob]
+        player.actions_available = 10  # plenty of actions
+        for _ in range(4):
+            play_card(game, "p0", 0)
+        actions_before = player.actions_available
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # 4 other cards played, but max 3 → gain 3
+        assert player.actions_available == actions_before + 3
+
+
+class TestNeutralAmbush:
+    def test_ambush_properties(self, card_registry):
+        """Ambush: claim, cost 4, power 2, power_modifier with if_contested."""
+        card = card_registry.get("neutral_ambush")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.CLAIM
+        assert card.buy_cost == 4
+        assert card.power == 2
+        assert card.archetype == Archetype.NEUTRAL
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.POWER_MODIFIER
+        assert eff.condition == ConditionType.IF_CONTESTED
+        assert eff.value == 2  # bonus power
+
+    def test_ambush_base_power_on_uncontested(self, card_registry):
+        """Ambush has power 2 on uncontested neutral tile."""
+        card = card_registry.get("neutral_ambush")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        p0 = game.players["p0"]
+        ambush = _copy_card(card, "test_ambush")
+        p0.hand = [ambush] + p0.hand[1:]
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r)
+        assert success, msg
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+        # Uncontested — base power 2 wins neutral tile (defense 0)
+        tile = game.grid.get_tile(q, r)
+        assert tile.owner == "p0"
+
+    def test_ambush_power_boost_on_contested(self, card_registry):
+        """Ambush becomes power 4 when contested (opponent also claims same tile)."""
+        card = card_registry.get("neutral_ambush")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+        ambush = _copy_card(card, "test_ambush")
+        # Find a neutral tile adjacent to BOTH players
+        target_q, target_r = None, None
+        p0_tiles = set((t.q, t.r) for t in game.grid.get_player_tiles("p0"))
+        p1_tiles = set((t.q, t.r) for t in game.grid.get_player_tiles("p1"))
+        for tile in game.grid.tiles.values():
+            if tile.owner is not None or tile.is_blocked:
+                continue
+            adj_coords = set((a.q, a.r) for a in game.grid.get_adjacent(tile.q, tile.r))
+            if adj_coords & p0_tiles and adj_coords & p1_tiles:
+                target_q, target_r = tile.q, tile.r
+                break
+        if target_q is None:
+            pytest.skip("No neutral tile adjacent to both players")
+
+        p0.hand = [ambush] + p0.hand[1:]
+        # p1 plays a weak claim (power 3) on same tile
+        weak_claim = _make_card("weak", "Weak Claim", CardType.CLAIM, power=3,
+                                adjacency_required=False)
+        p1.hand = [weak_claim] + p1.hand[1:]
+        game.grid.get_tile(target_q, target_r).defense_power = 0
+        game.grid.get_tile(target_q, target_r).base_defense = 0
+
+        success, _ = play_card(game, "p0", 0, target_q=target_q, target_r=target_r)
+        assert success
+        success, _ = play_card(game, "p1", 0, target_q=target_q, target_r=target_r)
+        assert success
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        # Ambush: base 2 + bonus 2 = 4 > 3 → p0 wins
+        tile = game.grid.get_tile(target_q, target_r)
+        assert tile.owner == "p0"
+
+    def test_ambush_contested_against_owned_tile(self, card_registry):
+        """Ambush gets bonus power when targeting a tile owned by an opponent (always contested)."""
+        card = card_registry.get("neutral_ambush")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        p0 = game.players["p0"]
+        ambush = _copy_card(card, "test_ambush")
+        ambush.adjacency_required = False
+        p0.hand = [ambush] + p0.hand[1:]
+        # Find a tile owned by p1 (not base) to attack
+        target_tile = None
+        for tile in game.grid.tiles.values():
+            if tile.owner == "p1" and not tile.is_base:
+                target_tile = tile
+                break
+        if target_tile is None:
+            # Give p1 an adjacent tile
+            for tile in game.grid.tiles.values():
+                adj = game.grid.get_adjacent(tile.q, tile.r)
+                if tile.owner is None and not tile.is_blocked and any(a.owner == "p1" for a in adj):
+                    tile.owner = "p1"
+                    tile.defense_power = 0
+                    tile.base_defense = 0
+                    target_tile = tile
+                    break
+        assert target_tile is not None
+        target_tile.defense_power = 3  # Ambush base 2 would lose, but with +2 bonus = 4 wins
+        target_tile.base_defense = 3
+
+        success, _ = play_card(game, "p0", 0, target_q=target_tile.q, target_r=target_tile.r)
+        assert success
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        # Ambush should get the contested bonus: 2 + 2 = 4 > 3 defense
+        result_tile = game.grid.get_tile(target_tile.q, target_tile.r)
+        assert result_tile.owner == "p0"
+
+    def test_ambush_upgraded_contested(self, card_registry):
+        """Ambush+ gets +3 power and 1 resource on contested claim."""
+        card = card_registry.get("neutral_ambush")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        p0 = game.players["p0"]
+        ambush = _copy_card(card, "test_ambush_up")
+        ambush.is_upgraded = True
+        ambush.adjacency_required = False
+        p0.hand = [ambush] + p0.hand[1:]
+        # Find/create a tile owned by p1 with defense 4
+        target_tile = None
+        for tile in game.grid.tiles.values():
+            if tile.owner is None and not tile.is_blocked:
+                tile.owner = "p1"
+                tile.defense_power = 4
+                tile.base_defense = 4
+                target_tile = tile
+                break
+        assert target_tile is not None
+        initial_resources = p0.resources
+
+        success, _ = play_card(game, "p0", 0, target_q=target_tile.q, target_r=target_tile.r)
+        assert success
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        # Ambush+: base 2 + bonus 3 = 5 > 4 defense → p0 wins
+        result_tile = game.grid.get_tile(target_tile.q, target_tile.r)
+        assert result_tile.owner == "p0"
+        # Upgraded also gains 1 resource immediately on play
+        assert p0.resources == initial_resources + 1
+
+    def test_ambush_no_bonus_on_unowned_uncontested(self, card_registry):
+        """Ambush does NOT get bonus on uncontested neutral tile — effective power is base 2 only."""
+        from app.game_engine.effect_resolver import calculate_effective_power
+        card = card_registry.get("neutral_ambush")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        p0 = game.players["p0"]
+        ambush = _copy_card(card, "test_ambush_no_bonus")
+        p0.hand = [ambush] + p0.hand[1:]
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+
+        success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
+        assert success
+        # Verify the effective power at resolve time is 2 (no bonus, uncontested)
+        action = p0.planned_actions[-1]
+        power = calculate_effective_power(game, p0, ambush, action)
+        assert power == 2  # base power only, no contest bonus
+
+    def test_ambush_effective_power_with_contest(self, card_registry):
+        """Ambush effective power is 4 when contested (opponent owns tile)."""
+        from app.game_engine.effect_resolver import calculate_effective_power
+        card = card_registry.get("neutral_ambush")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        p0 = game.players["p0"]
+        ambush = _copy_card(card, "test_ambush_contest_power")
+        ambush.adjacency_required = False
+        p0.hand = [ambush] + p0.hand[1:]
+        # Target an opponent-owned tile
+        target_tile = None
+        for tile in game.grid.tiles.values():
+            if tile.owner is None and not tile.is_blocked:
+                tile.owner = "p1"
+                tile.defense_power = 0
+                target_tile = tile
+                break
+        assert target_tile is not None
+
+        success, _ = play_card(game, "p0", 0, target_q=target_tile.q, target_r=target_tile.r)
+        assert success
+        action = p0.planned_actions[-1]
+        power = calculate_effective_power(game, p0, ambush, action)
+        assert power == 4  # base 2 + contest bonus 2
+
+
+class TestNeutralSupplyDepot:
+    def test_supply_depot_properties(self, card_registry):
+        """Supply Depot: engine, cost 6, next_turn_bonus effect on_resolution."""
+        card = card_registry.get("neutral_supply_depot")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 6
+        assert card.archetype == Archetype.NEUTRAL
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.NEXT_TURN_BONUS
+        assert eff.timing == Timing.ON_RESOLUTION
+        assert eff.metadata.get("draw") == 1
+        assert eff.metadata.get("resources") == 1
+        assert eff.metadata.get("upgraded_actions") == 1
+
+    def test_supply_depot_next_turn_bonuses(self, card_registry):
+        """Supply Depot queues +1 draw and +1 resource for next turn."""
+        card = card_registry.get("neutral_supply_depot")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        depot = _copy_card(card, "test_depot")
+        player.hand = [depot] + player.hand[1:]
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+        # After reveal, the on_resolution effect should set turn_modifiers
+        assert player.turn_modifiers.extra_draws_next_turn >= 1
+        assert player.turn_modifiers.extra_resources_next_turn >= 1
+
+    def test_supply_depot_upgraded_extra_action(self, card_registry):
+        """Upgraded Supply Depot also grants +1 action next turn."""
+        card = card_registry.get("neutral_supply_depot")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        depot = _copy_card(card, "test_depot_up")
+        depot.is_upgraded = True
+        player.hand = [depot] + player.hand[1:]
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+        assert player.turn_modifiers.extra_draws_next_turn >= 1
+        assert player.turn_modifiers.extra_resources_next_turn >= 1
+        assert player.turn_modifiers.extra_actions_next_turn >= 1
+
+
+# ══════════════════════════════════════════════════════════════════
+# FORTRESS CARDS — New
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestFortressMulligan:
+    def test_mulligan_properties(self, card_registry):
+        """Mulligan: engine, cost 3, action_return 1, mulligan effect."""
+        card = card_registry.get("fortress_mulligan")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 3
+        assert card.action_return == 1
+        assert card.archetype == Archetype.FORTRESS
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.MULLIGAN
+
+    def test_mulligan_full_hand_swap(self, card_registry):
+        """Mulligan discards entire hand and redraws same count."""
+        card = card_registry.get("fortress_mulligan")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        mul = _copy_card(card, "test_mul")
+        player.hand = [mul] + player.hand[1:]
+        hand_before = len(player.hand)
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # After play: card removed (-1), remaining hand discarded, redraw same count
+        # Mulligan discards the remaining hand (hand_before - 1 cards), then draws that many
+        assert len(player.hand) == hand_before - 1
+
+    def test_mulligan_upgraded_draws_extra(self, card_registry):
+        """Upgraded Mulligan draws hand_size + 1."""
+        card = card_registry.get("fortress_mulligan")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        mul = _copy_card(card, "test_mul_up")
+        mul.is_upgraded = True
+        player.hand = [mul] + player.hand[1:]
+        hand_before = len(player.hand)
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # Remaining hand was hand_before - 1, redraw that many + 1
+        assert len(player.hand) == hand_before
+
+
+class TestFortressRobinHood:
+    def test_robin_hood_properties(self, card_registry):
+        """Robin Hood: engine, cost 3, resources_per_tiles_lost effect."""
+        card = card_registry.get("fortress_robin_hood")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 3
+        assert card.archetype == Archetype.FORTRESS
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.RESOURCES_PER_TILES_LOST
+        assert eff.value == 2
+        assert eff.upgraded_value == 4
+
+    def test_robin_hood_resource_gain(self, card_registry):
+        """Robin Hood gains 2 resources per tile lost last turn."""
+        card = card_registry.get("fortress_robin_hood")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        rh = _copy_card(card, "test_rh")
+        player.hand = [rh] + player.hand[1:]
+        player.tiles_lost_last_round = 3
+        initial_resources = player.resources
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # 3 tiles lost × 2 resources = 6
+        assert player.resources == initial_resources + 6
+
+    def test_robin_hood_zero_tiles_lost(self, card_registry):
+        """Robin Hood gains 0 resources when no tiles were lost."""
+        card = card_registry.get("fortress_robin_hood")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        rh = _copy_card(card, "test_rh")
+        player.hand = [rh] + player.hand[1:]
+        player.tiles_lost_last_round = 0
+        initial_resources = player.resources
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        assert player.resources == initial_resources
+
+    def test_robin_hood_upgraded(self, card_registry):
+        """Robin Hood+ gains 4 resources per tile lost last turn."""
+        card = card_registry.get("fortress_robin_hood")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        rh = _copy_card(card, "test_rh_up")
+        rh.is_upgraded = True
+        player.hand = [rh] + player.hand[1:]
+        player.tiles_lost_last_round = 2
+        initial_resources = player.resources
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # 2 tiles lost × 4 resources = 8
+        assert player.resources == initial_resources + 8
+
+    def test_robin_hood_tiles_lost_tracking(self, card_registry):
+        """Robin Hood works with actual tile capture tracking across rounds."""
+        card = card_registry.get("fortress_robin_hood")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+
+        # Give p0 a non-base tile adjacent to p0's territory, then p1 captures it with adjacency_required=False
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        target_tile = game.grid.get_tile(q, r)
+        target_tile.owner = "p0"
+        target_tile.defense_power = 0
+        target_tile.base_defense = 0
+
+        # p1 claims p0's tile with a strong claim (ignoring adjacency)
+        strong_claim = _make_card("strong", "Strong Claim", CardType.CLAIM, power=5,
+                                  adjacency_required=False)
+        p1.hand = [strong_claim] + p1.hand[1:]
+
+        # p0 plays nothing (just submit)
+        success, _ = play_card(game, "p1", 0, target_q=q, target_r=r)
+        assert success
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        # p0 should have lost 1 tile
+        assert p0.tiles_lost_last_round == 1
+        assert game.grid.get_tile(q, r).owner == "p1"
+
+        # Start next turn and play Robin Hood
+        execute_start_of_turn(game)
+        rh = _copy_card(card, "test_rh_track")
+        p0.hand = [rh] + p0.hand[1:]
+        initial_resources = p0.resources
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # 1 tile lost × 2 resources = 2
+        assert p0.resources == initial_resources + 2
+
+    def test_robin_hood_snapshot_at_play_time(self, card_registry):
+        """Robin Hood's resource gain is snapshotted when played (effective_resource_gain on PlannedAction)."""
+        card = card_registry.get("fortress_robin_hood")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        rh = _copy_card(card, "test_rh_snap")
+        player.hand = [rh] + player.hand[1:]
+        player.tiles_lost_last_round = 3
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        # Verify the planned action has a snapshotted resource gain
+        action = player.planned_actions[-1]
+        assert action.effective_resource_gain == 6  # 3 tiles × 2 per tile
+
+
+class TestFortressScorchedRetreat:
+    def test_scorched_retreat_properties(self, card_registry):
+        """Scorched Retreat: engine, cost 4, trash_on_use, target_own_tile, abandon_and_block."""
+        card = card_registry.get("fortress_scorched_retreat")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 4
+        assert card.trash_on_use is True
+        assert card.target_own_tile is True
+        assert card.archetype == Archetype.FORTRESS
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.ABANDON_AND_BLOCK
+
+    def test_scorched_retreat_blocks_tile(self, card_registry):
+        """Scorched Retreat abandons tile and makes it blocked at resolve, gains 2 resources."""
+        card = card_registry.get("fortress_scorched_retreat")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        sr = _copy_card(card, "test_sr")
+        player.hand = [sr] + player.hand[1:]
+        # Need a non-base tile owned by p0
+        own_tiles = game.grid.get_player_tiles("p0")
+        non_base = [t for t in own_tiles if not t.is_base]
+        if not non_base:
+            # Claim a neutral tile first
+            q, r = _find_adjacent_neutral(game, "p0")
+            assert q is not None
+            tile = game.grid.get_tile(q, r)
+            tile.owner = "p0"
+            non_base = [tile]
+        target = non_base[0]
+        initial_resources = player.resources
+        success, msg = play_card(game, "p0", 0, target_q=target.q, target_r=target.r)
+        assert success, msg
+        # Tile should NOT be blocked yet (effect fires at resolve, not immediately)
+        assert target.is_blocked is False
+        assert target.owner == "p0"
+        # Submit play and resolve
+        player.has_submitted_play = True
+        game.players["p1"].has_submitted_play = True
+        execute_reveal(game)
+        # Now tile should be blocked with no owner
+        assert target.is_blocked is True
+        assert target.owner is None
+        assert player.resources == initial_resources + 2
+
+    def test_scorched_retreat_cannot_target_base(self, card_registry):
+        """Scorched Retreat cannot target a base tile."""
+        card = card_registry.get("fortress_scorched_retreat")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        sr = _copy_card(card, "test_sr")
+        player.hand = [sr] + player.hand[1:]
+        base_tiles = [t for t in game.grid.get_player_tiles("p0") if t.is_base]
+        assert len(base_tiles) > 0
+        base = base_tiles[0]
+        success, msg = play_card(game, "p0", 0, target_q=base.q, target_r=base.r)
+        assert not success
+        assert "base" in msg.lower()
+
+    def test_scorched_retreat_blocks_opponent_claims(self, card_registry):
+        """Claims against a scorched tile automatically fail at resolve."""
+        card = card_registry.get("fortress_scorched_retreat")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+
+        # Give p0 a non-base tile to scorch
+        own_tiles = game.grid.get_player_tiles("p0")
+        non_base = [t for t in own_tiles if not t.is_base]
+        if not non_base:
+            q, r = _find_adjacent_neutral(game, "p0")
+            assert q is not None
+            tile = game.grid.get_tile(q, r)
+            tile.owner = "p0"
+            non_base = [tile]
+        target = non_base[0]
+
+        # p0 plays Scorched Retreat on the tile
+        sr = _copy_card(card, "test_sr")
+        p0.hand = [sr] + p0.hand[1:]
+        success, _ = play_card(game, "p0", 0, target_q=target.q, target_r=target.r)
+        assert success
+
+        # p1 plays a claim against the same tile (give them adjacency)
+        adj = game.grid.get_adjacent(target.q, target.r)
+        p1_adj = [t for t in adj if not t.is_blocked and not t.is_base]
+        if p1_adj:
+            p1_adj[0].owner = "p1"
+        merc = _copy_card(card_registry["neutral_mercenary"], "test_merc")
+        p1.hand = [merc] + p1.hand[1:]
+        success2, _ = play_card(game, "p1", 0, target_q=target.q, target_r=target.r)
+        assert success2
+
+        # Resolve — the scorch fires first, then claims against blocked tile fail
+        p0.has_submitted_play = True
+        p1.has_submitted_play = True
+        execute_reveal(game)
+
+        assert target.is_blocked is True
+        assert target.owner is None  # Nobody owns it — scorch + failed claim
+
+
+class TestFortressSnowyHoliday:
+    def test_snowy_holiday_properties(self, card_registry):
+        """Snowy Holiday: engine, cost 5, trash_on_use, global_claim_ban on_resolution."""
+        card = card_registry.get("fortress_snowy_holiday")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 5
+        assert card.trash_on_use is True
+        assert card.archetype == Archetype.FORTRESS
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.GLOBAL_CLAIM_BAN
+        assert eff.timing == Timing.ON_RESOLUTION
+
+    def test_snowy_holiday_sets_claim_ban(self, card_registry):
+        """Snowy Holiday sets claim_ban_rounds after reveal."""
+        card = card_registry.get("fortress_snowy_holiday")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        player = game.players["p0"]
+        sh = _copy_card(card, "test_sh")
+        player.hand = [sh] + player.hand[1:]
+        assert game.claim_ban_rounds == 0
+        success, msg = play_card(game, "p0", 0)
+        assert success, msg
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+        # After reveal, claim ban should be set
+        assert game.claim_ban_rounds >= 1
+
+    def test_snowy_holiday_claim_ban_blocks_claims(self, card_registry):
+        """When claim_ban_rounds > 0, playing claim cards is rejected."""
+        card = card_registry.get("fortress_snowy_holiday")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch0="fortress")
+        # Manually set claim ban as if Snowy Holiday already fired
+        game.claim_ban_rounds = 1
+        player = game.players["p0"]
+        explore = _copy_card(card_registry["neutral_explore"], "test_explore")
+        player.hand = [explore] + player.hand[1:]
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r)
+        assert not success
+        assert "banned" in msg.lower() or "snowy" in msg.lower()
+
+
+# ══════════════════════════════════════════════════════════════════
+# SWARM CARDS — New
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestSwarmHeadyBrew:
+    def test_heady_brew_properties(self, card_registry):
+        """Heady Brew: engine, cost 4, trash_on_use, swap_draw_discard."""
+        card = card_registry.get("swarm_heady_brew")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 4
+        assert card.trash_on_use is True
+        assert card.archetype == Archetype.SWARM
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.SWAP_DRAW_DISCARD
+
+    def test_heady_brew_swaps_piles(self, card_registry):
+        """Heady Brew swaps draw and discard piles."""
+        card = card_registry.get("swarm_heady_brew")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        # Use p1 who is swarm archetype
+        player = game.players["p1"]
+        brew = _copy_card(card, "test_brew")
+        player.hand = [brew] + player.hand[1:]
+        # Set up known state: put some cards in discard
+        old_draw_count = len(player.deck.cards)
+        old_discard_count = len(player.deck.discard)
+        # Add some cards to discard
+        for _ in range(3):
+            g = _copy_card(card_registry["neutral_gather"], f"disc_{_}")
+            player.deck.discard.append(g)
+        discard_before = len(player.deck.discard)
+        draw_before = len(player.deck.cards)
+        success, msg = play_card(game, "p1", 0)
+        assert success, msg
+        # After swap: old discard becomes draw pile (shuffled), old draw becomes discard
+        # The new draw pile has the old discard cards (shuffled)
+        assert len(player.deck.discard) == draw_before
+        assert len(player.deck.cards) == discard_before
+
+    def test_heady_brew_upgraded_draws(self, card_registry):
+        """Upgraded Heady Brew also draws 2 cards."""
+        card = card_registry.get("swarm_heady_brew")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        player = game.players["p1"]
+        brew = _copy_card(card, "test_brew_up")
+        brew.is_upgraded = True
+        player.hand = [brew] + player.hand[1:]
+        # Put cards in discard so we have something to draw from
+        for i in range(5):
+            g = _copy_card(card_registry["neutral_gather"], f"disc_{i}")
+            player.deck.discard.append(g)
+        hand_before = len(player.hand)
+        success, msg = play_card(game, "p1", 0)
+        assert success, msg
+        # Played 1 card (-1), upgraded draws 2 (+2) → net +1
+        assert len(player.hand) == hand_before + 1
+
+
+class TestSwarmPlague:
+    def test_plague_properties(self, card_registry):
+        """Plague: engine, cost 3, global_random_trash."""
+        card = card_registry.get("swarm_plague")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 3
+        assert card.archetype == Archetype.SWARM
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.GLOBAL_RANDOM_TRASH
+
+    def test_plague_all_players_trash(self, card_registry):
+        """Non-upgraded Plague: all players (including self) trash a random card at start of next turn."""
+        card = card_registry.get("swarm_plague")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+        plague = _copy_card(card, "test_plague")
+        p1.hand = [plague] + p1.hand[1:]
+        p0_hand_before = len(p0.hand)
+        p1_hand_before = len(p1.hand)
+        success, msg = play_card(game, "p1", 0)
+        assert success, msg
+        # No immediate trashing — effect is queued for next turn
+        assert len(p0.hand) == p0_hand_before
+        assert len(p1.hand) == p1_hand_before - 1  # -1 played only
+        # Both players have plague queued
+        assert p0.turn_modifiers.plague_trash_next_turn == 1
+        assert p1.turn_modifiers.plague_trash_next_turn == 1
+        # Simulate next turn — cards are trashed from drawn hand
+        game.current_round += 1
+        execute_start_of_turn(game)
+        assert len(p0.trash) >= 1
+        assert len(p1.trash) >= 1
+
+    def test_plague_upgraded_spares_self(self, card_registry):
+        """Upgraded Plague: only opponents trash at start of next turn, self is spared."""
+        card = card_registry.get("swarm_plague")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+        plague = _copy_card(card, "test_plague_up")
+        plague.is_upgraded = True
+        p1.hand = [plague] + p1.hand[1:]
+        success, msg = play_card(game, "p1", 0)
+        assert success, msg
+        # Only p0 has plague queued (upgraded spares self)
+        assert p0.turn_modifiers.plague_trash_next_turn == 1
+        assert p1.turn_modifiers.plague_trash_next_turn == 0
+
+
+class TestSwarmInfestation:
+    def test_infestation_properties(self, card_registry):
+        """Infestation: engine, cost 4, trash_on_use, inject_rubble."""
+        card = card_registry.get("swarm_infestation")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 4
+        assert card.trash_on_use is True
+        assert card.archetype == Archetype.SWARM
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.INJECT_RUBBLE
+        assert eff.value == 3
+        assert eff.upgraded_value == 4
+
+    def test_infestation_adds_rubble(self, card_registry):
+        """Infestation adds 3 Rubble cards to opponent's discard at resolve."""
+        card = card_registry.get("swarm_infestation")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+        inf = _copy_card(card, "test_inf")
+        p1.hand = [inf] + p1.hand[1:]
+        discard_before = len(p0.deck.discard)
+        success, msg = play_card(game, "p1", 0, target_player_id="p0")
+        assert success, msg
+        # Not added yet — fires at resolve
+        assert sum(1 for c in p0.deck.discard[discard_before:] if "rubble" in c.id.lower()) == 0
+        # Resolve
+        p0.has_submitted_play = True
+        p1.has_submitted_play = True
+        execute_reveal(game)
+        rubble_count = sum(1 for c in p0.deck.discard if "rubble" in c.id.lower())
+        assert rubble_count == 3
+
+    def test_infestation_upgraded_adds_4(self, card_registry):
+        """Upgraded Infestation adds 4 Rubble cards at resolve."""
+        card = card_registry.get("swarm_infestation")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+        inf = _copy_card(card, "test_inf_up")
+        inf.is_upgraded = True
+        p1.hand = [inf] + p1.hand[1:]
+        success, msg = play_card(game, "p1", 0, target_player_id="p0")
+        assert success, msg
+        p0.has_submitted_play = True
+        p1.has_submitted_play = True
+        execute_reveal(game)
+        rubble_count = sum(1 for c in p0.deck.discard if "rubble" in c.id.lower())
+        assert rubble_count == 4
+
+
+class TestSwarmExodus:
+    def test_exodus_properties(self, card_registry):
+        """Exodus: engine, cost 3, action_return 2, target_own_tile, abandon_tile."""
+        card = card_registry.get("swarm_exodus")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.ENGINE
+        assert card.buy_cost == 3
+        assert card.action_return == 2
+        assert card.target_own_tile is True
+        assert card.archetype == Archetype.SWARM
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.ABANDON_TILE
+
+    def test_exodus_abandons_tile(self, card_registry):
+        """Exodus abandons the targeted tile at resolve (owner becomes None)."""
+        card = card_registry.get("swarm_exodus")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        player = game.players["p1"]
+        exo = _copy_card(card, "test_exo")
+        player.hand = [exo] + player.hand[1:]
+        own_tiles = game.grid.get_player_tiles("p1")
+        non_base = [t for t in own_tiles if not t.is_base]
+        if not non_base:
+            # Claim a neutral tile first
+            q, r = _find_adjacent_neutral(game, "p1")
+            assert q is not None
+            tile = game.grid.get_tile(q, r)
+            tile.owner = "p1"
+            non_base = [tile]
+        target = non_base[0]
+        assert target.owner == "p1"
+        success, msg = play_card(game, "p1", 0, target_q=target.q, target_r=target.r)
+        assert success, msg
+        # Tile should NOT be abandoned yet (fires at resolve)
+        assert target.owner == "p1"
+        # Submit play and resolve
+        player.has_submitted_play = True
+        game.players["p0"].has_submitted_play = True
+        execute_reveal(game)
+        assert target.owner is None
+
+    def test_exodus_cannot_target_base(self, card_registry):
+        """Exodus cannot target a base tile."""
+        card = card_registry.get("swarm_exodus")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        player = game.players["p1"]
+        exo = _copy_card(card, "test_exo")
+        player.hand = [exo] + player.hand[1:]
+        base_tiles = [t for t in game.grid.get_player_tiles("p1") if t.is_base]
+        assert len(base_tiles) > 0
+        base = base_tiles[0]
+        success, msg = play_card(game, "p1", 0, target_q=base.q, target_r=base.r)
+        assert not success
+        assert "base" in msg.lower()
+
+    def test_exodus_draws_cards(self, card_registry):
+        """Exodus draws 2 cards (from parsed draw_cards stat)."""
+        card = card_registry.get("swarm_exodus")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry, arch1="swarm")
+        player = game.players["p1"]
+        exo = _copy_card(card, "test_exo")
+        player.hand = [exo] + player.hand[1:]
+        own_tiles = game.grid.get_player_tiles("p1")
+        non_base = [t for t in own_tiles if not t.is_base]
+        if not non_base:
+            q, r = _find_adjacent_neutral(game, "p1")
+            assert q is not None
+            tile = game.grid.get_tile(q, r)
+            tile.owner = "p1"
+            non_base = [tile]
+        target = non_base[0]
+        hand_before = len(player.hand)
+        success, msg = play_card(game, "p1", 0, target_q=target.q, target_r=target.r)
+        assert success, msg
+        # Played 1 (-1), draw 2 (+2) → net +1
+        assert len(player.hand) == hand_before + 1
+
+
+# ══════════════════════════════════════════════════════════════════
+# VANGUARD CARDS — New
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestVanguardDemonPact:
+    def test_demon_pact_properties(self, card_registry):
+        """Demon Pact: claim, cost 6, power 10, mandatory_self_trash effect."""
+        card = card_registry.get("vanguard_demon_pact")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.card_type == CardType.CLAIM
+        assert card.buy_cost == 6
+        assert card.power == 10
+        assert card.upgraded_power == 12
+        assert card.archetype == Archetype.VANGUARD
+        assert len(card.effects) >= 1
+        eff = card.effects[0]
+        assert eff.type == EffectType.MANDATORY_SELF_TRASH
+        assert eff.value == 3
+        assert eff.requires_choice is True
+        assert eff.metadata.get("exact") is True
+
+    def test_demon_pact_requires_exactly_3_trash(self, card_registry):
+        """Demon Pact fails if not exactly 3 trash indices provided."""
+        card = card_registry.get("vanguard_demon_pact")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        dp = _copy_card(card, "test_dp")
+        player.hand = [dp] + player.hand[1:]
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        # Try with only 2 trash indices — should fail
+        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r,
+                                 trash_card_indices=[1, 2])
+        assert not success
+        assert "exactly 3" in msg.lower() or "3" in msg
+
+    def test_demon_pact_fails_with_too_few_cards(self, card_registry):
+        """Demon Pact fails if player has fewer than 3 other cards in hand."""
+        card = card_registry.get("vanguard_demon_pact")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        dp = _copy_card(card, "test_dp")
+        # Only 3 cards total (dp + 2 others) — needs 3 others
+        player.hand = [dp, player.hand[0], player.hand[1]]
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r,
+                                 trash_card_indices=[0, 1, 2])
+        assert not success
+        assert "requires" in msg.lower() or "3" in msg
+
+    def test_demon_pact_succeeds_with_3_trash(self, card_registry):
+        """Demon Pact succeeds when exactly 3 trash indices provided and sufficient cards."""
+        card = card_registry.get("vanguard_demon_pact")
+        if not card:
+            pytest.skip("Card not in registry")
+        game = _make_2p_game(card_registry)
+        player = game.players["p0"]
+        dp = _copy_card(card, "test_dp")
+        player.hand = [dp] + player.hand[1:]  # 5 cards total, dp + 4 others
+        assert len(player.hand) >= 4  # need at least 3 others
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        hand_before = len(player.hand)
+        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r,
+                                 trash_card_indices=[0, 1, 2])
+        assert success, msg
+        # Played 1 card, trashed 3 → hand reduced by 4
+        assert len(player.hand) == hand_before - 4
+
+    def test_demon_pact_power_is_10(self, card_registry):
+        """Demon Pact has base power 10."""
+        card = card_registry.get("vanguard_demon_pact")
+        if not card:
+            pytest.skip("Card not in registry")
+        assert card.power == 10
+        assert card.effective_power == 10

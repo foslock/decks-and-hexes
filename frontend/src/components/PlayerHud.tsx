@@ -32,46 +32,35 @@ function ShrinkText({ text, maxWidth, style }: { text: string; maxWidth: number;
   );
 }
 
-/** Stat value with an instant-hover styled tooltip, clamped inside the player card. */
+/** Stat value with an instant-hover styled tooltip, portalled to body so it's never clipped. */
 function StatTip({ label, children, color }: { label: string; children: ReactNode; color?: string }) {
   const [show, setShow] = useState(false);
-  const tipRef = useRef<HTMLSpanElement>(null);
   const anchorRef = useRef<HTMLSpanElement>(null);
-  const nudgeRef = useRef(0);
-  const [, forceUpdate] = useState(0);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
   useLayoutEffect(() => {
-    if (!show) return;
-    const tip = tipRef.current;
-    const anchor = anchorRef.current;
-    if (!tip || !anchor) return;
-    const card = anchor.closest('[data-player-hud]') as HTMLElement | null;
-    if (!card) { nudgeRef.current = 0; return; }
-    // Measure with no nudge first
-    const cardLeft = card.getBoundingClientRect().left;
-    const tipLeft = tip.getBoundingClientRect().left;
-    const prev = nudgeRef.current;
-    // Undo current nudge to get the un-nudged position
-    const rawLeft = tipLeft - prev;
-    nudgeRef.current = rawLeft < cardLeft ? cardLeft - rawLeft + 4 : 0;
-    if (nudgeRef.current !== prev) forceUpdate(n => n + 1);
+    if (!show || !anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setPos({
+      left: rect.left + rect.width / 2,
+      top: rect.top,
+    });
   }, [show]);
 
   return (
     <span
       ref={anchorRef}
       style={{ position: 'relative', cursor: 'default', color }}
-      onPointerEnter={() => { nudgeRef.current = 0; setShow(true); }}
-      onPointerLeave={() => { setShow(false); nudgeRef.current = 0; }}
+      onPointerEnter={() => setShow(true)}
+      onPointerLeave={() => { setShow(false); setPos(null); }}
     >
       {children}
-      {show && (
-        <span ref={tipRef} style={{
-          position: 'absolute',
-          bottom: '100%',
-          left: '50%',
-          transform: `translateX(calc(-50% + ${nudgeRef.current}px))`,
-          marginBottom: 6,
+      {show && pos && createPortal(
+        <span style={{
+          position: 'fixed',
+          left: pos.left,
+          top: pos.top,
+          transform: 'translate(-50%, calc(-100% - 6px))',
           whiteSpace: 'nowrap',
           background: '#111122',
           border: '1px solid #555',
@@ -81,11 +70,12 @@ function StatTip({ label, children, color }: { label: string; children: ReactNod
           color: '#ddd',
           fontWeight: 'bold',
           boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-          zIndex: 500,
+          zIndex: 20000,
           pointerEvents: 'none',
         }}>
           {label}
-        </span>
+        </span>,
+        document.body
       )}
     </span>
   );
@@ -174,7 +164,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
     )}
     <div
       ref={hudRef}
-      data-player-hud
+      data-player-hud={player.id}
       onPointerEnter={hasReachedVpTarget ? () => setShowVpTooltip(true) : undefined}
       onPointerLeave={hasReachedVpTarget ? () => setShowVpTooltip(false) : undefined}
       style={{
@@ -285,11 +275,6 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
         <StatTip label="Resources">💰 {player.resources}</StatTip>
         <StatTip label="Tiles Occupied">🔷 {tileCount}</StatTip>
         <StatTip label="Total Deck Size">🃏 {totalCards}</StatTip>
-        {player.rubble_count > 0 && (
-          <StatTip label={`${player.rubble_count} Rubble — each reduces VP by 1`} color="#ff6666">
-            🪨 {player.rubble_count}
-          </StatTip>
-        )}
       </div>
 
       {/* Purchases made this buy phase */}

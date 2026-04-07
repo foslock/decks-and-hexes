@@ -71,8 +71,8 @@ export default function MarketPanel({
           Neutral Market
           <IrreversibleButton
             onClick={onBuyUpgrade}
-            disabled={disabled || playerResources < 5}
-            tooltip="Buying an upgrade credit spends 5 resources."
+            disabled={disabled || playerResources < 4}
+            tooltip="Buying an upgrade credit spends 4 resources."
             style={{
               marginLeft: 8,
               fontSize: 11,
@@ -84,7 +84,7 @@ export default function MarketPanel({
               cursor: disabled ? 'not-allowed' : 'pointer',
             }}
           >
-            Buy Upgrade (5💰)
+            Buy Upgrade (4💰)
           </IrreversibleButton>
         </h4>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

@@ -79,8 +79,6 @@ class Card:
     upgrade_description: str = ""
     # Structured effects list (parsed from YAML)
     effects: list[Any] = field(default_factory=list)  # list[Effect]
-    # Neutral market copy count
-    copies: Optional[int] = None
     # Upgraded stats (applied when is_upgraded=True)
     upgraded_power: Optional[int] = None
     upgraded_resource_gain: Optional[int] = None
@@ -242,9 +240,9 @@ def make_rubble_card() -> Card:
         name="Rubble",
         archetype=Archetype.NEUTRAL,
         card_type=CardType.PASSIVE,
-        passive_vp=-1,
+        passive_vp=0,
         unplayable=True,
-        description="Dead weight from a base raid. -1 VP per copy.",
+        description="Dead weight from a base raid. Takes up a hand slot.",
     )
 
 

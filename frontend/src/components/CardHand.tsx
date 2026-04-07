@@ -70,6 +70,8 @@ interface CardHandProps {
   trashedCardIds?: Set<string>;
   /** Game context for resolving dynamic card subtitle values */
   subtitleContext?: CardSubtitleContext;
+  /** When true, claim cards are banned (Snowy Holiday) — shown dimmed and unplayable */
+  claimBanned?: boolean;
 }
 
 import { CARD_TYPE_COLORS } from '../constants/cardColors';
@@ -462,6 +464,7 @@ export default function CardHand({
   closePopups,
   trashedCardIds,
   subtitleContext,
+  claimBanned,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -600,6 +603,7 @@ export default function CardHand({
   const shuffleAnimRef = useRef<{ target: number; startTime: number; duration: number } | null>(null);
   const prevDeckSizeRef = useRef(deckSize);
   const prevDiscardCountRef = useRef(discardCount);
+  const prevDeckCardIdsRef = useRef<Set<string>>(new Set(deckCards.map(c => c.id)));
   const discardAllFiredRef = useRef(false);
   // Cards drawn during a shuffle — held back until shuffle animation finishes
   const deferredDrawnCardsRef = useRef<Set<string>>(new Set());
@@ -650,8 +654,11 @@ export default function CardHand({
   useLayoutEffect(() => {
     const prevDeck = prevDeckSizeRef.current;
     const prevDiscard = prevDiscardCountRef.current;
+    const prevDeckIds = prevDeckCardIdsRef.current;
     prevDeckSizeRef.current = deckSize;
     prevDiscardCountRef.current = discardCount;
+    const currDeckIds = new Set(deckCards.map(c => c.id));
+    prevDeckCardIdsRef.current = currDeckIds;
 
     const prev = prevCardsForShuffleRef.current;
     prevCardsForShuffleRef.current = cards;
@@ -660,21 +667,33 @@ export default function CardHand({
     // - Draw pile was empty (or nearly so) and is now replenished
     // - Discard pile shrank (cards moved from discard → draw pile)
     // - New cards appeared in hand (a draw was attempted)
+    // - OR deck contents changed even if counts stayed the same (Heady Brew swap)
     const newCardIds = cards.filter(c => !prev.some(p => p.id === c.id)).map(c => c.id);
     const hasNewCards = newCardIds.length > 0;
     const discardMovedToDraw = prevDiscard > 0 && discardCount < prevDiscard;
     const deckReplenished = deckSize > prevDeck || (prevDeck === 0 && deckSize >= 0 && discardMovedToDraw);
+    // Detect Heady Brew: deck contents changed even though counts may be equal (swap)
+    const deckContentsChanged = currDeckIds.size > 0 && prevDeckIds.size > 0 &&
+      [...currDeckIds].some(id => !prevDeckIds.has(id));
+    const isSwapShuffle = deckContentsChanged && (prevDiscard > 0 || prevDeck > 0);
 
-    if (hasNewCards && discardMovedToDraw && deckReplenished && !animationOff) {
+    if ((discardMovedToDraw && deckReplenished || isSwapShuffle) && !animationOff) {
       // Mark the newly drawn cards as deferred — they'll animate in after shuffle completes
-      deferredDrawnCardsRef.current = new Set(newCardIds);
+      if (hasNewCards) {
+        deferredDrawnCardsRef.current = new Set(newCardIds);
+      }
       setShuffling(true);
       setShuffleDisplayCount(0);
       sound.deckShuffle();
       const duration = Math.round(2500 * (animSpeed || 0.5));
       shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
+    } else if (hasNewCards && shuffling && !animationOff) {
+      // Cards drawn while shuffle is already in progress (e.g. test mode draw button)
+      // — add them to the deferred set so they animate in after shuffle ends
+      const existing = deferredDrawnCardsRef.current;
+      deferredDrawnCardsRef.current = new Set([...existing, ...newCardIds]);
     }
-  }, [deckSize, discardCount, cards, animated, animationOff]);
+  }, [deckSize, discardCount, cards, deckCards, animated, animationOff, shuffling]);
 
   // Phase 1: Detect hand changes.
   // New cards are registered immediately with a placeholder offset (offsetComputed: false).
@@ -1494,11 +1513,12 @@ export default function CardHand({
             // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
             const isAnimating = (!!entering && !entering.active) || isDiscardingAll || isDeferredDuringShuffle;
+            const isClaimBanned = claimBanned && card.card_type === 'claim';
             const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode && !isAnimating;
             // FLIP reflow transforms are applied directly to DOM elements (not via React state)
             const baseTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'translateY(0)';
             let cardTransform = baseTransform;
-            let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
+            let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : isClaimBanned ? 0.4 : 1;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';
@@ -1666,6 +1686,7 @@ export default function CardHand({
         <button
           className="hud-btn"
           ref={discardBtnRef}
+          data-discard-pile
           onClick={() => setShowDiscardPopup(true)}
           title="View discard pile"
           style={{ ...iconBtnStyle, opacity: discardCount === 0 ? 0.4 : 1 }}

@@ -274,11 +274,13 @@ def _serialize_turn_modifiers(tm: TurnModifiers) -> dict[str, Any]:
         "contest_costs": tm.contest_costs,
         "extra_draws_next_turn": tm.extra_draws_next_turn,
         "extra_actions_next_turn": tm.extra_actions_next_turn,
+        "extra_resources_next_turn": tm.extra_resources_next_turn,
         "free_rerolls": tm.free_rerolls,
         "ignore_defense_tiles": list(tm.ignore_defense_tiles),
         "immediate_resolve_tiles": list(tm.immediate_resolve_tiles),
         "cease_fire_bonus": tm.cease_fire_bonus,
         "ignore_defense_override_tiles": list(tm.ignore_defense_override_tiles),
+        "plague_trash_next_turn": tm.plague_trash_next_turn,
     }
 
 
@@ -290,11 +292,13 @@ def _deserialize_turn_modifiers(data: dict[str, Any]) -> TurnModifiers:
         contest_costs=data.get("contest_costs", {}),
         extra_draws_next_turn=data.get("extra_draws_next_turn", 0),
         extra_actions_next_turn=data.get("extra_actions_next_turn", 0),
+        extra_resources_next_turn=data.get("extra_resources_next_turn", 0),
         free_rerolls=data.get("free_rerolls", 0),
         ignore_defense_tiles=set(data.get("ignore_defense_tiles", [])),
         immediate_resolve_tiles=set(data.get("immediate_resolve_tiles", [])),
         cease_fire_bonus=data.get("cease_fire_bonus", 0),
         ignore_defense_override_tiles=set(data.get("ignore_defense_override_tiles", [])),
+        plague_trash_next_turn=data.get("plague_trash_next_turn", 0),
     )
 
 
@@ -375,6 +379,7 @@ def _serialize_player(player: Player, registry: dict[str, Card]) -> dict[str, An
         "has_left": player.has_left,
         "left_vp": player.left_vp,
         "claims_won_last_round": player.claims_won_last_round,
+        "tiles_lost_last_round": player.tiles_lost_last_round,
         "pending_discard": player.pending_discard,
         "_prev_market_ids": player._prev_market_ids,
         "_prev_market_types": player._prev_market_types,
@@ -437,6 +442,7 @@ def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Play
         has_left=data.get("has_left", False),
         left_vp=data.get("left_vp", 0),
         claims_won_last_round=data.get("claims_won_last_round", 0),
+        tiles_lost_last_round=data.get("tiles_lost_last_round", 0),
         pending_discard=data.get("pending_discard", 0),
     )
     player._prev_market_ids = data.get("_prev_market_ids", [])
@@ -624,6 +630,7 @@ def serialize_game(game: GameState) -> str:
         "current_buyer_index": game.current_buyer_index,
         "card_pack": game.card_pack,
         "map_seed": game.map_seed,
+        "claim_ban_rounds": game.claim_ban_rounds,
         "test_mode": game.test_mode,
         # Grid
         "grid": _serialize_grid(game.grid) if game.grid else None,
@@ -712,6 +719,7 @@ def deserialize_game(
         buy_phase_purchases=blob.get("buy_phase_purchases", {}),
         card_pack=blob.get("card_pack", "everything"),
         map_seed=blob.get("map_seed", ""),
+        claim_ban_rounds=blob.get("claim_ban_rounds", 0),
         resolution_steps=blob.get("resolution_steps", []),
         player_effects=blob.get("player_effects", []),
     )

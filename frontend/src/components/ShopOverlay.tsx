@@ -3,7 +3,7 @@ import type { Card, MarketStack } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
 import { useAnimationMode } from './SettingsContext';
-import CardFull, { CARD_FULL_WIDTH } from './CardFull';
+import CardFull from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
@@ -24,8 +24,7 @@ const ARCHETYPE_EMOJI: Record<string, string> = {
   neutral: '⬜',
 };
 
-// Persists shop view mode across opens (reset on page reload)
-let shopViewMemory: boolean | null = null;
+
 
 interface ShopOverlayProps {
   archetypeMarket: Card[];
@@ -72,93 +71,6 @@ function StatChip({ value }: { value: string }) {
   );
 }
 
-function FullShopCard({
-  card,
-  remaining,
-  canAfford,
-  effectiveCost,
-  upkeepWarning,
-  onBuy,
-  onHover,
-  onLeave,
-  disabled,
-  shiftHeld,
-  disabledTooltip,
-  purchaseHighlight,
-  currentTurnPurchaseInfo,
-}: {
-  card: Card;
-  remaining: number | null;
-  canAfford: boolean;
-  effectiveCost?: number | null;
-  upkeepWarning: boolean;
-  onBuy: () => void;
-  onHover: (e: React.MouseEvent, card: Card) => void;
-  onLeave: () => void;
-  disabled: boolean;
-  shiftHeld: boolean;
-  disabledTooltip?: string;
-  purchaseHighlight?: boolean;
-  /** Tooltip text for current-turn purchases by other players */
-  currentTurnPurchaseInfo?: Array<{ playerName: string; count: number }>;
-}) {
-  const displayCost = effectiveCost ?? card.buy_cost;
-  const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
-  const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
-  const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
-  const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
-  const purchaseLines = hasCurrentTurnPurchase
-    ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this turn`).join('\n')
-    : '';
-  const buyTooltip = disabledTooltip
-    ? disabledTooltip
-    : [
-        upkeepWarning
-          ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
-          : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
-        purchaseLines,
-      ].filter(Boolean).join('\n');
-  return (
-    <div
-      data-card-id={card.id}
-      onMouseEnter={(e) => onHover(e, card)}
-      onMouseLeave={onLeave}
-      style={{
-        opacity: disabled || !canAfford ? 0.55 : 1,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-      }}
-    >
-      <CardFull card={displayCard} effectiveCost={effectiveCost} remaining={remaining} />
-      {shiftHeld && hasUpgradePreview(card) && (
-        <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginBottom: 2 }}>
-          Upgraded
-        </div>
-      )}
-      <IrreversibleButton
-        onClick={onBuy}
-        disabled={disabled || !canAfford}
-        tooltip={buyTooltip}
-        tooltipDelay={upkeepWarning ? 0 : undefined}
-        style={{
-          width: CARD_FULL_WIDTH,
-          padding: '4px 0',
-          background: buyColor,
-          border: 'none',
-          borderRadius: 5,
-          color: '#fff',
-          fontSize: 12,
-          fontWeight: 'bold',
-          cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
-          ...(purchaseHighlight || hasCurrentTurnPurchase ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
-        }}
-      >
-        Buy{displayCost !== null ? ` (${displayCost}${isDiscounted ? '*' : ''}💰)` : ''}
-      </IrreversibleButton>
-    </div>
-  );
-}
 
 /** Compact card width — matches CardHand CARD_WIDTH */
 const COMPACT_CARD_WIDTH = 154;
@@ -301,8 +213,6 @@ export default function ShopOverlay({
   players,
   freeRerolls = 0,
 }: ShopOverlayProps) {
-  const [fullView, setFullViewRaw] = useState(() => shopViewMemory ?? false);
-  const setFullView = useCallback((v: boolean) => { setFullViewRaw(v); shopViewMemory = v; }, []);
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
   const [hoverVisible, setHoverVisible] = useState(false);
   const mousePosRef = useRef<{ x: number; y: number } | null>(null);
@@ -528,39 +438,6 @@ export default function ShopOverlay({
             · You have <span style={{ color: '#ffcc00' }}>{playerResources}</span> resource{playerResources !== 1 ? 's' : ''}
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{
-              display: 'flex',
-              border: '1px solid #444',
-              borderRadius: 6,
-              overflow: 'hidden',
-            }}>
-              <button
-                onClick={() => setFullView(false)}
-                style={{
-                  padding: '3px 10px',
-                  background: !fullView ? '#4a4aff' : '#2a2a3e',
-                  border: 'none',
-                  color: '#fff',
-                  fontSize: 11,
-                  cursor: 'pointer',
-                }}
-              >
-                Compact
-              </button>
-              <button
-                onClick={() => setFullView(true)}
-                style={{
-                  padding: '3px 10px',
-                  background: fullView ? '#4a4aff' : '#2a2a3e',
-                  border: 'none',
-                  color: '#fff',
-                  fontSize: 11,
-                  cursor: 'pointer',
-                }}
-              >
-                Full
-              </button>
-            </div>
             {onClose && (
               <button
                 onClick={onClose}
@@ -601,7 +478,7 @@ export default function ShopOverlay({
                     if (purchased) {
                       // Render the real card invisibly to preserve exact dimensions,
                       // with a "Purchased!" overlay on top
-                      const cardW = fullView ? CARD_FULL_WIDTH : COMPACT_CARD_WIDTH;
+                      const cardW = COMPACT_CARD_WIDTH;
                       return (
                         <div key={card.id} style={{
                           width: cardW,
@@ -612,9 +489,7 @@ export default function ShopOverlay({
                           <div style={{ position: 'relative', width: cardW }}>
                             {/* Invisible card — preserves height */}
                             <div style={{ visibility: 'hidden' }}>
-                              {fullView
-                                ? <CardFull card={card} />
-                                : <div style={{
+                              <div style={{
                                     width: COMPACT_CARD_WIDTH,
                                     padding: 6,
                                     background: '#2a2a3e',
@@ -628,7 +503,6 @@ export default function ShopOverlay({
                                     </div>
                                     <div style={{ fontSize: 15, color: '#aaa' }}>&nbsp;</div>
                                   </div>
-                              }
                             </div>
                             {/* Overlay — exact same size */}
                             <div style={{
@@ -636,25 +510,25 @@ export default function ShopOverlay({
                               inset: 0,
                               background: '#1a1a2e',
                               border: '2px dashed #333',
-                              borderRadius: fullView ? 12 : 6,
+                              borderRadius: 6,
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               boxSizing: 'border-box',
                             }}>
-                              <span style={{ color: '#4a9eff', fontWeight: 'bold', fontSize: fullView ? 16 : 13 }}>Purchased!</span>
+                              <span style={{ color: '#4a9eff', fontWeight: 'bold', fontSize: 13 }}>Purchased!</span>
                             </div>
                           </div>
                           <button
                             disabled
                             style={{
                               width: cardW,
-                              padding: fullView ? '4px 0' : '3px 0',
+                              padding: '3px 0',
                               background: '#333',
                               border: 'none',
-                              borderRadius: fullView ? 5 : 4,
+                              borderRadius: 4,
                               color: '#fff',
-                              fontSize: fullView ? 12 : 11,
+                              fontSize: 11,
                               fontWeight: 'bold',
                               cursor: 'not-allowed',
                               opacity: 0.55,
@@ -668,21 +542,7 @@ export default function ShopOverlay({
                     const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
                     const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
                     const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
-                    return fullView ? (
-                      <FullShopCard
-                        key={card.id}
-                        card={card}
-                        remaining={null}
-                        canAfford={canAfford}
-                        effectiveCost={effCost}
-                        upkeepWarning={wouldDipBelowUpkeep}
-                        onBuy={() => buyArchetypeWithSound(card.id)}
-                        onHover={handleCardHover}
-                        onLeave={handleCardLeave}
-                        disabled={disabled}
-                        shiftHeld={shiftHeld}
-                      />
-                    ) : (
+                    return (
                       <CompactShopCard
                         key={card.id}
                         card={card}
@@ -741,23 +601,7 @@ export default function ShopOverlay({
                   const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
                   const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
-                  return fullView ? (
-                    <FullShopCard
-                      key={stack.card.id}
-                      card={stack.card}
-                      remaining={stack.remaining}
-                      canAfford={canAfford}
-                      effectiveCost={effCost}
-                      upkeepWarning={wouldDipBelowUpkeep}
-                      onBuy={() => buyNeutralWithSound(stack.card.id)}
-                      onHover={handleCardHover}
-                      onLeave={handleCardLeave}
-                      disabled={disabled}
-                      shiftHeld={shiftHeld}
-                      purchaseHighlight={!!purchasedBy}
-                      currentTurnPurchaseInfo={turnPurchases}
-                    />
-                  ) : (
+                  return (
                     <CompactShopCard
                       key={stack.card.id}
                       card={stack.card}
@@ -806,20 +650,20 @@ export default function ShopOverlay({
                 )}
               <button
                 onClick={buyUpgradeWithSound}
-                disabled={disabled || (!testMode && playerResources < 5)}
+                disabled={disabled || (!testMode && playerResources < 4)}
                 style={{
                   fontSize: 14,
                   padding: '8px 16px',
-                  background: (testMode || playerResources >= 5) && !disabled ? '#cc7a2a' : '#333',
-                  border: `1px solid ${(testMode || playerResources >= 5) && !disabled ? '#cc7a2a' : '#555'}`,
+                  background: (testMode || playerResources >= 4) && !disabled ? '#cc7a2a' : '#333',
+                  border: `1px solid ${(testMode || playerResources >= 4) && !disabled ? '#cc7a2a' : '#555'}`,
                   borderRadius: 6,
-                  color: (testMode || playerResources >= 5) && !disabled ? '#fff' : '#555',
-                  cursor: disabled || (!testMode && playerResources < 5) ? 'not-allowed' : 'pointer',
+                  color: (testMode || playerResources >= 4) && !disabled ? '#fff' : '#555',
+                  cursor: disabled || (!testMode && playerResources < 4) ? 'not-allowed' : 'pointer',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
                 }}
               >
-                Buy Upgrade Credit · 5💰
+                Buy Upgrade Credit · 4💰
               </button>
               </div>
               <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>

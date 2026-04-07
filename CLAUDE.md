@@ -57,7 +57,7 @@ Bump frontend version when frontend files change, backend version when backend f
 1. **Start of Turn** — Pay upkeep (skip round 1), score VP hexes held since last turn, check win (20 VP), draw hand, reveal archetype market (3 random cards from player's archetype deck)
 2. **Play Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
-4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards (unlimited per turn), or upgrade credits (5 resources). Purchases are visible to all players.
+4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards (unlimited per turn), or upgrade credits (4 resources). Purchases are visible to all players.
 5. **End of Turn** — Discard hand. Check objective reveal threshold. Rotate first player token clockwise.
 
 ### Action Slot System
@@ -88,8 +88,8 @@ Bump frontend version when frontend files change, backend version when backend f
 
 ### Markets
 - **Archetype market:** 3 random cards drawn from player's private archetype deck each turn. Private per player. Re-roll (2 res) or Retain one card (1 res) during Buy Phase.
-- **Neutral market:** Shared stacks with fixed copy counts. When exhausted, gone for the game.
-- **Upgrade credits:** Tokens, 5 resources each. Spent at start of Phase 1 to upgrade one card in hand. Max one upgrade per turn. Permanent.
+- **Neutral market:** Shared stacks with N×2 copies per card (N = player count). When exhausted, gone for the game.
+- **Upgrade credits:** Tokens, 4 resources each. Spent at start of Phase 1 to upgrade one card in hand. Max one upgrade per turn. Permanent.
 
 ### Forced Discards
 - Always apply to targeted opponent's NEXT turn (they draw fewer cards)
@@ -182,7 +182,7 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Upkeep cost: **dynamic** — 1 resource per 3 tiles beyond first 4
 - Re-roll cost: **2 resources**
 - Retain cost: **1 resource**
-- Upgrade credit cost: **5 resources**
+- Upgrade credit cost: **4 resources**
 - Starting resources: **0**
 - Action slot hard cap: **6**
 - Objective VP reward: **2**

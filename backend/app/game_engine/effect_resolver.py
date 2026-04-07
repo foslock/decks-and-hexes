@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from .cards import Card, CardType, Timing, make_land_grant_card
+from .cards import Card, CardType, Timing, make_land_grant_card, make_rubble_card
 from .effects import ConditionType, Effect, EffectType
 
 if TYPE_CHECKING:
@@ -315,6 +315,37 @@ def check_condition(
         # Scavenge: true if player has 0 actions remaining after playing this card
         remaining = player.actions_available - player.actions_used
         return remaining <= 0
+
+    if condition == ConditionType.HAND_SIZE_LTE:
+        # Spyglass: condition evaluated inside handler (after draw resolves)
+        return True
+
+    if condition == ConditionType.IF_CONTESTED:
+        # Ambush: true if the target tile is also claimed by another player this round.
+        # At play time we don't know yet (other players haven't revealed), so return False.
+        # This is evaluated during resolve phase when claim_results are available.
+        if action.target_q is None:
+            return False
+        target_r = action.target_r if action.target_r is not None else 0
+        tile_key = f"{action.target_q},{target_r}"
+        # Check if any other player also has a claim on this tile
+        for pid, other in game.players.items():
+            if pid == player.id:
+                continue
+            for other_action in other.planned_actions:
+                if other_action.card.card_type != CardType.CLAIM:
+                    continue
+                if other_action.target_q is None:
+                    continue
+                other_r = other_action.target_r if other_action.target_r is not None else 0
+                if f"{other_action.target_q},{other_r}" == tile_key:
+                    return True
+        # Also contested if tile is already owned by another player
+        if game.grid:
+            tile = game.grid.get_tile(action.target_q, target_r)
+            if tile and tile.owner is not None and tile.owner != player.id:
+                return True
+        return False
 
     return False
 
@@ -729,6 +760,20 @@ def _handle_grant_land_grants(effect: Effect, ctx: EffectContext) -> None:
         f"{ctx.player.name} receives {self_count} Land Grant(s) from {ctx.card.name}",
         actor=ctx.player.id)
 
+    # Record self land grants as player effect for animation
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": f"+{self_count} Land Grant{'s' if self_count > 1 else ''}",
+        "effect_type": "grant_land_grants",
+        "value": self_count,
+        "source_q": ctx.action.target_q,
+        "source_r": ctx.action.target_r,
+        "added_card_name": "Land Grant",
+        "added_card_count": self_count,
+    })
+
     if effect.target == "chosen_player":
         # Fortress Diplomacy: target one opponent
         target_id = ctx.action.target_player_id
@@ -740,6 +785,18 @@ def _handle_grant_land_grants(effect: Effect, ctx: EffectContext) -> None:
                 ctx.game._log(
                     f"{target_player.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
                     actor=ctx.player.id)
+                ctx.game.player_effects.append({
+                    "source_player_id": ctx.player.id,
+                    "target_player_id": target_id,
+                    "card_name": ctx.card.name,
+                    "effect": "+1 Land Grant",
+                    "effect_type": "grant_land_grants",
+                    "value": 1,
+                    "source_q": ctx.action.target_q,
+                    "source_r": ctx.action.target_r,
+                    "added_card_name": "Land Grant",
+                    "added_card_count": 1,
+                })
     else:
         # Neutral Diplomat: all other players
         for pid, other in ctx.game.players.items():
@@ -750,6 +807,18 @@ def _handle_grant_land_grants(effect: Effect, ctx: EffectContext) -> None:
             ctx.game._log(
                 f"{other.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
                 actor=ctx.player.id)
+            ctx.game.player_effects.append({
+                "source_player_id": ctx.player.id,
+                "target_player_id": pid,
+                "card_name": ctx.card.name,
+                "effect": "+1 Land Grant",
+                "effect_type": "grant_land_grants",
+                "value": 1,
+                "source_q": ctx.action.target_q,
+                "source_r": ctx.action.target_r,
+                "added_card_name": "Land Grant",
+                "added_card_count": 1,
+            })
 
 
 def _handle_vp_from_contested_wins(effect: Effect, ctx: EffectContext) -> None:
@@ -920,7 +989,7 @@ def _handle_draw_per_connected_vp(effect: Effect, ctx: EffectContext) -> None:
         drawn = ctx.player.deck.draw(total_draw, ctx.game.rng)
         ctx.player.hand.extend(drawn)
         ctx.game._log(
-            f"{ctx.player.name} draws {len(drawn)} card(s) from Toll Road ({connected_count} connected VP bonus tile{'s' if connected_count != 1 else ''})",
+            f"{ctx.player.name} draws {len(drawn)} card(s) from Toll Road ({connected_count} connected VP tile{'s' if connected_count != 1 else ''})",
             visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
@@ -929,3 +998,412 @@ register_handler(EffectType.DRAW_PER_CONNECTED_VP, _handle_draw_per_connected_vp
 # VP formula passive effects — no handler needed (computed in _compute_formula_vp)
 register_handler(EffectType.VP_FROM_DISCONNECTED_GROUPS, _handle_stub)
 register_handler(EffectType.VP_FROM_UNCAPTURED_TILES, _handle_stub)
+
+
+# ── Synergy card effect handlers ──────────────────────────────────
+
+
+def _handle_conditional_action(effect: Effect, ctx: EffectContext) -> None:
+    """Spyglass: gain action if hand size <= threshold after drawing."""
+    threshold = effect.condition_threshold
+    if len(ctx.player.hand) <= threshold:
+        actions = effect.effective_value(ctx.card.is_upgraded)
+        ctx.player.actions_available += actions
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name} grants {actions} action(s) "
+            f"(hand size {len(ctx.player.hand)} <= {threshold})",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        # Upgraded Spyglass also grants 1 resource
+        if ctx.card.is_upgraded:
+            ctx.player.resources += 1
+            ctx.game._log(
+                f"{ctx.player.name} gains 1 resource from {ctx.card.name}+",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+    else:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: hand size {len(ctx.player.hand)} "
+            f"> {threshold}, no bonus action",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_resource_scaling(effect: Effect, ctx: EffectContext) -> None:
+    """Dividends: gain 1 resource per N resources currently held (min 1)."""
+    divisor = effect.value  # e.g. 2 = gain 1 per 2 held
+    gained = max(1, ctx.player.resources // divisor)
+    ctx.player.resources += gained
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
+        f"(had {ctx.player.resources - gained}, 1 per {divisor} held)",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    # Upgraded Dividends: draw 1 card
+    if ctx.card.is_upgraded:
+        drawn = ctx.player.deck.draw(1, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        if drawn:
+            ctx.game._log(
+                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_cycle(effect: Effect, ctx: EffectContext) -> None:
+    """Cartographer: discard N cards, draw N cards."""
+    discard_count = effect.metadata.get("discard", 2)
+    draw_count = effect.metadata.get("draw", 2)
+    if ctx.card.is_upgraded:
+        draw_count = effect.metadata.get("upgraded_draw", draw_count)
+
+    # Discard chosen cards (uses discard_card_indices from player choice)
+    actual_discard = min(discard_count, len(ctx.discard_card_indices))
+    discarded = []
+    for idx in sorted(ctx.discard_card_indices[:actual_discard], reverse=True):
+        if 0 <= idx < len(ctx.player.hand):
+            discarded.append(ctx.player.hand.pop(idx))
+    if discarded:
+        ctx.player.deck.add_to_discard(discarded)
+        names = ", ".join(c.name for c in discarded)
+        ctx.game._log(
+            f"{ctx.player.name} discards {names} for {ctx.card.name}",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+    # Draw cards
+    drawn = ctx.player.deck.draw(draw_count, ctx.game.rng)
+    ctx.player.hand.extend(drawn)
+    if drawn:
+        ctx.game._log(
+            f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_resource_per_vp_hex(effect: Effect, ctx: EffectContext) -> None:
+    """Tax Collector: gain resources per connected VP hex."""
+    per_hex = effect.effective_value(ctx.card.is_upgraded)
+    vp_hex_count = 0
+    if ctx.game.grid:
+        connected_coords = ctx.game.grid.get_connected_tiles(ctx.player.id)
+        for tile in ctx.game.grid.tiles.values():
+            if tile.is_vp and tile.owner == ctx.player.id and (tile.q, tile.r) in connected_coords:
+                vp_hex_count += 1
+    gained = vp_hex_count * per_hex
+    if gained > 0:
+        ctx.player.resources += gained
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
+        f"({vp_hex_count} connected VP tile{'s' if vp_hex_count != 1 else ''} × {per_hex})",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_resources_per_tiles_lost(effect: Effect, ctx: EffectContext) -> None:
+    """Robin Hood: gain resources per tile captured from you last round."""
+    tiles_lost = ctx.player.tiles_lost_last_round
+    per_tile = effect.effective_value(ctx.card.is_upgraded)
+    gained = tiles_lost * per_tile
+    if gained > 0:
+        ctx.player.resources += gained
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
+        f"({tiles_lost} tile(s) lost last round × {per_tile})",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+register_handler(EffectType.CONDITIONAL_ACTION, _handle_conditional_action)
+register_handler(EffectType.RESOURCE_SCALING, _handle_resource_scaling)
+register_handler(EffectType.CYCLE, _handle_cycle)
+register_handler(EffectType.RESOURCE_PER_VP_HEX, _handle_resource_per_vp_hex)
+register_handler(EffectType.RESOURCES_PER_TILES_LOST, _handle_resources_per_tiles_lost)
+
+
+# ── Medium-complexity effect handlers ────────────────────────────
+
+
+def _handle_actions_per_cards_played(effect: Effect, ctx: EffectContext) -> None:
+    """Mobilize: gain 1 action per other card played this turn (max N)."""
+    is_upgraded = ctx.card.is_upgraded
+    max_actions = int(
+        ctx.card.effects[0].metadata.get("upgraded_max", 3)
+        if is_upgraded
+        else ctx.card.effects[0].metadata.get("max", 3)
+    ) if ctx.card.effects else 3
+    # Find the actual metadata from THIS effect
+    max_actions = int(effect.metadata.get("upgraded_max" if is_upgraded else "max", 3))
+    # Count other cards played this turn (excluding Mobilize itself)
+    other_cards = len([
+        a for a in ctx.player.planned_actions
+        if a.card.id != ctx.card.id
+    ])
+    actions_gained = min(other_cards * effect.value, max_actions)
+    if actions_gained > 0:
+        ctx.player.actions_available += actions_gained
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} grants {actions_gained} action(s) "
+        f"({other_cards} other card(s) played, max {max_actions})",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    # Upgraded Mobilize also draws 1 card
+    if is_upgraded:
+        drawn = ctx.player.deck.draw(1, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        if drawn:
+            ctx.game._log(
+                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_next_turn_bonus(effect: Effect, ctx: EffectContext) -> None:
+    """Supply Depot: grant bonuses at start of next turn."""
+    is_upgraded = ctx.card.is_upgraded
+    extra_draw = int(effect.metadata.get("draw", 0))
+    extra_resources = int(effect.metadata.get("resources", 0))
+    extra_actions = int(effect.metadata.get("upgraded_actions", 0)) if is_upgraded else 0
+
+    if extra_draw > 0:
+        ctx.player.turn_modifiers.extra_draws_next_turn += extra_draw
+    if extra_resources > 0:
+        ctx.player.turn_modifiers.extra_resources_next_turn += extra_resources
+    if extra_actions > 0:
+        ctx.player.turn_modifiers.extra_actions_next_turn += extra_actions
+
+    parts = []
+    if extra_draw > 0:
+        parts.append(f"+{extra_draw} card(s)")
+    if extra_resources > 0:
+        parts.append(f"+{extra_resources} resource(s)")
+    if extra_actions > 0:
+        parts.append(f"+{extra_actions} action(s)")
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} queues next-turn bonus: {', '.join(parts)}",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_mulligan(effect: Effect, ctx: EffectContext) -> None:
+    """Mulligan: discard entire hand, draw that many cards (+1 if upgraded)."""
+    hand_size = len(ctx.player.hand)
+    if hand_size == 0:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: no cards in hand to mulligan",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+
+    # Discard entire hand
+    discarded = list(ctx.player.hand)
+    ctx.player.deck.add_to_discard(discarded)
+    ctx.player.hand.clear()
+    names = ", ".join(c.name for c in discarded)
+    ctx.game._log(
+        f"{ctx.player.name} mulligans {hand_size} card(s): {names}",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+    # Draw that many (+1 if upgraded)
+    draw_count = hand_size + (1 if ctx.card.is_upgraded else 0)
+    drawn = ctx.player.deck.draw(draw_count, ctx.game.rng)
+    ctx.player.hand.extend(drawn)
+    ctx.game._log(
+        f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_inject_rubble(effect: Effect, ctx: EffectContext) -> None:
+    """Infestation: add N Rubble cards to chosen opponent's discard pile."""
+    target_id = ctx.action.target_player_id
+    if not target_id:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: no target opponent selected",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+    target_player = ctx.game.players.get(target_id)
+    if not target_player:
+        return
+
+    count = effect.effective_value(ctx.card.is_upgraded)
+    for _ in range(count):
+        rubble = make_rubble_card()
+        target_player.deck.discard.append(rubble)
+
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} adds {count} Rubble card(s) "
+        f"to {target_player.name}'s discard pile",
+        actor=ctx.player.id)
+
+    # Record player effect for flying-card animation
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": target_id,
+        "card_name": ctx.card.name,
+        "effect": f"+{count} Rubble",
+        "effect_type": "inject_rubble",
+        "value": count,
+        "source_q": ctx.action.target_q,
+        "source_r": ctx.action.target_r,
+        "added_card_name": "Rubble",
+        "added_card_count": count,
+    })
+
+
+register_handler(EffectType.ACTIONS_PER_CARDS_PLAYED, _handle_actions_per_cards_played)
+register_handler(EffectType.NEXT_TURN_BONUS, _handle_next_turn_bonus)
+register_handler(EffectType.MULLIGAN, _handle_mulligan)
+register_handler(EffectType.INJECT_RUBBLE, _handle_inject_rubble)
+
+
+# ── Complex effect handlers ──────────────────────────────────────
+
+
+def _handle_global_claim_ban(effect: Effect, ctx: EffectContext) -> None:
+    """Snowy Holiday: ban all Claim cards for the next round."""
+    # Add duration + 1: the extra 1 accounts for the end-of-turn decrement
+    # in the same round the ban is set (during reveal, after play phase).
+    ctx.game.claim_ban_rounds += effect.duration + 1
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} bans all Claim cards next round!",
+        actor=ctx.player.id)
+    # Record player effects for resolve animation popup
+    for pid in ctx.game.players:
+        if ctx.game.players[pid].has_left:
+            continue
+        ctx.game.player_effects.append({
+            "source_player_id": ctx.player.id,
+            "target_player_id": pid,
+            "card_name": ctx.card.name,
+            "effect": "🚫 No claims next turn",
+            "effect_type": "global_claim_ban",
+            "value": effect.duration,
+        })
+    # Upgraded Snowy Holiday: draw 2 cards
+    if ctx.card.is_upgraded:
+        drawn = ctx.player.deck.draw(2, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        if drawn:
+            ctx.game._log(
+                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_global_random_trash(effect: Effect, ctx: EffectContext) -> None:
+    """Plague: queue random card trash for all affected players at start of next turn."""
+    is_upgraded = ctx.card.is_upgraded
+    for pid, player in ctx.game.players.items():
+        if player.has_left:
+            continue
+        # Upgraded: skip self (opponents only)
+        if is_upgraded and pid == ctx.player.id:
+            continue
+        player.turn_modifiers.plague_trash_next_turn += 1
+        ctx.game.player_effects.append({
+            "source_player_id": ctx.player.id,
+            "target_player_id": pid,
+            "card_name": ctx.card.name,
+            "effect": "Trashes a random card next turn",
+            "effect_type": "global_random_trash",
+            "value": 1,
+        })
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} — all {'opponents' if is_upgraded else 'players'} "
+        f"will trash a random card at the start of next turn",
+        actor=ctx.player.id)
+
+
+def _handle_swap_draw_discard(effect: Effect, ctx: EffectContext) -> None:
+    """Heady Brew: swap draw and discard piles, then shuffle draw pile."""
+    old_draw = ctx.player.deck.cards
+    ctx.player.deck.cards = ctx.player.deck.discard
+    ctx.player.deck.discard = old_draw
+    ctx.player.deck.shuffle(ctx.game.rng)
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} swaps draw/discard piles and shuffles "
+        f"({len(ctx.player.deck.cards)} cards now in draw pile)",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    # Upgraded Heady Brew: draw 2 cards
+    if ctx.card.is_upgraded:
+        drawn = ctx.player.deck.draw(2, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        if drawn:
+            ctx.game._log(
+                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_abandon_tile(effect: Effect, ctx: EffectContext) -> None:
+    """Exodus: abandon a tile you own (remove ownership)."""
+    if ctx.action.target_q is None or not ctx.game.grid:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: no target tile",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+    target_r = ctx.action.target_r if ctx.action.target_r is not None else 0
+    tile = ctx.game.grid.get_tile(ctx.action.target_q, target_r)
+    if not tile or tile.owner != ctx.player.id:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: tile not owned by player",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+    if tile.is_base:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: cannot abandon a base tile",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+    tile.owner = None
+    tile.held_since_turn = None
+    tile.defense_power = tile.base_defense
+    tile.permanent_defense_bonus = 0
+    ctx.game._log(
+        f"{ctx.player.name} abandons tile {ctx.action.target_q},{target_r} ({ctx.card.name})",
+        actor=ctx.player.id)
+
+
+def _handle_abandon_and_block(effect: Effect, ctx: EffectContext) -> None:
+    """Scorched Retreat: abandon a tile and convert it to blocked terrain."""
+    if ctx.action.target_q is None or not ctx.game.grid:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: no target tile",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+    target_r = ctx.action.target_r if ctx.action.target_r is not None else 0
+    tile = ctx.game.grid.get_tile(ctx.action.target_q, target_r)
+    if not tile or tile.owner != ctx.player.id:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: tile not owned by player",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+    if tile.is_base:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: cannot scorch a base tile",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+    tile.owner = None
+    tile.held_since_turn = None
+    tile.is_blocked = True
+    tile.defense_power = 0
+    tile.permanent_defense_bonus = 0
+    tile.is_vp = False  # VP hexes lose their status when blocked
+    tile.vp_value = 0
+    # Gain resources (2 base, 3 upgraded)
+    gained = 3 if ctx.card.is_upgraded else 2
+    ctx.player.resources += gained
+    ctx.game._log(
+        f"{ctx.player.name} scorches tile {ctx.action.target_q},{target_r} "
+        f"(now blocked terrain, +{gained} resources)",
+        actor=ctx.player.id)
+
+
+def _handle_mandatory_self_trash(effect: Effect, ctx: EffectContext) -> None:
+    """Demon Pact: trash exactly N cards from hand (mandatory, validated in play_card)."""
+    count = effect.effective_value(ctx.card.is_upgraded)
+    indices = ctx.trash_card_indices[:count]
+
+    trashed = []
+    for idx in sorted(indices, reverse=True):
+        if 0 <= idx < len(ctx.player.hand):
+            trashed.append(ctx.player.hand.pop(idx))
+
+    if trashed:
+        ctx.player.trash.extend(trashed)
+        names = ", ".join(c.name for c in trashed)
+        ctx.game._log(
+            f"{ctx.player.name} sacrifices {names} for {ctx.card.name}",
+            actor=ctx.player.id)
+
+
+register_handler(EffectType.GLOBAL_CLAIM_BAN, _handle_global_claim_ban)
+register_handler(EffectType.GLOBAL_RANDOM_TRASH, _handle_global_random_trash)
+register_handler(EffectType.SWAP_DRAW_DISCARD, _handle_swap_draw_discard)
+register_handler(EffectType.ABANDON_TILE, _handle_abandon_tile)
+register_handler(EffectType.ABANDON_AND_BLOCK, _handle_abandon_and_block)
+register_handler(EffectType.MANDATORY_SELF_TRASH, _handle_mandatory_self_trash)

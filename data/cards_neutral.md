@@ -1,6 +1,6 @@
 # Card Clash – Neutral Card Pool
 # Available to all archetypes from a shared market.
-# Each card has a fixed number of copies. When exhausted, the stack is gone for the game.
+# Each market card gets N×2 copies (N = player count). When exhausted, the stack is gone for the game.
 # Buying out a neutral card stack is a valid denial strategy.
 #
 # NOTE: Advance and Gather are special starter cards. Every player begins with copies
@@ -8,7 +8,6 @@
 # All other cards below ARE purchasable from the shared market.
 #
 # EDITING NOTES:
-# - copies: number of physical copies in the shared stack (null = starter card only, not in market)
 # - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - starter: true = included in starting decks, not available in market
 
@@ -21,7 +20,7 @@ cards:
     name_upgraded: Explore+
     type: Claim
     buy_cost: null
-    copies: null
+
     starter: true
     action_return: 0
     power: 0
@@ -38,7 +37,7 @@ cards:
     name_upgraded: Gather+
     type: Engine
     buy_cost: null
-    copies: null
+
     starter: true
     action_return: 0
     power: 0
@@ -56,23 +55,23 @@ cards:
     name_upgraded: null
     type: Passive
     buy_cost: null
-    copies: null
+
     starter: false
     action_return: 0
     power: 0
-    passive_vp: -1
+    passive_vp: 0
     unplayable: true
-    effect: "Dead weight from a base raid. -1 VP per copy."
+    effect: "Dead weight from a base raid. Takes up a hand slot."
     effect_upgraded: null
     trash_on_use: false
-    note: "Generated when an opponent raids your base. Each Rubble card reduces derived VP by 1 and wastes a hand slot when drawn. Trashing Rubble is a key recovery mechanism."
+    note: "Generated when an opponent raids your base. Wastes a hand slot when drawn. Trashing Rubble is a key recovery mechanism."
 
   - id: spoils
     name: Spoils
     name_upgraded: null
     type: Passive
     buy_cost: null
-    copies: null
+
     starter: false
     action_return: 0
     power: 0
@@ -90,7 +89,7 @@ cards:
     name_upgraded: Mercenary+
     type: Claim
     buy_cost: 4
-    copies: 5
+
     action_return: 0
     power: 3
     effect: "Claim: Power 3."
@@ -102,7 +101,7 @@ cards:
     name_upgraded: Land Grant+
     type: Passive
     buy_cost: 5
-    copies: 3
+
     action_return: 0
     power: 0
     unplayable: true
@@ -110,14 +109,14 @@ cards:
     effect: "+1 VP per copy."
     effect_upgraded: "+2 VP per copy."
     trash_on_use: false
-    note: "Awards VP on purchase but clogs your deck permanently. Limited copies make buying multiples a real investment."
+    note: "Awards VP on purchase but clogs your deck permanently. Finite stack makes buying multiples a real investment."
 
   - id: neutral_sabotage
     name: Sabotage
     name_upgraded: Sabotage+
     type: Engine
     buy_cost: 5
-    copies: 3
+
     action_return: 0
     power: 0
     forced_discard: 1
@@ -131,7 +130,7 @@ cards:
     name_upgraded: Cease Fire+
     type: Engine
     buy_cost: 3
-    copies: 4
+
     action_return: 0
     power: 0
     effect: "Draw 2 cards next turn if you did not claim any opponent-owned tiles this turn."
@@ -149,7 +148,7 @@ cards:
     name_upgraded: Road Builder+
     type: Claim
     buy_cost: 2
-    copies: 3
+
     action_return: 0
     power: 5
     effect: "Claim: Power 5. Must target a tile that would connect two of your disconnected territory groups."
@@ -164,7 +163,7 @@ cards:
     name_upgraded: Prospector+
     type: Engine
     buy_cost: 2
-    copies: 5
+
     action_return: 0
     power: 0
     effect: "Gain 2 resources."
@@ -176,7 +175,7 @@ cards:
     name_upgraded: Surveyor+
     type: Engine
     buy_cost: 2
-    copies: 4
+
     action_return: 0
     power: 0
     effect: "Gain 1 free archetype market re-roll this turn."
@@ -193,7 +192,7 @@ cards:
     name_upgraded: Militia+
     type: Claim
     buy_cost: 3
-    copies: 5
+
     action_return: 0
     power: 2
     effect: "Claim: Power 2. If you own 3 or more tiles adjacent to the target tile, power is 4 instead."
@@ -212,7 +211,7 @@ cards:
     name_upgraded: Eminent Domain+
     type: Claim
     buy_cost: 5
-    copies: 3
+
     action_return: 0
     power: 3
     adjacency_required: false
@@ -225,7 +224,7 @@ cards:
     name_upgraded: Barricade+
     type: Defense
     buy_cost: 3
-    copies: 3
+
     action_return: 0
     power: 0
     defense_bonus: 4
@@ -239,7 +238,7 @@ cards:
     name_upgraded: Forced March+
     type: Engine
     buy_cost: 3
-    copies: 3
+
     action_return: 2
     power: 0
     effect: "Gain 2 actions. All other players gain 1 extra action next turn."
@@ -258,7 +257,7 @@ cards:
     name_upgraded: Rally Cry+
     type: Engine
     buy_cost: 5
-    copies: 2
+
     action_return: 0
     power: 0
     effect: "All Claim cards in your hand gain Stackable this turn. Trash this card."
@@ -273,7 +272,7 @@ cards:
     name_upgraded: Tithe+
     type: Engine
     buy_cost: 3
-    copies: 4
+
     action_return: 1
     power: 0
     effect: "Gain 2 resources. Gain 1 action."
@@ -285,7 +284,7 @@ cards:
     name_upgraded: Cull+
     type: Engine
     buy_cost: 1
-    copies: 4
+
     action_return: 0
     power: 0
     effect: "Trash up to 1 card from your hand."
@@ -304,7 +303,7 @@ cards:
     name_upgraded: Levy+
     type: Claim
     buy_cost: 2
-    copies: 5
+
     action_return: 1
     power: 1
     effect: "Claim: Power 1. Gain 1 action."
@@ -316,7 +315,7 @@ cards:
     name_upgraded: Muster+
     type: Engine
     buy_cost: 4
-    copies: 4
+
     action_return: 0
     power: 0
     draw_cards: 2
@@ -330,7 +329,7 @@ cards:
     name_upgraded: Watchtower+
     type: Defense
     buy_cost: 3
-    copies: 3
+
     action_return: 0
     power: 0
     defense_bonus: 3
@@ -346,7 +345,7 @@ cards:
     name_upgraded: Siege Tower+
     type: Claim
     buy_cost: 8
-    copies: 3
+
     action_return: 0
     power: 6
     effect: "Claim: Power 6."
@@ -358,7 +357,7 @@ cards:
     name_upgraded: Reclaim+
     type: Engine
     buy_cost: 2
-    copies: 4
+
     action_return: 0
     power: 0
     effect: "Trash 1 card from your hand. If you did, gain resources equal to half its buy cost (rounded down)."
@@ -376,7 +375,7 @@ cards:
     name_upgraded: Diplomat+
     type: Engine
     buy_cost: 3
-    copies: 3
+
     action_return: 0
     power: 0
     trash_on_use: true
@@ -387,3 +386,133 @@ cards:
       - type: grant_land_grants
         timing: immediate
         target: all_players
+
+  # ── NEW SYNERGY CARDS ─────────────────────────────────────────────────
+
+  - id: neutral_spyglass
+    name: Spyglass
+    name_upgraded: Spyglass+
+    type: Engine
+    buy_cost: 1
+
+    action_return: 0
+    power: 0
+    draw_cards: 1
+    upgraded_draw_cards: 1
+    effect: "Draw 1 card. If you have 3 or fewer cards in hand after drawing, gain 1 action."
+    effect_upgraded: "Draw 1 card. If you have 3 or fewer cards in hand after drawing, gain 1 action and 1 resource."
+    trash_on_use: false
+    effects:
+      - type: conditional_action
+        timing: immediate
+        value: 1
+        condition: hand_size_lte
+        condition_threshold: 3
+    note: "Cheap draw that rewards spending your hand. Play your actions first, then refuel with Spyglass for a bonus action."
+
+  - id: neutral_dividends
+    name: Dividends
+    name_upgraded: Dividends+
+    type: Engine
+    buy_cost: 4
+
+    action_return: 0
+    power: 0
+    effect: "Gain 1 resource for every 2 resources you already have (rounded down, minimum 1)."
+    effect_upgraded: "Gain 1 resource for every 2 resources you already have (rounded down, minimum 1). Draw 1 card."
+    trash_on_use: false
+    effects:
+      - type: resource_scaling
+        timing: immediate
+        value: 2
+        condition: per_resources_held
+    note: "Rewards banking resources instead of spending them every turn. Synergizes with Prospector, Tithe, and the Hoarder passive."
+
+  - id: neutral_cartographer
+    name: Cartographer
+    name_upgraded: Cartographer+
+    type: Engine
+    buy_cost: 3
+
+    action_return: 0
+    power: 0
+    effect: "Discard 2 cards. Draw 2 cards."
+    effect_upgraded: "Discard 2 cards. Draw 4 cards."
+    trash_on_use: false
+    effects:
+      - type: cycle
+        timing: immediate
+        metadata: {discard: 2, draw: 2, upgraded_draw: 4}
+    note: "Non-destructive deck filtering. Swap dead draws for better cards without permanently thinning your deck."
+
+  - id: neutral_tax_collector
+    name: Tax Collector
+    name_upgraded: Tax Collector+
+    type: Engine
+    buy_cost: 4
+
+    action_return: 0
+    power: 0
+    effect: "Gain 2 resources for each VP tile you own that is connected to your base."
+    effect_upgraded: "Gain 3 resources for each VP tile you own that is connected to your base."
+    trash_on_use: false
+    effects:
+      - type: resource_per_vp_hex
+        timing: immediate
+        value: 2
+        upgraded_value: 3
+    note: "Converts board dominance into economy. Holding even 2 VP hexes makes this better than Prospector."
+
+  - id: neutral_mobilize
+    name: Mobilize
+    name_upgraded: Mobilize+
+    type: Engine
+    buy_cost: 4
+
+    action_return: 0
+    power: 0
+    effect: "Gain 1 action for each other card you've played this turn (max 3). Trash this card."
+    effect_upgraded: "Gain 1 action for each other card you've played this turn (max 4). Draw 1 card. Trash this card."
+    trash_on_use: true
+    effects:
+      - type: actions_per_cards_played
+        timing: immediate
+        value: 1
+        metadata: {max: 3, upgraded_max: 4}
+    note: "The combo payoff card. Set up with cheap action-neutral cards, then Mobilize for an explosive turn. Trash-on-use prevents recurring abuse."
+
+  - id: neutral_ambush
+    name: Ambush
+    name_upgraded: Ambush+
+    type: Claim
+    buy_cost: 4
+
+    action_return: 0
+    power: 2
+    effect: "Claim: Power 2. If the target tile was also claimed by an opponent this round, power is 4 instead."
+    effect_upgraded: "Claim: Power 2. If the target tile was also claimed by an opponent this round, power is 5 instead. Gain 1 resource."
+    trash_on_use: false
+    effects:
+      - type: power_modifier
+        value: 2
+        upgraded_value: 3
+        timing: on_resolution
+        condition: if_contested
+    note: "A read-your-opponent card. Weak on uncontested tiles, powerful when you predict a collision. Rewards game knowledge."
+
+  - id: neutral_supply_depot
+    name: Supply Depot
+    name_upgraded: Supply Depot+
+    type: Engine
+    buy_cost: 6
+
+    action_return: 0
+    power: 0
+    effect: "At the start of your next turn, draw 1 card and gain 1 resource."
+    effect_upgraded: "At the start of your next turn, draw 1 card, gain 1 resource, and gain 1 action."
+    trash_on_use: false
+    effects:
+      - type: next_turn_bonus
+        timing: on_resolution
+        metadata: {draw: 1, resources: 1, upgraded_actions: 1}
+    note: "Invest an action now for a better next turn. The upgraded version's extra action is particularly strong for setting up big combo turns."

@@ -16,10 +16,16 @@ export interface CardSubtitleContext {
   trashCount?: number;
   /** Total cards in the player's deck (draw + hand + discard) */
   totalDeckCards?: number;
+  /** Resources the player currently holds */
+  resourcesHeld?: number;
+  /** Tiles captured from the player last round */
+  tilesLostLastRound?: number;
   /** When true, card.power is already the frozen effective value — skip dynamic power resolution */
   powerFrozen?: boolean;
   /** Override for dynamic resource gain (e.g. War Tithe), snapshotted at play time */
   effectiveResourceGain?: number;
+  /** Number of VP tiles connected to the player's base */
+  vpHexCount?: number;
 }
 
 /** A single segment of a card subtitle. */
@@ -181,8 +187,10 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
   const hasDrawPerVP = card.effects?.some(e => e.type === 'draw_per_connected_vp');
   // Defer action icon when a later effect should appear first (to match description order)
   const hasDelayedDraw = card.effects?.some(e => e.type === 'draw_next_turn' || e.type === 'cease_fire');
-  const deferAction = hasDelayedDraw || hasSelfDiscard;
-  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP) parts.push(p(`+${card.draw_cards}🃏`));
+  const hasMulligan = card.effects?.some(e => e.type === 'mulligan');
+  const hasActionsPerCards = card.effects?.some(e => e.type === 'actions_per_cards_played');
+  const deferAction = hasDelayedDraw || hasSelfDiscard || hasMulligan || hasActionsPerCards;
+  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasMulligan) parts.push(p(`+${card.draw_cards}🃏`));
   if (card.action_return > 0 && !hasTrashConditional && !deferAction) parts.push(p(`+${card.action_return}⚡`));
   if (card.forced_discard > 0) parts.push(p(`🎯-${card.forced_discard}🃏`));
 
@@ -228,6 +236,47 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
           parts.push(p(`+${card.action_return}⚡`));
         }
       }
+      if (eff.type === 'resource_scaling') {
+        const divisor = eff.value || 2;
+        if (ctx?.effectiveResourceGain !== undefined) {
+          parts.push(p(`+${ctx.effectiveResourceGain}💰`, true));
+        } else if (ctx?.resourcesHeld !== undefined) {
+          const gained = Math.max(1, Math.floor(ctx.resourcesHeld / divisor));
+          parts.push(p(`+${gained}💰`, true));
+        } else {
+          parts.push(p(`+1💰/${divisor}💰`));
+        }
+      }
+      if (eff.type === 'cycle') {
+        const discardN = (eff.metadata?.discard as number) ?? 2;
+        const drawN = isUpgraded
+          ? ((eff.metadata?.upgraded_draw as number) ?? (eff.metadata?.draw as number) ?? 2)
+          : ((eff.metadata?.draw as number) ?? 2);
+        parts.push(p(`🃏↘${discardN} · +${drawN}🃏`));
+      }
+      if (eff.type === 'resources_per_tiles_lost') {
+        const perTile = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (ctx?.effectiveResourceGain !== undefined) {
+          parts.push(p(`+${ctx.effectiveResourceGain}💰`, ctx.effectiveResourceGain > 0));
+        } else if (ctx?.tilesLostLastRound !== undefined) {
+          const gained = ctx.tilesLostLastRound * perTile;
+          parts.push(p(`+${gained}💰`, gained > 0));
+        } else {
+          parts.push(p(`+💰`));
+        }
+      }
+      if (eff.type === 'resource_per_vp_hex') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (ctx?.effectiveResourceGain !== undefined) {
+          // Use frozen snapshot from play time
+          parts.push(p(`+${ctx.effectiveResourceGain}💰`, ctx.effectiveResourceGain > 0));
+        } else if (ctx?.vpHexCount !== undefined) {
+          const gained = ctx.vpHexCount * val;
+          parts.push(p(`+${gained}💰`, gained > 0));
+        } else {
+          parts.push(p(`+${val}💰/★🔷`));
+        }
+      }
       if (eff.type === 'enhance_vp_tile') parts.push(p('🔷+★'));
       if (eff.type === 'draw_per_connected_vp') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
@@ -237,6 +286,54 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'grant_land_grants') {
         parts.push(p(isUpgraded ? '↓2🃏' : '↓🃏'));
         parts.push(p('↑🃏'));
+      }
+      if (eff.type === 'actions_per_cards_played') {
+        const max = isUpgraded
+          ? ((eff.metadata?.upgraded_max as number) ?? 4)
+          : ((eff.metadata?.max as number) ?? 3);
+        parts.push(p(`+≤${max}⚡`));
+        if (isUpgraded) parts.push(p('+1🃏'));
+      }
+      if (eff.type === 'next_turn_bonus') {
+        const draw = (eff.metadata?.draw as number) ?? 0;
+        const resources = (eff.metadata?.resources as number) ?? 0;
+        const actions = isUpgraded ? ((eff.metadata?.upgraded_actions as number) ?? 0) : 0;
+        const bonusParts: string[] = [];
+        if (draw > 0) bonusParts.push(`+${draw}⏰🃏`);
+        if (resources > 0) bonusParts.push(`+${resources}⏰💰`);
+        if (actions > 0) bonusParts.push(`+${actions}⏰⚡`);
+        if (bonusParts.length > 0) parts.push(p(bonusParts.join(' · ')));
+      }
+      if (eff.type === 'mulligan') {
+        parts.push(p('🃏↘ · +🃏'));
+        if (isUpgraded) parts.push(p('+1🃏'));
+        parts.push(p(`+${card.action_return}⚡`));
+      }
+      if (eff.type === 'inject_rubble') {
+        const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        parts.push(p(`🎯+${count}🧱`));
+      }
+      if (eff.type === 'global_claim_ban') {
+        parts.push(p('🚫⚔️'));
+        if (isUpgraded) parts.push(p('+2🃏'));
+      }
+      if (eff.type === 'global_random_trash') {
+        parts.push(p(isUpgraded ? '🎯✂️🃏' : '✂️🃏'));
+      }
+      if (eff.type === 'swap_draw_discard') {
+        parts.push(p('🔄'));
+        if (isUpgraded) parts.push(p('+2🃏'));
+      }
+      if (eff.type === 'abandon_tile') {
+        parts.push(p('🔷↘'));
+      }
+      if (eff.type === 'abandon_and_block') {
+        const gained = isUpgraded ? 3 : 2;
+        parts.push(p(`🔷↘🚧 · +${gained}💰`));
+      }
+      if (eff.type === 'mandatory_self_trash') {
+        const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        parts.push(p(`✂️${count}`));
       }
     }
   }

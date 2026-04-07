@@ -502,7 +502,7 @@ class TestGeneratedCards:
 
         rubble = [c for c in restored.players["p0"].deck.discard if c.name == "Rubble"]
         assert len(rubble) == 1
-        assert rubble[0].passive_vp == -1
+        assert rubble[0].passive_vp == 0
 
         spoils = [c for c in restored.players["p1"].deck.discard if c.name == "Spoils"]
         assert len(spoils) == 1

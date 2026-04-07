@@ -65,7 +65,7 @@ Before purchasing, the active buyer may adjust their archetype market using thes
 - After each player finishes buying, their purchases are visible to all other players.
 
 ### Purchasing Upgrade Credits
-- Upgrade credits are purchased from the shared pool at a cost of **5 resources** each.
+- Upgrade credits are purchased from the shared pool at a cost of **4 resources** each.
 - A player may hold multiple upgrade credits simultaneously.
 - Upgrade credits are **not cards** — they are tokens held between turns.
 

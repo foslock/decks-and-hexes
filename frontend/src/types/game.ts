@@ -96,6 +96,7 @@ export interface Player {
   tiles_lost_to_upkeep: number;
   rubble_count: number;
   claims_won_last_round: number;
+  tiles_lost_last_round: number;
   tile_count: number;
   is_cpu: boolean;
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
@@ -136,6 +137,13 @@ export interface PlayerEffect {
   effect: string;
   effect_type: string;
   value: number;
+  /** Source tile coordinates for flying-card animations */
+  source_q?: number;
+  source_r?: number;
+  /** Name of the card being added (e.g. "Rubble", "Land Grant", "Spoils") */
+  added_card_name?: string;
+  /** Number of cards being added */
+  added_card_count?: number;
 }
 
 export interface NeutralPurchaseRecord {
@@ -177,6 +185,7 @@ export interface GameState {
   }>>;
   card_pack?: string;
   map_seed?: string;
+  claim_ban_rounds?: number;
 }
 
 // ── Lobby types ──────────────────────────────────────────

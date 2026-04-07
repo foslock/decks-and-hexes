@@ -144,14 +144,14 @@ cards:
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Gain 2 resources. One card in your hand costs 2 less resources to purchase this turn. Gain 1 action."
-    effect_upgraded: "Gain 3 resources. One card in your hand costs 2 less resources to purchase this turn. Gain 1 action."
+    effect: "Gain 1 resource. Your next purchase this turn costs 1 less. Gain 1 action."
+    effect_upgraded: "Gain 2 resources. Your next purchase this turn costs 1 less. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: cost_reduction
-        value: 2
+        value: 1
         timing: immediate
         metadata: {scope: "any_one_card"}
 
@@ -343,8 +343,8 @@ cards:
     buy_cost: 5
     action_return: 0
     power: 0
-    effect: "Draw 2 cards for each VP bonus tile you own that is connected to your base."
-    effect_upgraded: "Draw 3 cards for each VP bonus tile you own that is connected to your base."
+    effect: "Draw 2 cards for each connected VP tile you own."
+    effect_upgraded: "Draw 3 cards for each connected VP tile you own."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards VP hex connectivity with massive card draw. Upgraded version draws 3 per tile."
@@ -374,4 +374,78 @@ cards:
         value: 2
         timing: immediate
         condition: fewest_tiles
+
+  - id: fortress_mulligan
+    name: Mulligan
+    name_upgraded: Mulligan+
+    type: Engine
+    buy_cost: 3
+    action_return: 1
+    power: 0
+    effect: "Discard your entire hand. Draw that many cards. Gain 1 action."
+    effect_upgraded: "Discard your entire hand. Draw that many cards +1. Gain 1 action."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Full hand reset. Lets Fortress throw back a bad draw and try again. The action refund means it doesn't cost tempo."
+
+    effects:
+      - type: mulligan
+        timing: immediate
+
+  - id: fortress_robin_hood
+    name: Robin Hood
+    name_upgraded: Robin Hood+
+    type: Engine
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    effect: "Gain 2 resources for each tile that was captured from you last turn."
+    effect_upgraded: "Gain 4 resources for each tile that was captured from you last turn."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Turns territorial losses into economic fuel. Creates a deterrent: opponents know that taking Fortress tiles feeds their economy."
+
+    effects:
+      - type: resources_per_tiles_lost
+        value: 2
+        upgraded_value: 4
+        timing: immediate
+
+  - id: fortress_scorched_retreat
+    name: Scorched Retreat
+    name_upgraded: Scorched Retreat+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    target_own_tile: true
+    effect: "Abandon a tile you own. It becomes blocked terrain. Gain 2 resources. Trash this card."
+    effect_upgraded: "Abandon a tile you own. It becomes blocked terrain. Gain 3 resources. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Strategic denial — if you can't hold it, nobody gets it. One-time use prevents abuse."
+
+    effects:
+      - type: abandon_and_block
+        timing: on_resolution
+
+  - id: fortress_snowy_holiday
+    name: Snowy Holiday
+    name_upgraded: Snowy Holiday+
+    type: Engine
+    buy_cost: 5
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Next turn, no player can play Claim cards. Trash this card."
+    effect_upgraded: "Next turn, no player can play Claim cards. Draw 2 cards. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+    note: "The panic button. Buys Fortress one turn of absolute safety. The upgraded version draws cards so the stalled turn isn't wasted."
+
+    effects:
+      - type: global_claim_ban
+        timing: on_resolution
+        duration: 1
 

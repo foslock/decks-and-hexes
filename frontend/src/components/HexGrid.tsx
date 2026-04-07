@@ -85,7 +85,7 @@ export interface VpPath {
 
 interface HexGridProps {
   tiles: Record<string, HexTile>;
-  onTileClick: (q: number, r: number) => void;
+  onTileClick: (q: number, r: number, shiftKey?: boolean) => void;
   highlightTiles?: Set<string>;
   surgeTargets?: [number, number][];
   playerInfo?: Record<string, PlayerInfo>;
@@ -480,12 +480,12 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       tileGraphicsRef.current.set(key, { g, baseColor: fillColor, isBlocked: tile.is_blocked, baseAlpha: fillAlpha });
 
       g.eventMode = 'static';
-      g.cursor = tile.is_blocked ? 'not-allowed' : 'pointer';
+      g.cursor = 'pointer';
       g.hitArea = { contains: (px: number, py: number) => {
         const dx = px - x; const dy = py - y;
         return Math.sqrt(dx * dx + dy * dy) < HEX_SIZE;
       }};
-      g.on('pointerdown', () => { if (!tile.is_blocked) onClickRef.current(tile.q, tile.r); });
+      g.on('pointerdown', (e) => { onClickRef.current(tile.q, tile.r, e.shiftKey); });
       g.on('pointerover', (e) => {
         if (disableHoverRef.current) return;
         if (!tile.is_blocked) {
@@ -528,11 +528,21 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             existingLabel.visible = false;
             hiddenLabelKeyRef.current = key;
           }
-          const isPlayerTarget = pCard.card_type === 'engine' && pCard.forced_discard > 0;
-          const isDefensive = !isPlayerTarget && (pCard.card_type === 'defense' || isOwnTile);
+          const isRubblePreview = pCard.card_type === 'engine' && pCard.effects?.some(e => e.type === 'inject_rubble');
+          const isPlayerTarget = pCard.card_type === 'engine' && (pCard.forced_discard > 0 || isRubblePreview);
+          const isAbandonEffect = pCard.card_type === 'engine' && pCard.target_own_tile;
+          const isDefensive = !isPlayerTarget && !isAbandonEffect && (pCard.card_type === 'defense' || isOwnTile);
           let previewText: string;
           let previewColor: number;
-          if (isPlayerTarget) {
+          if (isAbandonEffect) {
+            // Scorched Retreat / Exodus: show abandon icon instead of claim/defense
+            const isBlock = pCard.effects?.some(e => e.type === 'abandon_and_block');
+            previewText = isBlock ? '🚧' : '↘';
+            previewColor = 0xff9944;
+          } else if (isRubblePreview) {
+            previewText = '🪨';
+            previewColor = 0xff6666;
+          } else if (isPlayerTarget) {
             previewText = '🎯';
             previewColor = 0xff6666;
           } else {
@@ -1139,16 +1149,23 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       const plannedAction = planned?.get(key);
 
       if (plannedAction) {
-        // Determine icon: target for player-targeting, shield for defense, sword for attack
-        const isPlayerTarget = plannedAction.type === 'engine' && plannedAction.card.forced_discard > 0;
-        const isDefensivePlay = !isPlayerTarget && (plannedAction.type === 'defense' || tile.owner === activePlayer);
-        const label = isPlayerTarget
-          ? '🎯'
-          : isDefensivePlay
-            ? `🛡+${plannedAction.power}`
-            : `⚔ ${plannedAction.power}`;
-        const labelColor = isPlayerTarget ? 0xff6666 : 0xffffff;
-        const claimFontSize = isPlayerTarget ? 13 : 21;
+        // Determine icon: target for player-targeting, shield for defense, sword for attack, abandon for own-tile engine
+        const isAbandon = plannedAction.type === 'abandon';
+        const isBlock = isAbandon && plannedAction.card.effects?.some(e => e.type === 'abandon_and_block');
+        const isRubbleEffect = plannedAction.type === 'engine' && plannedAction.card.effects?.some(e => e.type === 'inject_rubble');
+        const isPlayerTarget = plannedAction.type === 'engine' && (plannedAction.card.forced_discard > 0 || isRubbleEffect);
+        const isDefensivePlay = !isPlayerTarget && !isAbandon && (plannedAction.type === 'defense' || tile.owner === activePlayer);
+        const label = isAbandon
+          ? (isBlock ? '🚧' : '↘')
+          : isRubbleEffect
+            ? '🪨'
+            : isPlayerTarget
+              ? '🎯'
+              : isDefensivePlay
+                ? `🛡+${plannedAction.power}`
+                : `⚔ ${plannedAction.power}`;
+        const labelColor = isAbandon ? 0xff9944 : isPlayerTarget ? 0xff6666 : 0xffffff;
+        const claimFontSize = isAbandon ? 24 : isPlayerTarget ? 13 : 21;
         const textY = tile.is_vp ? y + 8 : y;
 
         const actionLabel = new Text({

@@ -22,6 +22,12 @@ import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
 
+/** Check if an engine card needs an opponent target (forced discard or inject rubble). */
+function needsOpponentTarget(card: Card): boolean {
+  return (card.forced_discard > 0) ||
+    (card.effects?.some(e => e.type === 'inject_rubble') ?? false);
+}
+
 /**
  * Compute effective power for a card still in hand, accounting for dynamic
  * modifiers (hand-size scaling, tile-count scaling).  Returns a copy of the
@@ -141,11 +147,60 @@ function getCardChoiceRequirement(card: Card): {
         label: 'Discard',
       };
     }
+    if (effect.type === 'cycle') {
+      const discardCount = (effect.metadata?.discard as number) ?? 2;
+      return {
+        effectType: 'self_discard' as const,
+        minCards: discardCount,
+        maxCards: discardCount,
+        label: 'Discard',
+      };
+    }
+    if (effect.type === 'mandatory_self_trash') {
+      const count = card.is_upgraded && effect.upgraded_value != null ? effect.upgraded_value : effect.value;
+      return {
+        effectType: 'self_trash' as const,
+        minCards: count,
+        maxCards: count,
+        label: 'Trash',
+      };
+    }
   }
   return null;
 }
 
 const HEX_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+
+/** Count VP tiles owned by a player that are connected to their base through owned territory. */
+function countConnectedVpTiles(
+  tiles: Record<string, import('../types/game').HexTile>,
+  playerId: string,
+): number {
+  // BFS from base tiles through owned territory
+  const visited = new Set<string>();
+  const queue: string[] = [];
+  for (const [key, tile] of Object.entries(tiles)) {
+    if (tile.is_base && tile.owner === playerId) {
+      visited.add(key);
+      queue.push(key);
+    }
+  }
+  let count = 0;
+  while (queue.length > 0) {
+    const key = queue.shift()!;
+    const tile = tiles[key];
+    if (tile.is_vp) count++;
+    for (const [dq, dr] of HEX_DIRS) {
+      const nk = `${tile.q + dq},${tile.r + dr}`;
+      if (visited.has(nk)) continue;
+      const neighbor = tiles[nk];
+      if (!neighbor || neighbor.owner !== playerId) continue;
+      visited.add(nk);
+      queue.push(nk);
+    }
+  }
+  return count;
+}
 
 /** BFS from each VP tile owned by a player to their base, through owned territory.
  *  Deduplicates: if a VP tile is already a waypoint on a longer path, its standalone path is omitted. */
@@ -417,7 +472,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     handSize: activePlayer.hand.length,
     trashCount: activePlayer.trash?.length ?? 0,
     totalDeckCards: activePlayer.deck_size + activePlayer.hand.length + activePlayer.discard_count,
-  }), [activePlayer.claims_won_last_round, activePlayer.tile_count, activePlayer.hand.length, activePlayer.trash, activePlayer.deck_size, activePlayer.discard_count]);
+    resourcesHeld: activePlayer.resources,
+    tilesLostLastRound: activePlayer.tiles_lost_last_round,
+    vpHexCount: gameState.grid ? countConnectedVpTiles(gameState.grid.tiles, activePlayerId) : 0,
+  }), [activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand.length, activePlayer.trash, activePlayer.deck_size, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId]);
 
   // Context for played/revealed cards: power is already frozen on card.power, skip re-resolution
   const frozenSubtitleContext: CardSubtitleContext = useMemo(() => ({
@@ -1047,6 +1105,47 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
 
+    // Global claim ban (Snowy Holiday)
+    if (card.card_type === 'claim' && gameState.claim_ban_rounds && gameState.claim_ban_rounds > 0) {
+      setError('Claim cards are banned this round (Snowy Holiday)');
+      return;
+    }
+
+    // Validate the tile is a legal target before entering any card choice UI (e.g. Demon Pact trash selection).
+    // This prevents the player from selecting trash cards only to have the play rejected.
+    const tileKey = `${q},${r}`;
+    const tile = gameState.grid?.tiles[tileKey];
+    if (!tile || tile.is_blocked) {
+      setError(`${card.name} cannot target that tile`);
+      return;
+    }
+    if (card.card_type === 'claim') {
+      // Check adjacency requirement
+      if (card.adjacency_required !== false) {
+        const hasAdjacentOwned = HEX_DIRS.some(([dq, dr]) => {
+          const nk = `${q + dq},${r + dr}`;
+          const nt = gameState.grid?.tiles[nk];
+          return nt && nt.owner === activePlayerId;
+        });
+        if (!hasAdjacentOwned) {
+          setError(`${card.name} must target a tile adjacent to one you own`);
+          return;
+        }
+      }
+      // Check unoccupied_only
+      if (card.unoccupied_only && tile.owner) {
+        setError(`${card.name} can only target unoccupied tiles`);
+        return;
+      }
+      // Check duplicate claim (non-stackable)
+      if (!card.stackable && activePlayer.planned_actions?.some(
+        a => a.card.card_type === 'claim' && a.target_q === q && a.target_r === r
+      )) {
+        setError(`You already have a claim on that tile this turn`);
+        return;
+      }
+    }
+
     // Check if card needs trash/discard choice
     const choiceReq = getCardChoiceRequirement(card);
     if (choiceReq && maybeEnterTrashMode(cardIndex, choiceReq, q, r, extraTargets, targetPlayerId)) {
@@ -1054,7 +1153,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
 
     await executePlayCard(cardIndex, q, r, extraTargets, targetPlayerId);
-  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode]);
+  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode, gameState.grid?.tiles, activePlayerId]);
 
   const playCardNoTarget = useCallback(async (cardIndex: number) => {
     if (phase !== 'play' || !activePlayer) return;
@@ -1079,8 +1178,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // Store drag release info so executePlayCard can pass it to the departing animation
     dragReleaseRef.current = { x: screenX, y: screenY, vx: dragVelocityX ?? 0, vy: dragVelocityY ?? 0 };
 
-    // Player-targeting engine cards (e.g. Sabotage): must drop on an opponent's tile
-    if (card.card_type === 'engine' && card.forced_discard > 0) {
+    // Player-targeting engine cards (e.g. Sabotage, Infestation): must drop on an opponent's tile
+    if (card.card_type === 'engine' && needsOpponentTarget(card)) {
       const rect = gridContainerRef.current.getBoundingClientRect();
       const canvasX = screenX - rect.left;
       const canvasY = screenY - rect.top;
@@ -1096,6 +1195,30 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         return;
       }
       playCardAtTile(cardIndex, q, r, undefined, tile.owner);
+      return;
+    }
+
+    // Engine cards targeting own tiles (Exodus, Scorched Retreat): must drop on own non-base tile
+    if (card.card_type === 'engine' && card.target_own_tile) {
+      const rect = gridContainerRef.current.getBoundingClientRect();
+      const canvasX = screenX - rect.left;
+      const canvasY = screenY - rect.top;
+      const transform = gridTransformRef.current;
+      if (!transform) return;
+      const localX = (canvasX - transform.offsetX) / transform.scale;
+      const localY = (canvasY - transform.offsetY) / transform.scale;
+      const { q, r } = pixelToAxial(localX, localY);
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+      if (!tile || tile.owner !== activePlayerId) {
+        setError(`${card.name} must target a tile you own`);
+        return;
+      }
+      if (tile.is_base) {
+        setError(`${card.name} cannot target a base tile`);
+        return;
+      }
+      playCardAtTile(cardIndex, q, r);
       return;
     }
 
@@ -1141,7 +1264,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       }
     }
 
-    // Validate claim card restrictions
+    // Validate claim card restrictions (more specific error messages)
     if (card.card_type === 'claim' && !card.target_own_tile) {
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
@@ -1191,8 +1314,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return null;
   }, [findBaseKey]);
 
-  const handleTileClick = useCallback(async (q: number, r: number) => {
+  const handleTileClick = useCallback(async (q: number, r: number, shiftKey?: boolean) => {
     tileClickedRef.current = true;
+
+    // Test mode: shift+click cycles tile ownership (none → p0 → p1 → ... → none)
+    if (shiftKey && gameState.test_mode) {
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+      if (!tile || tile.is_blocked || tile.is_base) return;
+      const playerOrder = gameState.player_order;
+      const currentOwnerIdx = tile.owner ? playerOrder.indexOf(tile.owner) : -1;
+      const nextIdx = currentOwnerIdx + 1;
+      const nextOwner = nextIdx < playerOrder.length ? playerOrder[nextIdx] : null;
+      try {
+        const resp = await api.testSetTileOwner(gameState.id, q, r, nextOwner);
+        onStateUpdate(resp.state);
+      } catch { /* ignore */ }
+      return;
+    }
 
     // Review mode: clicking a tile with revealed actions opens full-card overlay
     if (reviewing && revealedActionsRef.current) {
@@ -1249,8 +1388,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const card = activePlayer.hand[selectedCardIndex];
     if (!card) return;
 
-    // Player-targeting engine cards (e.g. Sabotage): click an opponent's tile
-    if (card.card_type === 'engine' && card.forced_discard > 0) {
+    // Player-targeting engine cards (e.g. Sabotage, Infestation): click an opponent's tile
+    if (card.card_type === 'engine' && needsOpponentTarget(card)) {
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || !tile.owner || tile.owner === activePlayerId) {
@@ -1259,6 +1398,23 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       }
       sound.tileSelect();
       await playCardAtTile(selectedCardIndex, q, r, undefined, tile.owner);
+      return;
+    }
+
+    // Engine cards targeting own tiles (Exodus, Scorched Retreat): click own non-base tile
+    if (card.card_type === 'engine' && card.target_own_tile) {
+      const tileKey = `${q},${r}`;
+      const tile = gameState.grid?.tiles[tileKey];
+      if (!tile || tile.owner !== activePlayerId) {
+        setError(`${card.name} must target a tile you own`);
+        return;
+      }
+      if (tile.is_base) {
+        setError(`${card.name} cannot target a base tile`);
+        return;
+      }
+      sound.tileSelect();
+      await playCardAtTile(selectedCardIndex, q, r);
       return;
     }
 
@@ -1370,11 +1526,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const next = new Set(prev);
       if (next.has(cardIndex)) {
         next.delete(cardIndex);
-      } else if (trashMode.maxCards === 1) {
-        // Single-select replacement: swap to the new card
-        next.clear();
-        next.add(cardIndex);
-      } else if (next.size < trashMode.maxCards) {
+      } else {
+        // At capacity: evict the least recently selected card (first in Set insertion order)
+        if (next.size >= trashMode.maxCards) {
+          const oldest = next.values().next().value;
+          if (oldest !== undefined) next.delete(oldest);
+        }
         next.add(cardIndex);
       }
       return next;
@@ -1597,13 +1754,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           return;
         }
 
-        // Priority 1: Play selected engine card
+        // Priority 1: Play selected engine card (only non-targeting engines)
         if (
           phase === 'play' && activePlayer && !resolving &&
           selectedCardIndex !== null && surgeCardIndex === null && !trashMode
         ) {
           const card = activePlayer.hand[selectedCardIndex];
-          if (card?.card_type === 'engine') {
+          if (card?.card_type === 'engine' && !needsOpponentTarget(card) && !card.target_own_tile) {
             handlePlayEngine();
             return;
           }
@@ -2319,6 +2476,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return valid;
     }
 
+    // Engine cards targeting own tiles (Exodus, Scorched Retreat): own non-base, non-blocked tiles
+    if (card.card_type === 'engine' && card.target_own_tile) {
+      const valid = new Set<string>();
+      const tiles = gameState.grid?.tiles;
+      if (tiles) {
+        for (const [key, tile] of Object.entries(tiles)) {
+          if (tile.owner === activePlayerId && !tile.is_base && !tile.is_blocked) {
+            valid.add(key);
+          }
+        }
+      }
+      return valid;
+    }
+
     // Start with the highlighted expansion targets for claim cards
     const valid = new Set(getValidClaimTiles(card));
     // For claim cards (not unoccupied_only, not target_own_tile which is already handled),
@@ -2465,7 +2636,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     for (const action of activePlayer.planned_actions) {
       if (action.target_q != null && action.target_r != null) {
         const key = `${action.target_q},${action.target_r}`;
-        const type = action.card.card_type;
+        // Engine cards targeting own tiles (Scorched Retreat, Exodus) get 'abandon' type
+        const type = action.card.card_type === 'engine' && action.card.target_own_tile ? 'abandon' : action.card.card_type;
         const effectivePow = action.effective_power ?? action.card.power;
         const power = type === 'defense' ? action.card.defense_bonus : effectivePow;
         addToMap(key, type, power, action.card.name, action.card);
@@ -2555,10 +2727,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   }
                   return ownTiles;
                 }
-                // Player-targeting engine card (e.g. Sabotage): highlight opponent tiles
-                const ptCard = selectedCard?.card_type === 'engine' && selectedCard?.forced_discard > 0 ? selectedCard
+                // Player-targeting engine card (e.g. Sabotage, Infestation): highlight opponent tiles
+                const ptCard = selectedCard?.card_type === 'engine' && needsOpponentTarget(selectedCard) ? selectedCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'engine'
-                    && activePlayer?.hand[draggingCardIndex]?.forced_discard > 0
+                    && needsOpponentTarget(activePlayer?.hand[draggingCardIndex]!)
                     ? activePlayer?.hand[draggingCardIndex] : null;
                 if (ptCard) {
                   const opponentTiles = new Set<string>();
@@ -2566,6 +2738,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     if (t.owner && t.owner !== activePlayerId) opponentTiles.add(k);
                   }
                   return opponentTiles;
+                }
+                // Engine cards targeting own tiles (Exodus, Scorched Retreat)
+                const ownTileEngCard = selectedCard?.card_type === 'engine' && selectedCard?.target_own_tile ? selectedCard
+                  : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'engine'
+                    && activePlayer?.hand[draggingCardIndex]?.target_own_tile
+                    ? activePlayer?.hand[draggingCardIndex] : null;
+                if (ownTileEngCard) {
+                  const ownNonBase = new Set<string>();
+                  for (const [k, t] of Object.entries(displayState.grid.tiles)) {
+                    if (t.owner === activePlayerId && !t.is_base) ownNonBase.add(k);
+                  }
+                  return ownNonBase;
                 }
                 return undefined;
               })()}
@@ -2580,7 +2764,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               plannedActions={phase === 'play' ? plannedActions : undefined}
               previewCard={phase === 'play' ? (() => {
                 const raw = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
-                  : (selectedCard?.card_type === 'engine' && selectedCard?.forced_discard > 0) ? selectedCard
+                  : (selectedCard?.card_type === 'engine' && (needsOpponentTarget(selectedCard) || selectedCard?.target_own_tile)) ? selectedCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
                   : null;
                 return raw ? withEffectivePower(raw, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0) : null;
@@ -2588,6 +2772,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               previewValidTiles={(() => {
                 if (phase !== 'play') return undefined;
                 const card = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
+                  : (selectedCard?.card_type === 'engine' && (needsOpponentTarget(selectedCard) || selectedCard?.target_own_tile)) ? selectedCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
                   : null;
                 return card ? getAllValidPlayTiles(card) : undefined;
@@ -2596,7 +2781,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
-              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !(dc?.forced_discard > 0); })()))}
+              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
               reviewPulseTiles={reviewPulseTiles}
               onTileHover={reviewing ? (q, r, sx, sy) => {
                 setReviewHoveredTile(`${q},${r}`);
@@ -3233,7 +3418,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </div>
             )}
-            {phase === 'play' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && surgeCardIndex === null && !trashMode && (
+            {phase === 'play' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && !needsOpponentTarget(selectedCard) && !selectedCard?.target_own_tile && surgeCardIndex === null && !trashMode && (
               <IrreversibleButton
                 onClick={handlePlayEngine}
                 tooltip="Playing a card uses an action and cannot be undone."
@@ -3608,7 +3793,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onDoubleClick={isMobile ? undefined : (idx) => {
                 if (trashMode) return; // disable double-click during trash/discard selection
                 const card = activePlayer?.hand[idx];
-                if (card?.card_type === 'engine') playCardNoTarget(idx);
+                if (card?.card_type === 'engine' && !needsOpponentTarget(card) && !card.target_own_tile) playCardNoTarget(idx);
               }}
               onDragStart={setDraggingCardIndex}
               onDragEnd={() => setDraggingCardIndex(null)}
@@ -3633,6 +3818,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               subtitleContext={subtitleContext}
               closePopups={showShopOverlay || showCardBrowser || showDeckViewer}
               trashedCardIds={trashedCardIds.size > 0 ? trashedCardIds : undefined}
+              claimBanned={!!gameState.claim_ban_rounds && gameState.claim_ban_rounds > 0}
             />
           )}
         </div>
@@ -3663,6 +3849,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             packNeutralIds={pack?.neutral_card_ids}
             packArchetypeIds={pack?.archetype_card_ids}
             packName={pack?.name}
+            onShiftClickCard={gameState.test_mode ? handleTestGiveCard : undefined}
           />
         );
       })()}
@@ -3869,52 +4056,170 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         });
         const STACK_OFFSET = 50; // px between stacked popups
         const STAGGER_DELAY = 300; // ms between each popup on same target
-        return activePlayerEffects.map((effect, i) => {
-          const baseTile = Object.values(tiles).find(t => t.is_base && t.base_owner === effect.target_player_id);
-          if (!baseTile) return null;
-          const local = axialToPixel(baseTile.q, baseTile.r);
-          const screenX = local.x * transform.scale + transform.offsetX + rect.left;
-          const screenY = local.y * transform.scale + transform.offsetY + rect.top;
-          const sourceColor = PLAYER_COLORS[effect.source_player_id];
-          const colorStr = sourceColor !== undefined
-            ? `#${sourceColor.toString(16).padStart(6, '0')}`
-            : '#fff';
+
+        // Helper: compute screen position from axial tile coords
+        const tileToScreen = (q: number, r: number) => {
+          const local = axialToPixel(q, r);
+          return {
+            x: local.x * transform.scale + transform.offsetX + rect.left,
+            y: local.y * transform.scale + transform.offsetY + rect.top,
+          };
+        };
+
+        // Collect flying card elements
+        const flyingCards: React.ReactNode[] = [];
+        const FLY_DURATION = Math.round(800 * animSpeed);
+        const FLY_CARD_STAGGER = 120; // ms between each card in a batch
+
+        for (let i = 0; i < activePlayerEffects.length; i++) {
+          const effect = activePlayerEffects[i];
+          if (!effect.added_card_name || !effect.added_card_count || effect.source_q == null || effect.source_r == null) continue;
+
           const stackIdx = stackIndices[i];
-          const yOffset = stackIdx * STACK_OFFSET;
-          const delay = stackIdx * STAGGER_DELAY;
-          return (
-            <div
-              key={i}
-              style={{
-                position: 'fixed',
-                left: screenX,
-                top: screenY - 40 - yOffset,
-                transform: 'translateX(-50%)',
-                zIndex: 15000 + stackIdx,
-                pointerEvents: 'none',
-                opacity: 0,
-                animation: `playerEffectPopup 2.5s ease-out ${delay}ms forwards`,
-              }}
-            >
-              <div style={{
-                background: 'rgba(15, 15, 35, 0.95)',
-                border: `2px solid ${colorStr}`,
-                borderRadius: 10,
-                padding: '8px 14px',
-                textAlign: 'center',
-                boxShadow: `0 0 20px ${colorStr}44, 0 4px 16px rgba(0,0,0,0.6)`,
-                whiteSpace: 'nowrap',
-              }}>
-                <div style={{ fontSize: 13, fontWeight: 'bold', color: '#fff', marginBottom: 2 }}>
-                  {effect.card_name}
-                </div>
-                <div style={{ fontSize: 12, color: '#ff6666', fontWeight: 'bold' }}>
-                  {effect.effect}
+          const effectDelay = stackIdx * STAGGER_DELAY;
+          const src = tileToScreen(effect.source_q, effect.source_r);
+
+          // Determine destination: home player → discard pile, others → their HUD card
+          const isHomePlayer = effect.target_player_id === activePlayerId;
+          let destX: number, destY: number;
+          if (isHomePlayer) {
+            const discardEl = document.querySelector('[data-discard-pile]');
+            if (discardEl) {
+              const dr = discardEl.getBoundingClientRect();
+              destX = dr.left + dr.width / 2;
+              destY = dr.top + dr.height / 2;
+            } else {
+              destX = window.innerWidth - 60;
+              destY = window.innerHeight - 60;
+            }
+          } else {
+            const hudEl = document.querySelector(`[data-player-hud="${effect.target_player_id}"]`);
+            if (hudEl) {
+              const hr = hudEl.getBoundingClientRect();
+              destX = hr.left + hr.width / 2;
+              destY = hr.top + hr.height / 2;
+            } else {
+              // Fallback: target's base tile
+              const baseTile = Object.values(tiles).find(t => t.is_base && t.base_owner === effect.target_player_id);
+              if (baseTile) {
+                const bp = tileToScreen(baseTile.q, baseTile.r);
+                destX = bp.x;
+                destY = bp.y;
+              } else {
+                continue;
+              }
+            }
+          }
+
+          const isRubble = effect.added_card_name === 'Rubble';
+          const cardColor = isRubble ? '#ff6666' : '#ffd700';
+          const cardEmoji = isRubble ? '🪨' : '★';
+
+          for (let c = 0; c < effect.added_card_count; c++) {
+            const cardDelay = effectDelay + c * FLY_CARD_STAGGER;
+            const dx = destX - src.x;
+            const dy = destY - src.y;
+            // Slight random spread so multiple cards don't overlap exactly
+            const spreadX = (Math.random() - 0.5) * 20;
+            const spreadY = (Math.random() - 0.5) * 20;
+            const keyName = `flyCard_${i}_${c}`;
+
+            flyingCards.push(
+              <div key={keyName}>
+                <style>{`
+                  @keyframes ${keyName} {
+                    0% {
+                      transform: translate(0, 0) scale(1);
+                      opacity: 1;
+                    }
+                    20% {
+                      transform: translate(0, -20px) scale(1.1);
+                      opacity: 1;
+                    }
+                    100% {
+                      transform: translate(${dx + spreadX}px, ${dy + spreadY}px) scale(0.3);
+                      opacity: 0.2;
+                    }
+                  }
+                `}</style>
+                <div style={{
+                  position: 'fixed',
+                  left: src.x,
+                  top: src.y,
+                  transform: 'translate(-50%, -50%)',
+                  zIndex: 16000,
+                  pointerEvents: 'none',
+                  opacity: 0,
+                  animation: `${keyName} ${FLY_DURATION}ms ease-in ${cardDelay}ms forwards`,
+                }}>
+                  <div style={{
+                    background: 'rgba(15, 15, 35, 0.95)',
+                    border: `2px solid ${cardColor}`,
+                    borderRadius: 6,
+                    padding: '3px 8px',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    color: cardColor,
+                    whiteSpace: 'nowrap',
+                    boxShadow: `0 0 12px ${cardColor}66`,
+                  }}>
+                    {cardEmoji} {effect.added_card_name}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        });
+            );
+          }
+        }
+
+        return (
+          <>
+            {activePlayerEffects.map((effect, i) => {
+              const baseTile = Object.values(tiles).find(t => t.is_base && t.base_owner === effect.target_player_id);
+              if (!baseTile) return null;
+              const screenPos = tileToScreen(baseTile.q, baseTile.r);
+              const sourceColor = PLAYER_COLORS[effect.source_player_id];
+              const colorStr = sourceColor !== undefined
+                ? `#${sourceColor.toString(16).padStart(6, '0')}`
+                : '#fff';
+              const stackIdx = stackIndices[i];
+              const yOffset = stackIdx * STACK_OFFSET;
+              const delay = stackIdx * STAGGER_DELAY;
+              return (
+                <div
+                  key={`popup_${i}`}
+                  style={{
+                    position: 'fixed',
+                    left: screenPos.x,
+                    top: screenPos.y - 40 - yOffset,
+                    transform: 'translateX(-50%)',
+                    zIndex: 15000 + stackIdx,
+                    pointerEvents: 'none',
+                    opacity: 0,
+                    animation: `playerEffectPopup 2.5s ease-out ${delay}ms forwards`,
+                  }}
+                >
+                  <div style={{
+                    background: 'rgba(15, 15, 35, 0.95)',
+                    border: `2px solid ${colorStr}`,
+                    borderRadius: 10,
+                    padding: '8px 14px',
+                    textAlign: 'center',
+                    boxShadow: `0 0 20px ${colorStr}44, 0 4px 16px rgba(0,0,0,0.6)`,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 'bold', color: '#fff', marginBottom: 2 }}>
+                      {effect.card_name}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#ff6666', fontWeight: 'bold' }}>
+                      {effect.effect}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {flyingCards}
+          </>
+        );
       })()}
 
       {/* Game intro overlay */}

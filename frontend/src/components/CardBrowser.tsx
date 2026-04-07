@@ -59,22 +59,33 @@ function sortCards(cards: Card[], mode: SortMode): Card[] {
 let browserViewMemory: boolean = false;
 let browserSortMemory: SortMode = 'cost';
 
-function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolean }) {
+function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = CARD_TYPE_COLORS[displayCard.card_type] || '#555';
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
+  const [flashAdded, setFlashAdded] = useState(false);
   return (
     <div
       onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
       onPointerLeave={() => setHoverRect(null)}
+      onClick={(e) => {
+        if (e.shiftKey && onShiftClick) {
+          e.preventDefault();
+          onShiftClick(card.id);
+          setFlashAdded(true);
+          setTimeout(() => setFlashAdded(false), 400);
+        }
+      }}
       style={{
         width: 154,
         padding: 6,
-        background: '#2a2a3e',
-        border: `1px solid ${color}`,
+        background: flashAdded ? '#2a4a2e' : '#2a2a3e',
+        border: `1px solid ${flashAdded ? '#4a4' : color}`,
         borderRadius: 6,
         color: '#fff',
         flexShrink: 0,
+        cursor: onShiftClick ? 'pointer' : undefined,
+        transition: 'background 0.2s, border-color 0.2s',
       }}
     >
       <div>
@@ -130,10 +141,27 @@ function BrowserCardCompact({ card, shiftHeld }: { card: Card; shiftHeld: boolea
   );
 }
 
-function BrowserCardFull({ card, shiftHeld }: { card: Card; shiftHeld: boolean }) {
+function BrowserCardFull({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
+  const [flashAdded, setFlashAdded] = useState(false);
   return (
-    <div style={{ flexShrink: 0 }}>
+    <div
+      onClick={(e) => {
+        if (e.shiftKey && onShiftClick) {
+          e.preventDefault();
+          onShiftClick(card.id);
+          setFlashAdded(true);
+          setTimeout(() => setFlashAdded(false), 400);
+        }
+      }}
+      style={{
+        flexShrink: 0,
+        cursor: onShiftClick ? 'pointer' : undefined,
+        borderRadius: 8,
+        outline: flashAdded ? '2px solid #4a4' : 'none',
+        transition: 'outline 0.2s',
+      }}
+    >
       <CardFull card={displayCard} style={{ flexShrink: 0 }} />
     </div>
   );
@@ -147,9 +175,11 @@ interface CardBrowserProps {
   packArchetypeIds?: Record<string, string[]> | null;
   /** Pack name shown in the header */
   packName?: string;
+  /** Callback when shift+clicking a card (test mode: add to hand) */
+  onShiftClickCard?: (cardId: string) => void;
 }
 
-export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds, packName }: CardBrowserProps) {
+export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds, packName, onShiftClickCard }: CardBrowserProps) {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullView, setFullViewRaw] = useState(() => browserViewMemory);
@@ -369,8 +399,8 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
                   {group.cards.map((card) => (
                     fullView
-                      ? <BrowserCardFull key={card.id} card={card} shiftHeld={shiftHeld} />
-                      : <BrowserCardCompact key={card.id} card={card} shiftHeld={shiftHeld} />
+                      ? <BrowserCardFull key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} />
+                      : <BrowserCardCompact key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} />
                   ))}
                 </div>
               )}

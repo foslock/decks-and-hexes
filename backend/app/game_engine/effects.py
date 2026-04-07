@@ -108,6 +108,27 @@ class EffectType(str, Enum):
     # Draw based on connected VP hexes
     DRAW_PER_CONNECTED_VP = "draw_per_connected_vp"      # Toll Road: draw 2 per connected VP hex
 
+    # ── New synergy card effects ──────────────────────────────────
+    CONDITIONAL_ACTION = "conditional_action"          # Spyglass: gain action if hand_size <= threshold
+    RESOURCE_SCALING = "resource_scaling"              # Dividends: gain res per N resources held
+    CYCLE = "cycle"                                    # Cartographer: discard N, draw N
+    RESOURCE_PER_VP_HEX = "resource_per_vp_hex"       # Tax Collector: gain res per VP hex controlled
+    RESOURCES_PER_TILES_LOST = "resources_per_tiles_lost"  # Robin Hood: gain res per tile lost last turn
+
+    # ── Medium-complexity effects ─────────────────────────────────
+    ACTIONS_PER_CARDS_PLAYED = "actions_per_cards_played"  # Mobilize: gain 1 action per card played (max N)
+    NEXT_TURN_BONUS = "next_turn_bonus"                    # Supply Depot: next turn +draw, +resource, (+action upgraded)
+    MULLIGAN = "mulligan"                                  # Mulligan: discard entire hand, redraw same count (+1 upgraded)
+    INJECT_RUBBLE = "inject_rubble"                        # Infestation: add N Rubble to opponent's discard
+
+    # ── Complex effects ──────────────────────────────────────────
+    GLOBAL_CLAIM_BAN = "global_claim_ban"                  # Snowy Holiday: no claims next round
+    GLOBAL_RANDOM_TRASH = "global_random_trash"            # Plague: all players trash random card from hand
+    SWAP_DRAW_DISCARD = "swap_draw_discard"                # Heady Brew: swap draw and discard piles
+    ABANDON_TILE = "abandon_tile"                          # Exodus: give up a tile you own
+    ABANDON_AND_BLOCK = "abandon_and_block"                # Scorched Retreat: give up tile, make it blocked
+    MANDATORY_SELF_TRASH = "mandatory_self_trash"          # Demon Pact: trash exactly N cards (required)
+
 
 class ConditionType(str, Enum):
     """Conditions that gate whether an effect fires."""
@@ -126,6 +147,8 @@ class ConditionType(str, Enum):
     FEWEST_TILES = "fewest_tiles"
     ZERO_ACTIONS = "zero_actions"
     IF_TARGET_HAS_DEFENSE = "if_target_has_defense"
+    IF_CONTESTED = "if_contested"                    # Ambush: target tile also claimed by opponent
+    HAND_SIZE_LTE = "hand_size_lte"                  # Spyglass: hand size <= threshold after draw
 
 
 @dataclass
@@ -185,6 +208,7 @@ class TurnModifiers:
     contest_costs: dict[str, int] = field(default_factory=dict)
     extra_draws_next_turn: int = 0
     extra_actions_next_turn: int = 0
+    extra_resources_next_turn: int = 0
     free_rerolls: int = 0
     # Track cards with ignore_defense flag (tile_key set)
     ignore_defense_tiles: set[str] = field(default_factory=set)
@@ -194,6 +218,8 @@ class TurnModifiers:
     cease_fire_bonus: int = 0
     # Tiles where ignore-defense is overridden (tile_key set)
     ignore_defense_override_tiles: set[str] = field(default_factory=set)
+    # Plague: number of random cards to trash from hand at start of next turn
+    plague_trash_next_turn: int = 0
 
     def reset_for_new_turn(self) -> None:
         """Clear single-round modifiers. Decrement multi-round ones."""

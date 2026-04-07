@@ -371,3 +371,24 @@ cards:
     secondary_effect: null
     secondary_timing: null
     note: "Rewards aggressive card purchasing. Creates a strategic fork: thin for efficiency or bulk up for VP. Takes up a hand slot when drawn."
+
+  - id: vanguard_demon_pact
+    name: Demon Pact
+    name_upgraded: Demon Pact+
+    type: Claim
+    buy_cost: 6
+    action_return: 0
+    power: 10
+    upgraded_power: 12
+    effect: "Trash exactly 3 other cards from your hand. Claim: Power 10."
+    effect_upgraded: "Trash exactly 3 other cards from your hand. Claim: Power 12."
+    secondary_effect: null
+    secondary_timing: null
+    note: "The highest raw power in the game. Requires sacrificing 3 cards — nearly your whole hand. Cannot be played with fewer than 3 other cards in hand."
+
+    effects:
+      - type: mandatory_self_trash
+        value: 3
+        timing: immediate
+        requires_choice: true
+        metadata: {exact: true}

@@ -49,7 +49,7 @@ VP_TARGET = 10  # legacy default; use compute_vp_target() for new games
 SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33}
 REROLL_COST = 2
 RETAIN_COST = 1
-UPGRADE_CREDIT_COST = 5
+UPGRADE_CREDIT_COST = 4
 
 _SEED_CHARS = string.ascii_lowercase + string.digits  # a-z0-9
 _SEED_LENGTH = 6
@@ -258,6 +258,7 @@ class Player:
     has_left: bool = False  # player disconnected/left mid-game
     left_vp: int = 0  # frozen VP at time of leaving (for leaderboard)
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
+    tiles_lost_last_round: int = 0  # tiles captured from this player last round (for Robin Hood)
     pending_discard: int = 0  # deferred discard count (e.g. Regroup: draw first, then discard)
     # Smart roll state — hidden heuristics for archetype market draws (not serialized)
     _prev_market_ids: list[str] = field(default_factory=list)
@@ -319,6 +320,7 @@ class Player:
             "has_ended_turn": self.has_ended_turn,
             "trash": [c.to_dict() for c in self.trash],
             "claims_won_last_round": self.claims_won_last_round,
+            "tiles_lost_last_round": self.tiles_lost_last_round,
             "tile_count": len(game.grid.get_player_tiles(self.id)) if game and game.grid else 0,
             "last_upkeep_paid": self.last_upkeep_paid,
             "upkeep_cost": self.upkeep_cost,
@@ -411,6 +413,8 @@ class GameState:
     buy_phase_purchases: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     card_pack: str = "everything"
     map_seed: str = ""
+    # Global claim ban (Snowy Holiday): rounds remaining where no player can play Claim cards
+    claim_ban_rounds: int = 0
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None) -> None:
@@ -487,6 +491,7 @@ class GameState:
             "buy_phase_purchases": self.buy_phase_purchases,
             "card_pack": self.card_pack,
             "map_seed": self.map_seed,
+            "claim_ban_rounds": self.claim_ban_rounds,
         }
         if self.resolution_steps:
             result["resolution_steps"] = self.resolution_steps
@@ -535,7 +540,7 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
         if game.grid.tiles[f"{q},{r}"].is_vp and (q, r) in connected
     )
 
-    # Card VP: Land Grant (+1), Rubble (-1), Battle Glory (accumulated), etc.
+    # Card VP: Land Grant (+1), Battle Glory (accumulated), etc.
     all_cards = player.deck.cards + player.hand + player.deck.discard
     card_vp = sum(c.passive_vp for c in all_cards)
 
@@ -764,6 +769,10 @@ def execute_start_of_turn(game: GameState) -> GameState:
     game.current_phase = Phase.START_OF_TURN
     game._log(f"=== Round {game.current_round}, Start of Turn ===")
 
+    # Log global claim ban (Snowy Holiday) — decrement happens at end of turn
+    if game.claim_ban_rounds > 0:
+        game._log("⚠️ Claim cards are banned this round (Snowy Holiday)")
+
     for pid in game.player_order:
         player = game.players[pid]
 
@@ -797,6 +806,33 @@ def execute_start_of_turn(game: GameState) -> GameState:
         player.forced_discard_next_turn = 0
         player.turn_modifiers.extra_draws_next_turn = 0
         player.hand = player.deck.draw(draw_count, game.rng)
+
+        # Grant bonus resources from next-turn effects (Supply Depot)
+        extra_resources = player.turn_modifiers.extra_resources_next_turn
+        if extra_resources > 0:
+            player.resources += extra_resources
+            game._log(f"{player.name} gains {extra_resources} extra resource(s) from effects",
+                      visible_to=[pid], actor=pid)
+            player.turn_modifiers.extra_resources_next_turn = 0
+
+        # Plague: trash random card(s) from newly drawn hand
+        plague_count = player.turn_modifiers.plague_trash_next_turn
+        if plague_count > 0:
+            player.turn_modifiers.plague_trash_next_turn = 0
+            trashed_names = []
+            for _ in range(plague_count):
+                if not player.hand:
+                    break
+                idx = game.rng.randrange(len(player.hand))
+                trashed = player.hand.pop(idx)
+                player.trash.append(trashed)
+                trashed_names.append(trashed.name)
+            if trashed_names:
+                game._log(f"{player.name} trashes {', '.join(trashed_names)} from Plague",
+                          actor=pid)
+            else:
+                game._log(f"{player.name} has no cards to trash from Plague",
+                          visible_to=[pid], actor=pid)
 
         # Reset turn modifiers (decrement multi-round effects)
         player.turn_modifiers.reset_for_new_turn()
@@ -1041,6 +1077,10 @@ def play_card(game: GameState, player_id: str, card_index: int,
     if card.unplayable:
         return False, f"{card.name} cannot be played"
 
+    # Global claim ban (Snowy Holiday) — no player can play Claim cards this round
+    if card.card_type == CardType.CLAIM and game.claim_ban_rounds > 0:
+        return False, "Claim cards are banned this round (Snowy Holiday)"
+
     # Block card play while a deferred discard is pending
     if player.pending_discard > 0:
         return False, "Must discard before playing another card"
@@ -1110,6 +1150,18 @@ def play_card(game: GameState, player_id: str, card_index: int,
         if tile.owner != player_id:
             return False, "Defense cards must target a tile you own"
 
+    # Validate target for engine cards that target own tiles (Exodus, Scorched Retreat)
+    if card.card_type == CardType.ENGINE and card.target_own_tile and target_q is not None:
+        assert game.grid is not None
+        _target_r = target_r if target_r is not None else 0
+        tile = game.grid.get_tile(target_q, _target_r)
+        if not tile:
+            return False, "Invalid target tile"
+        if tile.owner != player_id:
+            return False, f"{card.name} must target a tile you own"
+        if tile.is_base:
+            return False, f"{card.name} cannot target a base tile"
+
     # Validate extra targets for multi-target cards (Surge)
     validated_extra: list[tuple[int, int]] = []
     if card.card_type == CardType.CLAIM and card.effective_multi_target_count > 0 and extra_targets:
@@ -1150,6 +1202,17 @@ def play_card(game: GameState, player_id: str, card_index: int,
     for effect in card.effects:
         if not effect.requires_choice:
             continue
+        if effect.type == _EffectType.MANDATORY_SELF_TRASH:
+            # Demon Pact: must trash exactly N other cards from hand
+            exact = bool(effect.metadata.get("exact", False))
+            required = effect.effective_value(card.is_upgraded)
+            available = len(player.hand) - 1  # exclude the card being played
+            if available < required:
+                return False, f"{card.name} requires {required} other card(s) in hand to trash"
+            if exact and (not trash_card_indices or len(trash_card_indices) != required):
+                return False, f"{card.name} requires trashing exactly {required} card(s)"
+            elif not trash_card_indices or len(trash_card_indices) < required:
+                return False, f"{card.name} requires trashing {required} card(s)"
         if effect.type == _EffectType.SELF_DISCARD:
             # If the card also draws, defer the discard until after the draw
             # so the player can choose from their expanded hand
@@ -1166,7 +1229,13 @@ def play_card(game: GameState, player_id: str, card_index: int,
     # (hand size, tile count, adjacency) reflect the game state at play time.
     # This value is frozen for the rest of the turn.
     snapshotted_power: Optional[int] = None
-    if card.card_type in (CardType.CLAIM, CardType.DEFENSE) and card.effects:
+    # Skip snapshotting for cards with IF_CONTESTED power modifiers (Ambush) —
+    # contest status isn't known until reveal phase when all claims are visible.
+    has_contested_modifier = any(
+        e.type == EffectType.POWER_MODIFIER and e.condition == ConditionType.IF_CONTESTED
+        for e in card.effects
+    )
+    if card.card_type in (CardType.CLAIM, CardType.DEFENSE) and card.effects and not has_contested_modifier:
         # Build a temporary action to pass to calculate_effective_power
         _tmp_action = PlannedAction(
             card=card,
@@ -1183,7 +1252,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         if computed != card.effective_power:
             snapshotted_power = computed
 
-    # Snapshot dynamic resource gain (War Tithe) before removing card from hand
+    # Snapshot dynamic resource gain (War Tithe, Dividends) before removing card from hand
     snapshotted_resource_gain: Optional[int] = None
     if card.effects:
         for eff in card.effects:
@@ -1192,6 +1261,20 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 max_key = "upgraded_max_resources" if card.is_upgraded else "max_resources"
                 max_res = eff.metadata.get(max_key, 999)
                 snapshotted_resource_gain = min(player.claims_won_last_round * per_claim, max_res)
+                break
+            if eff.type == EffectType.RESOURCE_SCALING:
+                divisor = eff.value or 2
+                snapshotted_resource_gain = max(1, player.resources // divisor)
+                break
+            if eff.type == EffectType.RESOURCES_PER_TILES_LOST:
+                per_tile = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
+                snapshotted_resource_gain = player.tiles_lost_last_round * per_tile
+                break
+            if eff.type == EffectType.RESOURCE_PER_VP_HEX:
+                per_hex = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
+                connected_coords = game.grid.get_connected_tiles(player_id)
+                vp_hex_count = sum(1 for t in game.grid.tiles.values() if t.is_vp and t.owner == player_id and (t.q, t.r) in connected_coords)
+                snapshotted_resource_gain = vp_hex_count * per_hex
                 break
 
     player.hand.pop(card_index)
@@ -1372,6 +1455,35 @@ def execute_reveal(game: GameState) -> GameState:
             else:
                 other_actions.append((pid, action))
 
+    # Pre-resolve abandon effects (abandon_tile, abandon_and_block) before claims.
+    # These transform tiles before claim resolution so claims against blocked tiles fail.
+    abandon_actions: list[tuple[str, PlannedAction]] = []
+    remaining_other: list[tuple[str, PlannedAction]] = []
+    for pid, action in other_actions:
+        has_abandon = action.card.effects and any(
+            e.type in (EffectType.ABANDON_TILE, EffectType.ABANDON_AND_BLOCK)
+            for e in action.card.effects
+        )
+        if has_abandon:
+            abandon_actions.append((pid, action))
+        else:
+            remaining_other.append((pid, action))
+    other_actions = remaining_other
+
+    for pid, action in abandon_actions:
+        player = game.players[pid]
+        resolve_on_resolution_effects(game, player, action.card, action)
+
+    # Remove claims targeting tiles that are now blocked (from Scorched Retreat)
+    for tile_key in list(claims_by_tile.keys()):
+        tile = game.grid.tiles.get(tile_key)
+        if tile and tile.is_blocked:
+            for cpid, _action in claims_by_tile[tile_key]:
+                game._log(
+                    f"{game.players[cpid].name}'s claim on {tile_key} fails — tile is now blocked terrain",
+                    actor=cpid)
+            del claims_by_tile[tile_key]
+
     # Check for tile immunity — remove immune tiles from claims
     for pid in game.player_order:
         player = game.players[pid]
@@ -1530,6 +1642,31 @@ def execute_reveal(game: GameState) -> GameState:
                         f"{rubble_count} Rubble added to {defender.name}'s deck, "
                         f"Spoils added to {attacker.name}'s deck."
                     )
+                    # Record player effects for flying-card animations
+                    game.player_effects.append({
+                        "source_player_id": winner_id,
+                        "target_player_id": base_owner_id,
+                        "card_name": "Base Raid",
+                        "effect": f"+{rubble_count} Rubble",
+                        "effect_type": "base_raid_rubble",
+                        "value": rubble_count,
+                        "source_q": tile.q,
+                        "source_r": tile.r,
+                        "added_card_name": "Rubble",
+                        "added_card_count": rubble_count,
+                    })
+                    game.player_effects.append({
+                        "source_player_id": winner_id,
+                        "target_player_id": winner_id,
+                        "card_name": "Base Raid",
+                        "effect": "+1 Spoils",
+                        "effect_type": "base_raid_spoils",
+                        "value": 1,
+                        "source_q": tile.q,
+                        "source_r": tile.r,
+                        "added_card_name": "Spoils",
+                        "added_card_count": 1,
+                    })
                 else:
                     game._log(f"{game.players[winner_id].name} fails to raid {defender.name}'s base")
             else:
@@ -1679,6 +1816,15 @@ def execute_reveal(game: GameState) -> GameState:
             if pid in results and results[pid]
         )
         game.players[pid].claims_won_last_round = won
+
+    # Track tiles lost this round (for Robin Hood next round)
+    tiles_lost: dict[str, int] = {pid: 0 for pid in game.player_order}
+    for step in game.resolution_steps:
+        prev = step.get("previous_owner")
+        if prev and prev in tiles_lost:
+            tiles_lost[prev] += 1
+    for pid in game.player_order:
+        game.players[pid].tiles_lost_last_round = tiles_lost[pid]
 
     # Discard planned claim cards (or trash if trash_on_use)
     for pid in game.player_order:
@@ -2035,6 +2181,11 @@ def execute_end_of_turn(game: GameState) -> GameState:
         # Discard remaining hand
         player.deck.add_to_discard(player.hand)
         player.hand = []
+
+    # Decrement global claim ban (Snowy Holiday) at end of turn,
+    # after the play phase has enforced the ban for this round.
+    if game.claim_ban_rounds > 0:
+        game.claim_ban_rounds -= 1
 
     # Note: turn_modifiers.reset_for_new_turn() is called at START of next turn
     # so that multi-round effects (like Stronghold's 2-round immunity) persist
