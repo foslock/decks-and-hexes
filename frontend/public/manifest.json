@@ -1,0 +1,9 @@
+{
+  "name": "Card Clash",
+  "short_name": "Card Clash",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#111111",
+  "theme_color": "#111111",
+  "start_url": "/"
+}
