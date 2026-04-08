@@ -1063,6 +1063,10 @@ export default function CardHand({
         for (const id of departing.keys()) next.delete(id);
         return next;
       });
+      // Clear prevCardsRef BEFORE calling onDiscardAllComplete so the subsequent
+      // state update (which empties the hand) won't trigger the card-change
+      // detection system and cause a duplicate departing animation.
+      prevCardsRef.current = [];
       onDiscardAllComplete?.();
     }, duration + 60);
   }, [discardAll, cards, animated, animationOff, onDiscardAllComplete]);

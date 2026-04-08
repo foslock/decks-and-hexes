@@ -16,6 +16,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
+  const [isSmallWindow, setIsSmallWindow] = useState(window.innerHeight < 540);
 
   useEffect(() => {
     const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
@@ -24,6 +25,12 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
       .then(r => r.json())
       .then(d => setBackendVersion(d.version))
       .catch(() => setBackendVersion(null));
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setIsSmallWindow(window.innerHeight < 540);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
   }, []);
 
   const attemptJoin = async () => {
@@ -44,7 +51,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   };
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ height: '100vh', minWidth: 400, display: 'flex', flexDirection: 'column', overflow: isSmallWindow ? 'auto' : 'hidden' }}>
       <style>{`
         .lobby-btn { transition: box-shadow 0.2s ease; box-shadow: none; }
         .lobby-btn:hover { box-shadow: 0 0 16px rgba(74, 158, 255, 0.35); }
@@ -61,7 +68,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
       </div>
 
       {/* Hero animation — fills space between title and buttons */}
-      <div style={{ flex: 1, minHeight: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+      <div style={{ flex: 1, minHeight: 120, minWidth: 400, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
         <HeroAnimation />
       </div>
 
@@ -186,14 +193,27 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
       </div>
 
       {/* Version & copyright footer */}
-      <div style={{
-        position: 'fixed', bottom: 8, right: 12,
-        fontSize: 10, color: '#444', textAlign: 'right',
-        lineHeight: 1.5, pointerEvents: 'none',
-      }}>
-        <div>v{packageJson.version}{backendVersion ? ` / v${backendVersion}` : ''}</div>
-        <div>&copy; 2026 J. Foster Lockwood</div>
-      </div>
+      {isSmallWindow ? (
+        <div style={{
+          flexShrink: 0, padding: '12px 0 16px',
+          fontSize: 10, color: '#444', textAlign: 'center',
+          lineHeight: 1.5,
+        }}>
+          <div><a href="https://github.com/foslock/decks-and-hexes/issues" target="_blank" rel="noopener noreferrer" style={{ color: '#667', textDecoration: 'none' }}>Provide Feedback</a></div>
+          <div>v{packageJson.version}{backendVersion ? ` / v${backendVersion}` : ''}</div>
+          <div>&copy; 2026 J. Foster Lockwood</div>
+        </div>
+      ) : (
+        <div style={{
+          position: 'fixed', bottom: 8, right: 12,
+          fontSize: 10, color: '#444', textAlign: 'right',
+          lineHeight: 1.5,
+        }}>
+          <div><a href="https://github.com/foslock/decks-and-hexes/issues" target="_blank" rel="noopener noreferrer" style={{ color: '#667', textDecoration: 'none' }}>Provide Feedback</a></div>
+          <div style={{ pointerEvents: 'none' }}>v{packageJson.version}{backendVersion ? ` / v${backendVersion}` : ''}</div>
+          <div style={{ pointerEvents: 'none' }}>&copy; 2026 J. Foster Lockwood</div>
+        </div>
+      )}
 
       {showHowToPlay && (
         <HowToPlay onClose={() => setShowHowToPlay(false)} />
