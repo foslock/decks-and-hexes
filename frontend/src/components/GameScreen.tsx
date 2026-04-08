@@ -1246,8 +1246,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         });
       }
     } else {
+      // Non-targeting card (engine) — animate toward the In Play list
+      let inPlayX: number | null = null;
+      let inPlayY: number | null = null;
+      const inPlayRect = inPlayContainerRef.current?.getBoundingClientRect();
+      if (inPlayRect) {
+        inPlayX = inPlayRect.left + inPlayRect.width / 2;
+        inPlayY = inPlayRect.top + inPlayRect.height / 2;
+      }
       setLastPlayedTarget({
-        cardId: card.id, screenX: null, screenY: null,
+        cardId: card.id, screenX: inPlayX, screenY: inPlayY,
         ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
       });
     }
@@ -3694,26 +3702,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </div>
             )}
-            {phase === 'play' && activePlayer && !resolving && selectedCard?.card_type === 'engine' && !needsOpponentTarget(selectedCard) && !selectedCard?.target_own_tile && surgeCardIndex === null && !trashMode && (
-              <IrreversibleButton
-                onClick={handlePlayEngine}
-                tooltip="Playing a card uses an action and cannot be undone."
-                style={{
-                  padding: '6px 16px',
-                  background: '#4a9eff',
-                  border: 'none',
-                  borderRadius: 6,
-                  color: '#fff',
-                  fontWeight: 'bold',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                  lineHeight: '1.2',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                }}
-              >
-                Play {selectedCard.name}
-              </IrreversibleButton>
-            )}
             {/* Multi-target confirm/cancel (Surge or Defense) */}
             {phase === 'play' && surgeCardIndex !== null && surgePrimaryTarget && (() => {
               const surgeCard = activePlayer?.hand[surgeCardIndex];
@@ -3824,6 +3812,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 opacity: submitButtonVisible ? 1 : 0,
                 transition: 'opacity 0.4s ease-in',
               }}>
+                <style>{`
+                  @keyframes pulseGlowOrange {
+                    0%, 100% { box-shadow: 0 0 6px rgba(255,136,68,0.3), 0 2px 8px rgba(0,0,0,0.4); }
+                    50% { box-shadow: 0 0 14px rgba(255,136,68,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                  }
+                  @keyframes pulseGlowGreen {
+                    0%, 100% { box-shadow: 0 0 6px rgba(42,170,74,0.3), 0 2px 8px rgba(0,0,0,0.4); }
+                    50% { box-shadow: 0 0 14px rgba(42,170,74,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                  }
+                `}</style>
                 <HoldToSubmitButton
                   ref={submitPlayRef}
                   key={activePlayerId}
@@ -3832,16 +3830,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   warning={`You still have ${activePlayer.hand.length} card(s) and ${submitActionsLeft} action(s) remaining.`}
                   tooltip="Submitting locks your play for this round. You cannot change it after."
                   style={{
-                    padding: '6px 16px',
+                    padding: '10px 24px',
                     background: submitCanStillPlay ? '#ff8844' : '#2a9a3e',
                     border: 'none',
-                    borderRadius: 6,
+                    borderRadius: 8,
                     color: '#fff',
                     fontWeight: 'bold',
                     cursor: 'pointer',
-                    fontSize: 13,
+                    fontSize: 18,
                     lineHeight: '1.2',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                    animation: submitCanStillPlay ? 'pulseGlowOrange 2s ease-in-out infinite' : 'pulseGlowGreen 2s ease-in-out infinite',
                   }}
                 >
                   Submit Play{submitCanStillPlay ? ' →' : ' ✓'}
@@ -3852,14 +3850,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               <button
                 disabled
                 style={{
-                  padding: '6px 16px',
+                  padding: '10px 24px',
                   background: '#555',
                   border: 'none',
-                  borderRadius: 6,
+                  borderRadius: 8,
                   color: '#aaa',
                   fontWeight: 'bold',
                   cursor: 'not-allowed',
-                  fontSize: 13,
+                  fontSize: 18,
                   lineHeight: '1.2',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                 }}
@@ -3871,16 +3869,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               <button
                 onClick={handleDoneReviewing}
                 style={{
-                  padding: '6px 16px',
+                  padding: '10px 24px',
                   background: '#2aaa4a',
                   border: 'none',
-                  borderRadius: 6,
+                  borderRadius: 8,
                   color: '#fff',
                   fontWeight: 'bold',
                   cursor: 'pointer',
-                  fontSize: 13,
+                  fontSize: 18,
                   lineHeight: '1.2',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                  animation: 'pulseGlowGreen 2s ease-in-out infinite',
                 }}
               >
                 Done Reviewing ✓
@@ -3894,16 +3892,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   requireHold={true}
                   warning="Done buying passes the shop to the next player. Any unspent resources carry over."
                   style={{
-                    padding: '6px 16px',
+                    padding: '10px 24px',
                     background: '#ff8844',
                     border: 'none',
-                    borderRadius: 6,
+                    borderRadius: 8,
                     color: '#fff',
                     fontWeight: 'bold',
                     cursor: 'pointer',
-                    fontSize: 13,
+                    fontSize: 18,
                     lineHeight: '1.2',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                    animation: 'pulseGlowOrange 2s ease-in-out infinite',
                   }}
                 >
                   Done Buying →
@@ -3915,14 +3913,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <button
                   disabled
                   style={{
-                    padding: '6px 16px',
+                    padding: '10px 24px',
                     background: '#555',
                     border: 'none',
-                    borderRadius: 6,
+                    borderRadius: 8,
                     color: '#aaa',
                     fontWeight: 'bold',
                     cursor: 'not-allowed',
-                    fontSize: 13,
+                    fontSize: 18,
                     lineHeight: '1.2',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                   }}

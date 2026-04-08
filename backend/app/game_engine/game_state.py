@@ -1034,8 +1034,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 return False, f"{card.name} can only target unoccupied tiles"
 
             # Prevent claiming neutral tiles with defense higher than card power
-            if not tile.owner and tile.defense_power > card.effective_power:
-                return False, f"Card power ({card.effective_power}) too low to overcome tile defense ({tile.defense_power})"
+            # Use calculate_effective_power for cards with dynamic power modifiers
+            # (e.g. Strength in Numbers, Locust Swarm) so validation reflects actual power
+            check_power = card.effective_power
+            if card.effects:
+                _check_action = PlannedAction(card=card, target_q=target_q, target_r=target_r)
+                check_power = calculate_effective_power(game, player, card, _check_action)
+            if not tile.owner and tile.defense_power > check_power:
+                return False, f"Card power ({check_power}) too low to overcome tile defense ({tile.defense_power})"
 
             # Check stacking (only one claim per tile unless exception)
             existing_claims = [

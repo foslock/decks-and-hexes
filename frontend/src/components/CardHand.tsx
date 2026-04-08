@@ -790,16 +790,14 @@ export default function CardHand({
             toY = startY - 180;
           } else if (isPlayed) {
             if (lastPlayedTarget.screenX !== null && lastPlayedTarget.screenY !== null) {
-              // Targeting card → animate to tile position
+              // Animate to target position (tile for claims, In Play list for engines)
               toX = lastPlayedTarget.screenX - rect.width / 2;
               toY = lastPlayedTarget.screenY - rect.height / 2;
               shrink = true;
             } else {
-              // Non-targeting card (engine) → "thrown" with momentum from drag velocity
-              const vx = lastPlayedTarget.dragVelocityX ?? 0;
-              const THROW_DISTANCE = 150; // base px to travel
-              toX = startX + vx * THROW_DISTANCE;
-              toY = startY - 80; // drift upward slightly
+              // Fallback (e.g. first engine play before In Play list exists) → drift upward
+              toX = startX;
+              toY = startY - 120;
               shrink = true;
             }
           } else {
@@ -1402,14 +1400,15 @@ export default function CardHand({
         x: dx * t,
         y: dy * t - arc * 4 * t * (1 - t), // parabolic arc
         r: endRot * t,
-        o: Math.max(0, 1 - t * t), // ease out opacity quadratically
+        o: t < 0.9 ? 1 : Math.max(0, 1 - (t - 0.9) / 0.1), // 100% alpha until 90%, then fade to 0
       });
-      const k = [0, 0.25, 0.5, 0.75, 1].map(t => p(t));
+      const k = [0, 0.25, 0.5, 0.75, 0.9, 1].map(t => p(t));
       lines.push(`@keyframes ${name} {
   0%   { transform: translate(0px, 0px) rotate(0deg); opacity: 1; }
-  25%  { transform: translate(${k[1].x}px, ${k[1].y}px) rotate(${k[1].r}deg); opacity: ${k[1].o.toFixed(2)}; }
-  50%  { transform: translate(${k[2].x}px, ${k[2].y}px) rotate(${k[2].r}deg); opacity: ${k[2].o.toFixed(2)}; }
-  75%  { transform: translate(${k[3].x}px, ${k[3].y}px) rotate(${k[3].r}deg); opacity: ${k[3].o.toFixed(2)}; }
+  25%  { transform: translate(${k[1].x}px, ${k[1].y}px) rotate(${k[1].r}deg); opacity: 1; }
+  50%  { transform: translate(${k[2].x}px, ${k[2].y}px) rotate(${k[2].r}deg); opacity: 1; }
+  75%  { transform: translate(${k[3].x}px, ${k[3].y}px) rotate(${k[3].r}deg); opacity: 1; }
+  90%  { transform: translate(${k[4].x}px, ${k[4].y}px) rotate(${k[4].r}deg); opacity: 1; }
   100% { transform: translate(${dx}px, ${dy}px) rotate(${endRot}deg); opacity: 0; }
 }`);
     }
@@ -1542,10 +1541,12 @@ export default function CardHand({
                 cardTransition = 'none';
               } else {
                 // Arc animation via @keyframes: draw pile → arc up → hand position
+                // Keep inline opacity at 0 — the animation keyframes control opacity
+                // (prevents flash if @keyframes CSS isn't parsed before the next paint)
                 const enterDur = Math.round(500 * animSpeed);
                 const animName = `cardEnter_${card.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
                 cardTransform = 'translate(0, 0) rotate(0deg)';
-                cardOpacity = 1;
+                cardOpacity = 0;
                 cardTransition = 'none';
                 cardAnimation = `${animName} ${enterDur}ms linear ${entering.delay}ms both`;
               }
@@ -1868,7 +1869,7 @@ export default function CardHand({
                   transformOrigin: 'center center',
                   opacity: d.active ? 0 : 1,
                   transition: d.active
-                    ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in`
+                    ? `transform ${durMs}ms ease-in, opacity ${Math.round(durMs * 0.1)}ms ease-in ${Math.round(durMs * 0.9)}ms`
                     : 'none',
                   pointerEvents: 'none',
                   zIndex: 9990,

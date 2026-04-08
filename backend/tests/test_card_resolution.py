@@ -1068,6 +1068,30 @@ class TestSwarmNumbersGame:
         card = card_registry["swarm_numbers_game"]
         assert card.card_type == CardType.CLAIM
 
+    def test_numbers_game_playable_against_defended_tile(self, card_registry):
+        """Strength in Numbers (base power 0) should be playable against a
+        defended neutral tile when hand size gives it enough dynamic power."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+        sin = _copy_card(card_registry["swarm_numbers_game"], "test_sin")
+
+        # Set up: put card at index 0, keep 4 other cards in hand → dynamic power = 4
+        player.hand = [sin] + player.hand[:4]
+        assert len(player.hand) == 5
+
+        # Find an adjacent neutral tile and set its defense to 2
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        assert game.grid is not None
+        tile = game.grid.get_tile(q, r)
+        assert tile is not None
+        tile.defense_power = 2
+        tile.base_defense = 2
+
+        # Should succeed: dynamic power 4 > defense 2
+        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r)
+        assert success, f"Expected play to succeed but got: {msg}"
+
 
 class TestSwarmSwarmTactics:
     def test_swarm_tactics_draw_and_action(self, card_registry):
@@ -1882,6 +1906,35 @@ class TestSwarmLocustSwarm:
         power = calculate_effective_power(game, player, locust, action)
         # tiles / 3 = 9 / 3 = 3 (replaces base power of 0)
         assert power == total_tiles // 3
+
+    def test_locust_swarm_playable_against_defended_tile(self, card_registry):
+        """Locust Swarm (base power 0) should be playable against a defended
+        neutral tile when tile count gives it enough dynamic power."""
+        game = _make_2p_game(card_registry, arch0="swarm")
+        player = game.players["p0"]
+        locust = _copy_card(card_registry["swarm_locust_swarm"], "test_locust2")
+
+        assert game.grid is not None
+        # Give player 9 tiles total → power = 9 // 3 = 3
+        neutrals = [t for t in game.grid.tiles.values()
+                     if t.owner is None and not t.is_blocked]
+        current = len(game.grid.get_player_tiles("p0"))
+        needed = 9 - current
+        for t in neutrals[:needed]:
+            t.owner = "p0"
+
+        # Find an adjacent neutral tile and set its defense to 2
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        tile = game.grid.get_tile(q, r)
+        assert tile is not None
+        tile.defense_power = 2
+        tile.base_defense = 2
+
+        player.hand = [locust] + player.hand[:4]
+        # Should succeed: dynamic power 3 > defense 2
+        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r)
+        assert success, f"Expected play to succeed but got: {msg}"
 
 
 # ══════════════════════════════════════════════════════════════════
