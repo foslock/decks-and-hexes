@@ -1197,10 +1197,10 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 per_tile = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
                 snapshotted_resource_gain = player.tiles_lost_last_round * per_tile
                 break
-            if eff.type == EffectType.RESOURCE_PER_VP_HEX:
+            if eff.type == EffectType.RESOURCE_PER_VP_HEX and game.grid is not None:
                 per_hex = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
                 connected_coords = game.grid.get_connected_tiles(player_id)
-                vp_hex_count = sum(1 for t in game.grid.tiles.values() if t.is_vp and t.owner == player_id and (t.q, t.r) in connected_coords)
+                vp_hex_count = len([t for t in game.grid.tiles.values() if t.is_vp and t.owner == player_id and (t.q, t.r) in connected_coords])
                 snapshotted_resource_gain = vp_hex_count * per_hex
                 break
 

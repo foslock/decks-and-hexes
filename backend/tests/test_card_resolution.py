@@ -98,6 +98,30 @@ def _find_n_adjacent_neutrals(game: GameState, player_id: str, n: int):
     return found
 
 
+def _ensure_adjacent_enemy_tile(game: GameState, player_id: str, enemy_id: str):
+    """Find or create an enemy-owned tile adjacent to player_id's territory.
+
+    If no such tile exists, assigns a neutral tile adjacent to the player to
+    the enemy.  Returns the tile, or None if impossible.
+    """
+    assert game.grid is not None
+    # First check if one already exists
+    for pt in game.grid.get_player_tiles(player_id):
+        for adj in game.grid.get_adjacent(pt.q, pt.r):
+            if adj.owner == enemy_id:
+                return adj
+    # Create one by assigning a neutral neighbour to the enemy
+    for pt in game.grid.get_player_tiles(player_id):
+        for adj in game.grid.get_adjacent(pt.q, pt.r):
+            if adj.owner is None and not adj.is_blocked and not adj.is_base:
+                adj.owner = enemy_id
+                adj.held_since_turn = game.current_round
+                adj.defense_power = 0
+                adj.base_defense = 0
+                return adj
+    return None
+
+
 def _make_2p_game(card_registry, arch0="vanguard", arch1="swarm", seed=42):
     game = create_game(
         GridSize.SMALL,
@@ -675,15 +699,13 @@ class TestVanguardForwardMarch:
         fm = _copy_card(card_registry["vanguard_forward_march"], "test_fm")
         player.hand = [fm] + player.hand[1:]
 
-        # Try to target an opponent's tile
-        for pt in game.grid.get_player_tiles("p0"):
-            for adj in game.grid.get_adjacent(pt.q, pt.r):
-                if adj.owner == "p1":
-                    success, msg = play_card(game, "p0", 0, target_q=adj.q, target_r=adj.r)
-                    assert not success
-                    assert "unoccupied" in msg.lower()
-                    return
-        pytest.skip("No adjacent enemy tile found")
+        # Ensure there is an opponent's tile adjacent to p0
+        enemy_tile = _ensure_adjacent_enemy_tile(game, "p0", "p1")
+        assert enemy_tile is not None
+
+        success, msg = play_card(game, "p0", 0, target_q=enemy_tile.q, target_r=enemy_tile.r)
+        assert not success
+        assert "unoccupied" in msg.lower()
 
     def test_forward_march_draw_on_success(self, card_registry):
         """Forward March: draw 1 next turn if successful claim on neutral."""
@@ -754,19 +776,10 @@ class TestVanguardSpoilsOfWar:
         p0 = game.players["p0"]
         p1 = game.players["p1"]
 
-        # Find a tile owned by p1 adjacent to p0
+        # Ensure a tile owned by p1 is adjacent to p0
         assert game.grid is not None
-        target_tile = None
-        for pt in game.grid.get_player_tiles("p0"):
-            for adj in game.grid.get_adjacent(pt.q, pt.r):
-                if adj.owner == "p1":
-                    target_tile = adj
-                    break
-            if target_tile:
-                break
-
-        if not target_tile:
-            pytest.skip("No adjacent p1 tile found")
+        target_tile = _ensure_adjacent_enemy_tile(game, "p0", "p1")
+        assert target_tile is not None
 
         # p0 plays Spoils of War (power 3) on p1's tile
         sow = _copy_card(card_registry["vanguard_spoils_of_war"], "test_sow")
@@ -1551,14 +1564,31 @@ class TestFortressTollRoad:
             if connected_vp:
                 break
         if not connected_vp:
-            pytest.skip("No adjacent VP tile found")
+            # No VP tile adjacent — promote a neutral neighbour to VP
+            for pt in player_tiles:
+                for adj in game.grid.get_adjacent(pt.q, pt.r):
+                    if adj.owner is None and not adj.is_blocked and not adj.is_base:
+                        adj.is_vp = True
+                        connected_vp = adj
+                        break
+                if connected_vp:
+                    break
+        assert connected_vp is not None, "Could not create adjacent VP tile"
         connected_vp.owner = "p0"
+
+        # Count all connected VP tiles to compute expected draws
+        connected_coords = game.grid.get_connected_tiles("p0")
+        total_connected_vp = len([
+            t for t in game.grid.tiles.values()
+            if t.is_vp and t.owner == "p0" and (t.q, t.r) in connected_coords
+        ])
+        assert total_connected_vp >= 1
 
         hand_before = len(player.hand)
         success, _ = play_card(game, "p0", 0)
         assert success
-        # Should have drawn 2 cards (1 connected VP × 2 draws each), minus the played card
-        assert len(player.hand) == hand_before - 1 + 2
+        # Should have drawn 2 cards per connected VP hex, minus the played card
+        assert len(player.hand) == hand_before - 1 + (2 * total_connected_vp)
 
 
 class TestFortressFortifiedPosition:
@@ -1662,18 +1692,9 @@ class TestContestResolution:
         p0 = game.players["p0"]
         p1 = game.players["p1"]
 
-        # Find a tile owned by p1 adjacent to p0
-        target = None
-        for pt in game.grid.get_player_tiles("p0"):
-            for adj in game.grid.get_adjacent(pt.q, pt.r):
-                if adj.owner == "p1":
-                    target = adj
-                    break
-            if target:
-                break
-
-        if not target:
-            pytest.skip("No adjacent contested tile")
+        # Ensure a tile owned by p1 is adjacent to p0
+        target = _ensure_adjacent_enemy_tile(game, "p0", "p1")
+        assert target is not None
 
         # Both play same power
         attack = _make_card("atk", "Attacker", CardType.CLAIM, power=5,
@@ -1704,17 +1725,9 @@ class TestContestResolution:
         p0 = game.players["p0"]
         p1 = game.players["p1"]
 
-        target = None
-        for pt in game.grid.get_player_tiles("p0"):
-            for adj in game.grid.get_adjacent(pt.q, pt.r):
-                if adj.owner == "p1":
-                    target = adj
-                    break
-            if target:
-                break
-
-        if not target:
-            pytest.skip("No adjacent contested tile")
+        # Ensure a tile owned by p1 is adjacent to p0
+        target = _ensure_adjacent_enemy_tile(game, "p0", "p1")
+        assert target is not None
 
         attack = _make_card("atk", "Attacker", CardType.CLAIM, power=20,
                             adjacency_required=False)
@@ -1738,19 +1751,16 @@ class TestContestResolution:
         p0 = game.players["p0"]  # Fortress
         p1 = game.players["p1"]
 
-        # Find p0 tile adjacent to p1
+        # Ensure p1 has a tile adjacent to p0, then pick the p0 tile being attacked
+        enemy_tile = _ensure_adjacent_enemy_tile(game, "p0", "p1")
+        assert enemy_tile is not None
+        # Find the p0 tile that neighbours this enemy tile
         target = None
-        for pt in game.grid.get_player_tiles("p0"):
-            for adj in game.grid.get_adjacent(pt.q, pt.r):
-                if adj.owner == "p1":
-                    # Actually we want the p0 tile that's being attacked
-                    target = pt
-                    break
-            if target:
+        for adj in game.grid.get_adjacent(enemy_tile.q, enemy_tile.r):
+            if adj.owner == "p0":
+                target = adj
                 break
-
-        if not target:
-            pytest.skip("No p0 tile adjacent to p1")
+        assert target is not None
 
         # p1 attacks with power 5
         attack = _make_card("atk", "Attacker", CardType.CLAIM, power=5,
@@ -2654,6 +2664,9 @@ class TestNeutralAmbush:
         p0 = game.players["p0"]
         p1 = game.players["p1"]
         ambush = _copy_card(card, "test_ambush")
+        # Ensure p1 has a tile adjacent to p0 so we can find a shared neutral neighbour
+        enemy_tile = _ensure_adjacent_enemy_tile(game, "p0", "p1")
+        assert enemy_tile is not None
         # Find a neutral tile adjacent to BOTH players
         target_q, target_r = None, None
         p0_tiles = set((t.q, t.r) for t in game.grid.get_player_tiles("p0"))
@@ -2665,8 +2678,7 @@ class TestNeutralAmbush:
             if adj_coords & p0_tiles and adj_coords & p1_tiles:
                 target_q, target_r = tile.q, tile.r
                 break
-        if target_q is None:
-            pytest.skip("No neutral tile adjacent to both players")
+        assert target_q is not None, "No neutral tile adjacent to both players"
 
         p0.hand = [ambush] + p0.hand[1:]
         # p1 plays a weak claim (power 3) on same tile
