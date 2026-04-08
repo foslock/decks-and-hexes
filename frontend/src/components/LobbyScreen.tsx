@@ -38,9 +38,9 @@ function computeRecommendedVp(gridSizeId: string): number {
 }
 
 const DIFFICULTIES = [
-  { id: 'easy', name: 'Easy' },
-  { id: 'medium', name: 'Normal' },
-  { id: 'hard', name: 'Hard' },
+  { id: 'easy', name: 'Easy', short: 'E' },
+  { id: 'medium', name: 'Normal', short: 'N' },
+  { id: 'hard', name: 'Hard', short: 'H' },
 ];
 
 // ── Recent seeds (localStorage) ────────────────────────────
@@ -478,6 +478,11 @@ export default function LobbyScreen({
                 0%, 100% { opacity: 1; }
                 50% { opacity: 0.5; }
               }
+              .diff-short { display: none; }
+              @media (max-width: 480px) {
+                .diff-full { display: none; }
+                .diff-short { display: inline; }
+              }
             `}</style>
           </div>
           <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
@@ -532,9 +537,11 @@ export default function LobbyScreen({
                   fontSize: 13, padding: '0 8px', height: 26,
                   background: '#2a2a3e', border: '1px solid #555',
                   borderRadius: 4, color: '#aaa', cursor: 'pointer',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  flexShrink: 1, minWidth: 0,
                 }}
               >
-                View Cards
+                Cards
               </button>
             </div>
 
@@ -549,7 +556,7 @@ export default function LobbyScreen({
                   <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Map Size</span>
                 </Tooltip>
               </div>
-              <div style={{ display: 'flex', gap: 4 }}>
+              <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
                 {GRID_SIZES.map((size) => (
                   <button
                     key={size.id}
@@ -563,6 +570,8 @@ export default function LobbyScreen({
                       color: '#fff',
                       cursor: isHost ? 'pointer' : 'default',
                       fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      flex: 1, minWidth: 0,
                     }}
                   >
                     {size.name}
@@ -995,13 +1004,13 @@ export default function LobbyScreen({
                       else if (isHost && p.is_local) handleUpdatePlayer(p.id, { name: e.target.value });
                     }}
                     style={{
-                      flex: 1, padding: '6px 10px',
+                      flex: 1, minWidth: 0, padding: '6px 10px',
                       background: '#2a2a3e', border: '1px solid #444',
                       borderRadius: 6, color: '#fff', fontSize: 14,
                     }}
                   />
                 ) : (
-                  <span style={{ flex: 1, fontSize: 14 }}>
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {p.name}
                     {p.is_cpu && p.cpu_difficulty && !isHost && (
                       <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>
@@ -1013,7 +1022,7 @@ export default function LobbyScreen({
 
                 {/* CPU difficulty selector (host only) */}
                 {p.is_cpu && isHost && (
-                  <div style={{ display: 'flex', gap: 2 }}>
+                  <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
                     {DIFFICULTIES.map((d) => (
                       <button
                         key={d.id}
@@ -1026,7 +1035,8 @@ export default function LobbyScreen({
                           cursor: 'pointer',
                         }}
                       >
-                        {d.name}
+                        <span className="diff-full">{d.name}</span>
+                        <span className="diff-short">{d.short}</span>
                       </button>
                     ))}
                   </div>

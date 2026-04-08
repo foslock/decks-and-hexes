@@ -278,6 +278,11 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
           overflow: 'hidden',
         }}
       >
+        <style>{`
+          @media (max-width: 480px) {
+            .cb-hide-narrow { display: none !important; }
+          }
+        `}</style>
         {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
@@ -294,7 +299,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
               ({searchQuery ? `${filteredCards.length}/` : ''}{totalCount} cards)
             </span>
           )}
-          <span style={{ fontSize: 11, color: '#555', marginLeft: 4 }}>
+          <span className="cb-hide-narrow" style={{ fontSize: 11, color: '#555', marginLeft: 4 }}>
             Hold shift to view upgrades
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -305,7 +310,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
               onChange={(e) => setSearchQuery(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               style={{
-                width: 120,
+                width: 120, minWidth: 0, flexShrink: 1,
                 padding: '3px 8px',
                 background: '#2a2a3e',
                 border: '1px solid #444',
@@ -315,7 +320,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
                 outline: 'none',
               }}
             />
-            <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
+            <div className="cb-hide-narrow" style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
               <button
                 onClick={() => setSortMode('cost')}
                 style={{ padding: '3px 10px', background: sortMode === 'cost' ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
@@ -329,7 +334,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
                 Type
               </button>
             </div>
-            <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
+            <div className="cb-hide-narrow" style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
               <button
                 onClick={() => setFullView(false)}
                 style={{ padding: '3px 10px', background: !fullView ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}

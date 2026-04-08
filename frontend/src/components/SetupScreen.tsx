@@ -45,7 +45,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   };
 
   return (
-    <div style={{ height: '100vh', minWidth: 400, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+    <div style={{ height: '100vh', minWidth: 350, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
       <style>{`
         .lobby-btn { transition: box-shadow 0.2s ease; box-shadow: none; }
         .lobby-btn:hover { box-shadow: 0 0 16px rgba(74, 158, 255, 0.35); }
@@ -62,7 +62,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
       </div>
 
       {/* Hero animation — fills space between title and buttons */}
-      <div style={{ flex: 1, minHeight: 400, minWidth: 400, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+      <div style={{ flex: 1, minHeight: 350, minWidth: 350, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
         <HeroAnimation />
       </div>
 
