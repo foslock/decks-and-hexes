@@ -553,6 +553,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [testCardId, setTestCardId] = useState('');
   const [testVp, setTestVp] = useState('');
   const [testResources, setTestResources] = useState('');
+  const [testRound, setTestRound] = useState('');
   // Surge multi-target mode
   const [surgeTargets, setSurgeTargets] = useState<[number, number][]>([]);
   const [surgeCardIndex, setSurgeCardIndex] = useState<number | null>(null);
@@ -2667,6 +2668,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [gameState.id, activePlayerId, onStateUpdate]);
 
+  const handleTestSetRound = useCallback(async (round: number) => {
+    try {
+      setError(null);
+      const result = await api.testSetRound(gameState.id, round);
+      onStateUpdate(result.state);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [gameState.id, onStateUpdate]);
+
   const handleTestDiscardCard = useCallback(async (cardIndex: number) => {
     try {
       setError(null);
@@ -3621,6 +3632,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                               <input type="number" value={testResources} onChange={e => setTestResources(e.target.value)} placeholder={String(activePlayer?.resources ?? 0)}
                                 style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
                               <button onClick={() => { if (testResources !== '') handleTestSetStats(undefined, Number(testResources)); }}
+                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ color: '#888', marginBottom: 2 }}>Set Round (max {gameState.max_rounds ?? '?'}):</div>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <input type="number" value={testRound} onChange={e => setTestRound(e.target.value)} placeholder={String(gameState.current_round ?? 1)}
+                                style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
+                              <button onClick={() => { if (testRound !== '') handleTestSetRound(Number(testRound)); }}
                                 style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>

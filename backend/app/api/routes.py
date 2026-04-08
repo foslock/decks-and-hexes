@@ -677,6 +677,32 @@ async def test_discard_hand(game_id: str, req: TestPlayerRequest) -> dict[str, A
     return {"message": f"Discarded {count} card(s)", "state": game.to_dict()}
 
 
+class TestSetRoundRequest(BaseModel):
+    round: int
+
+
+@router.post("/games/{game_id}/test/set-round")
+async def test_set_round(game_id: str, req: TestSetRoundRequest) -> dict[str, Any]:
+    """Test mode: set the current round number."""
+    game = await _get_store().get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+    if not game.test_mode:
+        raise HTTPException(403, "Test mode is not enabled")
+    if req.round < 1:
+        raise HTTPException(400, "Round must be at least 1")
+
+    old_round = game.current_round
+    game.current_round = req.round
+    game._log(f"[TEST] Round set: {old_round} → {req.round}")
+    await _get_store().save(game)
+
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": f"Round set to {req.round}", "state": game.to_dict()}
+
+
 class TestSetTileOwnerRequest(BaseModel):
     q: int
     r: int

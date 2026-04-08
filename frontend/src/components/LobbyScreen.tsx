@@ -442,7 +442,7 @@ export default function LobbyScreen({
             <div style={{
               fontSize: 48, fontWeight: 'bold', letterSpacing: 12,
               fontFamily: 'monospace', color: '#4a9eff',
-              userSelect: 'all', cursor: 'pointer',
+              cursor: 'pointer',
             }}
               title="Click to copy"
               onClick={() => {

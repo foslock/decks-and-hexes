@@ -385,6 +385,16 @@ export async function testSetStats(
   });
 }
 
+export async function testSetRound(
+  gameId: string,
+  round: number,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/test/set-round`, {
+    method: 'POST',
+    body: JSON.stringify({ round }),
+  });
+}
+
 export async function testSetTileOwner(
   gameId: string,
   q: number,
