@@ -333,12 +333,15 @@ class Player:
 class NeutralMarket:
     """Shared neutral market with fixed copy counts."""
     stacks: dict[str, list[Card]] = field(default_factory=dict)
+    # Template cards for each stack (so we can still serialize sold-out stacks)
+    card_templates: dict[str, Card] = field(default_factory=dict)
 
     def get_available(self) -> list[dict[str, Any]]:
         result = []
         for card_id, copies in self.stacks.items():
-            if copies:
-                card_dict = copies[0].to_dict()
+            template = copies[0] if copies else self.card_templates.get(card_id)
+            if template:
+                card_dict = template.to_dict()
                 card_dict["id"] = card_id  # Use base card ID for stable matching
                 result.append({
                     "card": card_dict,
@@ -763,6 +766,7 @@ def _setup_neutral_market(
     for card in neutral_cards:
         copies = [_copy_card(card, f"neutral_{i}") for i in range(copies_count)]
         game.neutral_market.stacks[card.id] = copies
+        game.neutral_market.card_templates[card.id] = card
 
 
 # ── Phase execution ─────────────────────────────────────────────
@@ -998,11 +1002,10 @@ def play_card(game: GameState, player_id: str, card_index: int,
     if player.pending_discard > 0:
         return False, "Must discard before playing another card"
 
-    # Check action availability (skip in test mode)
+    # Check action availability
     net_cost = 1 - card.effective_action_return
-    if not game.test_mode:
-        if player.actions_used >= player.actions_available and net_cost > 0:
-            return False, "No action slots available"
+    if player.actions_used >= player.actions_available and net_cost > 0:
+        return False, "No action slots available"
 
     # Validate target for claim cards
     if card.card_type == CardType.CLAIM and target_q is not None:
@@ -1873,7 +1876,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
     if player.turn_modifiers.buy_locked:
         return False, "Cannot purchase cards this round (buy restriction active)"
 
-    free = game.test_mode  # skip resource costs in test mode
+    free = False  # resource costs always apply
 
     if source == "upgrade":
         if not free and player.resources < UPGRADE_CREDIT_COST:
@@ -1960,7 +1963,7 @@ def spend_upgrade_credit(
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
-    if player.upgrade_credits <= 0 and not game.test_mode:
+    if player.upgrade_credits <= 0:
         return False, "No upgrade credits available"
     if card_index < 0 or card_index >= len(player.hand):
         return False, "Invalid card index"
@@ -1973,8 +1976,7 @@ def spend_upgrade_credit(
         card.name = card.name_upgraded
     if card.upgrade_description:
         card.description = card.upgrade_description
-    if not game.test_mode:
-        player.upgrade_credits -= 1
+    player.upgrade_credits -= 1
     game._log(
         f"{player.name} upgrades {card.name} "
         f"({player.upgrade_credits} credits remaining)"

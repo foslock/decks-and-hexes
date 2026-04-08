@@ -644,6 +644,7 @@ export default function LobbyScreen({
                           key={i}
                           onClick={() => {
                             handleConfigChange('map_seed', s.seed);
+                            handleConfigChange('grid_size', s.gridSize);
                             setShowSeedHistory(false);
                           }}
                           style={{

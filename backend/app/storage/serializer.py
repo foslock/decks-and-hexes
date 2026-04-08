@@ -530,7 +530,11 @@ def _serialize_neutral_market(
     stacks: dict[str, list[dict[str, Any]]] = {}
     for base_id, copies in market.stacks.items():
         stacks[base_id] = _serialize_card_list(copies, registry)
-    return {"stacks": stacks}
+    # Save card templates so sold-out stacks can still be displayed
+    templates: dict[str, dict[str, Any]] = {}
+    for base_id, card in market.card_templates.items():
+        templates[base_id] = _serialize_card_ref(card, registry)
+    return {"stacks": stacks, "card_templates": templates}
 
 
 def _deserialize_neutral_market(
@@ -539,6 +543,12 @@ def _deserialize_neutral_market(
     market = NeutralMarket()
     for base_id, copies_data in data.get("stacks", {}).items():
         market.stacks[base_id] = _deserialize_card_list(copies_data, registry)
+    for base_id, tmpl_data in data.get("card_templates", {}).items():
+        market.card_templates[base_id] = _deserialize_card_ref(tmpl_data, registry)
+    # Backfill templates from existing copies for older saves
+    for base_id, copies in market.stacks.items():
+        if base_id not in market.card_templates and copies:
+            market.card_templates[base_id] = copies[0]
     return market
 
 

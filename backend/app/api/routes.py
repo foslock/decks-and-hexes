@@ -504,6 +504,7 @@ class TestSetStatsRequest(BaseModel):
     player_id: str
     vp: Optional[int] = None
     resources: Optional[int] = None
+    actions: Optional[int] = None
 
 
 @router.post("/games/{game_id}/test/give-card")
@@ -561,6 +562,9 @@ async def test_set_stats(game_id: str, req: TestSetStatsRequest) -> dict[str, An
     if req.resources is not None:
         player.resources = req.resources
         changes.append(f"Resources={req.resources}")
+    if req.actions is not None:
+        player.actions_available = req.actions
+        changes.append(f"Actions={req.actions}")
 
     if changes:
         game._log(f"[TEST] {player.name}: {', '.join(changes)}", actor=req.player_id)

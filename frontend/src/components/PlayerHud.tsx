@@ -198,7 +198,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           zIndex: 20000,
           pointerEvents: 'none',
         }}>
-          ★ {player.name} has reached the VP target — game ends next round
+          ★ {player.name} has reached the VP target — game ends after this round
         </span>,
         document.body
       )}

@@ -106,17 +106,20 @@ function CompactShopCard({
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
   const typeColor = getCardDisplayColor(card);
   const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
-  const buyColor = !canAfford || disabled ? '#333' : '#4a9eff';
+  const soldOut = remaining === 0;
+  const buyColor = soldOut || !canAfford || disabled ? '#333' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase
     ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this turn`).join('\n')
     : '';
-  const buyTooltip = disabledTooltip
+  const buyTooltip = soldOut
+    ? 'Sold out'
+    : disabledTooltip
     ? disabledTooltip
     : [
         `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
         purchaseLines,
       ].filter(Boolean).join('\n');
-  const buyLabel = remaining !== null ? `Buy (${remaining} left)` : 'Buy';
+  const buyLabel = soldOut ? 'Sold Out' : remaining !== null ? `Buy (${remaining} left)` : 'Buy';
   return (
     <div
       data-card-id={card.id}
@@ -126,7 +129,7 @@ function CompactShopCard({
         display: 'flex',
         flexDirection: 'column',
         gap: 4,
-        opacity: disabled || !canAfford ? 0.5 : 1,
+        opacity: soldOut ? 0.35 : disabled || !canAfford ? 0.5 : 1,
       }}
     >
       {/* Card element — same dimensions as CardHand compact cards */}
@@ -169,7 +172,7 @@ function CompactShopCard({
       {/* Buy button below card */}
       <IrreversibleButton
         onClick={onBuy}
-        disabled={disabled || !canAfford}
+        disabled={disabled || !canAfford || soldOut}
         tooltip={buyTooltip}
         tooltipDelay={undefined}
         style={{
@@ -181,7 +184,7 @@ function CompactShopCard({
           color: '#fff',
           fontSize: 11,
           fontWeight: 'bold',
-          cursor: disabled || !canAfford ? 'not-allowed' : 'pointer',
+          cursor: disabled || !canAfford || soldOut ? 'not-allowed' : 'pointer',
           ...(purchaseHighlight || hasCurrentTurnPurchase ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
         }}
       >
@@ -537,7 +540,7 @@ export default function ShopOverlay({
                       );
                     }
                     const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
-                    const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
+                    const canAfford = effCost !== null && playerResources >= (effCost ?? 0);
                     return (
                       <CompactShopCard
                         key={card.id}
@@ -562,15 +565,15 @@ export default function ShopOverlay({
                   }>
                     <button
                       onClick={onReroll}
-                      disabled={disabled || (!testMode && freeRerolls <= 0 && playerResources < 2)}
+                      disabled={disabled || (freeRerolls <= 0 && playerResources < 2)}
                       style={{
                         fontSize: 14,
                         padding: '8px 14px',
-                        background: freeRerolls > 0 ? '#2a5a2e' : (testMode || playerResources >= 2) && !disabled ? '#cc7a2a' : '#333',
-                        border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : (testMode || playerResources >= 2) && !disabled ? '#cc7a2a' : '#555'}`,
+                        background: freeRerolls > 0 ? '#2a5a2e' : playerResources >= 2 && !disabled ? '#cc7a2a' : '#333',
+                        border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : playerResources >= 2 && !disabled ? '#cc7a2a' : '#555'}`,
                         borderRadius: 6,
-                        color: (testMode || freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
-                        cursor: disabled || (!testMode && freeRerolls <= 0 && playerResources < 2) ? 'not-allowed' : 'pointer',
+                        color: (freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
+                        cursor: disabled || (freeRerolls <= 0 && playerResources < 2) ? 'not-allowed' : 'pointer',
                         whiteSpace: 'nowrap',
                         ...(freeRerolls > 0 && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
                       }}
@@ -592,7 +595,7 @@ export default function ShopOverlay({
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
                 {[...neutralMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
-                  const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
+                  const canAfford = effCost !== null && playerResources >= (effCost ?? 0);
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
                   const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
                   return (
@@ -643,15 +646,15 @@ export default function ShopOverlay({
                 )}
               <button
                 onClick={buyUpgradeWithSound}
-                disabled={disabled || (!testMode && playerResources < 4)}
+                disabled={disabled || playerResources < 4}
                 style={{
                   fontSize: 14,
                   padding: '8px 16px',
-                  background: (testMode || playerResources >= 4) && !disabled ? '#cc7a2a' : '#333',
-                  border: `1px solid ${(testMode || playerResources >= 4) && !disabled ? '#cc7a2a' : '#555'}`,
+                  background: playerResources >= 4 && !disabled ? '#cc7a2a' : '#333',
+                  border: `1px solid ${playerResources >= 4 && !disabled ? '#cc7a2a' : '#555'}`,
                   borderRadius: 6,
-                  color: (testMode || playerResources >= 4) && !disabled ? '#fff' : '#555',
-                  cursor: disabled || (!testMode && playerResources < 4) ? 'not-allowed' : 'pointer',
+                  color: playerResources >= 4 && !disabled ? '#fff' : '#555',
+                  cursor: disabled || playerResources < 4 ? 'not-allowed' : 'pointer',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
                 }}

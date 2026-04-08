@@ -23,6 +23,8 @@ interface ResolveOverlayProps {
   steps: ResolutionStep[];
   gridTransform: GridTransform | null;
   gridRect: DOMRect | null;
+  /** Ref to the grid container element — used for live rect measurement */
+  gridContainerRef?: React.RefObject<HTMLDivElement | null>;
   /** Called when a step finishes its winner_grow phase (tile should change color). */
   onStepApply?: (stepIndex: number) => void;
   /** Called after all steps have been animated. */
@@ -48,7 +50,7 @@ type StepStage = 'numbers_move' | 'winner_grow' | 'done';
  * one-by-one: power numbers fly in from source tiles, bounce at the center,
  * then the winner's number grows while losers fade.
  */
-export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepApply, onComplete }: ResolveOverlayProps) {
+export default function ResolveOverlay({ steps, gridTransform, gridRect, gridContainerRef, onStepApply, onComplete }: ResolveOverlayProps) {
   const animMode = useAnimationMode();
   const isOff = animMode === 'off';
   const animSpeed = useAnimationSpeed();
@@ -69,9 +71,12 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
 
   const step = steps[currentIdx] as ResolutionStep | undefined;
 
-  // Convert hex coords to screen coords
+  // Convert hex coords to screen coords (uses live DOM measurement for accuracy)
   const toScreen = useCallback((q: number, r: number) => {
-    if (!gridTransform || !gridRect) return { x: 0, y: 0 };
+    if (!gridTransform) return { x: 0, y: 0 };
+    // Prefer live DOM rect for accuracy; fall back to prop
+    const rect = gridContainerRef?.current?.getBoundingClientRect() ?? gridRect;
+    if (!rect) return { x: 0, y: 0 };
     const local = axialToPixel(q, r);
     // Rotation-aware: apply pivot-based transform
     const relX = (local.x - gridTransform.pivotX) * gridTransform.scale;
@@ -79,10 +84,10 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
     const cos = Math.cos(gridTransform.rotation);
     const sin = Math.sin(gridTransform.rotation);
     return {
-      x: relX * cos - relY * sin + gridRect.width / 2 + gridRect.left,
-      y: relX * sin + relY * cos + gridRect.height / 2 + gridRect.top,
+      x: relX * cos - relY * sin + rect.width / 2 + rect.left,
+      y: relX * sin + relY * cos + rect.height / 2 + rect.top,
     };
-  }, [gridTransform, gridRect]);
+  }, [gridTransform, gridRect, gridContainerRef]);
 
   // Build the numbers for current step
   const numbers: ActiveNumber[] = [];

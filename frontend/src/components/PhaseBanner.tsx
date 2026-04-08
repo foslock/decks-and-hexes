@@ -17,7 +17,7 @@ interface PhaseBannerProps {
 
 const PHASE_LABELS: Record<string, string> = {
   upkeep: 'Upkeep',
-  play: 'Play',
+  play: 'Play Cards',
   reveal: 'Resolve',
   buy: 'Buy',
 };

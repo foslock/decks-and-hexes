@@ -378,10 +378,11 @@ export async function testSetStats(
   playerId: string,
   vp?: number,
   resources?: number,
+  actions?: number,
 ): Promise<{ message: string; state: GameState }> {
   return request(`/games/${gameId}/test/set-stats`, {
     method: 'POST',
-    body: JSON.stringify({ player_id: playerId, vp, resources }),
+    body: JSON.stringify({ player_id: playerId, vp, resources, actions }),
   });
 }
 

@@ -742,7 +742,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     // border edges meet, the inset is extended so the perpendicular shadow depth reaches the full INSET distance.
     {
       const INSET = 8; // px inward from edge where shadow begins
-      const MAX_ALPHA = 0.35; // darkest at the edge
+      const MAX_ALPHA = 0.55; // darkest at the edge
       const STRIPS = 4; // number of gradient bands
       const STD_FRAC = INSET / HEX_SIZE; // radial inset fraction for single-border vertices
       const CORNER_FRAC = INSET / (HEX_SIZE * Math.sin(Math.PI / 3)); // extended inset at double-border corners

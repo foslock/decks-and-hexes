@@ -554,6 +554,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [testVp, setTestVp] = useState('');
   const [testResources, setTestResources] = useState('');
   const [testRound, setTestRound] = useState('');
+  const [testActions, setTestActions] = useState('');
   // Surge multi-target mode
   const [surgeTargets, setSurgeTargets] = useState<[number, number][]>([]);
   const [surgeCardIndex, setSurgeCardIndex] = useState<number | null>(null);
@@ -648,6 +649,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // (resolveFinishedStateRef removed — server holds state at REVEAL, client calls advanceResolve when done)
   const [gridRect, setGridRect] = useState<DOMRect | null>(null);
   const [gridTransformSnapshot, setGridTransformSnapshot] = useState<GridTransform | null>(null);
+  const [gridRectSnapshot, setGridRectSnapshot] = useState<DOMRect | null>(null);
   const pendingStateRef = useRef<GameState | null>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridTransformRef = useRef<GridTransform | null>(null);
@@ -919,6 +921,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setResolveDisplayState(preResolveState);
         setResolutionSteps(steps);
         setGridTransformSnapshot(gridTransformRef.current);
+        setGridRectSnapshot(gridContainerRef.current?.getBoundingClientRect() ?? null);
         setResolving(true);
         setInteractionBlocked(true);
         setBannerSubtitle('Battle & Expand');
@@ -979,7 +982,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           setBannerHoldUntilRelease(!animationOff);
         }
       } else if (phase === 'play') {
-        setBannerSubtitle('Choose Wisely');
+        setBannerSubtitle(null);
       } else if (phase === 'buy') {
         setBannerSubtitle('Grow Your Deck');
       } else {
@@ -2065,8 +2068,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (key === 'd') { setShowDeckViewer(p => { if (!p) { setShowShopOverlay(false); setShowCardBrowser(false); } return !p; }); return; }
       if (key === 's' && !e.ctrlKey && !e.metaKey) { setShowShopOverlay(p => { if (!p) { setShowDeckViewer(false); setShowCardBrowser(false); } return !p; }); return; }
 
-      // R key: rotate grid 30° clockwise (only when no popover is open)
-      if (key === 'r' && !showShopOverlay && !showCardBrowser && !showDeckViewer && !showFullLog && !showUpgradePreview) {
+      // R key: rotate grid 30° clockwise (only when no popover is open and not resolving)
+      if (key === 'r' && !showShopOverlay && !showCardBrowser && !showDeckViewer && !showFullLog && !showUpgradePreview && !resolving) {
         if (e.shiftKey) {
           handleRotateGridReverse();
         } else {
@@ -2353,7 +2356,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         onStateUpdate(result.state);
         // Chain into the play banner — sync ref so phase effect doesn't re-trigger
         prevPhaseRef.current = result.state.current_phase;
-        setBannerSubtitle('Choose Wisely');
+        setBannerSubtitle(null);
         setPhaseBanner('play');
         setBannerKey(k => k + 1);
       }).catch(() => {
@@ -2396,7 +2399,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       api.advanceUpkeep(gameState.id).then(result => {
         onStateUpdate(result.state);
         prevPhaseRef.current = result.state.current_phase;
-        setBannerSubtitle('Choose Wisely');
+        setBannerSubtitle(null);
         setPhaseBanner('play');
         setBannerKey(k => k + 1);
       }).catch(() => {
@@ -2658,10 +2661,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [gameState.id, activePlayerId, onStateUpdate]);
 
-  const handleTestSetStats = useCallback(async (vp?: number, resources?: number) => {
+  const handleTestSetStats = useCallback(async (vp?: number, resources?: number, actions?: number) => {
     try {
       setError(null);
-      const result = await api.testSetStats(gameState.id, activePlayerId, vp, resources);
+      const result = await api.testSetStats(gameState.id, activePlayerId, vp, resources, actions);
       onStateUpdate(result.state);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -3251,8 +3254,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               width: 'fit-content',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, whiteSpace: 'nowrap' }}>
-                <span style={{ fontSize: 16, fontWeight: 'bold', color: '#fff' }}>
-                  Round {gameState.current_round}
+                <span style={{
+                  fontSize: 16, fontWeight: 'bold',
+                  ...(gameState.max_rounds && gameState.current_round >= gameState.max_rounds
+                    ? { color: '#ffe14d', animation: 'finalRoundGlow 2s ease-in-out infinite' }
+                    : { color: '#fff' }),
+                }}>
+                  {gameState.max_rounds && gameState.current_round >= gameState.max_rounds
+                    ? 'Final Round'
+                    : `Round ${gameState.current_round}`}
                 </span>
                 <PhaseIndicatorPill phase={phase} />
               </div>
@@ -3572,7 +3582,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     isMultiplayer={isMultiplayer}
                     isHost={mpIsHost}
                     mapSeed={gameState.map_seed}
-                    onRotateGrid={handleRotateGrid}
+                    onRotateGrid={resolving ? undefined : handleRotateGrid}
                     onLeaveGame={isMultiplayer && onLeaveGame ? async () => {
                       if (mpPlayerId && mpToken) {
                         try { await import('../api/client').then(api => api.leaveGame(gameState.id, mpPlayerId, mpToken)); } catch (e) { console.warn('leaveGame failed:', e); }
@@ -3632,6 +3642,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                               <input type="number" value={testResources} onChange={e => setTestResources(e.target.value)} placeholder={String(activePlayer?.resources ?? 0)}
                                 style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
                               <button onClick={() => { if (testResources !== '') handleTestSetStats(undefined, Number(testResources)); }}
+                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ color: '#888', marginBottom: 2 }}>Set {activePlayer?.name} Actions ({activePlayer?.actions_used ?? 0}/{activePlayer?.actions_available ?? 0} used):</div>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <input type="number" value={testActions} onChange={e => setTestActions(e.target.value)} placeholder={String(activePlayer?.actions_available ?? 0)}
+                                style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
+                              <button onClick={() => { if (testActions !== '') handleTestSetStats(undefined, undefined, Number(testActions)); }}
                                 style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>
@@ -4281,7 +4300,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         <ResolveOverlay
           steps={resolutionSteps}
           gridTransform={gridTransformSnapshot}
-          gridRect={gridRect}
+          gridRect={gridRectSnapshot ?? gridRect}
+          gridContainerRef={gridContainerRef}
           onStepApply={applyResolveStep}
           onComplete={handleResolveComplete}
         />
@@ -4699,6 +4719,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         }
         .hud-btn { transition: box-shadow 0.2s ease; }
         .hud-btn:hover { box-shadow: 0 0 8px rgba(160, 170, 255, 0.45); }
+        @keyframes finalRoundGlow {
+          0%, 100% { text-shadow: 0 0 6px rgba(255, 225, 77, 0.4), 0 0 12px rgba(255, 225, 77, 0.2); }
+          50% { text-shadow: 0 0 10px rgba(255, 225, 77, 0.8), 0 0 20px rgba(255, 225, 77, 0.4), 0 0 30px rgba(255, 225, 77, 0.2); }
+        }
         @keyframes playerEffectPopup {
           0% { opacity: 0; transform: translateX(-50%) translateY(10px) scale(0.8); }
           10% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.05); }
