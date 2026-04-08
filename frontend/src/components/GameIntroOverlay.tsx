@@ -84,6 +84,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
   }, [animOff, playerCount, animSpeed]);
 
   const handleReady = () => {
+    if (fadingOut) return; // already transitioning
     if (animOff) {
       onReadyRef.current();
       return;
@@ -91,6 +92,19 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
     setFadingOut(true);
     setTimeout(() => onReadyRef.current(), Math.round(600 * animSpeed));
   };
+
+  // Allow Enter key to trigger "I'm Ready" once the button is visible
+  useEffect(() => {
+    if (!readyVisible || fadingOut) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleReady();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [readyVisible, fadingOut]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const slideDur = animOff ? 0 : 0.8 * animSpeed;
   const slideStyle = (visible: boolean, delayMs?: number): React.CSSProperties => ({

@@ -36,11 +36,15 @@ export function renderSubtitlePart(
   const hasStar = part.text.includes('★');
   const isDyn = opts?.showDynamic && part.dynamic;
 
-  const style: React.CSSProperties | undefined = hasStar
-    ? undefined  // stars are colored inline
-    : isDyn
-      ? { color: '#ffe14d', fontWeight: 'bold' }
-      : undefined;
+  const isGlow = part.glow;
+
+  const style: React.CSSProperties | undefined = isGlow
+    ? { color: '#ffd700', fontWeight: 'bold', textShadow: '0 0 6px rgba(255, 215, 0, 0.8), 0 0 12px rgba(255, 215, 0, 0.4)' }
+    : hasStar
+      ? undefined  // stars are colored inline
+      : isDyn
+        ? { color: '#ffe14d', fontWeight: 'bold' }
+        : undefined;
 
   const className = isDyn && !hasStar ? 'dynamic-value' : undefined;
 

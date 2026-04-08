@@ -26,6 +26,7 @@ export interface Card {
   trash_on_use: boolean;
   trash_immune?: boolean;
   stackable: boolean;
+  granted_stackable?: boolean;
   forced_discard: number;
   draw_cards: number;
   defense_bonus: number;
@@ -43,7 +44,7 @@ export interface Card {
   upgrade_description?: string;
   name_upgraded?: string;
   starter: boolean;
-  effects?: { type: string; condition: string; value: number; upgraded_value?: number; target?: string; metadata?: Record<string, unknown> }[];
+  effects?: { type: string; condition: string; value: number; upgraded_value?: number; target?: string; condition_threshold?: number; metadata?: Record<string, unknown> }[];
   upgraded_stats?: {
     power?: number;
     resource_gain?: number;
@@ -127,7 +128,8 @@ export interface ResolutionStep {
   defender_power: number;
   winner_id: string | null;
   previous_owner: string | null;
-  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held';
+  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate';
+  vp_value?: number;  // Consecrate: new VP value of the tile after enhancement
 }
 
 export interface PlayerEffect {

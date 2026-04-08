@@ -1081,6 +1081,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
         if tile.is_base:
             return False, f"{card.name} cannot target a base tile"
 
+        # Consecrate: must target a VP tile connected to base
+        if card.effects and any(e.type == EffectType.ENHANCE_VP_TILE for e in card.effects):
+            if not tile.is_vp:
+                return False, f"{card.name} must target a VP tile"
+            connected = game.grid.get_connected_tiles(player_id)
+            if (tile.q, tile.r) not in connected:
+                return False, f"{card.name} must target a VP tile connected to your base"
+
     # Validate extra targets for multi-target cards (Surge)
     validated_extra: list[tuple[int, int]] = []
     if card.card_type == CardType.CLAIM and card.effective_multi_target_count > 0 and extra_targets:
@@ -1678,6 +1686,30 @@ def execute_reveal(game: GameState) -> GameState:
             resolve_on_resolution_effects(game, player, card, action,
                                           claim_results=claim_results)
 
+        # Consecrate: add resolution step for VP tile enhancement animation
+        if card.effects and any(e.type == EffectType.ENHANCE_VP_TILE for e in card.effects):
+            if action.target_q is not None:
+                _tr = action.target_r if action.target_r is not None else 0
+                _cons_tile = game.grid.get_tile(action.target_q, _tr)
+                _vp_bonus = 1
+                if card.is_upgraded:
+                    for eff in card.effects:
+                        if eff.type == EffectType.ENHANCE_VP_TILE:
+                            _vp_bonus = eff.metadata.get("upgraded_bonus", 2)
+                            break
+                game.resolution_steps.append({
+                    "tile_key": f"{action.target_q},{_tr}",
+                    "q": action.target_q, "r": _tr,
+                    "contested": False,
+                    "claimants": [{"player_id": pid, "power": 0, "source_q": None, "source_r": None}],
+                    "defender_id": None,
+                    "defender_power": 0,
+                    "winner_id": pid,
+                    "previous_owner": pid,
+                    "outcome": "consecrate",
+                    "vp_value": _cons_tile.vp_value if _cons_tile else _vp_bonus,
+                })
+
         # Trash on use
         if card.effective_trash_on_use:
             player.trash.append(card)
@@ -2136,6 +2168,11 @@ def execute_end_of_turn(game: GameState) -> GameState:
         player = game.players[pid]
         if player.has_left:
             continue
+        # Reset granted_stackable on all cards (Rally Cry is one-turn only)
+        for card in player.hand + player.deck.cards + player.deck.discard:
+            if card.granted_stackable:
+                card.stackable = False
+                card.granted_stackable = False
         # Discard remaining hand
         player.deck.add_to_discard(player.hand)
         player.hand = []

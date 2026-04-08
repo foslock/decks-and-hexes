@@ -126,7 +126,8 @@ function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { l
     return { label: 'Waiting', color: '#888' };
   }
   if (phase === 'reveal') return { label: 'Resolving', color: '#aa88ff' };
-  return { label: phase.replace(/_/g, ' '), color: '#888' };
+  const raw = phase.replace(/_/g, ' ');
+  return { label: raw.charAt(0).toUpperCase() + raw.slice(1), color: '#888' };
 }
 
 export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, isCurrentBuyer, phase, totalCards, tileCount, purchases, onPurchaseHover, onPurchaseLeave, vpTarget }: PlayerHudProps) {

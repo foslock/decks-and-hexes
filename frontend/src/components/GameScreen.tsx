@@ -92,6 +92,32 @@ function pixelToAxial(px: number, py: number): { q: number; r: number } {
   return { q: rq, r: rr };
 }
 
+/** Convert screen coordinates to hex-local coordinates, accounting for grid rotation. */
+function screenToLocal(canvasX: number, canvasY: number, transform: GridTransform, containerW: number, containerH: number): { x: number; y: number } {
+  const cx = containerW / 2;
+  const cy = containerH / 2;
+  const dx = canvasX - cx;
+  const dy = canvasY - cy;
+  const cos = Math.cos(-transform.rotation);
+  const sin = Math.sin(-transform.rotation);
+  return {
+    x: (dx * cos - dy * sin) / transform.scale + transform.pivotX,
+    y: (dx * sin + dy * cos) / transform.scale + transform.pivotY,
+  };
+}
+
+/** Convert hex-local coordinates to screen coordinates, accounting for grid rotation. */
+function localToScreen(localX: number, localY: number, transform: GridTransform, containerW: number, containerH: number, gRect: DOMRect): { x: number; y: number } {
+  const relX = (localX - transform.pivotX) * transform.scale;
+  const relY = (localY - transform.pivotY) * transform.scale;
+  const cos = Math.cos(transform.rotation);
+  const sin = Math.sin(transform.rotation);
+  return {
+    x: relX * cos - relY * sin + containerW / 2 + gRect.left,
+    y: relX * sin + relY * cos + containerH / 2 + gRect.top,
+  };
+}
+
 /** Hex distance in axial coordinates (module-level for use in effects before hooks). */
 function hexDist(q1: number, r1: number, q2: number, r2: number): number {
   return Math.max(Math.abs(q1 - q2), Math.abs(r1 - r2), Math.abs((q1 + r1) - (q2 + r2)));
@@ -654,6 +680,42 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+  // Grid rotation — starts oriented so active player's base is at the top
+  const computeBaseRotation = useCallback((playerId: string): number => {
+    const tileList = Object.values(gameState.grid.tiles);
+    if (tileList.length === 0) return 0;
+    // Compute grid center
+    let cx = 0, cy = 0;
+    for (const tile of tileList) {
+      const p = axialToPixel(tile.q, tile.r);
+      cx += p.x;
+      cy += p.y;
+    }
+    cx /= tileList.length;
+    cy /= tileList.length;
+    // Find the player's base tile
+    for (const tile of tileList) {
+      if (tile.is_base && tile.base_owner === playerId) {
+        const p = axialToPixel(tile.q, tile.r);
+        const baseAngle = Math.atan2(p.y - cy, p.x - cx);
+        // Target: base at upper-left (-5PI/6 ≈ -150°) with pointy-top offset (+PI/6)
+        // Raw rotation = targetAngle - baseAngle
+        const raw = -5 * Math.PI / 6 + Math.PI / 6 - baseAngle;
+        // Snap to nearest 30° (PI/6) increment so hex rows stay perfectly aligned
+        const step = Math.PI / 6;
+        return Math.round(raw / step) * step;
+      }
+    }
+    return 0;
+  }, [gameState.grid.tiles]);
+  const [gridRotation, setGridRotation] = useState(() => computeBaseRotation(gameState.player_order[activePlayerIndex]));
+  const handleRotateGrid = useCallback(() => {
+    setGridRotation(prev => prev + Math.PI / 6); // +30 degrees clockwise
+  }, []);
+  const handleRotateGridReverse = useCallback(() => {
+    setGridRotation(prev => prev - Math.PI / 6); // -30 degrees counter-clockwise
+  }, []);
 
   // "Drag a card" hint — shown once per round if no card played after 5s in play phase
   const [showDragHint, setShowDragHint] = useState(false);
@@ -1238,8 +1300,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const gRect = gridContainerRef.current?.getBoundingClientRect();
       if (transform && gRect) {
         const local = axialToPixel(q, r);
-        const screenX = local.x * transform.scale + transform.offsetX + gRect.left;
-        const screenY = local.y * transform.scale + transform.offsetY + gRect.top;
+        const containerW = gRect.width;
+        const containerH = gRect.height;
+        const screen = localToScreen(local.x, local.y, transform, containerW, containerH, gRect);
+        const screenX = screen.x;
+        const screenY = screen.y;
         setLastPlayedTarget({
           cardId: card.id, screenX, screenY,
           ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
@@ -1417,9 +1482,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const canvasY = screenY - rect.top;
       const transform = gridTransformRef.current;
       if (!transform) return;
-      const localX = (canvasX - transform.offsetX) / transform.scale;
-      const localY = (canvasY - transform.offsetY) / transform.scale;
-      const { q, r } = pixelToAxial(localX, localY);
+      const local = screenToLocal(canvasX, canvasY, transform, rect.width, rect.height);
+      const { q, r } = pixelToAxial(local.x, local.y);
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || !tile.owner || tile.owner === activePlayerId) {
@@ -1437,9 +1501,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const canvasY = screenY - rect.top;
       const transform = gridTransformRef.current;
       if (!transform) return;
-      const localX = (canvasX - transform.offsetX) / transform.scale;
-      const localY = (canvasY - transform.offsetY) / transform.scale;
-      const { q, r } = pixelToAxial(localX, localY);
+      const local = screenToLocal(canvasX, canvasY, transform, rect.width, rect.height);
+      const { q, r } = pixelToAxial(local.x, local.y);
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || tile.owner !== activePlayerId) {
@@ -1449,6 +1512,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (tile.is_base) {
         setError(`${card.name} cannot target a base tile`);
         return;
+      }
+      // Consecrate: must target a connected VP tile
+      if (card.effects?.some(e => e.type === 'enhance_vp_tile')) {
+        if (!tile.is_vp) {
+          setError(`${card.name} must target a VP tile`);
+          return;
+        }
+        const tileKey2 = `${q},${r}`;
+        if (!connectedVpTiles.has(tileKey2)) {
+          setError(`${card.name} must target a VP tile connected to your base`);
+          return;
+        }
       }
       playCardAtTile(cardIndex, q, r);
       return;
@@ -1478,9 +1553,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const canvasY = effectiveY - rect.top;
     const transform = gridTransformRef.current;
     if (!transform) return;
-    const localX = (canvasX - transform.offsetX) / transform.scale;
-    const localY = (canvasY - transform.offsetY) / transform.scale;
-    const { q, r } = pixelToAxial(localX, localY);
+    const local = screenToLocal(canvasX, canvasY, transform, rect.width, rect.height);
+    const { q, r } = pixelToAxial(local.x, local.y);
 
     // Verify the resolved hex actually exists on the grid
     const resolvedKey = `${q},${r}`;
@@ -1647,6 +1721,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (tile.is_base) {
         setError(`${card.name} cannot target a base tile`);
         return;
+      }
+      // Consecrate: must target a connected VP tile
+      if (card.effects?.some(e => e.type === 'enhance_vp_tile')) {
+        if (!tile.is_vp) {
+          setError(`${card.name} must target a VP tile`);
+          return;
+        }
+        const tileKey2 = `${q},${r}`;
+        if (!connectedVpTiles.has(tileKey2)) {
+          setError(`${card.name} must target a VP tile connected to your base`);
+          return;
+        }
       }
       sound.tileSelect();
       await playCardAtTile(selectedCardIndex, q, r);
@@ -1978,6 +2064,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (key === 'd') { setShowDeckViewer(p => { if (!p) { setShowShopOverlay(false); setShowCardBrowser(false); } return !p; }); return; }
       if (key === 's' && !e.ctrlKey && !e.metaKey) { setShowShopOverlay(p => { if (!p) { setShowDeckViewer(false); setShowCardBrowser(false); } return !p; }); return; }
 
+      // R key: rotate grid 30° clockwise (only when no popover is open)
+      if (key === 'r' && !showShopOverlay && !showCardBrowser && !showDeckViewer && !showFullLog && !showUpgradePreview) {
+        if (e.shiftKey) {
+          handleRotateGridReverse();
+        } else {
+          handleRotateGrid();
+        }
+        return;
+      }
+
       // Enter key: play engine card, done reviewing, or hold-to-submit/end-turn
       if (e.key === 'Enter') {
         if (e.repeat) return; // prevent repeated keydown from re-triggering
@@ -2060,7 +2156,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver]);
+  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -2448,6 +2544,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           owner: step.winner_id,
         };
       }
+      // Consecrate: update tile VP value so stars re-render
+      if (tile && step.outcome === 'consecrate' && step.vp_value != null) {
+        newTiles[step.tile_key] = {
+          ...tile,
+          vp_value: step.vp_value,
+        };
+      }
 
       // Move resolved claim cards from planned_actions → discard for each claimant
       const newPlayers = { ...prev.players };
@@ -2787,14 +2890,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return valid;
     }
 
-    // Engine cards targeting own tiles (Exodus, Scorched Retreat): own non-base, non-blocked tiles
+    // Engine cards targeting own tiles
     if (card.card_type === 'engine' && card.target_own_tile) {
       const valid = new Set<string>();
       const tiles = gameState.grid?.tiles;
       if (tiles) {
-        for (const [key, tile] of Object.entries(tiles)) {
-          if (tile.owner === activePlayerId && !tile.is_base && !tile.is_blocked) {
-            valid.add(key);
+        // Consecrate: only connected VP tiles
+        const isConsecrate = card.effects?.some(e => e.type === 'enhance_vp_tile');
+        if (isConsecrate) {
+          for (const key of connectedVpTiles) {
+            const tile = tiles[key];
+            if (tile && tile.owner === activePlayerId) {
+              valid.add(key);
+            }
+          }
+        } else {
+          for (const [key, tile] of Object.entries(tiles)) {
+            if (tile.owner === activePlayerId && !tile.is_base && !tile.is_blocked) {
+              valid.add(key);
+            }
           }
         }
       }
@@ -2824,7 +2938,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       }
     }
     return valid;
-  }, [getValidClaimTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId]);
+  }, [getValidClaimTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId, connectedVpTiles]);
 
   // Helper: find closest tile owned by a player to a target position
   const findClosestOwnedTile = useCallback((
@@ -2932,15 +3046,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (!activePlayer?.planned_actions) return undefined;
     const map = new Map<string, PlannedActionIcon>();
 
-    const addToMap = (key: string, type: string, power: number, name: string, card: Card) => {
+    const addToMap = (key: string, type: string, power: number, name: string, card: Card, effectivePower?: number) => {
       const existing = map.get(key);
       if (existing) {
         // Stackable: accumulate power from multiple cards on the same tile
         existing.power += power;
         existing.name = `${existing.name} + ${name}`;
         existing.card = card;
+        existing.allCards.push({ card, effectivePower });
       } else {
-        map.set(key, { type, power, name, card });
+        map.set(key, { type, power, name, card, allCards: [{ card, effectivePower }] });
       }
     };
 
@@ -2951,7 +3066,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const type = action.card.card_type === 'engine' && action.card.target_own_tile ? 'abandon' : action.card.card_type;
         const effectivePow = action.effective_power ?? action.card.power;
         const power = type === 'defense' ? action.card.defense_bonus : effectivePow;
-        addToMap(key, type, power, action.card.name, action.card);
+        addToMap(key, type, power, action.card.name, action.card, effectivePow);
 
         // Also show defense overlay on extra targets (multi-tile defense like Bulwark)
         if (type === 'defense' && action.extra_targets) {
@@ -2964,7 +3079,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (type === 'claim' && action.extra_targets) {
           for (const [eq, er] of action.extra_targets) {
             const extraKey = `${eq},${er}`;
-            addToMap(extraKey, type, effectivePow, action.card.name, action.card);
+            addToMap(extraKey, type, effectivePow, action.card.name, action.card, effectivePow);
           }
         }
       }
@@ -3026,7 +3141,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 const card = highlightCard?.card_type === 'claim' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
                     ? activePlayer?.hand[draggingCardIndex] : null;
-                if (card) return getValidClaimTiles(card);
+                if (card) return getAllValidPlayTiles(card);
                 // Defense card: highlight own tiles
                 const defCard = highlightCard?.card_type === 'defense' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'defense'
@@ -3056,6 +3171,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     && activePlayer?.hand[draggingCardIndex]?.target_own_tile
                     ? activePlayer?.hand[draggingCardIndex] : null;
                 if (ownTileEngCard) {
+                  const isConsecrate = ownTileEngCard.effects?.some(e => e.type === 'enhance_vp_tile');
+                  if (isConsecrate) {
+                    const valid = new Set<string>();
+                    for (const key of connectedVpTiles) {
+                      const t = displayState.grid.tiles[key];
+                      if (t && t.owner === activePlayerId) valid.add(key);
+                    }
+                    return valid;
+                  }
                   const ownNonBase = new Set<string>();
                   for (const [k, t] of Object.entries(displayState.grid.tiles)) {
                     if (t.owner === activePlayerId && !t.is_base) ownNonBase.add(k);
@@ -3071,6 +3195,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               borderTiles={phase === 'play' ? adjacentTiles : undefined}
               playerInfo={playerInfo}
               transformRef={gridTransformRef}
+              gridRotation={gridRotation}
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
               plannedActions={phase === 'play' ? plannedActions : undefined}
               previewCard={phase === 'play' ? (() => {
@@ -3436,6 +3561,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     isMultiplayer={isMultiplayer}
                     isHost={mpIsHost}
                     mapSeed={gameState.map_seed}
+                    onRotateGrid={handleRotateGrid}
                     onLeaveGame={isMultiplayer && onLeaveGame ? async () => {
                       if (mpPlayerId && mpToken) {
                         try { await import('../api/client').then(api => api.leaveGame(gameState.id, mpPlayerId, mpToken)); } catch (e) { console.warn('leaveGame failed:', e); }
@@ -3615,9 +3741,49 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           </div>
 
           {/* Bottom bar: buttons (right) */}
-          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
+          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'flex-end', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
             <div style={{ flex: 1 }} />
-            {/* Buttons — right aligned */}
+            {/* Buttons + waiting indicators — right aligned, stacked vertically */}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            {/* Multiplayer: waiting for other players indicator */}
+            {isMultiplayer && activePlayer && (
+              (phase === 'play' && activePlayer.has_submitted_play && !resolving) ||
+              (phase === 'reveal' && activePlayer.has_acknowledged_resolve && !resolving && !phaseBanner)
+            ) && (
+              <div style={{
+                padding: '4px 12px',
+                background: 'rgba(74, 158, 255, 0.15)',
+                border: '1px solid rgba(74, 158, 255, 0.3)',
+                borderRadius: 6,
+                color: '#4a9eff',
+                fontSize: 12,
+                fontWeight: 'bold',
+                animation: 'pulse 2s ease-in-out infinite',
+              }}>
+                Waiting for other players...
+              </div>
+            )}
+            {/* Sequential buy: waiting for current buyer */}
+            {phase === 'buy' && activePlayer && activePlayer.has_ended_turn && activePlayerId !== gameState.current_buyer_id && !phaseBanner && (() => {
+              const buyerId = gameState.current_buyer_id;
+              const buyerName = buyerId ? gameState.players[buyerId]?.name : null;
+              return buyerName ? (
+                <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
+                  <div style={{
+                    padding: '4px 12px',
+                    background: 'rgba(255, 170, 74, 0.15)',
+                    border: '1px solid rgba(255, 170, 74, 0.3)',
+                    borderRadius: 6,
+                    color: '#ffaa4a',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    animation: 'pulse 2s ease-in-out infinite',
+                  }}>
+                    Waiting for {buyerName} to buy...
+                  </div>
+                </div>
+              ) : null;
+            })()}
             {/* Test-mode Discard & Trash buttons */}
             {gameState.test_mode && phase === 'play' && activePlayer && !resolving &&
               selectedCard && selectedCardIndex !== null && surgeCardIndex === null && (
@@ -3673,8 +3839,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   <div style={{
                     position: 'absolute',
                     bottom: '100%',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
+                    right: 0,
                     marginBottom: 8,
                     zIndex: 100,
                     pointerEvents: 'none',
@@ -3929,45 +4094,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </div>
             )}
-            {/* Multiplayer: waiting for other players indicator */}
-            {isMultiplayer && activePlayer && (
-              (phase === 'play' && activePlayer.has_submitted_play && !resolving) ||
-              (phase === 'reveal' && activePlayer.has_acknowledged_resolve && !resolving && !phaseBanner)
-            ) && (
-              <div style={{
-                padding: '4px 12px',
-                background: 'rgba(74, 158, 255, 0.15)',
-                border: '1px solid rgba(74, 158, 255, 0.3)',
-                borderRadius: 6,
-                color: '#4a9eff',
-                fontSize: 12,
-                fontWeight: 'bold',
-                animation: 'pulse 2s ease-in-out infinite',
-              }}>
-                Waiting for other players...
-              </div>
-            )}
-            {/* Sequential buy: waiting for current buyer */}
-            {phase === 'buy' && activePlayer && activePlayer.has_ended_turn && activePlayerId !== gameState.current_buyer_id && !phaseBanner && (() => {
-              const buyerId = gameState.current_buyer_id;
-              const buyerName = buyerId ? gameState.players[buyerId]?.name : null;
-              return buyerName ? (
-                <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
-                  <div style={{
-                    padding: '4px 12px',
-                    background: 'rgba(255, 170, 74, 0.15)',
-                    border: '1px solid rgba(255, 170, 74, 0.3)',
-                    borderRadius: 6,
-                    color: '#ffaa4a',
-                    fontSize: 12,
-                    fontWeight: 'bold',
-                    animation: 'pulse 2s ease-in-out infinite',
-                  }}>
-                    Waiting for {buyerName} to buy...
-                  </div>
-                </div>
-              ) : null;
-            })()}
+            </div>
           </div>
         </div>
 
@@ -4335,10 +4462,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         // Helper: compute screen position from axial tile coords
         const tileToScreen = (q: number, r: number) => {
           const local = axialToPixel(q, r);
-          return {
-            x: local.x * transform.scale + transform.offsetX + rect.left,
-            y: local.y * transform.scale + transform.offsetY + rect.top,
-          };
+          return localToScreen(local.x, local.y, transform, rect.width, rect.height, rect);
         };
 
         // Collect flying card elements

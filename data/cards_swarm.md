@@ -257,7 +257,7 @@ cards:
 
     effects:
       - type: enhance_vp_tile
-        timing: immediate
+        timing: on_resolution
         metadata: {upgraded_bonus: 2}
 
   - id: swarm_nest

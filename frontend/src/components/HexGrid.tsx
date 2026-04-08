@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useCallback, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import type { HexTile, Card } from '../types/game';
 import { useTooltips } from './SettingsContext';
+import CompactCard, { COMPACT_CARD_WIDTH } from './CompactCard';
 
 // Flat-top hex geometry
 const HEX_SIZE = 32;
@@ -50,6 +52,9 @@ export interface GridTransform {
   scale: number;
   offsetX: number;
   offsetY: number;
+  rotation: number;  // radians
+  pivotX: number;
+  pivotY: number;
 }
 
 export interface PlannedActionIcon {
@@ -57,6 +62,8 @@ export interface PlannedActionIcon {
   power: number;
   name: string;
   card: Card;
+  /** All individual cards played on this tile (for multi-card hover preview) */
+  allCards: { card: Card; effectivePower?: number }[];
 }
 
 export interface ClaimChevron {
@@ -113,6 +120,8 @@ interface HexGridProps {
   onTileHoverEnd?: () => void;
   /** Build-from-center progress (0 = hidden, 1 = fully visible). Omit for instant render. */
   buildProgress?: number;
+  /** Grid rotation in radians. Animated smoothly via Pixi ticker. */
+  gridRotation?: number;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -268,6 +277,62 @@ function PlannedCardTooltip({ card, x, y, totalPower, displayName }: { card: Car
   );
 }
 
+/**
+ * Multi-card hover preview using CardFull, shown when hovering over tiles
+ * with planned actions. Max 4 cards per column, overflow into additional columns.
+ */
+function PlannedCardsPreview({ cards, x, y }: { cards: { card: Card; effectivePower?: number }[]; x: number; y: number }) {
+  const maxPerCol = 4;
+  const colGap = 6;
+  const rowGap = 4;
+  const cardW = COMPACT_CARD_WIDTH + 14; // card width + padding/border
+  const cardH = 42; // approximate compact card height
+  const numCols = Math.ceil(cards.length / maxPerCol);
+  const totalW = numCols * cardW + (numCols - 1) * colGap;
+  const rowsInFirstCol = Math.min(cards.length, maxPerCol);
+  const totalH = rowsInFirstCol * cardH + (rowsInFirstCol - 1) * rowGap;
+
+  // Position to the right of cursor, clamped to viewport
+  const margin = 14;
+  let left = x + margin;
+  let top = y - 10;
+
+  // Clamp right edge
+  if (left + totalW > window.innerWidth - 8) {
+    left = x - margin - totalW;
+  }
+  // Clamp bottom edge — push up if would overflow
+  if (top + totalH > window.innerHeight - 8) {
+    top = window.innerHeight - 8 - totalH;
+  }
+  // Clamp top edge
+  if (top < 8) top = 8;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      left,
+      top,
+      display: 'flex',
+      gap: colGap,
+      pointerEvents: 'none',
+      zIndex: 20000,
+    }}>
+      {Array.from({ length: numCols }, (_, col) => {
+        const colCards = cards.slice(col * maxPerCol, (col + 1) * maxPerCol);
+        return (
+          <div key={col} style={{ display: 'flex', flexDirection: 'column', gap: rowGap }}>
+            {colCards.map((entry, i) => {
+              const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
+              return <CompactCard key={i} card={c} />;
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Blend a hex color toward white by `amount` (0=no change, 1=white). */
 function lightenColor(color: number, amount: number): number {
   const r = (color >> 16) & 0xFF;
@@ -280,7 +345,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -308,7 +373,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const tileLabelRef = useRef<Map<string, Text>>(new Map());
   const hiddenLabelKeyRef = useRef<string | null>(null);
   const tileGraphicsRef = useRef<Map<string, { g: Graphics; baseColor: number; isBlocked: boolean; baseAlpha: number }>>(new Map());
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card; totalPower?: number; displayName?: string } | null>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card; totalPower?: number; displayName?: string; allCards?: { card: Card; effectivePower?: number }[] } | null>(null);
   const tooltipsEnabled = useTooltips();
   const tooltipsEnabledRef = useRef(tooltipsEnabled);
   tooltipsEnabledRef.current = tooltipsEnabled;
@@ -323,6 +388,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const reviewPulseGraphicsRef = useRef<Graphics | null>(null);
   const buildProgressRef = useRef(buildProgress);
   buildProgressRef.current = buildProgress;
+  const gridRotationRef = useRef(gridRotation ?? 0);
+  gridRotationRef.current = gridRotation ?? 0;
+  const currentRotationRef = useRef(gridRotation ?? 0);
+  const gridMidRef = useRef({ x: 0, y: 0 });
+  // Track all Text/Container children for counter-rotation during animation
+  const textChildrenRef = useRef<(Text | Container)[]>([]);
+  // Track VP tile indicator groups so hover preview labels can be parented inside them
+  const vpGroupsRef = useRef<Map<string, Container>>(new Map());
+  // Whether the current preview label is inside a VP group (skip individual counter-rotation)
+  const previewInGroupRef = useRef(false);
 
   tilesRef.current = tiles;
   highlightRef.current = highlightTiles;
@@ -383,16 +458,23 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
 
     hexContainer.scale.set(scale);
 
-    // Center based on actual bounding box midpoint
+    // Center based on actual bounding box midpoint, using pivot for rotation
     const midX = (minX + maxX) / 2;
     const midY = (minY + maxY) / 2;
-    const offsetX = app.screen.width / 2 - midX * scale;
-    const offsetY = app.screen.height / 2 - midY * scale;
-    hexContainer.position.set(offsetX, offsetY);
+    gridMidRef.current = { x: midX, y: midY };
+    hexContainer.pivot.set(midX, midY);
+    const screenCX = app.screen.width / 2;
+    const screenCY = app.screen.height / 2;
+    hexContainer.position.set(screenCX, screenCY);
+    hexContainer.rotation = currentRotationRef.current;
+
+    // Legacy offsetX/offsetY (non-rotated equivalent) for external callers
+    const offsetX = screenCX - midX * scale;
+    const offsetY = screenCY - midY * scale;
 
     // Expose transform so callers can invert screen→hex coordinates
     if (transformRefLocal.current) {
-      transformRefLocal.current.current = { scale, offsetX, offsetY };
+      transformRefLocal.current.current = { scale, offsetX, offsetY, rotation: currentRotationRef.current, pivotX: midX, pivotY: midY };
     }
   }, []);
 
@@ -534,7 +616,11 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           const isDefensive = !isPlayerTarget && !isAbandonEffect && (pCard.card_type === 'defense' || isOwnTile);
           let previewText: string;
           let previewColor: number;
-          if (isAbandonEffect) {
+          const isConsecratePreview = pCard.effects?.some(e => e.type === 'enhance_vp_tile');
+          if (isConsecratePreview) {
+            previewText = '+ ★';
+            previewColor = 0xffd700;
+          } else if (isAbandonEffect) {
             // Scorched Retreat / Exodus: show abandon icon instead of claim/defense
             const isBlock = pCard.effects?.some(e => e.type === 'abandon_and_block');
             previewText = isBlock ? '🚧' : '↘';
@@ -559,7 +645,6 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             previewText = `${icon}${spacing}${prefix}${previewPower}`;
             previewColor = 0xffffff;
           }
-          const textY = tile.is_vp ? y + 8 : y;
           const claimFontSize = 21;
           const lbl = new Text({
             text: previewText,
@@ -567,9 +652,19 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             resolution: Math.ceil(window.devicePixelRatio || 2),
           });
           lbl.anchor.set(0.5);
-          lbl.position.set(x, textY);
           lbl.alpha = 0.7;
-          hexC.addChild(lbl);
+          // If VP tile, add preview inside the VP group so it stays grouped with the star
+          const vpGroup = vpGroupsRef.current.get(key);
+          if (vpGroup) {
+            lbl.position.set(0, 8); // local offset below star within group
+            vpGroup.addChild(lbl);
+            previewInGroupRef.current = true;
+          } else {
+            lbl.position.set(x, y);
+            lbl.rotation = -currentRotationRef.current;
+            hexC.addChild(lbl);
+            previewInGroupRef.current = false;
+          }
           previewLabelRef.current = lbl;
         } else {
           // Not a valid target — clear any stale preview
@@ -582,7 +677,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         // Planned action card tooltip (always shown — critical gameplay info)
         const plannedAction = plannedActionsRef.current?.get(key);
         if (plannedAction) {
-          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name });
+          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name, allCards: plannedAction.allCards });
         } else if (tooltipsEnabledRef.current) {
           // Non-critical info tooltips (gated by Tooltips setting)
           const lines: string[] = [];
@@ -1072,35 +1167,60 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     // === PASS 8: Text labels — rendered last so they are always on top ===
     tileLabelRef.current.clear();
     hiddenLabelKeyRef.current = null;
+    textChildrenRef.current = [];
+    const counterRot = -currentRotationRef.current;
+    const vpGroups = new Map<string, Container>(); // tile key → VP indicator group container
+    vpGroupsRef.current = vpGroups;
     for (const [key, tile] of Object.entries(tiles)) {
       const { x, y } = axialToPixel(tile.q, tile.r);
       const labelAlpha = buildAlpha(tile.q, tile.r);
 
+      // --- VP tile indicators (star + optional defense/action) grouped in a Container ---
       if (tile.is_vp && !tile.is_blocked) {
-        const isPremium = tile.vp_value >= 2;
+        const vpVal = tile.vp_value || 1;
         const connected = connectedVpRef.current?.has(key) ?? false;
         const starChar = connected ? '★' : '☆';
         const starColor = connected
-          ? (isPremium ? 0xfff066 : 0xffd700)
+          ? (vpVal >= 2 ? 0xfff066 : 0xffd700)
           : 0x888888;
+        // Show individual stars up to 4, then "Nx★" for higher values
+        const starText = vpVal > 4
+          ? `${vpVal}×${starChar}`
+          : starChar.repeat(vpVal);
+        const starFontSize = vpVal === 1 ? 14 : vpVal <= 3 ? 11 : 10;
+
+        const group = new Container();
+        group.position.set(x, y);
+        group.rotation = counterRot;
+        group.alpha = labelAlpha;
+
         const star = new Text({
-          text: isPremium ? `${starChar}${starChar}` : starChar,
+          text: starText,
           style: new TextStyle({
-            fontSize: isPremium ? 11 : 14,
+            fontSize: starFontSize,
             fill: starColor,
-            letterSpacing: isPremium ? 1 : 0,
+            letterSpacing: vpVal > 1 && vpVal <= 4 ? 1 : 0,
             fontWeight: 'bold',
             ...(tile.owner ? { stroke: { color: 0x000000, width: 1 } } : {}),
           }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         star.anchor.set(0.5);
-        star.position.set(x, y - 8);
-        star.alpha = labelAlpha;
-        hexContainer.addChild(star);
+        star.position.set(0, -8);
+        group.addChild(star);
+
+        hexContainer.addChild(group);
+        textChildrenRef.current.push(group);
+        vpGroups.set(key, group);
       }
 
+      // --- Base tile indicators (castle + optional defense) grouped in a Container ---
       if (tile.is_base) {
+        const group = new Container();
+        group.position.set(x, y);
+        group.rotation = counterRot;
+        group.alpha = labelAlpha;
+
         const castle = new Text({
           text: '🏰',
           style: new TextStyle({
@@ -1109,11 +1229,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         castle.anchor.set(0.5);
-        castle.position.set(x + 1, y - 11);
-        castle.alpha = 0.8 * labelAlpha;
-        hexContainer.addChild(castle);
+        castle.position.set(1, -11);
+        castle.alpha = 0.8;
+        group.addChild(castle);
 
-        // Defense value below the castle (same layout as VP tiles)
         if (tile.defense_power > 0) {
           const baseDef = new Text({
             text: `🛡${tile.defense_power}`,
@@ -1126,25 +1245,33 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             resolution: Math.ceil(window.devicePixelRatio || 2),
           });
           baseDef.anchor.set(0.5);
-          baseDef.position.set(x, y + 9);
-          baseDef.alpha = labelAlpha;
-          hexContainer.addChild(baseDef);
+          baseDef.position.set(0, 9);
+          group.addChild(baseDef);
         }
+
+        hexContainer.addChild(group);
+        textChildrenRef.current.push(group);
       }
 
       if (tile.is_blocked) {
         // Deterministic pseudo-random flip based on tile coords for visual variety
         const flipHash = ((tile.q * 7 + tile.r * 13) & 1) === 0;
+        // Wrap in a Container at the tile center so counter-rotation keeps it centered
+        const mtnGroup = new Container();
+        mtnGroup.position.set(x, y);
+        mtnGroup.rotation = counterRot;
+        mtnGroup.alpha = labelAlpha;
         const mountain = new Text({
           text: '⛰️',
           style: new TextStyle({ fontSize: 40, fill: 0x888888 }),
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         mountain.anchor.set(0.5);
-        mountain.position.set(x, y - 4);
-        mountain.alpha = labelAlpha;
+        mountain.position.set(0, -4);
         if (flipHash) mountain.scale.x = -1;
-        hexContainer.addChild(mountain);
+        mtnGroup.addChild(mountain);
+        hexContainer.addChild(mtnGroup);
+        textChildrenRef.current.push(mtnGroup);
       }
 
       const inBorder = borders?.has(key);
@@ -1153,11 +1280,14 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       if (plannedAction) {
         // Determine icon: target for player-targeting, shield for defense, sword for attack, abandon for own-tile engine
         const isAbandon = plannedAction.type === 'abandon';
+        const isConsecrate = plannedAction.card.effects?.some(e => e.type === 'enhance_vp_tile');
         const isBlock = isAbandon && plannedAction.card.effects?.some(e => e.type === 'abandon_and_block');
         const isRubbleEffect = plannedAction.type === 'engine' && plannedAction.card.effects?.some(e => e.type === 'inject_rubble');
         const isPlayerTarget = plannedAction.type === 'engine' && (plannedAction.card.forced_discard > 0 || isRubbleEffect);
         const isDefensivePlay = !isPlayerTarget && !isAbandon && (plannedAction.type === 'defense' || tile.owner === activePlayer);
-        const label = isAbandon
+        const label = isConsecrate
+          ? '+ ★'
+          : isAbandon
           ? (isBlock ? '🚧' : '↘')
           : isRubbleEffect
             ? '🪨'
@@ -1166,9 +1296,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
               : isDefensivePlay
                 ? `🛡+${plannedAction.power}`
                 : `⚔ ${plannedAction.power}`;
-        const labelColor = isAbandon ? 0xff9944 : isPlayerTarget ? 0xff6666 : 0xffffff;
+        const labelColor = isConsecrate ? 0xffd700 : isAbandon ? 0xff9944 : isPlayerTarget ? 0xff6666 : 0xffffff;
         const claimFontSize = isAbandon ? 24 : isPlayerTarget ? 13 : 21;
-        const textY = tile.is_vp ? y + 8 : y;
 
         const actionLabel = new Text({
           text: label,
@@ -1181,9 +1310,19 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         actionLabel.anchor.set(0.5);
-        actionLabel.position.set(x, textY);
-        actionLabel.alpha = labelAlpha;
-        hexContainer.addChild(actionLabel);
+
+        // If this is a VP tile, add the action label into the VP group so it stays grouped with the star
+        const vpGroup = vpGroups.get(key);
+        if (vpGroup) {
+          actionLabel.position.set(0, 8); // local offset below star
+          vpGroup.addChild(actionLabel);
+        } else {
+          actionLabel.position.set(x, y);
+          actionLabel.alpha = labelAlpha;
+          actionLabel.rotation = counterRot;
+          hexContainer.addChild(actionLabel);
+          textChildrenRef.current.push(actionLabel);
+        }
         tileLabelRef.current.set(key, actionLabel);
       } else if (tile.defense_power > 0 && !tile.is_base) {
         const defColor = 0xffffff;
@@ -1198,10 +1337,19 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           resolution: Math.ceil(window.devicePixelRatio || 2),
         });
         def.anchor.set(0.5);
-        // VP tiles: below the star. Non-VP tiles: vertically centered.
-        def.position.set(x, tile.is_vp ? y + 12 : y);
-        def.alpha = labelAlpha;
-        hexContainer.addChild(def);
+
+        // If this is a VP tile, add defense into the VP group so it stays grouped with the star
+        const vpGroup = vpGroups.get(key);
+        if (vpGroup) {
+          def.position.set(0, 12); // local offset below star
+          vpGroup.addChild(def);
+        } else {
+          def.position.set(x, y);
+          def.alpha = labelAlpha;
+          def.rotation = counterRot;
+          hexContainer.addChild(def);
+          textChildrenRef.current.push(def);
+        }
         tileLabelRef.current.set(key, def);
       }
     }
@@ -1318,6 +1466,48 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       };
       app.ticker.add(highlightPulseFn);
 
+      // Rotation animation ticker — smoothly lerps toward target rotation
+      const rotationTickerFn = () => {
+        const target = gridRotationRef.current;
+        const current = currentRotationRef.current;
+        const diff = target - current;
+        if (Math.abs(diff) < 0.001) {
+          if (current !== target) {
+            currentRotationRef.current = target;
+            hexContainer.rotation = target;
+            // Final counter-rotation update
+            for (const t of textChildrenRef.current) {
+              if (!t.destroyed) t.rotation = -target;
+            }
+            if (previewLabelRef.current && !previewLabelRef.current.destroyed && !previewInGroupRef.current) {
+              previewLabelRef.current.rotation = -target;
+            }
+            // Update transform ref
+            if (transformRefLocal.current) {
+              const prev = transformRefLocal.current.current;
+              if (prev) transformRefLocal.current.current = { ...prev, rotation: target };
+            }
+          }
+          return;
+        }
+        const next = current + diff * 0.12;
+        currentRotationRef.current = next;
+        hexContainer.rotation = next;
+        // Counter-rotate all text to stay upright
+        for (const t of textChildrenRef.current) {
+          if (!t.destroyed) t.rotation = -next;
+        }
+        if (previewLabelRef.current && !previewLabelRef.current.destroyed && !previewInGroupRef.current) {
+          previewLabelRef.current.rotation = -next;
+        }
+        // Update transform ref for coordinate inversion
+        if (transformRefLocal.current) {
+          const prev = transformRefLocal.current.current;
+          if (prev) transformRefLocal.current.current = { ...prev, rotation: next };
+        }
+      };
+      app.ticker.add(rotationTickerFn);
+
       // Re-fit whenever the canvas is resized
       app.renderer.on('resize', fitGrid);
     });
@@ -1403,8 +1593,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         ref={containerRef}
         style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
       />
-      {tooltip && tooltip.card && (
-        <PlannedCardTooltip card={tooltip.card} x={tooltip.x} y={tooltip.y} totalPower={tooltip.totalPower} displayName={tooltip.displayName} />
+      {tooltip && tooltip.allCards && tooltip.allCards.length > 0 && createPortal(
+        <PlannedCardsPreview cards={tooltip.allCards} x={tooltip.x} y={tooltip.y} />,
+        document.body,
       )}
       {tooltip && tooltip.text && (
         <div style={{

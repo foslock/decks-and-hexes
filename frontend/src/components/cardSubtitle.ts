@@ -37,6 +37,8 @@ export interface SubtitlePart {
   text: string;
   /** True when this value was resolved from live game context (e.g. tile count). */
   dynamic?: boolean;
+  /** True for granted-stackable indicator — rendered bold yellow with glow. */
+  glow?: boolean;
 }
 
 /**
@@ -110,7 +112,8 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
     );
     const mtc = 1 + (card.multi_target_count || 0);
     const claimTileSuffix = mtc >= 2 ? ` · ${mtc}🔷` : '';
-    const stackIcon = card.stackable ? '↑' : '';
+    // Natively stackable cards show ↑ inline; granted stackable shows it as a separate glowing part
+    const stackIcon = (card.stackable && !card.granted_stackable) ? '↑' : '';
 
     if (ctx?.powerFrozen) {
       // Power already overridden with effective value — show as-is
@@ -146,6 +149,11 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       parts.push(p(`⚔️${card.power}/${card.power + bonusVal}${stackIcon}${claimTileSuffix}`));
     } else {
       parts.push(p(`⚔️${card.power}${stackIcon}${claimTileSuffix}`));
+    }
+
+    // Granted stackable indicator (Rally Cry) — shown as a separate glowing part
+    if (card.granted_stackable) {
+      parts.push({ text: '↑', glow: true });
     }
   }
 
@@ -305,7 +313,19 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
           parts.push(p('+1🃏/🃏'));
         }
       }
-      if (eff.type === 'free_reroll') parts.push(p('+1🎲'));
+      if (eff.type === 'free_reroll') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        parts.push(p(`+${val}🎲`));
+      }
+      if (eff.type === 'conditional_action') {
+        const threshold = eff.condition_threshold ?? 3;
+        const condParts = `≤${threshold}🃏, +${eff.value}⚡`;
+        if (isUpgraded) {
+          parts.push(p(`${condParts} · +1💰`));
+        } else {
+          parts.push(p(condParts));
+        }
+      }
       if (eff.type === 'grant_land_grants') {
         parts.push(p(isUpgraded ? '↓2🃏' : '↓🃏'));
         parts.push(p('↑🃏'));

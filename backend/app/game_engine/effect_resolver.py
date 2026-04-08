@@ -673,6 +673,7 @@ def _handle_grant_stackable(effect: Effect, ctx: EffectContext) -> None:
     for card in ctx.player.hand:
         if card.card_type == CardType.CLAIM and not card.stackable:
             card.stackable = True
+            card.granted_stackable = True
             count += 1
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} grants Stackable to {count} claim card(s)",

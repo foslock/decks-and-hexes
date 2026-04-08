@@ -73,9 +73,14 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
   const toScreen = useCallback((q: number, r: number) => {
     if (!gridTransform || !gridRect) return { x: 0, y: 0 };
     const local = axialToPixel(q, r);
+    // Rotation-aware: apply pivot-based transform
+    const relX = (local.x - gridTransform.pivotX) * gridTransform.scale;
+    const relY = (local.y - gridTransform.pivotY) * gridTransform.scale;
+    const cos = Math.cos(gridTransform.rotation);
+    const sin = Math.sin(gridTransform.rotation);
     return {
-      x: local.x * gridTransform.scale + gridTransform.offsetX + gridRect.left,
-      y: local.y * gridTransform.scale + gridTransform.offsetY + gridRect.top,
+      x: relX * cos - relY * sin + gridRect.width / 2 + gridRect.left,
+      y: relX * sin + relY * cos + gridRect.height / 2 + gridRect.top,
     };
   }, [gridTransform, gridRect]);
 
@@ -113,11 +118,12 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
     }
   }
 
-  const isContested = step?.contested && numbers.length > 1;
+  const isConsecrate = step?.outcome === 'consecrate';
+  const isContested = !isConsecrate && step?.contested && numbers.length > 1;
 
   // Timing
-  const moveMs = isOff ? 0 : Math.round((isContested ? 800 : 400) * animSpeed);
-  const growMs = isOff ? 0 : Math.round((isContested ? 1200 : 400) * animSpeed);
+  const moveMs = isOff ? 0 : Math.round((isConsecrate ? 600 : isContested ? 800 : 400) * animSpeed);
+  const growMs = isOff ? 0 : Math.round((isConsecrate ? 800 : isContested ? 1200 : 400) * animSpeed);
   const pauseMs = isOff ? 50 : Math.round(200 * animSpeed);
 
   const hasPositionData = !!(gridTransform && gridRect);
@@ -191,8 +197,56 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, onStepA
       pointerEvents: 'none',
       zIndex: 500,
     }}>
-      {/* Power numbers */}
-      {numbers.map((num, i) => {
+      {/* Consecrate star animation */}
+      {isConsecrate && step && (() => {
+        const target = toScreen(step.q, step.r);
+        const color = step.winner_id ? playerColorStr(step.winner_id) : '#ffd700';
+        // Star starts invisible, grows large during numbers_move, shrinks to rest during winner_grow
+        let scale = 0;
+        let opacity = 0;
+        let transition: string;
+        if (!numbersActive) {
+          scale = 0;
+          opacity = 0;
+          transition = 'none';
+        } else if (stage === 'numbers_move') {
+          scale = 2.5;
+          opacity = 1;
+          transition = `all ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.1)`;
+        } else if (stage === 'winner_grow') {
+          scale = 1;
+          opacity = 1;
+          transition = `all ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1)`;
+        } else {
+          scale = 1;
+          opacity = 0;
+          transition = `opacity ${pauseMs}ms ease`;
+        }
+        return (
+          <div
+            key="consecrate-star"
+            style={{
+              position: 'fixed',
+              left: target.x,
+              top: target.y,
+              transform: `translate(-50%, -50%) scale(${scale})`,
+              opacity,
+              transition,
+              fontSize: 28,
+              color: '#ffd700',
+              textShadow: `0 0 12px ${color}, 0 0 24px rgba(255, 215, 0, 0.6), 0 2px 4px rgba(0,0,0,0.8)`,
+              zIndex: 502,
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}
+          >
+            ★
+          </div>
+        );
+      })()}
+
+      {/* Power numbers (skip for Consecrate — star animation handles it) */}
+      {!isConsecrate && numbers.map((num, i) => {
         const color = playerColorStr(num.playerId);
         const isWinStage = stage === 'winner_grow';
 
