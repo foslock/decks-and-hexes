@@ -317,6 +317,7 @@ def _serialize_planned_action(
         "extra_targets": [[q, r] for q, r in action.extra_targets],
         "effective_power": action.effective_power,
         "effective_resource_gain": action.effective_resource_gain,
+        "effective_draw_cards": action.effective_draw_cards,
     }
     return d
 
@@ -333,6 +334,7 @@ def _deserialize_planned_action(
         extra_targets=[tuple(t) for t in data.get("extra_targets", [])],
         effective_power=data.get("effective_power"),
         effective_resource_gain=data.get("effective_resource_gain"),
+        effective_draw_cards=data.get("effective_draw_cards"),
     )
 
 
@@ -371,9 +373,6 @@ def _serialize_player(player: Player, registry: dict[str, Card]) -> dict[str, An
         "has_ended_turn": player.has_ended_turn,
         "turn_modifiers": _serialize_turn_modifiers(player.turn_modifiers),
         "trash": _serialize_card_list(player.trash, registry),
-        "last_upkeep_paid": player.last_upkeep_paid,
-        "upkeep_cost": player.upkeep_cost,
-        "tiles_lost_to_upkeep": player.tiles_lost_to_upkeep,
         "is_cpu": player.is_cpu,
         "cpu_noise": player.cpu_noise,
         "has_left": player.has_left,
@@ -434,9 +433,6 @@ def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Play
         has_ended_turn=data.get("has_ended_turn", False),
         turn_modifiers=turn_modifiers,
         trash=trash,
-        last_upkeep_paid=data.get("last_upkeep_paid", 0),
-        upkeep_cost=data.get("upkeep_cost", 0),
-        tiles_lost_to_upkeep=data.get("tiles_lost_to_upkeep", 0),
         is_cpu=data.get("is_cpu", False),
         cpu_noise=data.get("cpu_noise", 0.15),
         has_left=data.get("has_left", False),
@@ -631,6 +627,8 @@ def serialize_game(game: GameState) -> str:
         "card_pack": game.card_pack,
         "map_seed": game.map_seed,
         "claim_ban_rounds": game.claim_ban_rounds,
+        "max_rounds": game.max_rounds,
+        "winners": game.winners,
         "test_mode": game.test_mode,
         # Grid
         "grid": _serialize_grid(game.grid) if game.grid else None,
@@ -720,6 +718,8 @@ def deserialize_game(
         card_pack=blob.get("card_pack", "everything"),
         map_seed=blob.get("map_seed", ""),
         claim_ban_rounds=blob.get("claim_ban_rounds", 0),
+        max_rounds=blob.get("max_rounds", 20),
+        winners=blob.get("winners", []),
         resolution_steps=blob.get("resolution_steps", []),
         player_effects=blob.get("player_effects", []),
     )

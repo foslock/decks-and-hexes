@@ -58,7 +58,7 @@ Lay out all neutral cards in separate face-up stacks with their copy counts visi
 Place upgrade credit tokens in a shared pool (suggested: 2 × number of active players available at game start).
 
 ## Step 7: Prepare Resources
-Each player starts with **3 resources**. Resources are tracked individually and carry over between turns, minus 1 upkeep at the start of each turn.
+Each player starts with **0 resources**. Resources are tracked individually and carry over between turns.
 
 ## Step 8: Deal Starting Hands
 Each player draws their starting hand (per archetype hand size above). The game begins.

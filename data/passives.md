@@ -109,8 +109,8 @@ passives:
     name: Hoarder
     category: deck_hand
     best_for: ["fortress"]
-    effect: "You do not pay the 1 resource upkeep at the start of your turn. However, your maximum resource total is capped at 8."
-    notes: "Removes the save-or-lose-it pressure. Cap prevents snowballing. Strong for patient Fortress players."
+    effect: "Your maximum resource total is capped at 8, but you gain 1 extra resource at the start of each turn."
+    notes: "Cap prevents snowballing but steady income is valuable. Strong for patient Fortress players."
 
   - id: passive_efficient
     name: Efficient
@@ -183,7 +183,7 @@ passives:
     name: Treasure Hunter
     category: resource
     best_for: ["any"]
-    effect: "At the start of each round (after upkeep), gain 1 resource for each VP hex tile you currently control."
+    effect: "At the start of each round, gain 1 resource for each VP hex tile you currently control."
     notes: "Universally strong. Creates a compounding economic advantage for players who control VP hexes."
 
   - id: passive_opportunist

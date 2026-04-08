@@ -54,7 +54,7 @@ Bump frontend version when frontend files change, backend version when backend f
 ## Key Design Rules (critical to get right in implementation)
 
 ### Turn Structure (5 phases)
-1. **Start of Turn** — Pay upkeep (skip round 1), score VP hexes held since last turn, check win (20 VP), draw hand, reveal archetype market (3 random cards from player's archetype deck)
+1. **Start of Turn** — Distribute Debt card to VP leader (round 5+), score VP hexes held since last turn, draw hand, reveal archetype market (3 random cards from player's archetype deck)
 2. **Play Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
 4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards (unlimited per turn), or upgrade credits (4 resources). Purchases are visible to all players.
@@ -76,7 +76,6 @@ Bump frontend version when frontend files change, backend version when backend f
 
 ### Resources
 - Persistent between turns
-- Upkeep: lose 1 per turn (NOT on turn 1)
 - Spent only during Buy Phase
 - No cap unless Hoarder passive (caps at 8)
 
@@ -145,7 +144,7 @@ Bump frontend version when frontend files change, backend version when backend f
 3. Turn loop with all 5 phases
 4. Card playing with action slot tracking and immediate effect chaining
 5. Claim resolution (power comparison, adjacency checking, tie-breaking)
-6. Resource system (upkeep, carry-over, buy phase spending)
+6. Resource system (carry-over, buy phase spending)
 7. VP scoring and win condition
 8. Archetype market (3-card draw, re-roll, retain)
 9. Neutral market (shared stacks, exhaustion)
@@ -179,7 +178,9 @@ Card data files use YAML-style fields within markdown. Key fields:
 ## Frequently Changing Values (expect these to shift during playtesting)
 - VP target: **dynamic** (see `compute_vp_target`)
 - Tiles per VP: **3** (constant across all grid sizes)
-- Upkeep cost: **dynamic** — 1 resource per 3 tiles beyond first 4
+- Round limit: **20** (configurable)
+- Debt start round: **5**
+- Debt trash cost: **3 resources**
 - Re-roll cost: **2 resources**
 - Retain cost: **1 resource**
 - Upgrade credit cost: **4 resources**

@@ -239,8 +239,8 @@ const PAGES = [
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
             <div style={{ fontSize: 14, fontWeight: 'bold', color: '#ffaa33', marginBottom: 4 }}>1. Upkeep</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
-              Pay a resource cost based on how much territory you control. The more tiles you own,
-              the higher the upkeep. Tiles you can't pay for are lost. (Skipped on round 1.)
+              Draw your hand for the round. Starting from round 5, the VP leader receives a <strong style={{ color: '#fff' }}>Debt</strong> card
+              in their discard pile — a dead card that costs 1 action + 3 resources to trash.
             </div>
           </div>
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>

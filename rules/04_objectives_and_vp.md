@@ -28,9 +28,9 @@ A VP hex adds its bonus VP only when **connected to your base** — there must b
 
 ### Win Condition
 
-Checked at the **start of each turn** (after upkeep). The first player whose derived VP ≥ the **VP target** wins. Since VP can fluctuate (losing tiles, gaining Rubble), a player can drop below the target after having been above it.
+Checked at the **end of each round**. The first player whose derived VP ≥ the **VP target** wins. Since VP can fluctuate (losing tiles, gaining Rubble), a player can drop below the target after having been above it.
 
-If multiple players reach the target simultaneously, the player with the highest VP wins. If still tied, the player controlling the most tiles wins.
+The game also ends when the **round limit** is reached (default 20 rounds). The player with the most VP wins. If tied, all tied players share victory.
 
 ### Dynamic VP Target
 

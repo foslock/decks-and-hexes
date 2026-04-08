@@ -72,9 +72,11 @@ interface CardHandProps {
   subtitleContext?: CardSubtitleContext;
   /** When true, claim cards are banned (Snowy Holiday) — shown dimmed and unplayable */
   claimBanned?: boolean;
+  /** Called when the user hovers over a card (index) or leaves all cards (null). */
+  onCardHover?: (index: number | null) => void;
 }
 
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -144,7 +146,7 @@ function Flag({ text, color }: { text: string; color: string }) {
 
 function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; shiftHeld: boolean }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
-  const color = CARD_TYPE_COLORS[displayCard.card_type] || '#555';
+  const color = getCardDisplayColor(displayCard);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const upgradeLabel = shiftHeld && hasUpgradePreview(card) ? (
     <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 4 }}>
@@ -465,6 +467,7 @@ export default function CardHand({
   trashedCardIds,
   subtitleContext,
   claimBanned,
+  onCardHover,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -476,6 +479,8 @@ export default function CardHand({
 
   // Local display order — indices into the `cards` prop array
   const [localOrder, setLocalOrder] = useState<number[]>(() => cards.map((_, i) => i));
+  const localOrderRef = useRef(localOrder);
+  localOrderRef.current = localOrder;
 
   const prevCardsForOrderRef = useRef(cards);
   useEffect(() => {
@@ -734,7 +739,7 @@ export default function CardHand({
         const entries = new Map<string, EnteringAnim>();
         immediateCards.forEach((card, i) => {
           entries.set(card.id, {
-            offset: { x: 0, y: 0 },
+            offset: { x: 0, y: -2000 }, // off-screen until Phase 2 computes real offset
             delay: Math.round(i * 500 * animSpeed),
             active: false,
             offsetComputed: false,
@@ -1307,10 +1312,14 @@ export default function CardHand({
     };
   }, [onDragEnd, onDragPlay, localOrder, computeDropTarget, resetDragState, processDragMove, cards, animated]);
 
+  const onCardHoverRef = useRef(onCardHover);
+  onCardHoverRef.current = onCardHover;
+
   const handlePointerEnter = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (!isDraggingRef.current) {
       setHoveredIndex(localIdx);
       setHoveredRect((e.currentTarget as HTMLElement).getBoundingClientRect());
+      onCardHoverRef.current?.(localOrderRef.current[localIdx]);
     }
   }, []);
 
@@ -1318,6 +1327,7 @@ export default function CardHand({
     if (!isDraggingRef.current) {
       setHoveredIndex(null);
       setHoveredRect(null);
+      onCardHoverRef.current?.(null);
     }
   }, []);
 
@@ -1498,7 +1508,7 @@ export default function CardHand({
             if (!card) return null;
             const isBeingDragged = draggingIndex === localIdx;
             const isSelected = selectedIndex === cardIdx;
-            const typeColor = CARD_TYPE_COLORS[card.card_type] || '#555';
+            const typeColor = getCardDisplayColor(card);
             const isDropBefore = dropTargetIndex === localIdx;
             const isDropAfter = dropTargetIndex === localOrder.length && localIdx === localOrder.length - 1;
 
@@ -1704,7 +1714,7 @@ export default function CardHand({
       {/* Drag ghost */}
       {draggingIndex !== null && dragPos && cards[localOrder[draggingIndex]] && (() => {
         const dragCard = cards[localOrder[draggingIndex]];
-        const dragColor = CARD_TYPE_COLORS[dragCard.card_type] || '#fff';
+        const dragColor = getCardDisplayColor(dragCard);
         return (
           <div style={{
             position: 'fixed',
@@ -1757,7 +1767,7 @@ export default function CardHand({
       {departingAnims.size > 0 && createPortal(
         <>
           {[...departingAnims.values()].flatMap(d => {
-            const typeColor = CARD_TYPE_COLORS[d.card.card_type] || '#555';
+            const typeColor = getCardDisplayColor(d.card);
             const durMs = Math.round(500 * animSpeed);
             const fadeDurMs = Math.round(300 * animSpeed);
 

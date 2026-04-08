@@ -15,7 +15,7 @@ Card Clash is a 2–6 player simultaneous deck-building territory control game. 
 - CPU players count toward archetype weighting for objective selection and **will attempt to complete objectives**, competing with human players for the 2 VP reward
 
 ## Win Condition
-The **first player whose derived VP reaches the VP target wins.** VP is checked at the start of each turn after upkeep.
+The **first player whose derived VP reaches the VP target wins.** VP is checked at the end of each round. The game also ends when the round limit is reached — the player with the most VP wins (ties share victory).
 
 VP is derived instantaneously from the game state:
 1. **Territory:** +1 VP for every 3 tiles owned

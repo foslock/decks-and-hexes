@@ -39,6 +39,7 @@ from app.game_engine.game_state import (
     execute_end_of_turn,
     execute_reveal,
     execute_start_of_turn,
+    execute_upkeep,
     play_card,
     submit_pending_discard,
     submit_play,
@@ -346,6 +347,7 @@ class TestSelfTrash:
             seed=42,
         )
         execute_start_of_turn(game2)
+        execute_upkeep(game2)
         player = game2.players["f0"]
 
         consolidate = _copy_card(card_registry["fortress_consolidate"], "test_cons")
@@ -430,6 +432,7 @@ class TestTileImmunity:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         fort = game.players["f0"]
         attacker = game.players["a0"]
@@ -522,6 +525,7 @@ class TestConditionalPower:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         fort = game.players["f0"]
         assert game.grid is not None
@@ -547,6 +551,7 @@ class TestConditionalPower:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         fort = game.players["f0"]
         assert game.grid is not None
@@ -571,6 +576,7 @@ class TestConditionalPower:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         assert game.grid is not None
         player = game.players["p0"]
@@ -619,6 +625,7 @@ class TestOnResolutionEffects:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         player = game.players["p0"]
         assert game.grid is not None
@@ -655,6 +662,7 @@ class TestOnResolutionEffects:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         attacker = game.players["a0"]
         defender = game.players["f0"]
@@ -697,6 +705,7 @@ class TestCostReduction:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         player = game.players["f0"]
         supply = _copy_card(card_registry["fortress_supply_line"], "test_sl")
@@ -750,6 +759,7 @@ class TestIgnoreDefense:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         attacker = game.players["a0"]
         assert game.grid is not None
@@ -784,6 +794,7 @@ class TestBreakthrough:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         player = game.players["p0"]
         assert game.grid is not None

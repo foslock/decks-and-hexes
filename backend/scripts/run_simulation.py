@@ -78,6 +78,8 @@ def parse_args() -> argparse.Namespace:
                         help="Max rounds per game (default: 50)")
     parser.add_argument("--vp-target", type=int, default=None,
                         help="VP target to win (default: 10)")
+    parser.add_argument("--pack", type=str, default="everything",
+                        help="Card pack ID (default: everything)")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Print per-game details")
     parser.add_argument("--output", type=str, default=None,
@@ -100,10 +102,12 @@ def run_single_config(archetypes: list[Archetype], grid_size: GridSize,
         max_rounds=args.max_rounds,
         verbose=args.verbose,
         vp_target=args.vp_target,
+        card_pack=args.pack,
     )
 
     arch_str = "+".join(a.value for a in archetypes)
-    print(f"\nRunning {args.games} games: {arch_str} on {grid_size.value}...")
+    pack_str = f" [pack: {args.pack}]" if args.pack != "everything" else ""
+    print(f"\nRunning {args.games} games: {arch_str} on {grid_size.value}{pack_str}...")
 
     batch_result = run_batch(config, card_registry=card_registry)
     report = generate_report(batch_result)

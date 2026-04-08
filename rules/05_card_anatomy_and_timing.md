@@ -101,6 +101,5 @@ To avoid ambiguity, Card Clash uses explicit timing language on all card draw ef
 
 - Resources are a persistent currency tracked individually per player.
 - Resources are spent during the **Buy Phase** only (not during the Play Phase).
-- **Upkeep:** At the start of each turn, each player loses 1 resource. Minimum 0 (cannot go below zero). **Upkeep is not paid on the first turn of the game.**
-- Resources carry over between turns indefinitely, minus upkeep.
+- Resources carry over between turns indefinitely.
 - There is no maximum resource cap unless modified by a passive (e.g. Hoarder caps at 8).

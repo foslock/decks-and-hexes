@@ -5,25 +5,30 @@ interface TooltipProps {
   content: string;
   /** Delay in ms before showing. Default 0 (instant). */
   delay?: number;
+  /** Position relative to trigger. Default 'above'. */
+  position?: 'above' | 'below';
   children: ReactNode;
 }
 
-export default function Tooltip({ content, delay = 0, children }: TooltipProps) {
+export default function Tooltip({ content, delay = 0, position: placement = 'above', children }: TooltipProps) {
   const [visible, setVisible] = useState(false);
-  const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [coords, setCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
 
   const show = useCallback((e: React.PointerEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setPosition({ x: rect.left + rect.width / 2, y: rect.top });
+    setCoords({
+      x: rect.left + rect.width / 2,
+      y: placement === 'below' ? rect.bottom : rect.top,
+    });
 
     if (delay > 0) {
       timerRef.current = setTimeout(() => setVisible(true), delay);
     } else {
       setVisible(true);
     }
-  }, [delay]);
+  }, [delay, placement]);
 
   const hide = useCallback(() => {
     if (timerRef.current) {
@@ -53,9 +58,10 @@ export default function Tooltip({ content, delay = 0, children }: TooltipProps) 
         <div
           style={{
             position: 'fixed',
-            left: position.x,
-            top: position.y - 8,
-            transform: 'translate(-50%, -100%)',
+            left: coords.x,
+            ...(placement === 'below'
+              ? { top: coords.y + 8, transform: 'translateX(-50%)' }
+              : { top: coords.y - 8, transform: 'translate(-50%, -100%)' }),
             background: '#111122',
             border: '1px solid #555',
             borderRadius: 6,

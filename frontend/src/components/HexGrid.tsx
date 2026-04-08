@@ -205,10 +205,10 @@ const ARCHETYPE_LABELS: Record<string, string> = {
   fortress: 'Fortress',
 };
 
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
 
 function PlannedCardTooltip({ card, x, y, totalPower, displayName }: { card: Card; x: number; y: number; totalPower?: number; displayName?: string }) {
-  const typeColor = CARD_TYPE_COLORS[card.card_type] || '#888';
+  const typeColor = getCardDisplayColor(card);
   const parts: string[] = [];
   const displayPower = totalPower ?? card.power;
   if (displayPower > 0) parts.push(`Power ${displayPower}`);
@@ -592,7 +592,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             if (tile.is_base) {
               lines.push(`Base tile — Defense ${tile.defense_power}. Can be raided for Spoils and Rubble.`);
             } else if (tile.is_vp) {
-              lines.push(`VP hex — worth ${tile.vp_value} VP when connected to your base.`);
+              lines.push(`VP Tile — worth ${tile.vp_value} VP when connected to your base.`);
             }
             if (tile.defense_power > 0) {
               lines.push(`Claiming this tile requires at least ${tile.defense_power} power.`);
@@ -784,15 +784,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       hexContainer.addChild(edgeG);
     }
 
-    // === PASS 3b: VP tile edge outlines (dark orange) ===
+    // === PASS 3b: VP tile edge outlines (subtle dark orange) ===
     const VP_EDGE_COLOR = 0xcc7a2a;
+    const VP_EDGE_ALPHA = 0.35;
     if (building) {
       for (const [, tile] of Object.entries(tiles)) {
         if (!tile.is_vp || tile.is_blocked || tile.owner) continue;
         const tAlpha = buildAlpha(tile.q, tile.r);
         if (tAlpha <= 0) continue;
         const g = new Graphics();
-        g.setStrokeStyle({ width: 2, color: VP_EDGE_COLOR, cap: 'round' });
+        g.setStrokeStyle({ width: 1.5, color: VP_EDGE_COLOR, cap: 'round' });
         const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
         for (const [, , vA, vB] of DIRECTIONS_WITH_EDGES) {
           const a = hexVertex(cx, cy, vA, HEX_SIZE);
@@ -800,12 +801,12 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
         }
         g.stroke();
-        g.alpha = tAlpha;
+        g.alpha = tAlpha * VP_EDGE_ALPHA;
         hexContainer.addChild(g);
       }
     } else {
       const vpEdgeG = new Graphics();
-      vpEdgeG.setStrokeStyle({ width: 2, color: VP_EDGE_COLOR, cap: 'round' });
+      vpEdgeG.setStrokeStyle({ width: 1.5, color: VP_EDGE_COLOR, cap: 'round' });
       for (const [, tile] of Object.entries(tiles)) {
         if (!tile.is_vp || tile.is_blocked || tile.owner) continue;
         const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
@@ -816,6 +817,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         }
       }
       vpEdgeG.stroke();
+      vpEdgeG.alpha = VP_EDGE_ALPHA;
       hexContainer.addChild(vpEdgeG);
     }
 
@@ -865,8 +867,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
       }
     }
 
-    // === PASS 5: Active player territory outline ===
-    if (activePlayer) {
+    // === PASS 5: Active player territory outline (hidden when target highlights active) ===
+    if (activePlayer && (!highlights || highlights.size === 0)) {
       if (!building) {
         // No build animation — single Graphics for efficiency
         const outlineG = new Graphics();

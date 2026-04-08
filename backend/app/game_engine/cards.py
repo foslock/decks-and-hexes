@@ -73,6 +73,7 @@ class Card:
     flood: bool = False  # Flood: target own tile, claim all adjacent at resolution
     target_own_tile: bool = False  # Must target a tile you own (Flood)
     unplayable: bool = False  # Cannot be played from hand (e.g. Land Grant — dead weight)
+    trash_immune: bool = False  # Cannot be targeted by other cards' trash effects
     passive_vp: int = 0  # VP awarded on purchase (card stays in deck)
     vp_formula: str = ""  # Dynamic VP formula: "trash_div_5", "fortified_tiles_3", "deck_div_10"
     description: str = ""
@@ -172,6 +173,7 @@ class Card:
             "flood": self.flood,
             "target_own_tile": self.target_own_tile,
             "unplayable": self.unplayable,
+            "trash_immune": self.trash_immune,
             "passive_vp": self.passive_vp,
             "vp_formula": self.vp_formula,
             "description": self.description,
@@ -261,6 +263,26 @@ def make_spoils_card() -> Card:
         passive_vp=1,
         unplayable=True,
         description="Spoils of a successful base raid. +1 VP per copy.",
+    )
+
+
+_debt_counter = 0
+
+
+def make_debt_card() -> Card:
+    """Create a Debt card (given to VP leader each round starting round 5)."""
+    from app.game_engine.game_state import DEBT_START_ROUND
+    global _debt_counter
+    _debt_counter += 1
+    return Card(
+        id=f"debt_{_debt_counter}",
+        name="Debt",
+        archetype=Archetype.NEUTRAL,
+        card_type=CardType.ENGINE,
+        resource_gain=-3,
+        trash_on_use=True,
+        trash_immune=True,
+        description=f"Pay 3 resources to trash this card. One is given to the VP leader at the beginning of each round, starting round {DEBT_START_ROUND}.",
     )
 
 

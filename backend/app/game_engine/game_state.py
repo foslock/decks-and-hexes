@@ -18,6 +18,7 @@ from .cards import (
     Deck,
     Timing,
     build_starting_deck,
+    make_debt_card,
     make_rubble_card,
     make_spoils_card,
     _copy_card,
@@ -44,8 +45,9 @@ class Phase(str, Enum):
 
 
 STARTING_RESOURCES = 0
-UPKEEP_FREE_TILES = 4
 VP_TARGET = 10  # legacy default; use compute_vp_target() for new games
+DEFAULT_MAX_ROUNDS = 20
+DEBT_START_ROUND = 5  # Debt cards start being distributed at this round
 SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33}
 REROLL_COST = 2
 RETAIN_COST = 1
@@ -82,16 +84,6 @@ def compute_vp_target(grid_size: GridSize, player_count: int = 2, speed: str = "
     }
     return _RECOMMENDED.get(grid_size, 10)
 
-
-def compute_upkeep_cost(tile_count: int, grid_size: GridSize = GridSize.SMALL) -> int:
-    """Compute dynamic upkeep cost based on number of tiles controlled.
-
-    Formula: max(0, (tiles - FREE_TILES) // (tiles_per_vp * 2))
-    First 4 tiles are free; then 1 resource per (tiles_per_vp * 2) additional tiles.
-    tiles_per_vp scales with grid radius (Small=3, Medium=4, Large=5),
-    so the divisor is Small=6, Medium=8, Large=10.
-    """
-    return max(0, (tile_count - UPKEEP_FREE_TILES) // (tiles_per_vp(grid_size) * 2))
 
 
 
@@ -211,6 +203,9 @@ class PlannedAction:
     # Dynamic resource gain snapshotted at play time (e.g. War Tithe).
     # None when the card has no dynamic resource effects.
     effective_resource_gain: Optional[int] = None
+    # Dynamic draw count snapshotted at play time (e.g. Financier: draw per Debt).
+    # None when the card has no dynamic draw effects.
+    effective_draw_cards: Optional[int] = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -225,6 +220,8 @@ class PlannedAction:
             d["effective_power"] = self.effective_power
         if self.effective_resource_gain is not None:
             d["effective_resource_gain"] = self.effective_resource_gain
+        if self.effective_draw_cards is not None:
+            d["effective_draw_cards"] = self.effective_draw_cards
         return d
 
 
@@ -250,9 +247,6 @@ class Player:
     has_ended_turn: bool = False
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
     trash: list[Card] = field(default_factory=list)
-    last_upkeep_paid: int = 0  # resources actually deducted at start of this turn
-    upkeep_cost: int = 0  # computed upkeep for this turn (before payment)
-    tiles_lost_to_upkeep: int = 0  # tiles forfeited this turn due to unpaid upkeep
     is_cpu: bool = False
     cpu_noise: float = 0.15  # default Medium difficulty
     has_left: bool = False  # player disconnected/left mid-game
@@ -322,9 +316,6 @@ class Player:
             "claims_won_last_round": self.claims_won_last_round,
             "tiles_lost_last_round": self.tiles_lost_last_round,
             "tile_count": len(game.grid.get_player_tiles(self.id)) if game and game.grid else 0,
-            "last_upkeep_paid": self.last_upkeep_paid,
-            "upkeep_cost": self.upkeep_cost,
-            "tiles_lost_to_upkeep": self.tiles_lost_to_upkeep,
             "rubble_count": self.rubble_count,
             "is_cpu": self.is_cpu,
             "cpu_difficulty": (
@@ -415,6 +406,8 @@ class GameState:
     map_seed: str = ""
     # Global claim ban (Snowy Holiday): rounds remaining where no player can play Claim cards
     claim_ban_rounds: int = 0
+    max_rounds: int = DEFAULT_MAX_ROUNDS
+    winners: list[str] = field(default_factory=list)  # all winners (for tied victories)
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None) -> None:
@@ -459,12 +452,16 @@ class GameState:
                 hide = False
             pdata = p.to_dict(hide_hand=hide, game=self)
             # Add effective buy costs for all market cards visible to this player
+            # Includes both dynamic buy cost (Elite Vanguard) and turn-based cost reductions (Supply Line)
             effective_costs: dict[str, int] = {}
+            has_reductions = len(p.turn_modifiers.cost_reductions) > 0
             for card in p.archetype_market:
-                effective_costs[card.id] = calculate_dynamic_buy_cost(self, p, card)
+                dynamic = calculate_dynamic_buy_cost(self, p, card)
+                effective_costs[card.id] = _preview_cost_reductions(p, card, base_cost_override=dynamic) if has_reductions else dynamic
             for base_id, stack in self.neutral_market.stacks.items():
                 if stack:
-                    effective_costs[base_id] = calculate_dynamic_buy_cost(self, p, stack[0])
+                    dynamic = calculate_dynamic_buy_cost(self, p, stack[0])
+                    effective_costs[base_id] = _preview_cost_reductions(p, stack[0], base_cost_override=dynamic) if has_reductions else dynamic
             pdata["effective_buy_costs"] = effective_costs
             players_dict[pid] = pdata
 
@@ -492,6 +489,8 @@ class GameState:
             "card_pack": self.card_pack,
             "map_seed": self.map_seed,
             "claim_ban_rounds": self.claim_ban_rounds,
+            "max_rounds": self.max_rounds,
+            "winners": self.winners,
         }
         if self.resolution_steps:
             result["resolution_steps"] = self.resolution_steps
@@ -643,6 +642,7 @@ def create_game(
     granted_actions: Optional[int] = None,
     card_pack: str = "everything",
     map_seed: Optional[str] = None,
+    max_rounds: Optional[int] = None,
 ) -> GameState:
     """Create a new game with the given configuration."""
     # Map seed: user-visible 6-char seed that controls grid layout only
@@ -671,6 +671,10 @@ def create_game(
 
     # Set granted actions override (None = use archetype default)
     game.granted_actions = granted_actions
+
+    # Set round limit
+    if max_rounds is not None:
+        game.max_rounds = max_rounds
 
     # Create players and assign starting positions
     for i, config in enumerate(player_configs):
@@ -783,19 +787,6 @@ def execute_start_of_turn(game: GameState) -> GameState:
             player.has_ended_turn = True
             continue
 
-        # Reset upkeep tracking (actual payment happens in UPKEEP phase)
-        player.last_upkeep_paid = 0
-        player.upkeep_cost = 0
-        player.tiles_lost_to_upkeep = 0
-
-        # Check win condition (VP is derived from territory + cards)
-        current_vp = compute_player_vp(game, pid)
-        if current_vp >= game.vp_target:
-            game.winner = pid
-            game.current_phase = Phase.GAME_OVER
-            game._log(f"{player.name} wins with {current_vp} VP!")
-            return game
-
         # Draw hand (minus forced discards, plus extra draws from effects)
         extra_draws = player.turn_modifiers.extra_draws_next_turn
         draw_count = max(0, player.hand_size - player.forced_discard_next_turn + extra_draws)
@@ -867,120 +858,37 @@ def execute_start_of_turn(game: GameState) -> GameState:
                 player.archetype_deck, 3, game.rng, player,
             )
 
-    # Round 1 skips upkeep; round 2+ computes and applies upkeep, then pauses
-    # at UPKEEP phase so the frontend can display the banner before advancing to PLAN
-    if game.current_round > 1:
-        _apply_upkeep(game)
-        game.current_phase = Phase.UPKEEP
-    else:
-        game.current_phase = Phase.PLAY
-        game._log("Play phase begins — place cards face-down on tiles")
+    # Upkeep phase: distribute Debt cards (round 5+), then pause for frontend
+    _apply_upkeep(game)
+    game.current_phase = Phase.UPKEEP
     return game
 
 
-def forfeit_tiles_for_unpaid_upkeep(
-    game: GameState, player_id: str, deficit: int
-) -> list[Any]:
-    """Remove tiles from a player who can't pay upkeep.
-
-    Priority: disconnected tiles first (farthest from base by hex distance),
-    then connected tiles by BFS depth (farthest first, tie-break by most recent).
-    Base tiles are immune.
-
-    Returns list of forfeited HexTile objects.
-    """
-    assert game.grid is not None
-    player_tiles = game.grid.get_player_tiles(player_id)
-    connected_coords = game.grid.get_connected_tiles(player_id)
-
-    # Find base tile for distance calculations
-    base_tile = None
-    for tile in player_tiles:
-        if tile.is_base and tile.base_owner == player_id:
-            base_tile = tile
-            break
-    if not base_tile:
-        return []
-
-    forfeited: list[Any] = []
-
-    # 1. Disconnected tiles first (not in connected set, not base)
-    disconnected = [
-        t for t in player_tiles
-        if (t.q, t.r) not in connected_coords and not t.is_base
-    ]
-    # Sort by hex distance from base, farthest first
-    disconnected.sort(key=lambda t: -base_tile.distance_to(t))
-
-    for tile in disconnected:
-        if len(forfeited) >= deficit:
-            break
-        tile.owner = None
-        tile.defense_power = tile.base_defense
-        tile.permanent_defense_bonus = 0
-        tile.held_since_turn = None
-        forfeited.append(tile)
-
-    # 2. Connected tiles by BFS depth (farthest first), excluding base
-    if len(forfeited) < deficit:
-        bfs_tiles = game.grid.get_tiles_by_bfs_depth(player_id)
-        for _depth, tile in bfs_tiles:
-            if len(forfeited) >= deficit:
-                break
-            if tile.is_base:
-                continue
-            tile.owner = None
-            tile.defense_power = tile.base_defense
-            tile.permanent_defense_bonus = 0
-            tile.held_since_turn = None
-            forfeited.append(tile)
-
-    return forfeited
-
-
 def _apply_upkeep(game: GameState) -> None:
-    """Internal: compute and apply dynamic upkeep for all players.
+    """Internal: beginning-of-round phase.
 
+    Distributes Debt cards to the VP leader starting at round 5.
     Called during execute_start_of_turn before transitioning to UPKEEP phase.
-    Results are stored on player fields so the frontend can display them.
     """
     game._log("=== Upkeep ===")
 
-    for pid in game.player_order:
-        player = game.players[pid]
-        assert game.grid is not None
-        tile_count = len(game.grid.get_player_tiles(pid))
-        upkeep = compute_upkeep_cost(tile_count, game.grid.size)
-        player.upkeep_cost = upkeep
+    # Debt card distribution (round 5+)
+    if game.current_round >= DEBT_START_ROUND:
+        active_pids = [pid for pid in game.player_order if not game.players[pid].has_left]
+        if active_pids:
+            vp_scores = {pid: compute_player_vp(game, pid) for pid in active_pids}
+            max_vp = max(vp_scores.values())
+            leaders = [pid for pid, vp in vp_scores.items() if vp == max_vp]
 
-        if upkeep == 0:
-            player.last_upkeep_paid = 0
-            player.tiles_lost_to_upkeep = 0
-            game._log(f"{player.name} owes no upkeep ({tile_count} tiles)")
-            continue
+            # Tiebreak: closest to first_player_index in turn order (clockwise)
+            if len(leaders) > 1:
+                n = len(game.player_order)
+                leaders.sort(key=lambda pid: (game.player_order.index(pid) - game.first_player_index) % n)
 
-        actual_cost = min(upkeep, player.resources)
-        player.resources -= actual_cost
-        player.last_upkeep_paid = actual_cost
-
-        deficit = upkeep - actual_cost
-        if deficit > 0:
-            forfeited = forfeit_tiles_for_unpaid_upkeep(game, pid, deficit)
-            player.tiles_lost_to_upkeep = len(forfeited)
-            for tile in forfeited:
-                game._log(
-                    f"{player.name} loses tile ({tile.q},{tile.r}) — unpaid upkeep"
-                )
-            game._log(
-                f"{player.name} paid {actual_cost}/{upkeep} upkeep, "
-                f"lost {len(forfeited)} tile(s) ({player.resources} remaining)"
-            )
-        else:
-            player.tiles_lost_to_upkeep = 0
-            game._log(
-                f"{player.name} pays {actual_cost} upkeep for {tile_count} tiles "
-                f"({player.resources} remaining)"
-            )
+            target_pid = leaders[0]
+            debt = make_debt_card()
+            game.players[target_pid].deck.add_to_discard([debt])
+            game._log(f"{game.players[target_pid].name} receives a Debt card (VP leader with {max_vp} VP)")
 
 
 def execute_upkeep(game: GameState) -> GameState:
@@ -1076,6 +984,11 @@ def play_card(game: GameState, player_id: str, card_index: int,
     # Block unplayable cards (e.g. Land Grant — passive VP, takes up a slot)
     if card.unplayable:
         return False, f"{card.name} cannot be played"
+
+    # Debt card: requires 3 resources to play (self-trash)
+    if card.name == "Debt" and card.trash_immune:
+        if player.resources < 3:
+            return False, "Need 3 resources to play Debt"
 
     # Global claim ban (Snowy Holiday) — no player can play Claim cards this round
     if card.card_type == CardType.CLAIM and game.claim_ban_rounds > 0:
@@ -1277,6 +1190,18 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 snapshotted_resource_gain = vp_hex_count * per_hex
                 break
 
+    # Snapshot dynamic draw count (Financier: draw per Debt) before removing card from hand
+    snapshotted_draw_cards: Optional[int] = None
+    if card.effects:
+        for eff in card.effects:
+            if eff.type == EffectType.DRAW_PER_DEBT:
+                debt_count = sum(
+                    1 for c in player.hand + player.deck.cards + player.deck.discard
+                    if c.name == "Debt"
+                )
+                snapshotted_draw_cards = debt_count * eff.value
+                break
+
     player.hand.pop(card_index)
     has_extra = (
         (card.card_type == CardType.CLAIM and target_q is not None and card.effective_multi_target_count > 0)
@@ -1290,6 +1215,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         extra_targets=validated_extra if has_extra else [],
         effective_power=snapshotted_power,
         effective_resource_gain=snapshotted_resource_gain,
+        effective_draw_cards=snapshotted_draw_cards,
     )
     player.planned_actions.append(action)
     player.actions_used += 1
@@ -1298,11 +1224,15 @@ def play_card(game: GameState, player_id: str, card_index: int,
     if card.effective_action_return > 0:
         player.actions_available += card.effective_action_return
 
-    # Immediate resource gain
-    if card.timing == Timing.IMMEDIATE and card.effective_resource_gain > 0:
+    # Immediate resource gain (or cost for negative values like Debt)
+    if card.timing == Timing.IMMEDIATE and card.effective_resource_gain != 0:
         player.resources += card.effective_resource_gain
-        game._log(f"{player.name} gains {card.effective_resource_gain} resources from {card.name}",
-                  visible_to=[player_id], actor=player_id)
+        if card.effective_resource_gain > 0:
+            game._log(f"{player.name} gains {card.effective_resource_gain} resources from {card.name}",
+                      visible_to=[player_id], actor=player_id)
+        else:
+            game._log(f"{player.name} pays {-card.effective_resource_gain} resources for {card.name}",
+                      visible_to=[player_id], actor=player_id)
 
     # Immediate card draw
     # Check if draw is gated behind a trash choice (e.g. Thin the Herd: "Trash 1. If you did, draw 1.")
@@ -2084,12 +2014,34 @@ def _apply_cost_reductions(player: Player, card: Card, base_cost_override: Optio
             reduction["remaining"] = remaining - 1
             if reduction["remaining"] <= 0:
                 reductions_to_remove.append(i)
-            break  # Only one reduction per purchase
 
     # Remove consumed reductions
     for i in sorted(reductions_to_remove, reverse=True):
         player.turn_modifiers.cost_reductions.pop(i)
 
+    return max(0, base_cost - discount)
+
+
+def _preview_cost_reductions(player: Player, card: Card, base_cost_override: Optional[int] = None) -> int:
+    """Preview the effective cost after reductions WITHOUT consuming them."""
+    base_cost = base_cost_override if base_cost_override is not None else (card.buy_cost if card.buy_cost is not None else 0)
+    discount = 0
+    for reduction in player.turn_modifiers.cost_reductions:
+        scope = reduction.get("scope", "any_one_card")
+        remaining = reduction.get("remaining", 1)
+        if remaining <= 0:
+            continue
+        applies = False
+        if scope == "any_one_card":
+            applies = True
+        elif scope == "next_defense" and card.card_type == CardType.DEFENSE:
+            applies = True
+        if applies:
+            amount = reduction.get("amount", 0)
+            if amount == 0:
+                discount = base_cost
+            else:
+                discount += amount
     return max(0, base_cost - discount)
 
 
@@ -2190,6 +2142,35 @@ def execute_end_of_turn(game: GameState) -> GameState:
     # Note: turn_modifiers.reset_for_new_turn() is called at START of next turn
     # so that multi-round effects (like Stronghold's 2-round immunity) persist
     # across the end-of-turn boundary.
+
+    # --- VP target check (checked at end of round) ---
+    for pid in game.player_order:
+        player = game.players[pid]
+        if player.has_left:
+            continue
+        current_vp = compute_player_vp(game, pid)
+        if current_vp >= game.vp_target:
+            game.winner = pid
+            game.winners = [pid]
+            game.current_phase = Phase.GAME_OVER
+            game._log(f"{player.name} wins with {current_vp} VP!")
+            return game
+
+    # --- Round limit check ---
+    if game.current_round >= game.max_rounds:
+        active_pids = [pid for pid in game.player_order if not game.players[pid].has_left]
+        vp_scores = {pid: compute_player_vp(game, pid) for pid in active_pids}
+        max_vp = max(vp_scores.values()) if vp_scores else 0
+        winners = [pid for pid, vp in vp_scores.items() if vp == max_vp]
+        game.winner = winners[0] if winners else None
+        game.winners = winners
+        game.current_phase = Phase.GAME_OVER
+        if len(winners) > 1:
+            names = ", ".join(game.players[pid].name for pid in winners)
+            game._log(f"Round limit reached ({game.max_rounds} rounds). Tied victory: {names} with {max_vp} VP!")
+        elif winners:
+            game._log(f"Round limit reached ({game.max_rounds} rounds). {game.players[winners[0]].name} wins with {max_vp} VP!")
+        return game
 
     # Rotate first player (skip left players)
     n = len(game.player_order)

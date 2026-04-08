@@ -6,7 +6,7 @@ A 2-6 player simultaneous deck-building territory control game played on a hexag
 
 Each round has five simultaneous phases:
 
-1. **Start of Turn** -- Pay upkeep, score VP from held hexes, draw hand, reveal archetype market
+1. **Start of Turn** -- Distribute Debt to VP leader (round 5+), score VP from held hexes, draw hand, reveal archetype market
 2. **Plan** -- All players simultaneously place cards face-down on target tiles (action slot limited)
 3. **Reveal & Resolve** -- Flip all cards; highest power wins each contested tile (ties to defender)
 4. **Buy** -- Spend resources on archetype cards, neutral market cards, or upgrade credits
@@ -135,7 +135,7 @@ What's implemented:
 - Full 5-phase turn loop with server-authoritative game logic
 - 57 cards loaded from YAML data files across all archetypes
 - Claim resolution (power comparison, adjacency, defender-wins-ties, stacking exceptions)
-- Resource system with upkeep, persistent carry-over, and buy phase spending
+- Resource system with persistent carry-over and buy phase spending
 - VP scoring from held tiles and win condition check
 - Archetype market (3-card draw, re-roll, retain) and neutral market with copy limits
 - PixiJS hex grid renderer with player colors, VP indicators, and click/drag interaction

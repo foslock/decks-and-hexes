@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.data_loader.loader import load_all_cards
 from app.game_engine.cards import Archetype, Card, CardType, Deck, Timing
-from app.game_engine.game_state import GameState, create_game, execute_start_of_turn
+from app.game_engine.game_state import GameState, create_game, execute_start_of_turn, execute_upkeep
 from app.game_engine.hex_grid import GridSize
 
 
@@ -34,6 +34,7 @@ def small_2p_game(card_registry: dict[str, Card]) -> GameState:
         seed=42,
     )
     execute_start_of_turn(game)
+    execute_upkeep(game)  # advance through upkeep to PLAY phase
     return game
 
 
@@ -51,4 +52,5 @@ def medium_3p_game(card_registry: dict[str, Card]) -> GameState:
         seed=99,
     )
     execute_start_of_turn(game)
+    execute_upkeep(game)  # advance through upkeep to PLAY phase
     return game

@@ -50,7 +50,7 @@ class TestCreateGame:
         assert "game_id" in data
         assert "state" in data
         state = data["state"]
-        assert state["current_phase"] == "play"
+        assert state["current_phase"] == "upkeep"
         assert state["current_round"] == 1
         assert len(state["players"]) == 2
 
@@ -132,7 +132,10 @@ class TestPlayCard:
             ],
             "seed": 42,
         })
-        return resp.json()["game_id"]
+        game_id = resp.json()["game_id"]
+        # Advance through upkeep to play phase
+        client.post(f"/api/games/{game_id}/advance-upkeep")
+        return game_id
 
     def test_play_card(self, client: TestClient) -> None:
         game_id = self._create_game(client)
@@ -189,7 +192,9 @@ class TestSubmitPlay:
             ],
             "seed": 42,
         })
-        return resp.json()["game_id"]
+        game_id = resp.json()["game_id"]
+        client.post(f"/api/games/{game_id}/advance-upkeep")
+        return game_id
 
     def test_submit_play(self, client: TestClient) -> None:
         game_id = self._create_game(client)
@@ -223,6 +228,7 @@ class TestBuyAndEndTurn:
             "seed": 42,
         })
         game_id = resp.json()["game_id"]
+        client.post(f"/api/games/{game_id}/advance-upkeep")
         client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p0"})
         client.post(f"/api/games/{game_id}/submit-play", json={"player_id": "p1"})
         client.post(f"/api/games/{game_id}/advance-resolve", json={"player_id": "p0"})
@@ -295,7 +301,9 @@ class TestGameLog:
             ],
             "seed": 42,
         })
-        return resp.json()["game_id"]
+        game_id = resp.json()["game_id"]
+        client.post(f"/api/games/{game_id}/advance-upkeep")
+        return game_id
 
     def test_get_full_log(self, client: TestClient) -> None:
         game_id = self._create_game(client)
@@ -393,7 +401,9 @@ class TestAdvanceResolveAPI:
             ],
             "seed": 42,
         })
-        return resp.json()["game_id"]
+        game_id = resp.json()["game_id"]
+        client.post(f"/api/games/{game_id}/advance-upkeep")
+        return game_id
 
     def test_advance_resolve_endpoint(self, client: TestClient) -> None:
         game_id = self._create_game(client)

@@ -11,6 +11,8 @@ interface PhaseBannerProps {
   onMidpoint?: () => void;
   /** Called when the banner animation fully completes and is dismissed. */
   onComplete: () => void;
+  /** When true, the banner holds at center until this prop becomes false. */
+  holdUntilRelease?: boolean;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -28,12 +30,14 @@ const PHASE_LABELS: Record<string, string> = {
  * Fast: same slide animation at 2x speed (~0.7s total).
  * Off: instant appear/disappear, no motion.
  */
-export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint, onComplete }: PhaseBannerProps) {
+export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint, onComplete, holdUntilRelease }: PhaseBannerProps) {
   const animMode = useAnimationMode();
   // Stages: 'mount' (initial position, no transition) → 'enter' (slide/fade in)
   //       → 'hold' (pause at center) → 'exit' (slide/fade out) → done
   const [stage, setStage] = useState<'mount' | 'enter' | 'hold' | 'exit'>('mount');
   const midpointFiredRef = useRef(false);
+  // Track whether hold was externally controlled (for shorter release delay)
+  const wasHeldRef = useRef(false);
 
   const label = labelOverride || PHASE_LABELS[phase] || phase;
 
@@ -76,12 +80,22 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
     }
   }, [stage]);
 
-  // hold → exit
+  // Track when hold is externally controlled
+  useEffect(() => {
+    if (stage === 'hold' && holdUntilRelease) {
+      wasHeldRef.current = true;
+    }
+  }, [stage, holdUntilRelease]);
+
+  // hold → exit (respects holdUntilRelease)
   useEffect(() => {
     if (stage !== 'hold') return;
-    const t = setTimeout(() => setStage('exit'), holdMs);
+    if (holdUntilRelease) return; // Don't advance while externally held
+    // If released from external hold, use a shorter delay before exiting
+    const delay = wasHeldRef.current ? Math.round(100 * speed) : holdMs;
+    const t = setTimeout(() => setStage('exit'), delay);
     return () => clearTimeout(t);
-  }, [stage, holdMs]);
+  }, [stage, holdMs, holdUntilRelease, speed]);
 
   // exit → complete
   useEffect(() => {

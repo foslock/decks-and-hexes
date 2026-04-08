@@ -8,9 +8,8 @@ Each round consists of five phases executed by all players simultaneously where 
 
 Performed individually, simultaneously by all players:
 
-1. **Pay upkeep:** Lose 1 resource (minimum 0). **Upkeep is not paid on the first turn of the game.**
+1. **Debt distribution:** Starting from round 5, the current VP leader receives a **Debt** card in their discard pile. Debt is a dead ENGINE card that costs 1 action + 3 resources to trash. It cannot be trashed by other cards. Among tied VP leaders, the one closest in turn order to the first player receives the Debt.
 2. **Score VP hex tiles:** Earn 1 VP for each VP hex tile you already owned at the end of last turn. Tiles claimed last turn count; tiles claimed this turn do not yet count.
-3. **Check win condition:** If any player has reached **20 VP**, the game ends immediately. That player wins.
 4. **Draw hand:** Draw cards up to your hand size from your personal deck.
    - If your deck is empty, shuffle your discard pile to form a new deck, then draw.
    - Apply any **"draw X cards next turn"** bonuses earned last round now.
@@ -61,7 +60,7 @@ Before purchasing, the active buyer may adjust their archetype market using thes
 - **Archetype cards:** Buy from your personal three-card archetype market. Each card has a listed buy cost in resources. Purchased cards go to your **discard pile**.
 - **Neutral cards:** Buy from the shared neutral market stacks. Costs are listed per card. Purchased cards go to your **discard pile**. When a neutral card stack is exhausted, it is gone for the game.
 - A player may buy **multiple cards per turn** (archetype and neutral) if they have the resources. There is no limit on the number of neutral cards purchased.
-- Resources not spent are **carried over** to next turn (minus upkeep at start of next turn).
+- Resources not spent are **carried over** to next turn.
 - After each player finishes buying, their purchases are visible to all other players.
 
 ### Purchasing Upgrade Credits

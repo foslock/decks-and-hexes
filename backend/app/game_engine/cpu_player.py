@@ -543,6 +543,14 @@ class CPUPlayer:
         """Score an engine card."""
         score = 0.0
 
+        # Debt card: high priority to play if we can afford it (removes dead weight)
+        if card.name == "Debt" and card.trash_immune:
+            action = {"type": "play_card", "card_index": card_index}
+            if player.resources >= 3:
+                return (15.0, action)  # Always play Debt if affordable
+            else:
+                return None  # Can't afford — skip
+
         # Resource gain
         if card.effective_resource_gain > 0:
             score += card.effective_resource_gain * 1.5 * weights.resource_value
@@ -1008,17 +1016,9 @@ class CPUPlayer:
 
     def pick_next_purchase(self, game: Any) -> Optional[dict[str, Any]]:
         """Pick the single best purchase to make. Returns None if done buying."""
-        from .game_state import compute_upkeep_cost
         player = game.players[self.player_id]
         if player.turn_modifiers.buy_locked or player.resources <= 0:
             return None
-
-        # Reserve resources for next turn's upkeep
-        if game.grid:
-            tile_count = len(game.grid.get_player_tiles(self.player_id))
-            anticipated_upkeep = compute_upkeep_cost(tile_count, game.grid.size)
-            if player.resources <= anticipated_upkeep:
-                return None  # save resources for upkeep
 
         weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
         return self._pick_best_purchase(game, player, weights)
@@ -1039,19 +1039,15 @@ class CPUPlayer:
             scored.append((score, {"source": "archetype", "card_id": card.id}))
 
         # Score neutral market cards
-        for stack_info in game.neutral_market.get_available():
-            card_dict = stack_info["card"]
-            card_id = card_dict["id"]
-            # Find the actual card object
-            for base_id, copies in game.neutral_market.stacks.items():
-                if copies and copies[0].id == card_id:
-                    card_obj = copies[0]
-                    cost = calculate_dynamic_buy_cost(game, player, card_obj)
-                    if cost > player.resources:
-                        break
-                    score = self._score_card_for_purchase(card_obj, player, weights, cost, game)
-                    scored.append((score, {"source": "neutral", "card_id": base_id}))
-                    break
+        for base_id, copies in game.neutral_market.stacks.items():
+            if not copies:
+                continue
+            card_obj = copies[0]
+            cost = calculate_dynamic_buy_cost(game, player, card_obj)
+            if cost > player.resources:
+                continue
+            score = self._score_card_for_purchase(card_obj, player, weights, cost, game)
+            scored.append((score, {"source": "neutral", "card_id": base_id}))
 
         # Score upgrade credits
         if player.resources >= UPGRADE_CREDIT_COST:

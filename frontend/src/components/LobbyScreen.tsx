@@ -718,6 +718,53 @@ export default function LobbyScreen({
               )}
             </div>
 
+            {/* Round Limit */}
+            <div style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span>⏱ Round Limit:</span>
+              {isHost ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="number"
+                    min={5}
+                    value={lobby.config.max_rounds ?? 20}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val >= 5) {
+                        handleConfigChange('max_rounds', val);
+                      }
+                    }}
+                    style={{
+                      width: 52, padding: '0 6px', height: 26,
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#fff', fontSize: 13,
+                      fontWeight: 'bold', textAlign: 'center',
+                    }}
+                  />
+                  {lobby.config.max_rounds !== 20 && (
+                    <button
+                      onClick={() => handleConfigChange('max_rounds', 20)}
+                      style={{
+                        fontSize: 13, padding: '0 8px', height: 26,
+                        background: '#2a2a3e', border: '1px solid #555',
+                        borderRadius: 4, color: '#888', cursor: 'pointer',
+                      }}
+                    >
+                      Reset (20)
+                    </button>
+                  )}
+                  <span style={{ fontSize: 11, color: '#666' }}>(recommended: 20)</span>
+                </div>
+              ) : (
+                <strong style={{ color: '#fff' }}>
+                  {lobby.config.max_rounds ?? 20}
+                </strong>
+              )}
+            </div>
+
             {/* Actions */}
             <div style={{
               fontSize: 13, color: '#aaa',

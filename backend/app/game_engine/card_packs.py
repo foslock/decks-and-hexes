@@ -77,6 +77,7 @@ CARD_PACKS: dict[str, CardPack] = {
         #   4. Surveyor + archetype market → find key archetype cards faster
         #   5. Swarm Consecrate + Fortress Toll Road + VP tiles → enhance tiles for massive draw
         #   6. Reclaim + deck thinning → convert junk cards into economy
+        #   7. Supply Depot + Cease Fire → stack next-turn value while playing defensively
         neutral_card_ids=[
             "neutral_reduce",          # Cull: deck thinning (1💰)
             "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
@@ -85,9 +86,9 @@ CARD_PACKS: dict[str, CardPack] = {
             "neutral_cease_fire",      # Cease Fire: draw if peaceful (3💰)
             "neutral_fortified_post",  # Barricade: +4 defense (3💰)
             "neutral_diplomat",        # Diplomat: land grants for all (3💰)
-            "neutral_watchtower",      # Watchtower: +3 defense + draw (3💰)
-            "neutral_eminent_domain",  # Eminent Domain: claim any neutral (5💰)
             "neutral_land_grant",      # Land Grant: +1 VP passive (5💰)
+            "neutral_eminent_domain",  # Eminent Domain: claim any neutral (5💰)
+            "neutral_supply_depot",    # Supply Depot: next-turn draw + resource (6💰)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -142,14 +143,15 @@ CARD_PACKS: dict[str, CardPack] = {
         name="Mini: War Economy",
         # Theme: Resources through combat — every claim pays dividends.
         # Synergies:
-        #   1. Tax Collector + VP tile control → snowball resources for Mercenary purchases
-        #   2. Ambush + Militia → read opponents, punish contested tiles, reward territory
-        #   3. Vanguard War Tithe + Mercenary → claims generate resources to buy more claims
-        #   4. Fortress Robin Hood + losing tiles → economic comeback into Mercenary power
+        #   1. Levy → cheap early claim + action chaining into Militia/Mercenary
+        #   2. Tax Collector + VP tile control → snowball resources for Mercenary purchases
+        #   3. Ambush + Militia → read opponents, punish contested tiles, reward territory
+        #   4. Vanguard War Tithe + Mercenary → claims generate resources to buy more claims
+        #   5. Fortress Robin Hood + losing tiles → economic comeback into Mercenary power
         neutral_card_ids=[
+            "neutral_recruit",         # Levy: cheap claim + action (2💰)
             "neutral_militia",         # Militia: territorial power claim (3💰)
             "neutral_war_bonds",       # Tithe: 2 resources + 1 action (3💰)
-            "neutral_ambush",          # Ambush: contested power boost (4💰)
             "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
             "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
         ],

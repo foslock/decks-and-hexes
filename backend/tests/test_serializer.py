@@ -86,9 +86,6 @@ def _assert_players_equal(a: Player, b: Player) -> None:
     assert a.has_submitted_play == b.has_submitted_play
     assert a.has_acknowledged_resolve == b.has_acknowledged_resolve
     assert a.has_ended_turn == b.has_ended_turn
-    assert a.last_upkeep_paid == b.last_upkeep_paid
-    assert a.upkeep_cost == b.upkeep_cost
-    assert a.tiles_lost_to_upkeep == b.tiles_lost_to_upkeep
     assert a.is_cpu == b.is_cpu
     assert a.cpu_noise == b.cpu_noise
     assert a.has_left == b.has_left
@@ -307,6 +304,7 @@ class TestBasicRoundTrip:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
         assert game.current_phase == Phase.PLAY
 
         blob = serialize_game(game)
@@ -347,6 +345,7 @@ class TestBasicRoundTrip:
             seed=99,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         blob = serialize_game(game)
         restored = deserialize_game(blob, card_registry)
@@ -368,6 +367,7 @@ class TestRNGContinuity:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         blob = serialize_game(game)
         restored = deserialize_game(blob, card_registry)
@@ -391,6 +391,7 @@ class TestPlayPhaseRoundTrip:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         p0 = game.players["p0"]
         # Play gather cards (resource-generating, no target needed)
@@ -415,6 +416,7 @@ class TestPlayPhaseRoundTrip:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         p0 = game.players["p0"]
         # Find a claim card and an adjacent empty tile
@@ -464,6 +466,7 @@ class TestGeneratedCards:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         # Inject a Land Grant into p0's deck
         land_grant = make_land_grant_card()
@@ -492,6 +495,7 @@ class TestGeneratedCards:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         # Inject generated cards
         game.players["p0"].deck.discard.append(make_rubble_card())
@@ -522,6 +526,7 @@ class TestUpgradedCards:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         # Upgrade a card in p0's hand
         p0 = game.players["p0"]
@@ -556,11 +561,11 @@ def _play_engine_cards_and_submit(game: GameState) -> None:
 
 
 def _advance_to_play_phase(game: GameState) -> None:
-    """Advance through upkeep/start-of-turn to reach PLAY phase."""
-    if game.current_phase == Phase.UPKEEP:
-        execute_upkeep(game)
+    """Advance through start-of-turn/upkeep to reach PLAY phase."""
     if game.current_phase == Phase.START_OF_TURN:
         execute_start_of_turn(game)
+    if game.current_phase == Phase.UPKEEP:
+        execute_upkeep(game)
 
 
 class TestMultiRoundRoundTrip:
@@ -579,6 +584,7 @@ class TestMultiRoundRoundTrip:
             test_mode=True,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
         _play_engine_cards_and_submit(game)
 
         # Advance to round 2 play phase
@@ -656,6 +662,7 @@ class TestGameLog:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         # Should have some log entries by now
         assert len(game.game_log) > 0
@@ -684,6 +691,7 @@ class TestCPUPlayers:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         blob = serialize_game(game)
         restored = deserialize_game(blob, card_registry)
@@ -731,6 +739,7 @@ class TestEdgeCases:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         blob1 = serialize_game(game)
         restored = deserialize_game(blob1, card_registry)
@@ -793,6 +802,7 @@ class TestEdgeCases:
             seed=42,
         )
         execute_start_of_turn(game)
+        execute_upkeep(game)
 
         blob = serialize_game(game)
         size_kb = len(blob) / 1024

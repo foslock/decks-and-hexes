@@ -3,7 +3,7 @@ import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
 import { renderWithKeywords, extractKeywordsFromText } from './Keywords';
 import { useTooltips } from './SettingsContext';
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor, getCardDisplayType } from '../constants/cardColors';
 
 /** Fallback emoji per card type (used when no per-card art is defined) */
 const TYPE_EMOJI: Record<string, string> = {
@@ -39,6 +39,7 @@ const CARD_ART: Record<string, string> = {
   vanguard_arsenal: '🗄️',
   vanguard_counterattack: '↩️',
   vanguard_rearguard: '🛡️',
+  vanguard_financier: '🏦',
 
   // ── Swarm ──
   swarm_scout: '👁️',
@@ -163,7 +164,7 @@ function extractKeywords(card: Card): { keyword: string; definition: string }[] 
 }
 
 export default function CardFull({ card, effectiveCost, remaining, style, showKeywordHints }: CardFullProps) {
-  const typeColor = CARD_TYPE_COLORS[card.card_type] || '#555';
+  const typeColor = getCardDisplayColor(card);
   const displayCost = effectiveCost ?? card.buy_cost;
   const tooltipsEnabled = useTooltips();
 
@@ -316,7 +317,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
         {ARCHETYPE_LABEL[card.archetype] || card.archetype}{' '}
         <span style={{ color: '#555' }}>—</span>{' '}
         <span style={{ color: typeColor }}>
-          {TYPE_LABEL[card.card_type] || card.card_type}
+          {getCardDisplayType(card)}
         </span>
         {card.starter && (
           <>

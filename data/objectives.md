@@ -158,7 +158,7 @@ objectives:
     archetype: fortress
     vp_reward: 2
     condition: "Have the highest total resource count among all players at the end of any round after round 5."
-    verification: "Compare resource totals after upkeep and buy phase at end of round. Must be strictly highest."
+    verification: "Compare resource totals at end of round. Must be strictly highest."
     notes: "Rewards patient resource banking. Hoarder passive pairs extremely well."
 
   # ── WILDCARD OBJECTIVES ───────────────────────────────────────────────────

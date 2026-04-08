@@ -26,6 +26,10 @@ export interface CardSubtitleContext {
   effectiveResourceGain?: number;
   /** Number of VP tiles connected to the player's base */
   vpHexCount?: number;
+  /** Number of Debt cards in the player's deck (draw + hand + discard, excluding trash) */
+  debtCount?: number;
+  /** Override for dynamic draw count (e.g. Financier), snapshotted at play time */
+  effectiveDrawCards?: number;
 }
 
 /** A single segment of a card subtitle. */
@@ -51,6 +55,12 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
 
   const p = (text: string, dynamic?: boolean): SubtitlePart =>
     dynamic ? { text, dynamic: true } : { text };
+
+  // Special case: Debt card
+  if (card.name === 'Debt') {
+    parts.push(p('3💰 → 🗑️'));
+    return parts;
+  }
 
   // VP
   if (card.passive_vp !== undefined && card.passive_vp !== 0) {
@@ -183,14 +193,15 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
   const hasTrashConditional = !!trashEffect;
 
   // For trash-conditional cards, draw/action are shown after the → arrow, not here
-  // For draw_per_connected_vp cards (Toll Road), draw_cards is dynamic — skip flat display
+  // For draw_per_connected_vp cards (Toll Road) and draw_per_debt cards (Financier), draw_cards is dynamic — skip flat display
   const hasDrawPerVP = card.effects?.some(e => e.type === 'draw_per_connected_vp');
+  const hasDrawPerDebt = card.effects?.some(e => e.type === 'draw_per_debt');
   // Defer action icon when a later effect should appear first (to match description order)
   const hasDelayedDraw = card.effects?.some(e => e.type === 'draw_next_turn' || e.type === 'cease_fire');
   const hasMulligan = card.effects?.some(e => e.type === 'mulligan');
   const hasActionsPerCards = card.effects?.some(e => e.type === 'actions_per_cards_played');
   const deferAction = hasDelayedDraw || hasSelfDiscard || hasMulligan || hasActionsPerCards;
-  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasMulligan) parts.push(p(`+${card.draw_cards}🃏`));
+  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan) parts.push(p(`+${card.draw_cards}🃏`));
   if (card.action_return > 0 && !hasTrashConditional && !deferAction) parts.push(p(`+${card.action_return}⚡`));
   if (card.forced_discard > 0) parts.push(p(`🎯-${card.forced_discard}🃏`));
 
@@ -281,6 +292,18 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'draw_per_connected_vp') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`+${val}🃏/★🔷`));
+      }
+      if (eff.type === 'draw_per_debt') {
+        if (ctx?.effectiveDrawCards !== undefined) {
+          // Use frozen snapshot from play time
+          parts.push(p(`+${ctx.effectiveDrawCards}🃏`, ctx.effectiveDrawCards > 0));
+        } else if (ctx?.debtCount !== undefined) {
+          const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+          const totalDraw = ctx.debtCount * val;
+          parts.push(p(`+${totalDraw}🃏`, totalDraw > 0));
+        } else {
+          parts.push(p('+1🃏/🃏'));
+        }
       }
       if (eff.type === 'free_reroll') parts.push(p('+1🎲'));
       if (eff.type === 'grant_land_grants') {

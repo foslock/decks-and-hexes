@@ -108,6 +108,9 @@ class EffectType(str, Enum):
     # Draw based on connected VP hexes
     DRAW_PER_CONNECTED_VP = "draw_per_connected_vp"      # Toll Road: draw 2 per connected VP hex
 
+    # Draw based on Debt cards in deck
+    DRAW_PER_DEBT = "draw_per_debt"                      # Financier: draw 1 per Debt in deck
+
     # ── New synergy card effects ──────────────────────────────────
     CONDITIONAL_ACTION = "conditional_action"          # Spyglass: gain action if hand_size <= threshold
     RESOURCE_SCALING = "resource_scaling"              # Dividends: gain res per N resources held

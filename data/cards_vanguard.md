@@ -15,7 +15,7 @@ cards:
     name: War Tithe
     name_upgraded: War Tithe+
     type: Engine
-    buy_cost: 3
+    buy_cost: 4
     action_return: 0
     power: 0
     resource_gain: 0
@@ -37,7 +37,7 @@ cards:
     name: Blitz
     name_upgraded: Blitz+
     type: Claim
-    buy_cost: 3
+    buy_cost: 4
     action_return: 0
     power: 2
     upgraded_power: 3
@@ -56,7 +56,7 @@ cards:
     name: Overrun
     name_upgraded: Overrun+
     type: Claim
-    buy_cost: 6
+    buy_cost: 7
     action_return: 0
     power: 4
     effect: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own."
@@ -69,7 +69,7 @@ cards:
     name: Strike Team
     name_upgraded: Strike Team+
     type: Claim
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     power: 3
     effect: "Claim: Power 3. If you played another Claim card this turn, +2 power."
@@ -88,7 +88,7 @@ cards:
     name: Rapid Assault
     name_upgraded: Rapid Assault+
     type: Claim
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
     power: 3
     effect: "Claim: Power 3. If successful against an opponent's tile, they lose 1 resource."
@@ -107,7 +107,7 @@ cards:
     name: Spearhead
     name_upgraded: Spearhead+
     type: Claim
-    buy_cost: 7
+    buy_cost: 8
     action_return: 0
     power: 8
     upgraded_power: 9
@@ -130,10 +130,10 @@ cards:
     name: Coordinated Push
     name_upgraded: Coordinated Push+
     type: Claim
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
     power: 3
-    effect: "Claim: Power 3. Stackable — can be played on a tile where you already have a claim this turn."
+    effect: "Claim: Power 3. Stackable."
     effect_upgraded: "Claim: Power 4. Stackable."
     secondary_effect: null
     secondary_timing: null
@@ -143,7 +143,7 @@ cards:
     name: Double Time
     name_upgraded: Double Time+
     type: Engine
-    buy_cost: 4
+    buy_cost: 5
     action_return: 2
     power: 0
     effect: "Draw 1 card. Gain 2 actions."
@@ -156,7 +156,7 @@ cards:
     name: Regroup
     name_upgraded: Regroup+
     type: Engine
-    buy_cost: 3
+    buy_cost: 4
     action_return: 1
     power: 0
     effect: "Draw 2 cards. Discard 1 card. Gain 1 action."
@@ -176,10 +176,11 @@ cards:
     type: Claim
     buy_cost: 2
     action_return: 0
-    power: 2
+    power: 1
+    upgraded_power: 3
     unoccupied_only: true
     upgraded_unoccupied_only: false
-    effect: "Claim: Power 2 on any adjacent neutral tile."
+    effect: "Claim: Power 1 on any adjacent neutral tile."
     effect_upgraded: "Claim: Power 3 on any adjacent tile."
     secondary_effect: "If successful, draw 1 card next turn."
     secondary_timing: on_resolution
@@ -194,7 +195,7 @@ cards:
     name: Plunder
     name_upgraded: Plunder+
     type: Engine
-    buy_cost: 4
+    buy_cost: 5
     action_return: 1
     power: 0
     effect: "Gain 3 resources. Draw 1 card next turn. Gain 1 action."
@@ -211,7 +212,7 @@ cards:
     name: Breakthrough
     name_upgraded: Breakthrough+
     type: Claim
-    buy_cost: 6
+    buy_cost: 7
     action_return: 0
     power: 3
     effect: "Claim: Power 3."
@@ -229,7 +230,7 @@ cards:
     name: Flanking Strike
     name_upgraded: Flanking Strike+
     type: Claim
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
     power: 3
     claim_range: 2
@@ -243,7 +244,7 @@ cards:
     name: Battle Cry
     name_upgraded: Battle Cry+
     type: Engine
-    buy_cost: 3
+    buy_cost: 4
     action_return: 2
     power: 0
     effect: "Gain 2 actions. One other player of your choice gains 1 extra action next turn."
@@ -261,7 +262,7 @@ cards:
     name: Spoils of War
     name_upgraded: Spoils of War+
     type: Claim
-    buy_cost: 6
+    buy_cost: 7
     action_return: 0
     power: 3
     effect: "Claim: Power 3. If this claim wins a contested tile, the opponent's claim card is permanently trashed."
@@ -279,7 +280,7 @@ cards:
     name: Elite Vanguard
     name_upgraded: Elite Vanguard+
     type: Claim
-    buy_cost: 8
+    buy_cost: 9
     action_return: 0
     power: 6
     effect: "Claim: Power 6. Costs 1 less resource to purchase for each VP hex you currently control."
@@ -297,7 +298,7 @@ cards:
     name: Battle Glory
     name_upgraded: Battle Glory+
     type: Passive
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     power: 0
     unplayable: true
@@ -345,7 +346,7 @@ cards:
     name: Rearguard
     name_upgraded: Rearguard+
     type: Defense
-    buy_cost: 3
+    buy_cost: 4
     action_return: 0
     power: 0
     defense_bonus: 3
@@ -361,7 +362,7 @@ cards:
     name: Arsenal
     name_upgraded: Arsenal+
     type: Passive
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     power: 0
     unplayable: true
@@ -376,7 +377,7 @@ cards:
     name: Demon Pact
     name_upgraded: Demon Pact+
     type: Claim
-    buy_cost: 6
+    buy_cost: 7
     action_return: 0
     power: 10
     upgraded_power: 12
@@ -392,3 +393,24 @@ cards:
         timing: immediate
         requires_choice: true
         metadata: {exact: true}
+
+  - id: vanguard_financier
+    name: Financier
+    name_upgraded: Financier+
+    type: Engine
+    buy_cost: 8
+    action_return: 0
+    upgraded_action_return: 2
+    power: 0
+    resource_gain: 0
+    draw_cards: 0
+    effect: "Draw 1 card for each Debt you have in your deck."
+    effect_upgraded: "Draw 1 card for each Debt you have in your deck. Gain 2 actions."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Turns the Debt penalty into a card draw engine. Expensive at 7 cost, but becomes very powerful when loaded with Debt cards. Upgraded version also grants 2 actions, making it a net-positive action card."
+
+    effects:
+      - type: draw_per_debt
+        value: 1
+        timing: immediate

@@ -61,7 +61,7 @@ export default function GameOverOverlay({
         vp: p.vp,
         tiles: tileCounts[pid] || 0,
         deckSize: p.deck_size + p.discard_count + p.hand_count,
-        isWinner: pid === gameState.winner,
+        isWinner: gameState.winners ? gameState.winners.includes(pid) : pid === gameState.winner,
         hasLeft: p.has_left,
         color: p.color || '#888',
       };

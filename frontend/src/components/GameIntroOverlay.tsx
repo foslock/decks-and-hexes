@@ -212,6 +212,8 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
         }}>
           <span>{GRID_SIZE_LABELS[gameState.grid.size] || gameState.grid.size}</span>
           <span>·</span>
+          <span>{gameState.max_rounds} Rounds</span>
+          <span>·</span>
           <span>{vpTiles} Bonus VP tiles</span>
           <span>·</span>
           <span>{tilesPerVp} tiles per VP</span>

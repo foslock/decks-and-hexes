@@ -472,8 +472,15 @@ async def list_card_packs() -> dict[str, Any]:
 @router.get("/cards")
 async def list_cards() -> dict[str, Any]:
     """List all available cards (for debugging/reference)."""
+    from app.game_engine.cards import make_debt_card
     registry = _get_card_registry()
-    return {cid: c.to_dict() for cid, c in registry.items()}
+    result = {cid: c.to_dict() for cid, c in registry.items()}
+    # Include a representative Debt card for the card browser
+    debt = make_debt_card()
+    debt_dict = debt.to_dict()
+    debt_dict["id"] = "debt"  # Stable ID for display
+    result["debt"] = debt_dict
+    return result
 
 
 @router.get("/stats")
@@ -512,15 +519,21 @@ async def test_give_card(game_id: str, req: TestGiveCardRequest) -> dict[str, An
     if not player:
         raise HTTPException(404, "Player not found")
 
-    registry = _get_card_registry()
-    template = registry.get(req.card_id)
-    if not template:
-        raise HTTPException(404, f"Card '{req.card_id}' not found in registry")
+    # Handle Debt card specially (not in registry — created dynamically)
+    if req.card_id == "debt":
+        from app.game_engine.cards import make_debt_card
+        card = make_debt_card()
+        card.id = f"test_debt_{len(player.hand)}"
+    else:
+        registry = _get_card_registry()
+        template = registry.get(req.card_id)
+        if not template:
+            raise HTTPException(404, f"Card '{req.card_id}' not found in registry")
 
-    # Create a copy with a unique ID
-    import copy as _copy
-    card = _copy.deepcopy(template)
-    card.id = f"test_{req.card_id}_{len(player.hand)}"
+        # Create a copy with a unique ID
+        import copy as _copy
+        card = _copy.deepcopy(template)
+        card.id = f"test_{req.card_id}_{len(player.hand)}"
     player.hand.append(card)
     game._log(f"[TEST] {player.name} receives {card.name}", actor=req.player_id)
     await _get_store().save(game)

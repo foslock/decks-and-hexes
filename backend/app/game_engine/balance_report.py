@@ -134,6 +134,7 @@ def generate_report(batch: BatchResult) -> dict[str, Any]:
         "grid_size": batch.config.grid_size.value,
         "player_archetypes": [a.value for a in batch.config.player_archetypes],
         "cpu_noise": batch.config.cpu_noise,
+        "card_pack": batch.config.card_pack,
         "total_duration_ms": batch.total_duration_ms,
     }
 

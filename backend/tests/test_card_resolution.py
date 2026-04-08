@@ -40,6 +40,7 @@ from app.game_engine.game_state import (
     execute_end_of_turn,
     execute_reveal,
     execute_start_of_turn,
+    execute_upkeep,
     play_card,
     submit_play,
     compute_player_vp,
@@ -108,6 +109,7 @@ def _make_2p_game(card_registry, arch0="vanguard", arch1="swarm", seed=42):
         seed=seed,
     )
     execute_start_of_turn(game)
+    execute_upkeep(game)
     return game
 
 
@@ -123,6 +125,7 @@ def _make_3p_game(card_registry, seed=99):
         seed=seed,
     )
     execute_start_of_turn(game)
+    execute_upkeep(game)
     return game
 
 
@@ -794,7 +797,7 @@ class TestVanguardEliteVanguard:
         card = card_registry["vanguard_elite_vanguard"]
         assert card.power == 6
         assert card.card_type == CardType.CLAIM
-        assert card.buy_cost == 8
+        assert card.buy_cost == 9
 
     def test_elite_vanguard_dynamic_cost(self, card_registry):
         """Elite Vanguard: has dynamic buy cost scaling with VP hexes."""
@@ -1765,9 +1768,9 @@ class TestVanguardCounterattack:
 
 class TestVanguardRearguard:
     def test_rearguard_stats(self, card_registry):
-        """Rearguard: cost 3, defense type, gains 2 resources."""
+        """Rearguard: cost 4, defense type, gains 2 resources."""
         card = card_registry["vanguard_rearguard"]
-        assert card.buy_cost == 3
+        assert card.buy_cost == 4
         assert card.resource_gain == 2
         assert card.card_type == CardType.DEFENSE
 
@@ -1888,10 +1891,10 @@ class TestSwarmLocustSwarm:
 
 class TestVanguardWarTithe:
     def test_war_tithe_properties(self, card_registry):
-        """War Tithe: engine card, cost 3, resources from last round's claims."""
+        """War Tithe: engine card, cost 4, resources from last round's claims."""
         card = card_registry["vanguard_war_tithe"]
         assert card.card_type == CardType.ENGINE
-        assert card.buy_cost == 3
+        assert card.buy_cost == 4
         assert card.archetype == Archetype.VANGUARD
         assert card.power == 0
 
@@ -2955,6 +2958,7 @@ class TestFortressRobinHood:
 
         # Start next turn and play Robin Hood
         execute_start_of_turn(game)
+        execute_upkeep(game)
         rh = _copy_card(card, "test_rh_track")
         p0.hand = [rh] + p0.hand[1:]
         initial_resources = p0.resources
@@ -3420,7 +3424,7 @@ class TestVanguardDemonPact:
         if not card:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.CLAIM
-        assert card.buy_cost == 6
+        assert card.buy_cost == 7
         assert card.power == 10
         assert card.upgraded_power == 12
         assert card.archetype == Archetype.VANGUARD

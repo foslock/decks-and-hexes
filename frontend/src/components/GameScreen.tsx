@@ -12,11 +12,11 @@ import PhaseBanner from './PhaseBanner';
 import ResolveOverlay from './ResolveOverlay';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } from './SettingsContext';
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
-import CardFull from './CardFull';
+import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
@@ -277,6 +277,215 @@ function computePlayerVpPaths(
   return result;
 }
 
+const PHASE_PILL_ORDER = ['upkeep', 'play', 'reveal', 'buy'] as const;
+const PHASE_PILL_COLORS: Record<string, string> = { upkeep: '#555', play: '#2a6e3e', reveal: '#4a2a6e', buy: '#2a4a6e' };
+const PHASE_PILL_LABELS: Record<string, string> = { upkeep: 'Upkeep', play: 'Play', reveal: 'Resolve', buy: 'Buy' };
+
+function PhaseIndicatorPill({ phase }: { phase: string }) {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  return (
+    <>
+      <span
+        onPointerEnter={(e) => setRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
+        onPointerLeave={() => setRect(null)}
+        style={{
+          fontSize: 11, padding: '2px 8px', borderRadius: 4,
+          background: PHASE_PILL_COLORS[phase] ?? '#333',
+          color: '#fff', fontWeight: 'bold', textTransform: 'uppercase', cursor: 'help',
+        }}
+      >
+        {phase.replace(/_/g, ' ')}
+      </span>
+      {rect && createPortal(
+        <div style={{
+          position: 'fixed',
+          left: rect.left,
+          top: rect.bottom + 6,
+          display: 'flex', alignItems: 'center', gap: 4,
+          background: '#111122', border: '1px solid #555', borderRadius: 6,
+          padding: '6px 10px', whiteSpace: 'nowrap', zIndex: 20000,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)', pointerEvents: 'none',
+        }}>
+          {PHASE_PILL_ORDER.map((p, i) => {
+            const isCurrent = phase === p;
+            return (
+              <span key={p} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                {i > 0 && <span style={{ color: '#555', fontSize: 10 }}>→</span>}
+                <span style={{
+                  fontSize: 11, padding: '2px 8px', borderRadius: 4,
+                  background: isCurrent ? (PHASE_PILL_COLORS[p] ?? '#333') : 'transparent',
+                  border: isCurrent ? 'none' : '1px solid #444',
+                  color: isCurrent ? '#fff' : '#777',
+                  fontWeight: isCurrent ? 'bold' : 'normal',
+                  textTransform: 'uppercase',
+                }}>
+                  {PHASE_PILL_LABELS[p]}
+                </span>
+              </span>
+            );
+          })}
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
+/** Round at which Debt cards start being distributed. */
+const DEBT_START_ROUND = 5;
+
+/** Parse the game log to find who received a Debt card this round. */
+function findDebtRecipientFromLog(gameState: GameState): { id: string; name: string } | null {
+  const log = gameState.log;
+  for (let i = log.length - 1; i >= 0; i--) {
+    const match = log[i].match(/^(.+) receives a Debt card/);
+    if (match) {
+      const name = match[1];
+      const entry = Object.entries(gameState.players).find(([, p]) => p.name === name);
+      if (entry) return { id: entry[0], name };
+      return null;
+    }
+    // Stop at round boundary to avoid matching previous rounds
+    if (log[i].startsWith('=== Round')) break;
+  }
+  return null;
+}
+
+/** Scale factor for the flying debt card (relative to CARD_FULL_WIDTH × CARD_FULL_MIN_HEIGHT). */
+const DEBT_FLY_SCALE = 0.45;
+const DEBT_FLY_CARD_W = CARD_FULL_WIDTH * DEBT_FLY_SCALE;
+const DEBT_FLY_CARD_H = CARD_FULL_MIN_HEIGHT * DEBT_FLY_SCALE;
+
+/** A representative Debt card object for rendering in CardFull. */
+const DEBT_CARD_OBJ: Card = {
+  id: 'debt_fly',
+  name: 'Debt',
+  archetype: 'neutral',
+  card_type: 'engine',
+  power: 0,
+  resource_gain: -3,
+  action_return: 0,
+  timing: 'immediate',
+  buy_cost: null,
+  is_upgraded: false,
+  trash_on_use: true,
+  trash_immune: true,
+  stackable: false,
+  forced_discard: 0,
+  draw_cards: 0,
+  defense_bonus: 0,
+  adjacency_required: false,
+  claim_range: 0,
+  unoccupied_only: false,
+  multi_target_count: 0,
+  defense_target_count: 0,
+  flood: false,
+  target_own_tile: false,
+  passive_vp: 0,
+  description: `Pay 3 resources to trash this card. One is given to the VP leader at the beginning of each round, starting round ${DEBT_START_ROUND}.`,
+  starter: false,
+  effects: [],
+};
+
+/** Animated Debt card that flies from screen center to a target element. */
+function DebtCardFlyAnimation({
+  targetRect,
+  onComplete,
+  speed = 1,
+}: {
+  targetRect: DOMRect;
+  onComplete: () => void;
+  speed?: number;
+}) {
+  const [stage, setStage] = useState<'mount' | 'grow' | 'fly'>('mount');
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  // Random jitter values, stable for the lifetime of this animation instance
+  const jitterRef = useRef({
+    startRot: (Math.random() - 0.5) * 6,    // ±3° initial wobble
+    growRot: (Math.random() - 0.5) * 10,     // ±5° during grow
+    flyRot: (Math.random() - 0.5) * 30 + (Math.random() > 0.5 ? 15 : -15), // 15-30° spin during fly
+  });
+
+  const startX = window.innerWidth / 2 - DEBT_FLY_CARD_W / 2;
+  const startY = window.innerHeight / 2 - DEBT_FLY_CARD_H - 60;
+
+  const targetX = targetRect.left + targetRect.width / 2 - DEBT_FLY_CARD_W / 2;
+  const targetY = targetRect.top + targetRect.height / 2 - DEBT_FLY_CARD_H / 2;
+
+  const growMs = Math.round(350 * speed);
+  const flyMs = Math.round(660 * speed);
+
+  // mount → grow (double-rAF to ensure initial paint)
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => setStage('grow'));
+    });
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // grow → fly
+  useEffect(() => {
+    if (stage !== 'grow') return;
+    const t = setTimeout(() => setStage('fly'), growMs);
+    return () => clearTimeout(t);
+  }, [stage, growMs]);
+
+  // fly → complete
+  useEffect(() => {
+    if (stage !== 'fly') return;
+    const t = setTimeout(() => onCompleteRef.current(), flyMs);
+    return () => clearTimeout(t);
+  }, [stage, flyMs]);
+
+  const j = jitterRef.current;
+  let left: number, top: number, scale: number, rotate: number, opacity: number, transition: string;
+  switch (stage) {
+    case 'mount':
+      left = startX; top = startY;
+      scale = 1; rotate = j.startRot; opacity = 1;
+      transition = 'none';
+      break;
+    case 'grow':
+      left = startX; top = startY;
+      scale = 1.15; rotate = j.growRot; opacity = 1;
+      transition = `all ${growMs}ms ease-out`;
+      break;
+    case 'fly': {
+      const fadeDelay = Math.round(flyMs * 0.95);
+      const fadeDur = flyMs - fadeDelay;
+      left = targetX; top = targetY;
+      scale = 0.55; rotate = j.flyRot; opacity = 0;
+      transition = `left ${flyMs}ms ease-in, top ${flyMs}ms ease-in, transform ${flyMs}ms ease-in, opacity ${fadeDur}ms ease-in ${fadeDelay}ms`;
+      break;
+    }
+  }
+
+  return createPortal(
+    <div style={{
+      position: 'fixed',
+      left, top,
+      width: DEBT_FLY_CARD_W,
+      height: DEBT_FLY_CARD_H,
+      transform: `scale(${scale}) rotate(${rotate}deg)`,
+      opacity,
+      transition,
+      zIndex: 31000,
+      pointerEvents: 'none',
+      filter: 'drop-shadow(0 4px 20px rgba(204, 102, 34, 0.5))',
+    }}>
+      <div style={{
+        transform: `scale(${DEBT_FLY_SCALE})`,
+        transformOrigin: 'top left',
+      }}>
+        <CardFull card={DEBT_CARD_OBJ} />
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, localPlayerIds: localPlayerIdsProp, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby }: GameScreenProps) {
   // Sync player colors from game state into the shared PLAYER_COLORS map
   syncPlayerColors(gameState.players);
@@ -298,6 +507,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const homePlayerIndex = isMultiplayer && mpPlayerIndex >= 0 ? mpPlayerIndex : Math.max(0, firstHumanIndex);
   const [activePlayerIndex, setActivePlayerIndex] = useState(homePlayerIndex);
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
+  const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
   const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showUpgradePreview, setShowUpgradePreview] = useState(false);
@@ -365,6 +575,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [interactionBlocked, setInteractionBlocked] = useState(false);
   const [submitButtonVisible, setSubmitButtonVisible] = useState(false);
   const [buyButtonVisible, setBuyButtonVisible] = useState(false);
+  // Debt card fly animation state
+  const [bannerHoldUntilRelease, setBannerHoldUntilRelease] = useState(false);
+  const [debtFlyTarget, setDebtFlyTarget] = useState<DOMRect | null>(null);
+  const [forcePlayerPanelExpanded, setForcePlayerPanelExpanded] = useState(false);
+  const debtFlyPendingRef = useRef<string | null>(null);
+  // Test mode: override debt recipient for animation testing
+  const testDebtRecipientRef = useRef<{ id: string; name: string } | null>(null);
+  const testDebtBannerRef = useRef(false); // true when banner is from test "Give Debt" button
   const submitPlayRef = useRef<HoldToSubmitHandle>(null);
   const endTurnRef = useRef<HoldToSubmitHandle>(null);
   // Responsive: stack top-right buttons vertically when screen is narrow
@@ -383,7 +601,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, []);
   // Detect mobile browser — disable double-tap shortcuts
   const isMobile = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window && navigator.maxTouchPoints > 0);
-  const prevPhaseRef = useRef<string>(gameState.current_phase);
+  // Start empty so the first phase always triggers a banner (upkeep → play chain)
+  const prevPhaseRef = useRef<string>('');
   // Track previous tiles for resolve animation (needed for multiplayer WebSocket updates)
   const prevTilesRef = useRef(gameState.grid.tiles);
   // Review phase state (between resolve animations and buy phase)
@@ -424,8 +643,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [resolveLogEntries, setResolveLogEntries] = useState<string[]>([]);
   // Player effect popups (shown over base tiles after resolve steps)
   const [activePlayerEffects, setActivePlayerEffects] = useState<PlayerEffect[]>([]);
-  // Upkeep indicator tooltip
-  const [upkeepTooltip, setUpkeepTooltip] = useState<{ x: number; y: number } | null>(null);
 
   // Auto-dismiss error toast after 4 seconds
   useEffect(() => {
@@ -466,16 +683,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [activePlayer?.planned_actions.length]);
 
   // Build subtitle context for dynamic card value resolution
-  const subtitleContext: CardSubtitleContext = useMemo(() => ({
-    claimsWonLastRound: activePlayer.claims_won_last_round,
-    tileCount: activePlayer.tile_count,
-    handSize: activePlayer.hand.length,
-    trashCount: activePlayer.trash?.length ?? 0,
-    totalDeckCards: activePlayer.deck_size + activePlayer.hand.length + activePlayer.discard_count,
-    resourcesHeld: activePlayer.resources,
-    tilesLostLastRound: activePlayer.tiles_lost_last_round,
-    vpHexCount: gameState.grid ? countConnectedVpTiles(gameState.grid.tiles, activePlayerId) : 0,
-  }), [activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand.length, activePlayer.trash, activePlayer.deck_size, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId]);
+  const subtitleContext: CardSubtitleContext = useMemo(() => {
+    // Count Debt cards in hand + draw pile + discard (not trash)
+    const debtCount = [...activePlayer.hand, ...activePlayer.deck_cards, ...activePlayer.discard]
+      .filter(c => c.name === 'Debt').length;
+    return {
+      claimsWonLastRound: activePlayer.claims_won_last_round,
+      tileCount: activePlayer.tile_count,
+      handSize: activePlayer.hand.length,
+      trashCount: activePlayer.trash?.length ?? 0,
+      totalDeckCards: activePlayer.deck_size + activePlayer.hand.length + activePlayer.discard_count,
+      resourcesHeld: activePlayer.resources,
+      tilesLostLastRound: activePlayer.tiles_lost_last_round,
+      vpHexCount: gameState.grid ? countConnectedVpTiles(gameState.grid.tiles, activePlayerId) : 0,
+      debtCount,
+    };
+  }, [activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand, activePlayer.trash, activePlayer.deck_size, activePlayer.deck_cards, activePlayer.discard, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId]);
 
   // Context for played/revealed cards: power is already frozen on card.power, skip re-resolution
   const frozenSubtitleContext: CardSubtitleContext = useMemo(() => ({
@@ -603,8 +826,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       prevTilesRef.current = gameState.grid.tiles;
       return;
     }
-    // Don't show banner during intro overlay
-    if (showIntro) return;
+    // Don't show banner during intro overlay or intro animation sequence
+    if (showIntro || introSequence !== 'done') return;
     // Don't show banner if currently resolving (resolve has its own banner flow)
     if (resolving) return;
     // Don't trigger if a banner is already active (e.g. reveal→buy chain).
@@ -680,19 +903,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (bannerPhases.includes(phase)) {
       // Set subtitle per phase
       if (phase === 'upkeep') {
-        // Show only the active player's upkeep result
-        const ap = activePlayer;
-        if (ap) {
-          const tileCount = Object.values(gameState.grid.tiles).filter(t => t.owner === activePlayerId).length;
-          if (ap.tiles_lost_to_upkeep > 0) {
-            setBannerSubtitle(`Lost ${ap.tiles_lost_to_upkeep} tile(s) — couldn't pay ${ap.upkeep_cost}💰`);
-          } else if (ap.upkeep_cost > 0) {
-            setBannerSubtitle(`${ap.last_upkeep_paid} 💰 paid for ${tileCount} tiles`);
-          } else {
-            setBannerSubtitle('No upkeep due');
-          }
+        const maxRounds = gameState.max_rounds ?? 20;
+        setBannerLabelOverride(`Round ${gameState.current_round} of ${maxRounds}`);
+        if (gameState.current_round < DEBT_START_ROUND) {
+          const roundsUntil = DEBT_START_ROUND - gameState.current_round;
+          setBannerSubtitle(`${roundsUntil} round${roundsUntil > 1 ? 's' : ''} until Debt is given to leader`);
+          setBannerHoldUntilRelease(false);
         } else {
-          setBannerSubtitle('No upkeep due');
+          const recipient = findDebtRecipientFromLog(gameState);
+          setBannerSubtitle(recipient ? `Debt given to ${recipient.name}` : 'Debt given to leader');
+          // Hold banner for debt card fly animation (unless animations off)
+          setBannerHoldUntilRelease(!animationOff);
         }
       } else if (phase === 'play') {
         setBannerSubtitle('Choose Wisely');
@@ -704,7 +925,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       setPhaseBanner(phase);
       setInteractionBlocked(true);
     }
-  }, [phase, animationOff, resolving, phaseBanner, gameState, showIntro, activePlayerId, homePlayerIndex, onStateUpdate]);
+  }, [phase, animationOff, resolving, phaseBanner, gameState, showIntro, introSequence, activePlayerId, homePlayerIndex, onStateUpdate]);
 
   // Submit button fade-in: hide when phase changes, fade in after banner clears
   useEffect(() => {
@@ -1175,6 +1396,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const card = activePlayer.hand[cardIndex];
     if (!card) return;
 
+    // Any drag attempt means the player understands the mechanic — dismiss the hint
+    setShowDragHint(false);
+
     // Store drag release info so executePlayCard can pass it to the departing animation
     dragReleaseRef.current = { x: screenX, y: screenY, vx: dragVelocityX ?? 0, vy: dragVelocityY ?? 0 };
 
@@ -1387,6 +1611,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
     const card = activePlayer.hand[selectedCardIndex];
     if (!card) return;
+
+    // Any play attempt means the player understands the mechanic — dismiss the hint
+    setShowDragHint(false);
 
     // Player-targeting engine cards (e.g. Sabotage, Infestation): click an opponent's tile
     if (card.card_type === 'engine' && needsOpponentTarget(card)) {
@@ -1887,16 +2114,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
     if (introSequence === 'draw') {
       // Cards are now being passed to CardHand — entering animations will play.
-      // Wait for all cards to finish their staggered draw animation, then show "Begin!" banner.
+      // Wait for all cards to finish their staggered draw animation, then
+      // mark intro done. The phase effect will detect upkeep and show banners.
       const handSize = activePlayer?.hand.length ?? 0;
       const drawDuration = handSize * 500 + 500;
       const timer = setTimeout(() => {
-        setIntroSequence('done');
-        setBannerSubtitle(null);
-        setBannerLabelOverride('Begin!');
         sound.beginJingle();
-        setPhaseBanner('play');
-        setBannerKey(k => k + 1);
+        setIntroSequence('done');
       }, drawDuration);
       return () => clearTimeout(timer);
     }
@@ -2004,10 +2228,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
     setBannerLabelOverride(null);
+    // Reset debt animation state
+    setDebtFlyTarget(null);
+    setForcePlayerPanelExpanded(false);
+    setBannerHoldUntilRelease(false);
+    debtFlyPendingRef.current = null;
     const bannerPhase = phaseBanner;
 
     // Upkeep banner finished → advance to PLAY via API, then show PLAY banner
     if (bannerPhase === 'upkeep') {
+      // Test mode "Give Debt" button — just dismiss the banner, don't call API
+      if (testDebtBannerRef.current) {
+        testDebtBannerRef.current = false;
+        setPhaseBanner(null);
+        setInteractionBlocked(false);
+        return;
+      }
       api.advanceUpkeep(gameState.id).then(result => {
         onStateUpdate(result.state);
         // Chain into the play banner — sync ref so phase effect doesn't re-trigger
@@ -2049,6 +2285,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return;
     }
 
+    // If the actual game phase is still upkeep (e.g. after intro "Begin!" banner),
+    // auto-advance through upkeep to reach play phase
+    if (phase === 'upkeep' && bannerPhase !== 'upkeep') {
+      api.advanceUpkeep(gameState.id).then(result => {
+        onStateUpdate(result.state);
+        prevPhaseRef.current = result.state.current_phase;
+        setBannerSubtitle('Choose Wisely');
+        setPhaseBanner('play');
+        setBannerKey(k => k + 1);
+      }).catch(() => {
+        setPhaseBanner(null);
+        setInteractionBlocked(false);
+      });
+      return;
+    }
+
     setPhaseBanner(null);
     // Sync phase ref so the phase change effect doesn't re-trigger for this phase
     prevPhaseRef.current = phase;
@@ -2062,11 +2314,68 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [resolving, phaseBanner, phase, onStateUpdate, animationOff, enterReviewMode, homePlayerIndex, gameState, activePlayerId]);
 
-  // Phase banner midpoint — start drawing cards if it's start_of_turn
-  const handleBannerMidpoint = useCallback(() => {
-    // Card drawing is handled by the state update, which has already been applied.
-    // The banner just delays interaction, so nothing special at midpoint currently.
+  // Debt fly animation complete — release banner hold, collapse panel after short delay
+  const handleDebtFlyComplete = useCallback(() => {
+    setDebtFlyTarget(null);
+    setBannerHoldUntilRelease(false);
+    debtFlyPendingRef.current = null;
+    // Collapse player panel after a brief delay so the user sees the target highlight
+    setTimeout(() => setForcePlayerPanelExpanded(false), 400);
   }, []);
+
+  // Effect: after panel expands, measure target player row and start flying
+  useEffect(() => {
+    const pid = debtFlyPendingRef.current;
+    if (!pid || !forcePlayerPanelExpanded) return;
+    // Wait for panel expansion CSS transition (200ms) + render buffer
+    const t = setTimeout(() => {
+      const row = playerRowRefs.current.get(pid);
+      if (row?.isConnected) {
+        setDebtFlyTarget(row.getBoundingClientRect());
+      } else {
+        // Fallback: release banner without animation
+        setBannerHoldUntilRelease(false);
+      }
+      debtFlyPendingRef.current = null;
+    }, 300);
+    return () => clearTimeout(t);
+  }, [forcePlayerPanelExpanded]);
+
+  // Phase banner midpoint — start debt card fly animation if applicable
+  const handleBannerMidpoint = useCallback(() => {
+    if (phaseBanner !== 'upkeep') return;
+    if (animationOff) return;
+
+    // Use test override if available, otherwise parse game log
+    const recipient = testDebtRecipientRef.current ?? (
+      gameState.current_round >= DEBT_START_ROUND ? findDebtRecipientFromLog(gameState) : null
+    );
+    testDebtRecipientRef.current = null; // consume the override
+    if (!recipient) return;
+
+    const isActive = recipient.id === activePlayerId;
+
+    if (isActive) {
+      // Target discard pile button (always visible in CardHand)
+      const discardEl = document.querySelector('[data-discard-pile]');
+      if (discardEl) {
+        setDebtFlyTarget(discardEl.getBoundingClientRect());
+      } else {
+        setBannerHoldUntilRelease(false);
+      }
+    } else {
+      // Target player card in sidebar — may need to expand panel first
+      // Check isConnected because stale refs linger in the Map after panel collapses
+      const existingRow = playerRowRefs.current.get(recipient.id);
+      if (existingRow?.isConnected) {
+        setDebtFlyTarget(existingRow.getBoundingClientRect());
+      } else {
+        // Force-expand player panel, then an effect will start the animation
+        setForcePlayerPanelExpanded(true);
+        debtFlyPendingRef.current = recipient.id;
+      }
+    }
+  }, [phaseBanner, gameState, activePlayerId, animationOff]);
 
   // Resolve animation completed — advance resolve and move to buy phase
   const handleResolveComplete = useCallback(() => {
@@ -2321,6 +2630,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [onLeaveGame]);
 
   const selectedCard = selectedCardIndex !== null ? activePlayer?.hand[selectedCardIndex] : null;
+  const hoveredCard = hoveredCardIndex !== null ? activePlayer?.hand[hoveredCardIndex] : null;
+  // For grid highlighting, prefer hovered card over selected card
+  const highlightCard = hoveredCard ?? selectedCard;
 
   // Review mode: compute tiles that had cards played on them
   const reviewPulseTiles = useMemo(() => {
@@ -2350,7 +2662,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (!reviewing) return null;
     const actions = revealedActionsRef.current;
     if (!actions) return null;
-    const map = new Map<string, { playerId: string; playerName: string; card: import('../types/game').Card; effectivePower?: number; effectiveResourceGain?: number }[]>();
+    const map = new Map<string, { playerId: string; playerName: string; card: import('../types/game').Card; effectivePower?: number; effectiveResourceGain?: number; effectiveDrawCards?: number }[]>();
     for (const [pid, playerActions] of Object.entries(actions)) {
       const player = gameState.players[pid];
       const name = player?.name ?? pid;
@@ -2358,7 +2670,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const key = actionTileKey(action);
         if (key) {
           if (!map.has(key)) map.set(key, []);
-          map.get(key)!.push({ playerId: pid, playerName: name, card: action.card, effectivePower: action.effective_power, effectiveResourceGain: action.effective_resource_gain });
+          map.get(key)!.push({ playerId: pid, playerName: name, card: action.card, effectivePower: action.effective_power, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards });
         }
       }
     }
@@ -2368,24 +2680,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Submit Play button state (used by keyboard handler and UI)
   // NOTE: declared here so it's available to the keyboard effect above
 
-  // Upkeep indicator calculations — tiles_per_vp is a constant 3 for all grid sizes
-  const UPKEEP_FREE_TILES = 4;
+  // Player tile count and VP tracking
   const tilesPerVp = 3;
   const playerTileCount = activePlayer
     ? Object.values(gameState.grid.tiles).filter(t => t.owner === activePlayerId).length
     : 0;
   const anyPlayerReachedVp = Object.values(gameState.players).some(p => !p.has_left && p.vp >= gameState.vp_target);
-  const upkeepDivisor = tilesPerVp * 2;
-  const currentUpkeep = Math.max(0, Math.floor((playerTileCount - UPKEEP_FREE_TILES) / upkeepDivisor));
-  const upkeepBracketHigh = currentUpkeep === 0
-    ? UPKEEP_FREE_TILES + upkeepDivisor - 1
-    : UPKEEP_FREE_TILES + (currentUpkeep + 1) * upkeepDivisor - 1;
-  const upkeepBracketLow = currentUpkeep === 0 ? 1 : UPKEEP_FREE_TILES + currentUpkeep * upkeepDivisor;
-  // Glow if pending claims might push past bracket boundary
   const pendingClaimCount = activePlayer
     ? activePlayer.planned_actions.filter(a => a.card.card_type === 'claim' && a.target_q !== null).length
     : 0;
-  const upkeepMightIncrease = playerTileCount + pendingClaimCount > upkeepBracketHigh;
 
   // Hex distance in axial coordinates
   const hexDistance = useCallback((q1: number, r1: number, q2: number, r2: number): number => {
@@ -2712,12 +3015,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   }
                   return getValidClaimTiles(surgeCard);
                 }
-                const card = selectedCard?.card_type === 'claim' ? selectedCard
+                const card = highlightCard?.card_type === 'claim' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
                     ? activePlayer?.hand[draggingCardIndex] : null;
                 if (card) return getValidClaimTiles(card);
                 // Defense card: highlight own tiles
-                const defCard = selectedCard?.card_type === 'defense' ? selectedCard
+                const defCard = highlightCard?.card_type === 'defense' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'defense'
                     ? activePlayer?.hand[draggingCardIndex] : null;
                 if (defCard) {
@@ -2728,7 +3031,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   return ownTiles;
                 }
                 // Player-targeting engine card (e.g. Sabotage, Infestation): highlight opponent tiles
-                const ptCard = selectedCard?.card_type === 'engine' && needsOpponentTarget(selectedCard) ? selectedCard
+                const ptCard = highlightCard?.card_type === 'engine' && needsOpponentTarget(highlightCard) ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'engine'
                     && needsOpponentTarget(activePlayer?.hand[draggingCardIndex]!)
                     ? activePlayer?.hand[draggingCardIndex] : null;
@@ -2740,7 +3043,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   return opponentTiles;
                 }
                 // Engine cards targeting own tiles (Exodus, Scorched Retreat)
-                const ownTileEngCard = selectedCard?.card_type === 'engine' && selectedCard?.target_own_tile ? selectedCard
+                const ownTileEngCard = highlightCard?.card_type === 'engine' && highlightCard?.target_own_tile ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'engine'
                     && activePlayer?.hand[draggingCardIndex]?.target_own_tile
                     ? activePlayer?.hand[draggingCardIndex] : null;
@@ -2763,16 +3066,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
               plannedActions={phase === 'play' ? plannedActions : undefined}
               previewCard={phase === 'play' ? (() => {
-                const raw = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
-                  : (selectedCard?.card_type === 'engine' && (needsOpponentTarget(selectedCard) || selectedCard?.target_own_tile)) ? selectedCard
+                const raw = highlightCard?.card_type === 'claim' || highlightCard?.card_type === 'defense' ? highlightCard
+                  : (highlightCard?.card_type === 'engine' && (needsOpponentTarget(highlightCard) || highlightCard?.target_own_tile)) ? highlightCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
                   : null;
                 return raw ? withEffectivePower(raw, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0) : null;
               })() : null}
               previewValidTiles={(() => {
                 if (phase !== 'play') return undefined;
-                const card = selectedCard?.card_type === 'claim' || selectedCard?.card_type === 'defense' ? selectedCard
-                  : (selectedCard?.card_type === 'engine' && (needsOpponentTarget(selectedCard) || selectedCard?.target_own_tile)) ? selectedCard
+                const card = highlightCard?.card_type === 'claim' || highlightCard?.card_type === 'defense' ? highlightCard
+                  : (highlightCard?.card_type === 'engine' && (needsOpponentTarget(highlightCard) || highlightCard?.target_own_tile)) ? highlightCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
                   : null;
                 return card ? getAllValidPlayTiles(card) : undefined;
@@ -2807,72 +3110,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <span style={{ fontSize: 16, fontWeight: 'bold', color: '#fff' }}>
                   Round {gameState.current_round}
                 </span>
-                <span style={{
-                  fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                  background: phase === 'play' ? '#2a6e3e' : phase === 'buy' ? '#2a4a6e' : phase === 'reveal' ? '#4a2a6e' : '#333',
-                  color: '#fff', fontWeight: 'bold', textTransform: 'uppercase',
-                }}>
-                  {phase.replace(/_/g, ' ')}
-                </span>
+                <PhaseIndicatorPill phase={phase} />
               </div>
               <div style={{ fontSize: 12, color: '#aaa' }}>
                 ★ {gameState.vp_target} VP to win
+                {gameState.max_rounds && (
+                  <Tooltip content={`Game ends after round ${gameState.max_rounds}. Starting on round 5, the leading player will receive a Debt card each round.`} position="below">
+                    <span style={{ marginLeft: 8, cursor: 'help' }}>⏱ {gameState.current_round}/{gameState.max_rounds}</span>
+                  </Tooltip>
+                )}
               </div>
-              {/* Upkeep indicator — inside round info box */}
-              {(phase === 'play' || phase === 'buy') && activePlayer && !resolving && gameState.current_round > 0 && (() => {
-                const cantAfford = activePlayer.resources < currentUpkeep;
-                const tooltipText = cantAfford
-                  ? `⚠ You can't afford ${currentUpkeep} 💰 upkeep! Tiles will be lost next round.`
-                  : `Upkeep: ${currentUpkeep} 💰 paid before each Play phase for ${playerTileCount} tile${playerTileCount !== 1 ? 's' : ''}. If you can't pay, your most distant tiles are lost.`;
-                return (
-                  <div
-                    style={{ marginTop: 4, cursor: 'help', display: 'flex', alignItems: 'center', gap: 4, fontSize: 12 }}
-                    onPointerEnter={(e) => {
-                      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                      setUpkeepTooltip({ x: rect.left, y: rect.bottom });
-                    }}
-                    onPointerLeave={() => setUpkeepTooltip(null)}
-                  >
-                    <span style={{ fontWeight: 'bold', color: upkeepMightIncrease ? '#ffaa33' : '#fff' }}>
-                      Upkeep: 💰 {currentUpkeep}
-                    </span>
-                    <span style={{ fontSize: 11, color: '#777' }}>
-                      ({upkeepBracketLow}–{upkeepBracketHigh} tiles)
-                    </span>
-                    {upkeepMightIncrease && (
-                      <span style={{ fontSize: 11, color: '#ffaa33', fontWeight: 'bold' }}>⚠</span>
-                    )}
-                    {upkeepTooltip && createPortal(
-                      <div style={{
-                        position: 'fixed',
-                        left: upkeepTooltip.x,
-                        top: upkeepTooltip.y + 8,
-                        background: cantAfford ? '#332200' : '#111122',
-                        border: `1px solid ${cantAfford ? '#aa7722' : '#555'}`,
-                        borderRadius: 6,
-                        padding: '6px 10px',
-                        fontSize: 12,
-                        lineHeight: 1.4,
-                        color: cantAfford ? '#ffcc66' : '#ddd',
-                        maxWidth: 260,
-                        zIndex: 20000,
-                        pointerEvents: 'none',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                        whiteSpace: 'normal',
-                      }}>
-                        {tooltipText}
-                      </div>,
-                      document.body
-                    )}
-                  </div>
-                );
-              })()}
               {gameState.winner && (
                 <div style={{
                   marginTop: 4, padding: '4px 8px', background: '#4a9eff33', borderRadius: 6, fontWeight: 'bold',
                   fontSize: 13,
                 }}>
-                  ★ {gameState.players[gameState.winner]?.name} wins!
+                  {gameState.winners && gameState.winners.length > 1
+                    ? `★ Tied: ${gameState.winners.map(id => gameState.players[id]?.name).join(', ')}!`
+                    : `★ ${gameState.players[gameState.winner]?.name} wins!`}
                 </div>
               )}
             </div>
@@ -2892,7 +3147,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 overflowY: 'auto',
               }}
             >
-              {(playerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp) ? (
+              {(playerPanelExpanded || forcePlayerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp) ? (
                 /* Expanded: all players */
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
@@ -3003,8 +3258,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   }}>
                     {actions.map((action, i) => {
                       const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
-                      const typeColor = CARD_TYPE_COLORS[c.card_type] || '#555';
-                      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain };
+                      const typeColor = getCardDisplayColor(c);
+                      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
                       const statParts = buildCardSubtitle(c, ctx);
                       return (
                         <div
@@ -3281,6 +3536,28 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           >
                             Replay Intro
                           </button>
+                          <button
+                            onClick={() => {
+                              if (animationOff || phaseBanner) return;
+                              // Pick a random non-left player as the debt recipient
+                              const candidates = gameState.player_order.filter(pid => !gameState.players[pid].has_left);
+                              const recipientId = candidates[Math.floor(Math.random() * candidates.length)];
+                              const recipientName = gameState.players[recipientId].name;
+                              testDebtRecipientRef.current = { id: recipientId, name: recipientName };
+                              testDebtBannerRef.current = true;
+                              const maxRounds = gameState.max_rounds ?? 20;
+                              setBannerLabelOverride(`Round ${gameState.current_round} of ${maxRounds}`);
+                              setBannerSubtitle(`Debt given to ${recipientName}`);
+                              setBannerHoldUntilRelease(true);
+                              setPhaseBanner('upkeep');
+                              setBannerKey(k => k + 1);
+                              setInteractionBlocked(true);
+                            }}
+                            disabled={animationOff || !!phaseBanner}
+                            style={{ padding: '4px 8px', background: (animationOff || phaseBanner) ? '#555' : '#cc6622', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: (animationOff || phaseBanner) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                          >
+                            Give Debt
+                          </button>
                         </div>
                       )}
                     </div>
@@ -3305,7 +3582,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onClose={() => setShowShopOverlay(false)}
               testMode={!!gameState.test_mode}
               effectiveBuyCosts={activePlayer?.effective_buy_costs}
-              currentUpkeep={currentUpkeep}
               neutralPurchasesLastRound={gameState.neutral_purchases_last_round}
               currentPlayerId={activePlayerId}
               buyPhasePurchases={gameState.buy_phase_purchases}
@@ -3819,6 +4095,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               closePopups={showShopOverlay || showCardBrowser || showDeckViewer}
               trashedCardIds={trashedCardIds.size > 0 ? trashedCardIds : undefined}
               claimBanned={!!gameState.claim_ban_rounds && gameState.claim_ban_rounds > 0}
+              onCardHover={setHoveredCardIndex}
             />
           )}
         </div>
@@ -3893,7 +4170,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               })();
               const typeColor = REVIEW_TYPE_COLORS[entry.card.card_type] || '#555';
               const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
-              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: entry.effectiveResourceGain };
+              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: entry.effectiveResourceGain, effectiveDrawCards: entry.effectiveDrawCards };
               const statParts = buildCardSubtitle(c, ctx);
               return (
                 <div key={i} style={{ marginBottom: i < cards.length - 1 ? 6 : 0 }}>
@@ -3963,7 +4240,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             {actions.map((action, i) => {
               const typeColor = REVIEW_TYPE_COLORS[action.card.card_type] || '#555';
               const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
-              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain };
+              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
               const statParts = buildCardSubtitle(c, ctx);
               return (
                 <div key={i} style={{
@@ -4236,6 +4513,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           subtitle={bannerSubtitle ?? undefined}
           onMidpoint={handleBannerMidpoint}
           onComplete={handleBannerComplete}
+          holdUntilRelease={bannerHoldUntilRelease}
+        />
+      )}
+
+      {/* Debt card fly animation — above phase banner */}
+      {debtFlyTarget && (
+        <DebtCardFlyAnimation
+          targetRect={debtFlyTarget}
+          onComplete={handleDebtFlyComplete}
+          speed={animationMode === 'fast' ? 0.5 : 1}
         />
       )}
 
@@ -4244,7 +4531,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         <GameOverOverlay
           gameState={gameState}
           playerId={mpPlayerId || activePlayerId}
-          isVictory={gameState.winner === (mpPlayerId || activePlayerId)}
+          isVictory={gameState.winners ? gameState.winners.includes(mpPlayerId || activePlayerId || '') : gameState.winner === (mpPlayerId || activePlayerId)}
           onReturnToLobby={handleReturnToLobby}
           onExitGame={handleExitGame}
           isMultiplayer={isMultiplayer}

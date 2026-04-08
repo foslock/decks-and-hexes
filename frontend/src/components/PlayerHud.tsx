@@ -89,7 +89,7 @@ interface BuyPurchase {
   card_type?: string;
 }
 
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, DEBT_CARD_COLOR } from '../constants/cardColors';
 
 interface PlayerHudProps {
   player: Player;
@@ -289,7 +289,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
                 fontSize: 10,
                 padding: '1px 5px',
                 background: '#1a1a2e',
-                border: `1px solid ${p.card_type ? (CARD_TYPE_COLORS[p.card_type] || '#555') : (p.source === 'upgrade' ? '#ffaa4a' : '#555')}`,
+                border: `1px solid ${p.card_name === 'Debt' ? DEBT_CARD_COLOR : p.card_type ? (CARD_TYPE_COLORS[p.card_type] || '#555') : (p.source === 'upgrade' ? '#ffaa4a' : '#555')}`,
                 borderRadius: 4,
                 color: '#ccc',
                 whiteSpace: 'nowrap',

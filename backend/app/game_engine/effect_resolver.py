@@ -413,6 +413,12 @@ def _handle_self_trash(effect: Effect, ctx: EffectContext) -> None:
     trashed = []
     for idx in sorted(indices, reverse=True):
         if 0 <= idx < len(ctx.player.hand):
+            card_to_trash = ctx.player.hand[idx]
+            if card_to_trash.trash_immune:
+                ctx.game._log(
+                    f"{ctx.player.name}: {card_to_trash.name} is immune to trashing, skipping",
+                    visible_to=[ctx.player.id], actor=ctx.player.id)
+                continue
             trashed.append(ctx.player.hand.pop(idx))
 
     if trashed:
@@ -439,6 +445,12 @@ def _handle_trash_gain_buy_cost(effect: Effect, ctx: EffectContext) -> None:
 
     idx = indices[0]
     if 0 <= idx < len(ctx.player.hand):
+        trashed_card = ctx.player.hand[idx]
+        if trashed_card.trash_immune:
+            ctx.game._log(
+                f"{ctx.player.name}: {trashed_card.name} is immune to trashing, skipping",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+            return
         trashed_card = ctx.player.hand.pop(idx)
         ctx.player.trash.append(trashed_card)
         base_cost = trashed_card.buy_cost or 0
@@ -995,6 +1007,36 @@ def _handle_draw_per_connected_vp(effect: Effect, ctx: EffectContext) -> None:
 
 register_handler(EffectType.DRAW_PER_CONNECTED_VP, _handle_draw_per_connected_vp)
 
+
+def _handle_draw_per_debt(effect: Effect, ctx: EffectContext) -> None:
+    """Financier: draw 1 card for each Debt card in draw pile, hand, and discard."""
+    debt_count = 0
+    for c in ctx.player.hand:
+        if c.name == "Debt":
+            debt_count += 1
+    for c in ctx.player.deck.cards:
+        if c.name == "Debt":
+            debt_count += 1
+    for c in ctx.player.deck.discard:
+        if c.name == "Debt":
+            debt_count += 1
+    draw_per = effect.effective_value(ctx.card.is_upgraded)
+    total_draw = debt_count * draw_per
+    if total_draw > 0:
+        drawn = ctx.player.deck.draw(total_draw, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        ctx.game._log(
+            f"{ctx.player.name} draws {len(drawn)} card(s) from Financier ({debt_count} Debt card{'s' if debt_count != 1 else ''} in deck)",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+    else:
+        ctx.game._log(
+            f"{ctx.player.name} plays Financier but has no Debt cards",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+register_handler(EffectType.DRAW_PER_DEBT, _handle_draw_per_debt)
+
+
 # VP formula passive effects — no handler needed (computed in _compute_formula_vp)
 register_handler(EffectType.VP_FROM_DISCONNECTED_GROUPS, _handle_stub)
 register_handler(EffectType.VP_FROM_UNCAPTURED_TILES, _handle_stub)
@@ -1391,6 +1433,12 @@ def _handle_mandatory_self_trash(effect: Effect, ctx: EffectContext) -> None:
     trashed = []
     for idx in sorted(indices, reverse=True):
         if 0 <= idx < len(ctx.player.hand):
+            card_to_trash = ctx.player.hand[idx]
+            if card_to_trash.trash_immune:
+                ctx.game._log(
+                    f"{ctx.player.name}: {card_to_trash.name} is immune to trashing, skipping",
+                    visible_to=[ctx.player.id], actor=ctx.player.id)
+                continue
             trashed.append(ctx.player.hand.pop(idx))
 
     if trashed:

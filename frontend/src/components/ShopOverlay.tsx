@@ -9,7 +9,7 @@ import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -32,7 +32,6 @@ interface ShopOverlayProps {
   playerResources: number;
   playerArchetype: string;
   effectiveBuyCosts?: Record<string, number>;
-  currentUpkeep: number;
   onBuyArchetype: (cardId: string) => void;
   onBuyNeutral: (cardId: string) => void;
   onBuyUpgrade: () => void;
@@ -55,6 +54,7 @@ interface ShopOverlayProps {
 interface HoverState {
   card: Card;
   rect: DOMRect;
+  effectiveCost?: number | null;
 }
 
 function StatChip({ value }: { value: string }) {
@@ -81,7 +81,6 @@ function CompactShopCard({
   remaining,
   canAfford,
   effectiveCost,
-  upkeepWarning,
   onBuy,
   onHover,
   onLeave,
@@ -94,9 +93,8 @@ function CompactShopCard({
   remaining: number | null;
   canAfford: boolean;
   effectiveCost?: number | null;
-  upkeepWarning: boolean;
   onBuy: () => void;
-  onHover: (e: React.MouseEvent, card: Card) => void;
+  onHover: (e: React.MouseEvent, card: Card, effectiveCost?: number | null) => void;
   onLeave: () => void;
   disabled: boolean;
   disabledTooltip?: string;
@@ -106,25 +104,23 @@ function CompactShopCard({
 }) {
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
-  const typeColor = CARD_TYPE_COLORS[card.card_type] || '#555';
+  const typeColor = getCardDisplayColor(card);
   const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
-  const buyColor = !canAfford || disabled ? '#333' : upkeepWarning ? '#cc7a2a' : '#4a9eff';
+  const buyColor = !canAfford || disabled ? '#333' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase
     ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this turn`).join('\n')
     : '';
   const buyTooltip = disabledTooltip
     ? disabledTooltip
     : [
-        upkeepWarning
-          ? `⚠ Purchasing ${card.name} will not leave you with enough resources for your next upkeep.`
-          : `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
+        `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
         purchaseLines,
       ].filter(Boolean).join('\n');
   const buyLabel = remaining !== null ? `Buy (${remaining} left)` : 'Buy';
   return (
     <div
       data-card-id={card.id}
-      onMouseEnter={(e) => onHover(e, card)}
+      onMouseEnter={(e) => onHover(e, card, effectiveCost)}
       onMouseLeave={onLeave}
       style={{
         display: 'flex',
@@ -155,7 +151,9 @@ function CompactShopCard({
               {card.name}
             </span>
           </div>
-          <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>
+          <span style={{ fontSize: 15, flexShrink: 0, color: isDiscounted ? '#ffd700' : '#aaa', fontWeight: isDiscounted ? 'bold' : undefined, textShadow: isDiscounted ? '0 0 6px rgba(255,215,0,0.6)' : undefined, whiteSpace: 'nowrap' }}>
+            {displayCost != null ? `${displayCost}💰` : '—'}
+          </span>
         </div>
         <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
           <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -173,7 +171,7 @@ function CompactShopCard({
         onClick={onBuy}
         disabled={disabled || !canAfford}
         tooltip={buyTooltip}
-        tooltipDelay={upkeepWarning ? 0 : undefined}
+        tooltipDelay={undefined}
         style={{
           width: COMPACT_CARD_WIDTH,
           padding: '3px 0',
@@ -199,7 +197,6 @@ export default function ShopOverlay({
   playerResources,
   playerArchetype,
   effectiveBuyCosts,
-  currentUpkeep,
   onBuyArchetype,
   onBuyNeutral,
   onBuyUpgrade,
@@ -302,10 +299,10 @@ export default function ShopOverlay({
     return map;
   }, [buyPhasePurchases, currentPlayerId, players]);
 
-  const handleCardHover = useCallback((e: React.MouseEvent, card: Card) => {
+  const handleCardHover = useCallback((e: React.MouseEvent, card: Card, effectiveCost?: number | null) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setHoverVisible(false);
-    setHoverState({ card, rect });
+    setHoverState({ card, rect, effectiveCost });
   }, []);
 
   const handleCardLeave = useCallback(() => {
@@ -541,7 +538,6 @@ export default function ShopOverlay({
                     }
                     const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
                     const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
-                    const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
                     return (
                       <CompactShopCard
                         key={card.id}
@@ -549,7 +545,6 @@ export default function ShopOverlay({
                         remaining={null}
                         canAfford={canAfford}
                         effectiveCost={effCost}
-                        upkeepWarning={wouldDipBelowUpkeep}
                         onBuy={() => buyArchetypeWithSound(card.id)}
                         onHover={handleCardHover}
                         onLeave={handleCardLeave}
@@ -598,7 +593,6 @@ export default function ShopOverlay({
                 {[...neutralMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
                   const canAfford = testMode || (effCost !== null && playerResources >= (effCost ?? 0));
-                  const wouldDipBelowUpkeep = canAfford && effCost !== null && (playerResources - (effCost ?? 0)) < currentUpkeep;
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
                   const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
                   return (
@@ -608,7 +602,6 @@ export default function ShopOverlay({
                       remaining={stack.remaining}
                       canAfford={canAfford}
                       effectiveCost={effCost}
-                      upkeepWarning={wouldDipBelowUpkeep}
                       onBuy={() => buyNeutralWithSound(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
@@ -681,7 +674,7 @@ export default function ShopOverlay({
           opacity: hoverVisible ? 1 : 0,
           transition: animMode === 'normal' ? 'opacity 0.15s ease' : 'none',
         }}>
-          <CardFull card={shiftHeld ? getUpgradedPreview(hoverState.card) : hoverState.card} showKeywordHints />
+          <CardFull card={shiftHeld ? getUpgradedPreview(hoverState.card) : hoverState.card} effectiveCost={shiftHeld ? undefined : hoverState.effectiveCost} showKeywordHints />
           {shiftHeld && hasUpgradePreview(hoverState.card) && (
             <div style={{
               textAlign: 'center',

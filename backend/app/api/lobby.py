@@ -93,6 +93,7 @@ class LobbyConfig:
     vp_target: Optional[int] = None  # None = use computed default
     granted_actions: Optional[int] = None  # None = use archetype default (currently 5)
     card_pack: str = DEFAULT_PACK_ID
+    max_rounds: int = 20
     map_seed: str = ""  # 6-char lowercase alphanumeric; "" = generate on init
 
     def __post_init__(self) -> None:
@@ -108,6 +109,7 @@ class LobbyConfig:
             "vp_target": self.vp_target,
             "granted_actions": self.granted_actions,
             "card_pack": self.card_pack,
+            "max_rounds": self.max_rounds,
             "map_seed": self.map_seed,
         }
 
@@ -743,6 +745,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
         granted_actions=lobby.config.granted_actions,
         card_pack=lobby.config.card_pack,
         map_seed=lobby.config.map_seed,
+        max_rounds=lobby.config.max_rounds,
     )
     game.host_id = lobby.host_id
     game.lobby_code = code

@@ -15,7 +15,23 @@ export const CARD_TYPE_COLORS: Record<string, string> = {
   passive: '#aa88cc',
 };
 
+/** Burnt orange color for Debt cards. */
+export const DEBT_CARD_COLOR = '#cc6622';
+
 /** Lookup with fallback for unknown card types. */
 export function cardTypeColor(cardType: string): string {
   return CARD_TYPE_COLORS[cardType] || '#555';
+}
+
+/** Get the display color for a card, with special cases (e.g. Debt → burnt orange). */
+export function getCardDisplayColor(card: { name: string; card_type: string }): string {
+  if (card.name === 'Debt') return DEBT_CARD_COLOR;
+  return CARD_TYPE_COLORS[card.card_type] || '#555';
+}
+
+/** Get the display type label for a card, with special cases (e.g. Debt → "Debt"). */
+export function getCardDisplayType(card: { name: string; card_type: string }): string {
+  if (card.name === 'Debt') return 'Debt';
+  const TYPE_LABELS: Record<string, string> = { claim: 'Claim', defense: 'Defense', engine: 'Engine', passive: 'Passive' };
+  return TYPE_LABELS[card.card_type] || card.card_type;
 }

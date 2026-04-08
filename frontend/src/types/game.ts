@@ -24,6 +24,7 @@ export interface Card {
   buy_cost: number | null;
   is_upgraded: boolean;
   trash_on_use: boolean;
+  trash_immune?: boolean;
   stackable: boolean;
   forced_discard: number;
   draw_cards: number;
@@ -65,6 +66,8 @@ export interface PlannedAction {
   effective_power?: number;
   /** Dynamic resource gain snapshotted at play time (e.g. War Tithe) */
   effective_resource_gain?: number;
+  /** Dynamic draw count snapshotted at play time (e.g. Financier: draw per Debt) */
+  effective_draw_cards?: number;
 }
 
 export interface Player {
@@ -91,9 +94,6 @@ export interface Player {
   has_ended_turn: boolean;
   effective_buy_costs?: Record<string, number>;
   trash: Card[];
-  last_upkeep_paid: number;
-  upkeep_cost: number;
-  tiles_lost_to_upkeep: number;
   rubble_count: number;
   claims_won_last_round: number;
   tiles_lost_last_round: number;
@@ -186,6 +186,8 @@ export interface GameState {
   card_pack?: string;
   map_seed?: string;
   claim_ban_rounds?: number;
+  max_rounds?: number;
+  winners?: string[];
 }
 
 // ── Lobby types ──────────────────────────────────────────
@@ -210,6 +212,7 @@ export interface LobbyConfig {
   vp_target: number | null;
   granted_actions: number | null;
   card_pack: string;
+  max_rounds: number;
   map_seed: string;
 }
 

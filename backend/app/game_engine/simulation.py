@@ -40,10 +40,11 @@ class SimConfig:
     player_archetypes: list[Archetype] = field(default_factory=lambda: [Archetype.VANGUARD, Archetype.SWARM])
     cpu_noise: float = 0.0
     seed: Optional[int] = None
-    max_rounds: int = 50
+    max_rounds: int = 20
     verbose: bool = False
     vp_target: Optional[int] = None  # None = use game default
     speed: str = "normal"  # "fast", "normal", "slow"
+    card_pack: str = "everything"  # Card pack ID to filter neutral market
 
 
 @dataclass
@@ -86,10 +87,11 @@ class BatchConfig:
     player_archetypes: list[Archetype] = field(default_factory=lambda: [Archetype.VANGUARD, Archetype.SWARM])
     cpu_noise: float = 0.0
     base_seed: Optional[int] = None
-    max_rounds: int = 50
+    max_rounds: int = 20
     verbose: bool = False
     vp_target: Optional[int] = None
     speed: str = "normal"
+    card_pack: str = "everything"
 
 
 @dataclass
@@ -122,7 +124,8 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
     try:
         game = create_game(config.grid_size, player_configs, card_registry,
                            seed=config.seed, vp_target=config.vp_target,
-                           speed=config.speed)
+                           speed=config.speed, card_pack=config.card_pack,
+                           max_rounds=config.max_rounds)
 
         # Create CPU players
         cpus: dict[str, CPUPlayer] = {}
@@ -144,10 +147,12 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
 
         # Main game loop
         while game.current_phase != Phase.GAME_OVER:
-            if game.current_round > config.max_rounds:
+            # Safety net: game should end via round limit in execute_end_of_turn,
+            # but break if somehow stuck (e.g. max_rounds+10)
+            if game.current_round > config.max_rounds + 10:
                 result.timed_out = True
                 if config.verbose:
-                    print(f"  Game timed out after {config.max_rounds} rounds")
+                    print(f"  Game timed out after {game.current_round} rounds (safety net)")
                 break
 
             if game.current_phase == Phase.PLAY:
@@ -355,6 +360,7 @@ def run_batch(config: BatchConfig,
             verbose=config.verbose,
             vp_target=config.vp_target,
             speed=config.speed,
+            card_pack=config.card_pack,
         )
         result = run_game(sim_config, card_registry=card_registry)
         batch_result.results.append(result)

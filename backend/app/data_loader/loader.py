@@ -106,7 +106,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     # Skip if draw is delayed ("next turn") or handled by a cycle/draw effect
     draw_cards = _safe_int(entry.get("draw_cards", 0))
     has_cycle_effect = any(
-        e.get("type") in ("cycle", "actions_per_cards_played", "mulligan", "global_claim_ban", "swap_draw_discard") for e in entry.get("effects", [])
+        e.get("type") in ("cycle", "actions_per_cards_played", "mulligan", "global_claim_ban", "swap_draw_discard", "draw_per_debt") for e in entry.get("effects", [])
     )
     if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower() and not has_cycle_effect:
         match = re.search(r'[Dd]raw\s+(\d+)\s+card', effect)

@@ -6,7 +6,7 @@ import { getUpgradedPreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useShiftKey } from '../hooks/useShiftKey';
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -61,7 +61,7 @@ let browserSortMemory: SortMode = 'cost';
 
 function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
-  const color = CARD_TYPE_COLORS[displayCard.card_type] || '#555';
+  const color = getCardDisplayColor(displayCard);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const [flashAdded, setFlashAdded] = useState(false);
   return (
