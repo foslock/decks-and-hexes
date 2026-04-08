@@ -29,9 +29,9 @@ const PAGES = [
         }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>How you earn VP</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 14, color: '#bbb' }}>
-            <div>🗺️ <strong style={{ color: '#ccc' }}>Territory</strong> — own tiles to earn VP (every 3 tiles = 1 VP)</div>
-            <div>⭐ <strong style={{ color: '#ffd700' }}>VP Hexes</strong> — special tiles worth bonus VP when connected to your base</div>
-            <div>🃏 <strong style={{ color: '#ccc' }}>Cards</strong> — some cards contribute VP directly</div>
+            <div>🗺️ <strong style={{ color: '#ccc' }}>Territory</strong> — own tiles to earn VP (1 VP for every 3 tiles)</div>
+            <div>⭐ <strong style={{ color: '#ffd700' }}>VP Tiles</strong> — worth bonus VP when connected to your base</div>
+            <div>🃏 <strong style={{ color: '#ccc' }}>Cards</strong> — some cards contribute VP directly when in your deck</div>
           </div>
         </div>
       </>
@@ -43,8 +43,8 @@ const PAGES = [
       <>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa' }}>
           You start with a <strong style={{ color: '#fff' }}>10-card deck</strong> of basic cards.
-          Each round you draw a hand of 5 cards, play some during the Play phase, then discard
-          the rest. When your deck runs out, your discard pile is reshuffled into a new deck.
+          Each round you draw a hand of 5 cards in your Upkeep phase, play some during the Play phase, then discard
+          the rest. When your deck runs out, your discard pile is reshuffled into a new draw pile.
         </p>
         <div style={{
           marginTop: 20,
@@ -87,15 +87,15 @@ const PAGES = [
         }}>
           <div style={{ fontSize: 13, color: '#888', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Tile Types</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 14, color: '#bbb' }}>
-            <div>🔷 <strong style={{ color: '#ccc' }}>Neutral Tiles</strong> — unclaimed, free to take</div>
-            <div>⭐ <strong style={{ color: '#ffd700' }}>VP Hexes</strong> — earn bonus VP while connected to your base</div>
-            <div>🚫 <strong style={{ color: '#666' }}>Blocked Terrain</strong> — impassable obstacles</div>
+            <div>🔷 <strong style={{ color: '#ccc' }}>Neutral Tiles</strong> — unclaimed, free to explore</div>
+            <div>⭐ <strong style={{ color: '#ffd700' }}>VP Tiles</strong> — earn bonus VP while connected to your base</div>
+            <div>🚫 <strong style={{ color: '#666' }}>Blocked Terrain</strong> — impassable, unclaimable obstacles</div>
             <div>🏰 <strong style={{ color: '#4a9eff' }}>Base Tiles</strong> — your permanent starting tile, can never be captured</div>
           </div>
         </div>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa', marginTop: 20 }}>
           <strong style={{ color: '#fff' }}>Adjacency matters.</strong> Most Claim cards can only target tiles
-          next to ones you already own. Keep your territory connected to maximize your VP from VP hexes.
+          next to ones you already own. Keep your territory connected to maximize your score from VP tiles.
         </p>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa', marginTop: 12 }}>
           When you claim an opponent's tile, they lose it — and it becomes yours. The highest
@@ -222,7 +222,7 @@ const PAGES = [
           </div>
         </div>
         <p style={{ fontSize: 14, lineHeight: 1.6, color: '#777', marginTop: 16 }}>
-          All archetypes also have access to a shared <strong style={{ color: '#aaa' }}>Neutral market</strong> of
+          All archetypes also have access to a <strong style={{ color: '#aaa' }}>Shared Market</strong> of
           cards available to everyone.
         </p>
       </>
@@ -233,7 +233,7 @@ const PAGES = [
     content: (
       <>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa', marginBottom: 16 }}>
-          Each round follows the same sequence of phases. All players act simultaneously.
+          Each round follows the same sequence of phases: Upkeep &rarr; Play &rarr; Reveal &rarr; Buy.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
@@ -246,29 +246,30 @@ const PAGES = [
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
             <div style={{ fontSize: 14, fontWeight: 'bold', color: '#4a9eff', marginBottom: 4 }}>2. Play</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
-              Draw your hand and play cards face-down onto the board. Claim cards target tiles,
-              defense cards protect tiles, and engine cards trigger immediately. You start each round with a set number of actions
-              to spend (some cards grant more). Press <strong style={{ color: '#fff' }}>Submit</strong> when done.
+              Use actions to play cards onto the grid. Claim cards target tiles,
+              defense cards protect tiles, and engine cards provide utility. You start each round with a set number of actions
+              to spend (some cards grant more).
             </div>
           </div>
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
-            <div style={{ fontSize: 14, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>3. Reveal & Resolve</div>
+            <div style={{ fontSize: 14, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>3. Reveal</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
-              All players' cards are flipped. Claims are resolved — if multiple players target the
+              All played cards are revealed. Effects are resolved — if multiple players target the
               same tile, highest power wins (ties go to the defender). Territory changes hands.
             </div>
           </div>
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
             <div style={{ fontSize: 14, fontWeight: 'bold', color: '#5dde5d', marginBottom: 4 }}>4. Buy</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
-              Players take turns buying in order. Spend resources to buy new cards from your archetype
-              market or the shared neutral market. You can also re-roll your archetype market or
+              Players take turns buying. Spend resources to buy new cards from your archetype
+              market and/or the shared neutral market. You can also re-roll your archetype market or
               purchase upgrade credits. Other players can see what you bought.
             </div>
           </div>
         </div>
         <p style={{ fontSize: 14, lineHeight: 1.6, color: '#777', marginTop: 16 }}>
-          At the start of each round, VP is checked — if any player has reached the target, they win!
+          At the end of each round, Vicory Points are checked — if any player has reached the target, they win! Otherwise,
+          the leading player wins the game at the end of the last round.
         </p>
       </>
     ),
