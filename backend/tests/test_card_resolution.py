@@ -3174,6 +3174,7 @@ class TestFortressScorchedRetreat:
             p1_adj[0].owner = "p1"
         merc = _copy_card(card_registry["neutral_mercenary"], "test_merc")
         p1.hand = [merc] + p1.hand[1:]
+        p1.resources = 5
         success2, _ = play_card(game, "p1", 0, target_q=target.q, target_r=target.r)
         assert success2
 
