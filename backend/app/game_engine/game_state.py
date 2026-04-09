@@ -248,7 +248,7 @@ class Player:
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
     trash: list[Card] = field(default_factory=list)
     is_cpu: bool = False
-    cpu_noise: float = 0.15  # default Medium difficulty
+    cpu_noise: float = 0.10  # default Medium difficulty
     has_left: bool = False  # player disconnected/left mid-game
     left_vp: int = 0  # frozen VP at time of leaving (for leaderboard)
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
@@ -699,7 +699,7 @@ def create_game(
             archetype=archetype,
             color=config.get("color", "#666666"),
             is_cpu=bool(config.get("is_cpu", False)),
-            cpu_noise=float(config.get("cpu_noise", 0.15)),
+            cpu_noise=float(config.get("cpu_noise", 0.10)),
         )
 
         # Build starting deck

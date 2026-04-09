@@ -1,8 +1,59 @@
 import { useState, useEffect, useMemo } from 'react';
-import type { GameState, Player, Card } from '../types/game';
+import type { GameState, Player, Card, HexTile } from '../types/game';
 import { CardViewPopup } from './CardHand';
 import { useSound } from '../audio/useSound';
 
+const HEX_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
+const TILES_PER_VP = 3;
+
+interface VpBreakdown {
+  tileCount: number;   // VP from owning tiles (tiles // 3)
+  bonusTiles: number;  // VP from connected VP hexes
+  cards: number;       // VP from card effects (passive_vp + formula + bonus)
+}
+
+function computeVpBreakdown(
+  gameState: GameState,
+  playerId: string,
+): VpBreakdown {
+  const tiles = gameState.grid?.tiles ?? {};
+  const player = gameState.players[playerId];
+  if (!player || !gameState.grid) return { tileCount: 0, bonusTiles: 0, cards: 0 };
+
+  // Tile VP: owned tiles // 3
+  const ownedTiles = Object.values(tiles).filter(t => t.owner === playerId);
+  const tileCount = Math.floor(ownedTiles.length / TILES_PER_VP);
+
+  // Connected VP hexes: BFS from base tiles through owned territory
+  const baseKeys: string[] = [];
+  for (const [key, tile] of Object.entries(tiles)) {
+    if (tile.is_base && tile.owner === playerId) baseKeys.push(key);
+  }
+  const reachable = new Set<string>(baseKeys);
+  const queue = [...baseKeys];
+  while (queue.length > 0) {
+    const key = queue.shift()!;
+    const tile = tiles[key];
+    if (!tile) continue;
+    for (const [dq, dr] of HEX_DIRS) {
+      const nk = `${tile.q + dq},${tile.r + dr}`;
+      if (reachable.has(nk)) continue;
+      const neighbor = tiles[nk];
+      if (!neighbor || neighbor.owner !== playerId) continue;
+      reachable.add(nk);
+      queue.push(nk);
+    }
+  }
+  const bonusTiles = ownedTiles
+    .filter(t => t.is_vp && reachable.has(`${t.q},${t.r}`))
+    .reduce((sum, t) => sum + t.vp_value, 0);
+
+  // Cards VP: everything else (passive_vp, formula, bonus)
+  const totalVp = player.vp;
+  const cards = Math.max(0, totalVp - tileCount - bonusTiles);
+
+  return { tileCount, bonusTiles, cards };
+}
 
 interface LeaderboardEntry {
   playerId: string;
@@ -39,6 +90,7 @@ export default function GameOverOverlay({
   const [rowsVisible, setRowsVisible] = useState(0);
   const [buttonsVisible, setButtonsVisible] = useState(false);
   const [viewingDeck, setViewingDeck] = useState<string | null>(null);
+  const [vpTooltip, setVpTooltip] = useState<{ pid: string; x: number; y: number } | null>(null);
   const sound = useSound();
 
   const [returnedToLobby, setReturnedToLobby] = useState(false);
@@ -73,6 +125,14 @@ export default function GameOverOverlay({
     });
   }, [gameState]);
 
+  const vpBreakdowns = useMemo(() => {
+    const map: Record<string, VpBreakdown> = {};
+    for (const pid of Object.keys(gameState.players)) {
+      map[pid] = computeVpBreakdown(gameState, pid);
+    }
+    return map;
+  }, [gameState]);
+
   // Get all cards for a player, grouped for display
   const getDeckGroups = (pid: string): { label: string; items: Card[] }[] => {
     const p = gameState.players[pid];
@@ -80,10 +140,10 @@ export default function GameOverOverlay({
     const inDeck = [...p.hand, ...p.deck_cards, ...p.discard];
     const trashed = p.trash ?? [];
     const groups: { label: string; items: Card[] }[] = [
-      { label: `Deck (${inDeck.length})`, items: inDeck },
+      { label: 'Deck', items: inDeck },
     ];
     if (trashed.length > 0) {
-      groups.push({ label: `Trashed (${trashed.length})`, items: trashed });
+      groups.push({ label: 'Trashed', items: trashed });
     }
     return groups;
   };
@@ -189,7 +249,7 @@ export default function GameOverOverlay({
                 gap: 10,
                 padding: isFirst ? '18px 20px' : '13px 20px',
                 borderTop: '1px solid #2a2a4a',
-                background: isFirst ? '#1a2a4a' : 'transparent',
+                background: isFirst ? '#111a30' : 'transparent',
                 fontSize: isFirst ? 20 : 17,
                 fontWeight: isFirst ? 'bold' : 'normal',
                 color: visible ? '#fff' : 'transparent',
@@ -207,8 +267,8 @@ export default function GameOverOverlay({
               {/* Name + archetype */}
               <div>
                 <span style={{ color: entry.hasLeft ? '#666' : entry.color }}>{entry.name}</span>
-                <span style={{ fontSize: 13, color: '#666', marginLeft: 8, textTransform: 'capitalize' }}>
-                  {entry.archetype}
+                <span style={{ fontSize: 13, color: '#666', marginLeft: 8 }}>
+                  {entry.archetype.charAt(0).toUpperCase() + entry.archetype.slice(1)}
                 </span>
                 {entry.hasLeft && (
                   <span style={{
@@ -225,7 +285,11 @@ export default function GameOverOverlay({
                 )}
               </div>
               {/* VP */}
-              <div style={{ textAlign: 'right', color: '#ffd700', fontWeight: 'bold' }}>
+              <div
+                style={{ textAlign: 'right', color: '#ffd700', fontWeight: 'bold', cursor: 'help' }}
+                onPointerEnter={(e) => setVpTooltip({ pid: entry.playerId, x: e.clientX, y: e.clientY })}
+                onPointerLeave={() => setVpTooltip(null)}
+              >
                 {entry.vp}
               </div>
               {/* Tiles */}
@@ -293,6 +357,33 @@ export default function GameOverOverlay({
           Exit Game
         </button>
       </div>
+
+      {/* VP breakdown tooltip */}
+      {vpTooltip && (() => {
+        const bd = vpBreakdowns[vpTooltip.pid];
+        if (!bd) return null;
+        return (
+          <div style={{
+            position: 'fixed',
+            left: vpTooltip.x + 12,
+            top: vpTooltip.y - 8,
+            background: '#1a1a3a',
+            border: '1px solid #4a4a6a',
+            borderRadius: 8,
+            padding: '8px 12px',
+            fontSize: 13,
+            color: '#ccc',
+            pointerEvents: 'none',
+            zIndex: 50000,
+            whiteSpace: 'nowrap',
+          }}>
+            <div style={{ fontWeight: 'bold', color: '#ffd700', marginBottom: 4 }}>VP Breakdown</div>
+            <div>Tiles: {bd.tileCount}</div>
+            <div>Bonus Tiles: {bd.bonusTiles}</div>
+            <div>Cards: {bd.cards}</div>
+          </div>
+        );
+      })()}
 
       {/* Deck viewer modal — reuses the in-game CardViewPopup */}
       {viewingDeck && (() => {

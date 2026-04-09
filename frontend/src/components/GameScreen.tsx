@@ -971,8 +971,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             if (step.outcome === 'defense_applied') continue;
             for (const claimant of step.claimants) {
               const color = PLAYER_COLORS[claimant.player_id] ?? 0xffffff;
-              const source = findNearestOwnedTile(step.q, step.r, oldTiles, claimant.player_id);
-              if (!source) continue;
+              const closest = findNearestOwnedTile(step.q, step.r, oldTiles, claimant.player_id);
+              if (!closest) continue;
+              // If target isn't adjacent to territory, point arrow toward base instead
+              const dist = hexDist(step.q, step.r, closest.q, closest.r);
+              let source = closest;
+              if (dist > 1) {
+                const base = Object.values(oldTiles).find(t => t.is_base && t.owner === claimant.player_id);
+                if (base) source = { q: base.q, r: base.r };
+              }
               cachedChevrons.push({
                 targetQ: step.q, targetR: step.r,
                 sourceQ: source.q, sourceR: source.r,
@@ -1497,15 +1504,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return;
     }
     if (card.card_type === 'claim') {
-      // Check adjacency requirement
+      // Check adjacency/range requirement
       if (card.adjacency_required !== false) {
-        const hasAdjacentOwned = HEX_DIRS.some(([dq, dr]) => {
-          const nk = `${q + dq},${r + dr}`;
-          const nt = gameState.grid?.tiles[nk];
-          return nt && nt.owner === activePlayerId;
-        });
-        if (!hasAdjacentOwned) {
-          setError(`${card.name} must target a tile adjacent to one you own`);
+        const range = card.claim_range || 1;
+        const tiles = gameState.grid?.tiles ?? {};
+        const inRange = Object.values(tiles).some(t =>
+          t.owner === activePlayerId &&
+          (Math.abs(t.q - q) + Math.abs(t.r - r) + Math.abs(t.q + t.r - q - r)) / 2 <= range
+        );
+        if (!inRange) {
+          const rangeDesc = range > 1 ? `within ${range} tiles of` : 'adjacent to';
+          setError(`${card.name} must target a tile ${rangeDesc} one you own`);
           return;
         }
       }
@@ -3302,15 +3311,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const color = PLAYER_COLORS[activePlayerId] ?? 0xffffff;
     const chevrons: ClaimChevron[] = [];
 
+    // Find base tile for ranged claims (fallback when target isn't adjacent to territory)
+    const baseTile = Object.values(tiles).find(t => t.is_base && t.owner === activePlayerId);
+
     for (const action of activePlayer.planned_actions) {
       if (action.card.card_type !== 'claim') continue;
       if (action.target_q == null || action.target_r == null) continue;
 
-      const source = findClosestOwnedTile(action.target_q, action.target_r, tiles, activePlayerId);
-      if (!source) continue;
+      const closest = findClosestOwnedTile(action.target_q, action.target_r, tiles, activePlayerId);
+      if (!closest) continue;
       // Skip if claim is on own tile (defensive play, no directional chevron needed)
       const targetKey = `${action.target_q},${action.target_r}`;
       if (tiles[targetKey]?.owner === activePlayerId) continue;
+
+      // If closest owned tile is not adjacent, use base tile as arrow direction
+      const dist = hexDistance(action.target_q, action.target_r, closest.q, closest.r);
+      const source = dist > 1 && baseTile ? { q: baseTile.q, r: baseTile.r } : closest;
 
       chevrons.push({
         targetQ: action.target_q, targetR: action.target_r,
@@ -3321,10 +3337,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Extra targets (Surge)
       if (action.extra_targets) {
         for (const [eq, er] of action.extra_targets) {
-          const es = findClosestOwnedTile(eq, er, tiles, activePlayerId);
-          if (!es) continue;
+          const ec = findClosestOwnedTile(eq, er, tiles, activePlayerId);
+          if (!ec) continue;
           const ek = `${eq},${er}`;
           if (tiles[ek]?.owner === activePlayerId) continue;
+          const eDist = hexDistance(eq, er, ec.q, ec.r);
+          const es = eDist > 1 && baseTile ? { q: baseTile.q, r: baseTile.r } : ec;
           chevrons.push({
             targetQ: eq, targetR: er,
             sourceQ: es.q, sourceR: es.r,
@@ -3574,7 +3592,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 return card ? getAllValidPlayTiles(card) : undefined;
               })()}
               claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
-              vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
+              vpPaths={vpPaths.length > 0 && !resolving ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
               disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
@@ -4760,6 +4778,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             packArchetypeIds={pack?.archetype_card_ids}
             packName={pack?.name}
             onShiftClickCard={gameState.test_mode ? handleTestGiveCard : undefined}
+            playerArchetype={activePlayer?.archetype}
           />
         );
       })()}
