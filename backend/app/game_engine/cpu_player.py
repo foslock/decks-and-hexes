@@ -3,6 +3,13 @@
 Provides heuristic-based decision-making for each game phase.
 A `noise` parameter (0.0–1.0) controls randomness: 0.0 = always pick
 the highest-scored option, 1.0 = pick uniformly among reasonable options.
+
+Difficulty levels: easy=0.25, medium=0.10, hard=0.05 noise.
+
+Strategic features:
+- VP denial: prioritizes contesting opponent VP hexes about to score
+- Tempo-sensitive buying: favors cheap/thinning early, finishers/VP late
+- Adaptive play style: shifts aggression/defense based on VP standing
 """
 
 from __future__ import annotations
@@ -43,6 +50,53 @@ ARCHETYPE_WEIGHTS: dict[Archetype, StrategyWeights] = {
         vp_hex_priority=1.5, card_draw_value=1.0, resource_value=1.5,
     ),
 }
+
+
+def _game_progress(game: Any) -> float:
+    """Return game progress as 0.0 (start) to 1.0 (end).
+
+    Uses current round relative to max rounds.
+    """
+    max_r = getattr(game, "max_rounds", 20) or 20
+    return min(1.0, max(0.0, (game.current_round - 1) / max(1, max_r - 1)))
+
+
+def _adapt_weights(weights: StrategyWeights, game: Any, player_id: str) -> StrategyWeights:
+    """Adjust strategy weights based on VP standing (adaptive play style).
+
+    When behind: boost aggression and VP hex priority (catch-up mode).
+    When ahead: boost defense, reduce aggression (protect lead).
+    """
+    from .game_state import compute_player_vp
+
+    players = game.players
+    if len(players) < 2:
+        return weights
+
+    my_vp = compute_player_vp(game, player_id)
+    vp_values = [compute_player_vp(game, pid) for pid in players if pid != player_id]
+    max_opponent_vp = max(vp_values) if vp_values else 0
+    vp_target = getattr(game, "vp_target", 10)
+
+    # How far ahead/behind as fraction of vp_target (-1.0 to +1.0 range)
+    vp_diff = (my_vp - max_opponent_vp) / max(1, vp_target)
+    # Clamp to reasonable range
+    vp_diff = max(-1.0, min(1.0, vp_diff))
+
+    # Scale adjustments — bigger delta = stronger adaptation
+    # Behind: vp_diff is negative, so aggression_boost is positive
+    aggression_mod = 1.0 - vp_diff * 0.4   # behind → up to +40%, ahead → down to -40%
+    defense_mod = 1.0 + vp_diff * 0.4      # ahead → up to +40%, behind → down to -40%
+    vp_hex_mod = 1.0 - vp_diff * 0.3       # behind → prioritize VP hexes more
+
+    return StrategyWeights(
+        aggression=weights.aggression * aggression_mod,
+        expansion=weights.expansion,
+        defense=weights.defense * defense_mod,
+        vp_hex_priority=weights.vp_hex_priority * vp_hex_mod,
+        card_draw_value=weights.card_draw_value,
+        resource_value=weights.resource_value,
+    )
 
 
 # ── CPU Player ────────────────────────────────────────────────────
@@ -110,6 +164,7 @@ class CPUPlayer:
         """
         player = game.players[self.player_id]
         weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
+        weights = _adapt_weights(weights, game, self.player_id)
         actions: list[dict[str, Any]] = []
 
         # Keep playing cards while we have actions and cards
@@ -143,6 +198,7 @@ class CPUPlayer:
                 return None
 
         weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
+        weights = _adapt_weights(weights, game, self.player_id)
         return self._pick_best_card(game, player, weights)
 
     def _pick_best_card(self, game: Any, player: Any,
@@ -373,6 +429,14 @@ class CPUPlayer:
         # VP hex bonus
         if tile.is_vp:
             score += tile.vp_value * 8.0 * weights.vp_hex_priority
+
+        # VP denial: enemy VP hex that will score next turn gets a big bonus
+        # (tiles score at start of turn for tiles held since previous turn)
+        if tile.is_vp and tile.owner is not None and tile.owner != self.player_id:
+            held_since = getattr(tile, "held_since_turn", None)
+            if held_since is not None and held_since < game.current_round:
+                # This tile is actively scoring VP for the opponent — deny it!
+                score += tile.vp_value * 6.0 * weights.vp_hex_priority
 
         # Neutral vs enemy tile
         if tile.owner is None:
@@ -1000,6 +1064,7 @@ class CPUPlayer:
             return []
 
         weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
+        weights = _adapt_weights(weights, game, self.player_id)
         purchases: list[dict[str, Any]] = []
 
         # Keep buying while we have resources and good options
@@ -1021,6 +1086,7 @@ class CPUPlayer:
             return None
 
         weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
+        weights = _adapt_weights(weights, game, self.player_id)
         return self._pick_best_purchase(game, player, weights)
 
     def _pick_best_purchase(self, game: Any, player: Any,
@@ -1066,8 +1132,13 @@ class CPUPlayer:
     def _score_card_for_purchase(self, card: Card, player: Any,
                                  weights: StrategyWeights,
                                  cost: int, game: Any = None) -> float:
-        """Score a card for purchase."""
+        """Score a card for purchase.
+
+        Tempo-sensitive: early game favors cheap cards and deck thinning,
+        late game favors high-power finishers and VP effects.
+        """
         score = 0.0
+        progress = _game_progress(game) if game else 0.5
 
         # Base value by card type
         if card.card_type == CardType.CLAIM:
@@ -1194,6 +1265,29 @@ class CPUPlayer:
         if card.vp_formula:
             score += 5.0
 
+        # Tempo-sensitive adjustments based on game progress
+        if cost <= 2:
+            # Cheap cards and deck thinning: more valuable early
+            score *= 1.0 + 0.5 * (1.0 - progress)  # up to +50% early
+        if cost >= 5:
+            # Expensive finishers: more valuable late
+            score *= 1.0 + 0.4 * progress  # up to +40% late
+        # Deck thinning (Cull, Reclaim, Consolidate) is best early
+        has_thinning = any(
+            e.type in (EffectType.TRASH_GAIN_BUY_COST, EffectType.SELF_TRASH)
+            for e in card.effects
+        ) or card.name == "Cull"
+        if has_thinning:
+            score *= 1.0 + 0.6 * (1.0 - progress)  # up to +60% early
+        # VP effects get stronger as game progresses
+        has_vp_effect = card.passive_vp > 0 or card.vp_formula or any(
+            e.type in (EffectType.GAIN_VP, EffectType.ENHANCE_VP_TILE,
+                       EffectType.GRANT_LAND_GRANTS, EffectType.VP_FROM_CONTESTED_WINS)
+            for e in card.effects
+        )
+        if has_vp_effect:
+            score *= 1.0 + 0.5 * progress  # up to +50% late
+
         # Cost efficiency: penalize expensive cards
         if cost > 0:
             score = score / (cost * 0.5 + 0.5)  # diminishing cost penalty
@@ -1214,6 +1308,7 @@ class CPUPlayer:
             return False
 
         weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
+        weights = _adapt_weights(weights, game, self.player_id)
 
         # Score current market offerings
         total_score = 0.0

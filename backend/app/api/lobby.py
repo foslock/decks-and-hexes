@@ -523,7 +523,7 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
         player.archetype = req.archetype
 
     if req.difficulty is not None and player.is_cpu:
-        noise_map = {"easy": 0.30, "medium": 0.15, "hard": 0.05}
+        noise_map = {"easy": 0.25, "medium": 0.10, "hard": 0.05}
         if req.difficulty not in noise_map:
             raise HTTPException(400, f"Invalid difficulty: {req.difficulty}")
         player.cpu_noise = noise_map[req.difficulty]
@@ -557,7 +557,7 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
     if len(lobby.players) >= 6:
         raise HTTPException(400, "Lobby is full (max 6 players)")
 
-    noise_map = {"easy": 0.30, "medium": 0.15, "hard": 0.05}
+    noise_map = {"easy": 0.25, "medium": 0.10, "hard": 0.05}
     noise = noise_map.get(req.difficulty, 0.15)
 
     # Assign next player_id
