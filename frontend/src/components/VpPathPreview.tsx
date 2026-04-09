@@ -291,7 +291,7 @@ export default function VpPathPreview() {
   const connectedCount = connectedVpTiles.size;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a2e', color: '#fff' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#1a1a2e', color: '#fff' }}>
       <div style={{ padding: '16px 24px', borderBottom: '1px solid #333', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>VP Path Animation Preview</h2>
         <button onClick={handleTogglePaths} style={btnStyle}>
