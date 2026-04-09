@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { BASE } from '../api/client';
 import CardBrowser from './CardBrowser';
 import HowToPlay from './HowToPlay';
 import HeroAnimation from './HeroAnimation';
@@ -18,9 +19,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
-    const base = BACKEND_HOST ? `${window.location.protocol}//${BACKEND_HOST}` : '';
-    fetch(`${base}/api/version`)
+    fetch(`${BASE}/version`)
       .then(r => r.json())
       .then(d => setBackendVersion(d.version))
       .catch(() => setBackendVersion(null));

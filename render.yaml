@@ -59,10 +59,10 @@ services:
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
+    envVars:
+      - key: VITE_BACKEND_HOST
+        value: card-clash-api-staging.onrender.com
     routes:
-      - type: rewrite
-        source: /api/*
-        destination: https://card-clash-api-staging.onrender.com/api/*
       - type: rewrite
         source: /*
         destination: /index.html

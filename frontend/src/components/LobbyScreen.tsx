@@ -129,7 +129,7 @@ export default function LobbyScreen({
 
   // Fetch card pack definitions on mount
   useEffect(() => {
-    fetch('/api/card-packs')
+    fetch(`${api.BASE}/card-packs`)
       .then(res => res.json())
       .then((data: { packs: CardPackDef[] }) => setCardPacks(data.packs))
       .catch(() => {});

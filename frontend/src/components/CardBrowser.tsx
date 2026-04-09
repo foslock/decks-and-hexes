@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
+import { BASE } from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
@@ -199,7 +200,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
   }, []);
 
   useEffect(() => {
-    fetch('/api/cards')
+    fetch(`${BASE}/cards`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to load cards');
         return res.json();

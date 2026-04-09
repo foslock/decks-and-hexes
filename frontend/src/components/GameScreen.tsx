@@ -632,7 +632,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, []);
   // Fetch card pack definitions (once) for CardBrowser filtering
   useEffect(() => {
-    fetch('/api/card-packs')
+    fetch(`${api.BASE}/card-packs`)
       .then(r => r.json())
       .then((d: { packs: typeof cardPackDefs }) => setCardPackDefs(d.packs))
       .catch(() => {});
