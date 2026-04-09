@@ -20,8 +20,8 @@ cards:
     power: 0
     resource_gain: 0
     upgraded_resource_gain: 0
-    effect: "Gain 1 resource for each tile you successfully claimed last round (max 3)."
-    effect_upgraded: "Gain 2 resources for each tile you successfully claimed last round (max 6). Draw 1 card."
+    effect: "Gain 1 resource for each tile you successfully claimed last round (max 4)."
+    effect_upgraded: "Gain 2 resources for each tile you successfully claimed last round (max 8). Draw 1 card."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards sustained aggression across rounds. Creates a virtuous cycle: claim tiles → fund more claims."
@@ -31,7 +31,7 @@ cards:
         value: 1
         upgraded_value: 2
         timing: immediate
-        metadata: {max_resources: 3, upgraded_max_resources: 6, upgraded_draw: 1}
+        metadata: {max_resources: 4, upgraded_max_resources: 8, upgraded_draw: 1}
 
   - id: vanguard_blitz
     name: Blitz
@@ -115,14 +115,14 @@ cards:
     upgraded_resource_gain: 0
     trash_on_use: true
     effect: "Claim: Power 8. Trash this card."
-    effect_upgraded: "Claim: Power 9. If successful, gain 4 resources. Trash this card."
+    effect_upgraded: "Claim: Power 9. If successful, gain 5 resources. Trash this card."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: gain_resources
         value: 0
-        upgraded_value: 4
+        upgraded_value: 5
         timing: on_resolution
         condition: if_successful
 
@@ -198,8 +198,8 @@ cards:
     buy_cost: 5
     action_return: 1
     power: 0
-    effect: "Gain 3 resources. Draw 1 card next round. Gain 1 action."
-    effect_upgraded: "Gain 4 resources. Draw 1 card next round. Gain 1 action."
+    effect: "Gain 4 resources. Draw 1 card next round. Gain 1 action."
+    effect_upgraded: "Gain 5 resources. Draw 1 card next round. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -215,10 +215,10 @@ cards:
     buy_cost: 7
     action_return: 0
     power: 3
-    effect: "Claim: Power 3."
-    effect_upgraded: "Claim: Power 5."
-    secondary_effect: "If successful, also claim one adjacent neutral tile automatically."
-    secondary_timing: on_resolution
+    effect: "Claim: Power 3. If successful, randomly claim up to one available adjacent neutral tile automatically."
+    effect_upgraded: "Claim: Power 5. If successful, randomly claim up to one available adjacent neutral tile automatically."
+    secondary_effect: null
+    secondary_timing: null
 
     effects:
       - type: auto_claim_adjacent_neutral
@@ -351,10 +351,10 @@ cards:
     power: 0
     defense_bonus: 3
     upgraded_defense_bonus: 4
-    resource_gain: 2
-    upgraded_resource_gain: 2
-    effect: "One tile you own gains +3 defense this round. Gain 2 resources."
-    effect_upgraded: "One tile you own gains +4 defense this round. Gain 2 resources."
+    resource_gain: 3
+    upgraded_resource_gain: 3
+    effect: "One tile you own gains +3 defense this round. Gain 3 resources."
+    effect_upgraded: "One tile you own gains +4 defense this round. Gain 3 resources."
     secondary_effect: null
     secondary_timing: null
 

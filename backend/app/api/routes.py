@@ -609,6 +609,7 @@ class TestDiscardCardRequest(BaseModel):
 
 class TestPlayerRequest(BaseModel):
     player_id: str
+    count: int = 1
 
 
 @router.post("/games/{game_id}/test/discard-card")
@@ -648,12 +649,14 @@ async def test_draw_card(game_id: str, req: TestPlayerRequest) -> dict[str, Any]
     if not player:
         raise HTTPException(404, "Player not found")
 
-    drawn = player.deck.draw(1, game.rng)
+    count = max(1, min(req.count, 20))  # clamp to 1-20
+    drawn = player.deck.draw(count, game.rng)
     if drawn:
         player.hand.extend(drawn)
-        game._log(f"[TEST] {player.name} draws {drawn[0].name}", actor=req.player_id)
+        names = ", ".join(c.name for c in drawn)
+        game._log(f"[TEST] {player.name} draws {len(drawn)} card(s): {names}", actor=req.player_id)
         await _get_store().save(game)
-        return {"message": f"Drew {drawn[0].name}", "state": game.to_dict()}
+        return {"message": f"Drew {len(drawn)} card(s)", "state": game.to_dict()}
     else:
         return {"message": "No cards to draw", "state": game.to_dict()}
 

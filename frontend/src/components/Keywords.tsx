@@ -17,7 +17,7 @@ const KEYWORDS: Record<string, string> = {
   'Discard': 'Put a card from your hand into your discard pile.',
   'Debt': 'A dead-weight card given to the VP leader each round (starting round 5). Play it and pay 3 resources to trash it.',
   'Adjacent': 'A hex tile directly neighboring one you already own (6 possible directions).',
-  'Stackable': 'This card can be played on a tile where you already have a claim this turn. Powers stack additively.',
+  'Stackable': 'This card can be played on a tile where you already have a claim this round. Powers stack additively.',
   'Trash': 'Remove this card from your deck permanently.',
   'Upgrade': 'Permanently improve a card using an upgrade credit, enhancing its stats.',
   'VP': 'Victory Points; first player to reach the VP target wins the game.',

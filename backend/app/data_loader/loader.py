@@ -108,7 +108,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     has_cycle_effect = any(
         e.get("type") in ("cycle", "actions_per_cards_played", "mulligan", "global_claim_ban", "swap_draw_discard", "draw_per_debt", "draw_per_connected_vp") for e in entry.get("effects", [])
     )
-    if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower() and not has_cycle_effect:
+    if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower() and "next round" not in effect.lower() and not has_cycle_effect:
         match = re.search(r'[Dd]raw\s+(\d+)\s+card', effect)
         if match:
             draw_cards = int(match.group(1))
@@ -213,7 +213,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             if m:
                 upgraded_resource_gain = int(m.group(1))
 
-        if upgraded_draw_cards is None and "draw" in effect_upgraded.lower() and "next turn" not in effect_upgraded.lower() and not has_cycle_effect:
+        if upgraded_draw_cards is None and "draw" in effect_upgraded.lower() and "next turn" not in effect_upgraded.lower() and "next round" not in effect_upgraded.lower() and not has_cycle_effect:
             m = re.search(r'[Dd]raw\s+(\d+)\s+card', effect_upgraded)
             if m:
                 upgraded_draw_cards = int(m.group(1))

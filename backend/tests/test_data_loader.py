@@ -36,7 +36,7 @@ class TestCardLoading:
         gather = card_registry["neutral_gather"]
         assert gather.name == "Gather"
         assert gather.card_type == CardType.ENGINE
-        assert gather.resource_gain == 1
+        assert gather.resource_gain == 2
         assert gather.starter is True
         assert gather.buy_cost is None
 

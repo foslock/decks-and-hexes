@@ -57,7 +57,7 @@ objectives:
     name: Elite Corps
     archetype: vanguard
     vp_reward: 2
-    condition: "Have 3 or more upgraded cards (+) in your hand at the start of any turn."
+    condition: "Have 3 or more upgraded cards (+) in your hand at the start of any round."
     verification: "Check hand at the start of Phase 1 before any cards are played."
     notes: "Rewards heavy upgrade credit investment. Naturally pairs with Vanguard's expensive card economy."
 
@@ -107,7 +107,7 @@ objectives:
     name: Swarm Intelligence
     archetype: swarm
     vp_reward: 2
-    condition: "Have 6 or more cards in your hand at the start of any turn before playing any cards."
+    condition: "Have 6 or more cards in your hand at the start of any round before playing any cards."
     verification: "Check hand size at start of Phase 1 before any actions are taken."
     notes: "Rewards deep draw engine investment. Thin the Herd and Swarm Tactics key enablers."
 
@@ -191,9 +191,9 @@ objectives:
     name: Diplomatic Incident
     archetype: wildcard
     vp_reward: 2
-    condition: "Successfully trigger Cease Fire's bonus in 3 different rounds (do not claim any opponent-owned tiles those turns)."
+    condition: "Successfully trigger Cease Fire's bonus in 3 different rounds (do not claim any opponent-owned tiles those rounds)."
     verification: "Track rounds where a Cease Fire card resolved with its condition met. Must reach 3 qualifying rounds."
-    notes: "Rewards restraint and card economy strategy. Requires investing actions in Cease Fire and forgoing aggression multiple turns."
+    notes: "Rewards restraint and card economy strategy. Requires investing actions in Cease Fire and forgoing aggression multiple rounds."
 
   - id: obj_renaissance
     name: Renaissance

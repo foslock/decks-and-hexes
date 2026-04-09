@@ -131,7 +131,8 @@ export interface ResolutionStep {
   defender_power: number;
   winner_id: string | null;
   previous_owner: string | null;
-  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate' | 'defense_applied';
+  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate' | 'defense_applied' | 'auto_claim';
+  card_name?: string;  // auto_claim: name of the card that triggered the auto-claim (e.g. "Breakthrough")
   vp_value?: number;  // Consecrate: new VP value of the tile after enhancement
   defense_permanent?: number;  // defense_applied: persistent defense after application
   defense_temporary?: number;  // defense_applied: temporary defense after application

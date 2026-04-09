@@ -104,7 +104,7 @@ Bump frontend version when frontend files change, backend version when backend f
 
 ### Explore & Gather (starter cards — NOT purchasable from market)
 - **Explore:** Claim: Power 1 on any adjacent tile
-- **Gather:** Gain 1 resource
+- **Gather:** Gain 2 resources
 
 ### Objectives
 - Revealed at end of round 3 (Small), 4 (Medium), or 5 (Large)
@@ -181,9 +181,9 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Round limit: **20** (configurable)
 - Debt start round: **5**
 - Debt trash cost: **3 resources**
-- Re-roll cost: **2 resources**
-- Retain cost: **1 resource**
-- Upgrade credit cost: **4 resources**
+- Re-roll cost: **1 resource**
+- Retain cost: **2 resources**
+- Upgrade credit cost: **5 resources**
 - Starting resources: **0**
 - Action slot hard cap: **6**
 - Objective VP reward: **2**

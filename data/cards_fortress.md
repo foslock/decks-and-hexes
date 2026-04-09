@@ -121,19 +121,21 @@ cards:
         condition: if_defending_owned
 
   - id: fortress_slow_advance
-    name: Slow Advance
-    name_upgraded: Slow Advance+
+    name: Mountaineer
+    name_upgraded: Mountaineer+
     type: Claim
-    buy_cost: 2
+    buy_cost: 4
     action_return: 0
     power: 2
-    effect: "Claim: Power 2. If the target is a neutral tile, claim it automatically."
-    effect_upgraded: "Claim: Power 3. If the target is a neutral tile, claim it automatically and draw 1 card next round."
+    upgraded_power: 4
+    effect: "Claim: Power 2. If the targeted tile is neutral, Power 4."
+    effect_upgraded: "Claim: Power 4."
     secondary_effect: null
     secondary_timing: null
 
     effects:
-      - type: auto_claim_if_neutral
+      - type: power_modifier
+        value: 2
         timing: on_resolution
         condition: if_target_neutral
 
@@ -144,8 +146,8 @@ cards:
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Gain 1 resource. Your next purchase this round costs 1 less. Gain 1 action."
-    effect_upgraded: "Gain 2 resources. Your next purchase this round costs 1 less. Gain 1 action."
+    effect: "Gain 2 resources. Your next purchase this round costs 1 less. Gain 1 action."
+    effect_upgraded: "Gain 3 resources. Your next purchase this round costs 1 less. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -220,14 +222,14 @@ cards:
     buy_cost: 4
     action_return: 0
     power: 3
-    effect: "Claim: Power 3. Stackable. If the target tile is neutral, gain 1 resource."
-    effect_upgraded: "Claim: Power 4. Stackable. If the target tile is neutral, gain 2 resources."
+    effect: "Claim: Power 3. Stackable. If the target tile is neutral, gain 2 resources."
+    effect_upgraded: "Claim: Power 4. Stackable. If the target tile is neutral, gain 3 resources."
     secondary_effect: null
     secondary_timing: null
     stackable: true
     effects:
       - type: resource_refund_if_neutral
-        value: 1
+        value: 2
         timing: on_resolution
         condition: if_target_neutral
 
@@ -315,8 +317,8 @@ cards:
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Gain 1 resource. Draw 1 card. Gain 1 action."
-    effect_upgraded: "Gain 2 resources. Draw 1 card. Gain 1 action."
+    effect: "Gain 2 resources. Draw 1 card. Gain 1 action."
+    effect_upgraded: "Gain 3 resources. Draw 1 card. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -363,15 +365,15 @@ cards:
     action_return: 1
     upgraded_action_return: 2
     power: 0
-    effect: "Gain 1 action. If you control the fewest tiles of any player, gain 2 resources."
-    effect_upgraded: "Gain 2 actions. If you control the fewest tiles of any player, gain 2 resources."
+    effect: "Gain 1 action. If you control the fewest tiles of any player, gain 3 resources."
+    effect_upgraded: "Gain 2 actions. If you control the fewest tiles of any player, gain 3 resources."
     secondary_effect: null
     secondary_timing: null
     note: "Comeback mechanic — rewards Fortress for playing slowly. The resource bonus helps fund defense or a late expansion push."
 
     effects:
       - type: gain_resources
-        value: 2
+        value: 3
         timing: immediate
         condition: fewest_tiles
 
@@ -399,16 +401,16 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 0
-    effect: "Gain 2 resources for each tile that was captured from you last round."
-    effect_upgraded: "Gain 4 resources for each tile that was captured from you last round."
+    effect: "Gain 3 resources for each tile that was captured from you last round."
+    effect_upgraded: "Gain 5 resources for each tile that was captured from you last round."
     secondary_effect: null
     secondary_timing: null
     note: "Turns territorial losses into economic fuel. Creates a deterrent: opponents know that taking Fortress tiles feeds their economy."
 
     effects:
       - type: resources_per_tiles_lost
-        value: 2
-        upgraded_value: 4
+        value: 3
+        upgraded_value: 5
         timing: immediate
 
   - id: fortress_scorched_retreat
@@ -420,8 +422,8 @@ cards:
     power: 0
     trash_on_use: true
     target_own_tile: true
-    effect: "Abandon a tile you own. It becomes blocked terrain. Gain 2 resources. Trash this card."
-    effect_upgraded: "Abandon a tile you own. It becomes blocked terrain. Gain 3 resources. Trash this card."
+    effect: "Abandon a tile you own. It becomes blocked terrain. Gain 3 resources. Trash this card."
+    effect_upgraded: "Abandon a tile you own. It becomes blocked terrain. Gain 4 resources. Trash this card."
     secondary_effect: null
     secondary_timing: null
     note: "Strategic denial — if you can't hold it, nobody gets it. One-time use prevents abuse."
@@ -442,7 +444,7 @@ cards:
     effect_upgraded: "Next round, no player can play Claim cards. Draw 2 cards. Trash this card."
     secondary_effect: null
     secondary_timing: null
-    note: "The panic button. Buys Fortress one turn of absolute safety. The upgraded version draws cards so the stalled turn isn't wasted."
+    note: "The panic button. Buys Fortress one round of absolute safety. The upgraded version draws cards so the stalled round isn't wasted."
 
     effects:
       - type: global_claim_ban

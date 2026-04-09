@@ -109,15 +109,17 @@ function ActionReturnBadge({ value }: { value: number }) {
 }
 
 // Floating card preview shown above/below a hovered hand card
-function CardPreview({ card, anchorRect }: { card: Card; anchorRect: DOMRect }) {
+function CardPreview({ card, anchorRect, exiting }: { card: Card; anchorRect: DOMRect; exiting?: boolean }) {
   const animMode = useAnimationMode();
   const [visible, setVisible] = useState(animMode !== 'normal');
 
   useEffect(() => {
-    if (animMode === 'normal') {
+    if (animMode !== 'off' && !exiting) {
       requestAnimationFrame(() => setVisible(true));
     }
-  }, [animMode]);
+  }, [animMode, exiting]);
+
+  const show = visible && !exiting;
 
   return (
     <div style={{
@@ -126,8 +128,9 @@ function CardPreview({ card, anchorRect }: { card: Card; anchorRect: DOMRect }) 
       bottom: window.innerHeight - anchorRect.top + 8,
       pointerEvents: 'none',
       zIndex: 9999,
-      opacity: visible ? 1 : 0,
-      transition: animMode === 'normal' ? 'opacity 0.15s ease' : 'none',
+      opacity: show ? 1 : 0,
+      transform: show ? 'scale(1)' : 'scale(0.9)',
+      transition: animMode !== 'off' ? `opacity ${animMode === 'fast' ? 0.06 : 0.12}s ease, transform ${animMode === 'fast' ? 0.06 : 0.12}s ease` : 'none',
     }}>
       <CardFull card={card} showKeywordHints />
     </div>
@@ -145,6 +148,7 @@ function Flag({ text, color }: { text: string; color: string }) {
 // ── Card Popup (deck viewer / discard viewer) ────────────────
 
 function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; shiftHeld: boolean }) {
+  const animMode = useAnimationMode();
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = getCardDisplayColor(displayCard);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
@@ -213,6 +217,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
               : { top: hoverRect.bottom + 8 }),
             pointerEvents: 'none',
             zIndex: 50000,
+            animation: animMode !== 'off' ? `cardPreviewIn ${animMode === 'fast' ? 0.06 : 0.12}s ease both` : 'none',
           }}>
             <CardFull card={displayCard} showKeywordHints />
           </div>,
@@ -516,6 +521,10 @@ export default function CardHand({
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredRect, setHoveredRect] = useState<DOMRect | null>(null);
+  // Delayed preview state for exit animation
+  const [displayedPreview, setDisplayedPreview] = useState<{ card: Card; rect: DOMRect } | null>(null);
+  const [previewExiting, setPreviewExiting] = useState(false);
+  const previewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const [dropTargetIndex, setDropTargetIndexState] = useState<number | null>(null);
@@ -526,6 +535,28 @@ export default function CardHand({
   }, []);
   const [showDeckPopup, setShowDeckPopup] = useState(false);
   const [showDiscardPopup, setShowDiscardPopup] = useState(false);
+
+  // Sync displayed preview with hover state, with delayed unmount for exit animation
+  const isHoveringPreview = hoveredIndex !== null && hoveredRect !== null && draggingIndex === null;
+  useEffect(() => {
+    if (previewTimeoutRef.current) {
+      clearTimeout(previewTimeoutRef.current);
+      previewTimeoutRef.current = null;
+    }
+    if (isHoveringPreview && hoveredIndex !== null && hoveredRect && cards[localOrder[hoveredIndex]]) {
+      setPreviewExiting(false);
+      setDisplayedPreview({ card: cards[localOrder[hoveredIndex]], rect: hoveredRect });
+    } else if (displayedPreview) {
+      setPreviewExiting(true);
+      const duration = animMode === 'off' ? 0 : animMode === 'fast' ? 60 : 120;
+      previewTimeoutRef.current = setTimeout(() => {
+        setDisplayedPreview(null);
+        setPreviewExiting(false);
+      }, duration);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isHoveringPreview, hoveredIndex, hoveredRect]);
+
   // Card reflow animation is handled via direct DOM manipulation — see useLayoutEffect blocks.
 
   // Close draw/discard popups when parent signals (e.g. shop/browser opened)
@@ -739,7 +770,7 @@ export default function CardHand({
         const entries = new Map<string, EnteringAnim>();
         immediateCards.forEach((card, i) => {
           entries.set(card.id, {
-            offset: { x: 0, y: -2000 }, // off-screen until Phase 2 computes real offset
+            offset: { x: 0, y: 0 }, // hidden via opacity:0 until Phase 2 computes real offset
             delay: Math.round(i * 500 * animSpeed),
             active: false,
             offsetComputed: false,
@@ -1076,25 +1107,13 @@ export default function CardHand({
     if (!discardAll) discardAllFiredRef.current = false;
   }, [discardAll]);
 
-  // Animate shuffle count-up
+  // Shuffle timer — show target count immediately, end shuffle after duration
   useEffect(() => {
     if (!shuffling || !shuffleAnimRef.current) return;
     const { target, duration } = shuffleAnimRef.current;
-    const animStart = performance.now();
-    let raf: number;
-    const tick = () => {
-      const elapsed = performance.now() - animStart;
-      const progress = Math.min(1, elapsed / duration);
-      setShuffleDisplayCount(Math.round(progress * target));
-      if (progress < 1) {
-        raf = requestAnimationFrame(tick);
-      } else {
-        // Count-up finished — end the shuffle in sync
-        setShuffling(false);
-      }
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    setShuffleDisplayCount(target);
+    const t = setTimeout(() => setShuffling(false), duration);
+    return () => clearTimeout(t);
   }, [shuffling]);
 
   // When shuffle finishes, trigger entering animations for deferred drawn cards
@@ -1522,7 +1541,7 @@ export default function CardHand({
 
             // Compute animation overrides
             const entering = enteringAnims.get(card.id);
-            const isDeferredDuringShuffle = shuffling && deferredDrawnCardsRef.current.has(card.id);
+            const isDeferredDuringShuffle = deferredDrawnCardsRef.current.has(card.id);
             // Hide cards when discard-all animation is playing (portal ghosts are visible instead)
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
             const isAnimating = (!!entering && !entering.active) || isDiscardingAll || isDeferredDuringShuffle;
@@ -1712,8 +1731,8 @@ export default function CardHand({
       </div>
 
       {/* Hover preview — appears above the hovered card */}
-      {hoveredIndex !== null && hoveredRect && draggingIndex === null && cards[localOrder[hoveredIndex]] && (
-        <CardPreview card={cards[localOrder[hoveredIndex]]} anchorRect={hoveredRect} />
+      {displayedPreview && (
+        <CardPreview card={displayedPreview.card} anchorRect={displayedPreview.rect} exiting={previewExiting} />
       )}
 
       {/* Drag ghost */}
@@ -1905,6 +1924,10 @@ export default function CardHand({
         @keyframes dynamicGlow {
           0%, 100% { text-shadow: 0 0 4px rgba(255,225,77,0.3); }
           50% { text-shadow: 0 0 8px rgba(255,225,77,0.8), 0 0 12px rgba(255,200,0,0.4); }
+        }
+        @keyframes cardPreviewIn {
+          from { opacity: 0; transform: scale(0.9); }
+          to { opacity: 1; transform: scale(1); }
         }
         .dynamic-value {
           animation: dynamicGlow 2s ease-in-out infinite;

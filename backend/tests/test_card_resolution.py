@@ -195,7 +195,7 @@ class TestNeutralExplore:
 
 class TestNeutralGather:
     def test_gather_gives_resources(self, card_registry):
-        """Gather: gain 1 resource immediately."""
+        """Gather: gain 2 resources immediately."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         gather = _copy_card(card_registry["neutral_gather"], "test_gather")
@@ -204,10 +204,10 @@ class TestNeutralGather:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_resources + 1
+        assert player.resources == initial_resources + 2
 
-    def test_gather_upgraded_gives_3(self, card_registry):
-        """Gather+: gain 3 resources."""
+    def test_gather_upgraded_gives_4(self, card_registry):
+        """Gather+: gain 4 resources."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         gather = _copy_card(card_registry["neutral_gather"], "test_gather_up")
@@ -217,7 +217,7 @@ class TestNeutralGather:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_resources + 3
+        assert player.resources == initial_resources + 4
 
 
 class TestNeutralMercenary:
@@ -243,8 +243,8 @@ class TestNeutralMercenary:
 
 
 class TestNeutralProspector:
-    def test_prospector_gain_2(self, card_registry):
-        """Prospector: gain 2 resources immediately."""
+    def test_prospector_gain_3(self, card_registry):
+        """Prospector: gain 3 resources immediately."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         prosp = _copy_card(card_registry["neutral_prospector"], "test_prosp")
@@ -253,7 +253,7 @@ class TestNeutralProspector:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial + 2
+        assert player.resources == initial + 3
 
 
 class TestNeutralSabotage:
@@ -354,7 +354,7 @@ class TestNeutralFortifiedPost:
 
 class TestNeutralWarBonds:
     def test_war_bonds_resources_and_action(self, card_registry):
-        """War Bonds: gain 2 resources, gain 1 action back."""
+        """Tithe: gain 3 resources, gain 1 action back."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         wb = _copy_card(card_registry["neutral_war_bonds"], "test_wb")
@@ -365,7 +365,7 @@ class TestNeutralWarBonds:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_res + 2
+        assert player.resources == initial_res + 3
         # Action return: played costs 1 action, returns 1 → net 0
         assert player.actions_available == initial_actions + 1
 
@@ -729,7 +729,7 @@ class TestVanguardForwardMarch:
 
 class TestVanguardWarCache:
     def test_war_cache_resources_and_action(self, card_registry):
-        """War Cache: gain 3 resources, draw next turn, gain 1 action back."""
+        """Plunder: gain 4 resources, draw next turn, gain 1 action back."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         wc = _copy_card(card_registry["vanguard_war_cache"], "test_wc")
@@ -739,7 +739,7 @@ class TestVanguardWarCache:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial + 3
+        assert player.resources == initial + 4
 
 
 class TestVanguardFlanking:
@@ -1155,11 +1155,11 @@ class TestSwarmBlitzRush:
 
 class TestSwarmScavenge:
     def test_scavenge_resource_gain(self, card_registry):
-        """Scavenge: gain 1 resource, no draw, no unconditional action return."""
+        """Scavenge: gain 2 resources, no draw, no unconditional action return."""
         game = _make_2p_game(card_registry)
         player = game.players["p1"]
         scav = _copy_card(card_registry["swarm_scavenge"], "test_scav")
-        assert scav.resource_gain == 1
+        assert scav.resource_gain == 2
         assert scav.draw_cards == 0
         assert scav.action_return == 0
         player.hand = [scav] + player.hand[1:]
@@ -1167,7 +1167,7 @@ class TestSwarmScavenge:
 
         success, _ = play_card(game, "p1", 0)
         assert success
-        assert player.resources == initial_res + 1
+        assert player.resources == initial_res + 2
 
     def test_scavenge_grants_action_at_zero(self, card_registry):
         """Scavenge: grants 1 action if player has 0 actions remaining."""
@@ -1371,15 +1371,19 @@ class TestFortressGarrison:
         assert card.power == 3
 
 
-class TestFortressSlowAdvance:
-    def test_slow_advance_auto_claim_neutral(self, card_registry):
-        """Slow Advance: auto-claims if target is neutral."""
+class TestFortressMountaineer:
+    def test_mountaineer_properties(self, card_registry):
+        """Mountaineer: cost 4, power 2, power_modifier +2 if neutral."""
         card = card_registry["fortress_slow_advance"]
-        auto_fx = [e for e in card.effects if e.type == EffectType.AUTO_CLAIM_IF_NEUTRAL]
-        assert len(auto_fx) >= 1
+        assert card.name == "Mountaineer"
+        assert card.buy_cost == 4
+        assert card.power == 2
+        power_fx = [e for e in card.effects if e.type == EffectType.POWER_MODIFIER]
+        assert len(power_fx) >= 1
+        assert power_fx[0].value == 2
 
-    def test_slow_advance_claims_neutral_tile(self, card_registry):
-        """Slow Advance: successfully claims a neutral tile."""
+    def test_mountaineer_claims_neutral_tile(self, card_registry):
+        """Mountaineer: successfully claims a neutral tile."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
         sa = _copy_card(card_registry["fortress_slow_advance"], "test_sa")
@@ -1450,7 +1454,7 @@ class TestFortressSupplyLine:
 
     def test_supply_line_resources(self, card_registry):
         card = card_registry["fortress_supply_line"]
-        assert card.resource_gain == 1
+        assert card.resource_gain == 2
         assert card.action_return == 1
 
 
@@ -1533,7 +1537,7 @@ class TestFortressWarCouncil:
 
 class TestFortressIronDiscipline:
     def test_iron_discipline_resources_draw_action(self, card_registry):
-        """Iron Discipline: gain 1 resource, draw 1, action return 1."""
+        """Iron Discipline: gain 2 resources, draw 1, action return 1."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
         id_card = _copy_card(card_registry["fortress_iron_discipline"], "test_id")
@@ -1544,7 +1548,7 @@ class TestFortressIronDiscipline:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_res + 1
+        assert player.resources == initial_res + 2
         assert len(player.hand) == initial_hand - 1 + 1  # played 1, drew 1
 
 
@@ -1807,10 +1811,10 @@ class TestVanguardCounterattack:
 
 class TestVanguardRearguard:
     def test_rearguard_stats(self, card_registry):
-        """Rearguard: cost 4, defense type, gains 2 resources."""
+        """Rearguard: cost 4, defense type, gains 3 resources."""
         card = card_registry["vanguard_rearguard"]
         assert card.buy_cost == 4
-        assert card.resource_gain == 2
+        assert card.resource_gain == 3
         assert card.card_type == CardType.DEFENSE
 
 
@@ -1973,7 +1977,7 @@ class TestVanguardWarTithe:
         assert len(matching) >= 1
         assert matching[0].value == 1
         assert matching[0].upgraded_value == 2
-        assert matching[0].metadata.get("max_resources") == 3
+        assert matching[0].metadata.get("max_resources") == 4
 
     def test_war_tithe_playable(self, card_registry):
         """War Tithe: can be played as an engine card (costs 1 action)."""
@@ -2000,7 +2004,7 @@ class TestVanguardWarTithe:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        # 3 claims × 1 resource each = 3 (capped at max_resources=3)
+        # 3 claims × 1 resource each = 3 (capped at max_resources=4)
         assert player.resources == initial + 3
 
     def test_war_tithe_respects_max_cap(self, card_registry):
@@ -2010,14 +2014,14 @@ class TestVanguardWarTithe:
         wt = _copy_card(card_registry["vanguard_war_tithe"], "test_wt")
         player.hand = [wt] + player.hand[1:]
 
-        # Simulate having claimed 5 tiles (exceeds max of 3)
+        # Simulate having claimed 5 tiles (exceeds max of 4)
         player.claims_won_last_round = 5
         initial = player.resources
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        # 5 × 1 = 5, but capped at 3
-        assert player.resources == initial + 3
+        # 5 × 1 = 5, but capped at 4
+        assert player.resources == initial + 4
 
     def test_war_tithe_zero_claims(self, card_registry):
         """War Tithe: no resources if no tiles claimed last round."""
@@ -2247,7 +2251,7 @@ class TestFortressResilience:
         assert card.action_return == 1
 
     def test_resilience_gains_resources_when_fewest_tiles(self, card_registry):
-        """Resilience: gain 2 resources when controlling fewest tiles."""
+        """Resilience: gain 3 resources when controlling fewest tiles."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
         opponent = game.players["p1"]
@@ -2268,7 +2272,7 @@ class TestFortressResilience:
         initial_resources = player.resources
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_resources + 2
+        assert player.resources == initial_resources + 3
 
     def test_resilience_no_bonus_when_not_fewest(self, card_registry):
         """Resilience: no resource bonus when NOT controlling fewest tiles."""
@@ -2395,10 +2399,10 @@ class TestNeutralDividends:
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.RESOURCE_SCALING
-        assert eff.value == 2  # divisor
+        assert eff.value == 3  # divisor
 
     def test_dividends_scales_with_resources(self, card_registry):
-        """Dividends gains floor(resources/2), min 1."""
+        """Dividends gains floor(resources/3), min 1."""
         card = card_registry.get("neutral_dividends")
         if not card:
             pytest.skip("Card not in registry")
@@ -2409,8 +2413,8 @@ class TestNeutralDividends:
         player.resources = 10
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        # floor(10/2) = 5 → resources = 10 + 5 = 15
-        assert player.resources == 15
+        # floor(10/3) = 3 → resources = 10 + 3 = 13
+        assert player.resources == 13
 
     def test_dividends_min_1(self, card_registry):
         """Dividends gains at least 1 even with 0 resources."""
@@ -2840,7 +2844,7 @@ class TestNeutralSupplyDepot:
         assert eff.type == EffectType.NEXT_TURN_BONUS
         assert eff.timing == Timing.ON_RESOLUTION
         assert eff.metadata.get("draw") == 1
-        assert eff.metadata.get("resources") == 1
+        assert eff.metadata.get("resources") == 2
         assert eff.metadata.get("upgraded_actions") == 1
 
     def test_supply_depot_next_turn_bonuses(self, card_registry):
@@ -2943,11 +2947,11 @@ class TestFortressRobinHood:
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.RESOURCES_PER_TILES_LOST
-        assert eff.value == 2
-        assert eff.upgraded_value == 4
+        assert eff.value == 3
+        assert eff.upgraded_value == 5
 
     def test_robin_hood_resource_gain(self, card_registry):
-        """Robin Hood gains 2 resources per tile lost last turn."""
+        """Robin Hood gains 3 resources per tile lost last round."""
         card = card_registry.get("fortress_robin_hood")
         if not card:
             pytest.skip("Card not in registry")
@@ -2959,8 +2963,8 @@ class TestFortressRobinHood:
         initial_resources = player.resources
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        # 3 tiles lost × 2 resources = 6
-        assert player.resources == initial_resources + 6
+        # 3 tiles lost × 3 resources = 9
+        assert player.resources == initial_resources + 9
 
     def test_robin_hood_zero_tiles_lost(self, card_registry):
         """Robin Hood gains 0 resources when no tiles were lost."""
@@ -2978,7 +2982,7 @@ class TestFortressRobinHood:
         assert player.resources == initial_resources
 
     def test_robin_hood_upgraded(self, card_registry):
-        """Robin Hood+ gains 4 resources per tile lost last turn."""
+        """Robin Hood+ gains 5 resources per tile lost last round."""
         card = card_registry.get("fortress_robin_hood")
         if not card:
             pytest.skip("Card not in registry")
@@ -2991,8 +2995,8 @@ class TestFortressRobinHood:
         initial_resources = player.resources
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        # 2 tiles lost × 4 resources = 8
-        assert player.resources == initial_resources + 8
+        # 2 tiles lost × 5 resources = 10
+        assert player.resources == initial_resources + 10
 
     def test_robin_hood_tiles_lost_tracking(self, card_registry):
         """Robin Hood works with actual tile capture tracking across rounds."""
@@ -3034,8 +3038,8 @@ class TestFortressRobinHood:
         initial_resources = p0.resources
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        # 1 tile lost × 2 resources = 2
-        assert p0.resources == initial_resources + 2
+        # 1 tile lost × 3 resources = 3
+        assert p0.resources == initial_resources + 3
 
     def test_robin_hood_snapshot_at_play_time(self, card_registry):
         """Robin Hood's resource gain is snapshotted when played (effective_resource_gain on PlannedAction)."""
@@ -3051,7 +3055,7 @@ class TestFortressRobinHood:
         assert success, msg
         # Verify the planned action has a snapshotted resource gain
         action = player.planned_actions[-1]
-        assert action.effective_resource_gain == 6  # 3 tiles × 2 per tile
+        assert action.effective_resource_gain == 9  # 3 tiles × 3 per tile
 
 
 class TestFortressScorchedRetreat:

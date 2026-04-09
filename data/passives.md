@@ -75,7 +75,7 @@ passives:
     category: deck_hand
     best_for: ["fortress"]
     effect: "The resource cost to Retain an archetype market card is reduced from 3 to 1."
-    notes: "Fortress's slow cycle means they benefit most from holding specific cards across turns."
+    notes: "Fortress's slow cycle means they benefit most from holding specific cards across rounds."
 
   - id: passive_veteran
     name: Veteran
@@ -95,7 +95,7 @@ passives:
     name: Recycler
     category: deck_hand
     best_for: ["swarm"]
-    effect: "Once per round, during Phase 1 (Start of Turn) before drawing your hand, you may trash 1 card from your discard pile. If you do, draw 1 extra card this turn."
+    effect: "Once per round, during Phase 1 (Start of Round) before drawing your hand, you may trash 1 card from your discard pile. If you do, draw 1 extra card this round."
     notes: "Accelerates deck thinning without costing an action slot. Swarm builds benefit from lean decks."
 
   - id: passive_curator
@@ -109,15 +109,15 @@ passives:
     name: Hoarder
     category: deck_hand
     best_for: ["fortress"]
-    effect: "Your maximum resource total is capped at 8, but you gain 1 extra resource at the start of each turn."
+    effect: "Your maximum resource total is capped at 12, but you gain 2 extra resources at the start of each round."
     notes: "Cap prevents snowballing but steady income is valuable. Strong for patient Fortress players."
 
   - id: passive_efficient
     name: Efficient
     category: deck_hand
     best_for: ["vanguard", "swarm"]
-    effect: "Once per game, at the start of Phase 1, you may draw your entire deck into your hand instead of your normal hand size. The 6-action cap still applies. All unplayed cards are discarded at end of turn as normal."
-    notes: "One explosive turn. Best saved for a critical round near the VP win threshold."
+    effect: "Once per game, at the start of Phase 1, you may draw your entire deck into your hand instead of your normal hand size. The 6-action cap still applies. All unplayed cards are discarded at end of round as normal."
+    notes: "One explosive round. Best saved for a critical round near the VP win threshold."
 
   - id: passive_scavenger
     name: Scavenger
@@ -132,7 +132,7 @@ passives:
     name: Blitz Doctrine
     category: combat
     best_for: ["vanguard", "swarm"]
-    effect: "If you successfully claim 2 or more tiles in a single round, draw 1 extra card at the start of your next turn."
+    effect: "If you successfully claim 2 or more tiles in a single round, draw 1 extra card at the start of your next round."
     notes: "Rewards aggression. Compounds with action engine cards for sustained pressure."
 
   - id: passive_tactical_genius
@@ -218,14 +218,14 @@ passives:
     name: Frugal
     category: resource
     best_for: ["fortress"]
-    effect: "At the end of each round, if you spent 0 resources during that round's Buy Phase, gain 3 resources."
+    effect: "At the end of each round, if you spent 0 resources during that round's Buy Phase, gain 5 resources."
     notes: "Rewards skipping purchases. Strong in early game or when banking for a big buy."
 
   - id: passive_investor
     name: Investor
     category: resource
     best_for: ["any"]
-    effect: "At game start, after setup is complete, gain 3 bonus resources."
+    effect: "At game start, after setup is complete, gain 5 bonus resources."
     notes: "Pure early game accelerator. Simple and universally useful."
 
   # ── OBJECTIVE & VP PASSIVES ──────────────────────────────────────────────
@@ -263,7 +263,7 @@ passives:
     category: objective_vp
     best_for: ["vanguard", "swarm"]
     effect: "Once per round, during Phase 1 before the Plan Phase, you may discard your three archetype market cards and draw three new ones for free (no re-roll resource cost)."
-    notes: "Reduces bad market turns. Particularly strong for archetypes with high card variance."
+    notes: "Reduces bad market rounds. Particularly strong for archetypes with high card variance."
 
   - id: passive_nomad
     name: Nomad

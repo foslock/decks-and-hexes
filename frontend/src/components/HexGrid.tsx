@@ -652,6 +652,18 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
                 if (eff.condition === 'if_defending_owned' && isOwnTile) basePower += mod;
                 if (eff.condition === 'if_target_has_defense' && tile.defense_power > 0) basePower += mod;
                 if (eff.condition === 'if_contested') basePower += mod;
+                if (eff.condition === 'if_target_neutral' && !tile.owner) basePower += mod;
+                if (eff.condition === 'if_adjacent_owned_gte') {
+                  const threshold = eff.condition_threshold ?? 3;
+                  const allTiles = tilesRef.current;
+                  const pid = activePlayerIdRef.current;
+                  let adjOwned = 0;
+                  for (const [dq, dr] of DIRECTIONS_WITH_EDGES) {
+                    const nKey = `${tile.q + dq},${tile.r + dr}`;
+                    if (allTiles[nKey]?.owner === pid) adjOwned++;
+                  }
+                  if (adjOwned >= threshold) basePower += mod;
+                }
               }
             }
             previewPower = basePower;
@@ -1271,7 +1283,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         const starText = vpVal > 4
           ? `${vpVal}×${starChar}`
           : starChar.repeat(vpVal);
-        const starFontSize = vpVal === 1 ? 14 : vpVal <= 3 ? 11 : 10;
+        const starFontSize = vpVal === 1 ? 18 : vpVal <= 3 ? 14 : 12;
 
         const group = new Container();
         group.position.set(x, y);
@@ -1328,7 +1340,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
             const hasTmp = isImmune || tempDef > 0;
             const baseText = new Text({
               text: `🛡${persistentDef}`,
-              style: new TextStyle({ fontSize: 13, fill: 0xffffff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              style: new TextStyle({ fontSize: 16, fill: 0xffffff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
               resolution: Math.ceil(window.devicePixelRatio || 2),
             });
             baseText.anchor.set(hasTmp ? 1 : 0.5, 0.5);
@@ -1337,7 +1349,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
             if (hasTmp) {
               const tmpText = new Text({
                 text: isImmune ? '+∞' : `+${tempDef}`,
-                style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+                style: new TextStyle({ fontSize: 16, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
                 resolution: Math.ceil(window.devicePixelRatio || 2),
               });
               tmpText.anchor.set(0, 0.5);
@@ -1347,7 +1359,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           } else {
             const tmpText = new Text({
               text: isImmune ? '🛡+∞' : `🛡+${tempDef}`,
-              style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              style: new TextStyle({ fontSize: 16, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
               resolution: Math.ceil(window.devicePixelRatio || 2),
             });
             tmpText.anchor.set(0.5, 0.5);
@@ -1469,7 +1481,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           const hasTmp = isImmune || tempDef > 0;
           const baseText = new Text({
             text: `🛡${persistentDef}`,
-            style: new TextStyle({ fontSize: 13, fill: 0xffffff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+            style: new TextStyle({ fontSize: 16, fill: 0xffffff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
             resolution: Math.ceil(window.devicePixelRatio || 2),
           });
           baseText.anchor.set(hasTmp ? 1 : 0.5, 0.5);
@@ -1478,7 +1490,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           if (hasTmp) {
             const tmpText = new Text({
               text: isImmune ? '+∞' : `+${tempDef}`,
-              style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              style: new TextStyle({ fontSize: 16, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
               resolution: Math.ceil(window.devicePixelRatio || 2),
             });
             tmpText.anchor.set(0, 0.5);
@@ -1488,7 +1500,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         } else {
           const tmpText = new Text({
             text: isImmune ? '🛡+∞' : `🛡+${tempDef}`,
-            style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+            style: new TextStyle({ fontSize: 16, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
             resolution: Math.ceil(window.devicePixelRatio || 2),
           });
           tmpText.anchor.set(0.5, 0.5);

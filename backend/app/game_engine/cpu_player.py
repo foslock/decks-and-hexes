@@ -1038,9 +1038,15 @@ class CPUPlayer:
             score = self._score_card_for_purchase(card, player, weights, cost, game)
             scored.append((score, {"source": "archetype", "card_id": card.id}))
 
-        # Score neutral market cards
+        # Score neutral market cards (limit 1 copy per card per round)
+        already_bought_neutral = {
+            p["card_id"] for p in game.buy_phase_purchases.get(self.player_id, [])
+            if p["source"] == "neutral"
+        }
         for base_id, copies in game.neutral_market.stacks.items():
             if not copies:
+                continue
+            if base_id in already_bought_neutral:
                 continue
             card_obj = copies[0]
             cost = calculate_dynamic_buy_cost(game, player, card_obj)

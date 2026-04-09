@@ -41,10 +41,10 @@ cards:
     starter: true
     action_return: 0
     power: 0
-    effect: "Gain 1 resource."
-    effect_upgraded: "Gain 3 resources."
-    resource_gain: 1
-    upgraded_resource_gain: 3
+    effect: "Gain 2 resources."
+    effect_upgraded: "Gain 4 resources."
+    resource_gain: 2
+    upgraded_resource_gain: 4
     trash_on_use: false
     note: "The baseline economy card. Every archetype starts with copies of this card."
 
@@ -166,8 +166,8 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 2 resources."
-    effect_upgraded: "Gain 3 resources."
+    effect: "Gain 3 resources."
+    effect_upgraded: "Gain 4 resources."
     trash_on_use: false
 
   - id: neutral_surveyor
@@ -276,8 +276,8 @@ cards:
 
     action_return: 1
     power: 0
-    effect: "Gain 2 resources. Gain 1 action."
-    effect_upgraded: "Gain 3 resources. Gain 1 action."
+    effect: "Gain 3 resources. Gain 1 action."
+    effect_upgraded: "Gain 4 resources. Gain 1 action."
     trash_on_use: false
 
   - id: neutral_reduce
@@ -419,15 +419,15 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 1 resource for every 2 resources you already have (rounded down, minimum 1)."
-    effect_upgraded: "Gain 1 resource for every 2 resources you already have (rounded down, minimum 1). Draw 1 card."
+    effect: "Gain 1 resource for every 3 resources you already have (rounded down, minimum 1)."
+    effect_upgraded: "Gain 1 resource for every 3 resources you already have (rounded down, minimum 1). Draw 1 card."
     trash_on_use: false
     effects:
       - type: resource_scaling
         timing: immediate
-        value: 2
+        value: 3
         condition: per_resources_held
-    note: "Rewards banking resources instead of spending them every turn. Synergizes with Prospector, Tithe, and the Hoarder passive."
+    note: "Rewards banking resources instead of spending them every round. Synergizes with Prospector, Tithe, and the Hoarder passive."
 
   - id: neutral_cartographer
     name: Cartographer
@@ -480,7 +480,7 @@ cards:
         timing: immediate
         value: 1
         metadata: {max: 3, upgraded_max: 4}
-    note: "The combo payoff card. Set up with cheap action-neutral cards, then Mobilize for an explosive turn. Trash-on-use prevents recurring abuse."
+    note: "The combo payoff card. Set up with cheap action-neutral cards, then Mobilize for an explosive round. Trash-on-use prevents recurring abuse."
 
   - id: neutral_ambush
     name: Ambush
@@ -509,11 +509,11 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "At the start of your next round, draw 1 card and gain 1 resource."
-    effect_upgraded: "At the start of your next round, draw 1 card, gain 1 resource, and gain 1 action."
+    effect: "At the start of your next round, draw 1 card and gain 2 resources."
+    effect_upgraded: "At the start of your next round, draw 1 card, gain 2 resources, and gain 1 action."
     trash_on_use: false
     effects:
       - type: next_turn_bonus
         timing: on_resolution
-        metadata: {draw: 1, resources: 1, upgraded_actions: 1}
-    note: "Invest an action now for a better next round. The upgraded version's extra action is particularly strong for setting up big combo turns."
+        metadata: {draw: 1, resources: 2, upgraded_actions: 1}
+    note: "Invest an action now for a better next round. The upgraded version's extra action is particularly strong for setting up big combo rounds."

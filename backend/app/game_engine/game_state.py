@@ -49,9 +49,9 @@ VP_TARGET = 10  # legacy default; use compute_vp_target() for new games
 DEFAULT_MAX_ROUNDS = 20
 DEBT_START_ROUND = 5  # Debt cards start being distributed at this round
 SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33}
-REROLL_COST = 2
-RETAIN_COST = 1
-UPGRADE_CREDIT_COST = 4
+REROLL_COST = 1
+RETAIN_COST = 2
+UPGRADE_CREDIT_COST = 5
 
 _SEED_CHARS = string.ascii_lowercase + string.digits  # a-z0-9
 _SEED_LENGTH = 6
@@ -1822,9 +1822,15 @@ def execute_reveal(game: GameState) -> GameState:
         rotated_order = game.player_order[fpi:] + game.player_order[:fpi]
         pid_rank = {pid: i for i, pid in enumerate(rotated_order)}
 
-        def step_sort_key(step: dict[str, Any]) -> tuple[int, int, int, int]:
-            # Defense-applied steps always come first (0), then claims/other (1)
-            is_defense = 0 if step.get("outcome") == "defense_applied" else 1
+        def step_sort_key(step: dict[str, Any]) -> tuple[int, int, int, int, int]:
+            # Tier: defense_applied (0), regular claims (1), post-claim effects like auto_claim/consecrate (2)
+            outcome = step.get("outcome")
+            if outcome == "defense_applied":
+                tier = 0
+            elif outcome in ("auto_claim", "consecrate"):
+                tier = 2
+            else:
+                tier = 1
             # Primary: rank of the earliest claimant in turn order
             claimant_ids = [c["player_id"] for c in step.get("claimants", [])]
             min_rank = min((pid_rank.get(pid, n) for pid in claimant_ids), default=n)
@@ -1832,7 +1838,7 @@ def execute_reveal(game: GameState) -> GameState:
             # resolve before their fights)
             contested = 1 if step.get("contested") else 0
             # Tertiary: stable sort by tile position for determinism
-            return (is_defense, min_rank, contested, step.get("q", 0) * 1000 + step.get("r", 0))
+            return (tier, min_rank, contested, step.get("q", 0) * 1000 + step.get("r", 0), 0)
 
         game.resolution_steps.sort(key=step_sort_key)
 
@@ -2022,6 +2028,11 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         return True, f"Bought {target.name}"
 
     if source == "neutral":
+        # One copy per neutral card per round per player
+        already_bought = game.buy_phase_purchases.get(player_id, [])
+        if any(p["source"] == "neutral" and p["card_id"] == card_id for p in already_bought):
+            return False, "Already purchased this card this round (limit 1 per round)"
+
         result = game.neutral_market.purchase(card_id)
         if not result:
             return False, "Card not available in neutral market"

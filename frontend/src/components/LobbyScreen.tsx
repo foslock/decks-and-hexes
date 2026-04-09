@@ -783,7 +783,7 @@ export default function LobbyScreen({
               borderRadius: isHost ? undefined : '0 0 8px 8px',
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
-                <Tooltip content="The number of actions each player starts their turn with.">
+                <Tooltip content="The number of actions each player starts their round with.">
                   <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Actions</span>
                 </Tooltip>
               </div>

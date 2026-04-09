@@ -111,7 +111,7 @@ function CompactShopCard({
   const soldOut = remaining === 0;
   const buyColor = soldOut || !canAfford || disabled ? '#333' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase
-    ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this turn`).join('\n')
+    ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this round`).join('\n')
     : '';
   const buyTooltip = soldOut
     ? 'Sold out'
@@ -157,7 +157,7 @@ function CompactShopCard({
             </span>
           </div>
           <span style={{ fontSize: 15, flexShrink: 0, color: isDiscounted ? '#ffd700' : '#aaa', fontWeight: isDiscounted ? 'bold' : undefined, textShadow: isDiscounted ? '0 0 6px rgba(255,215,0,0.6)' : undefined, whiteSpace: 'nowrap' }}>
-            {displayCost != null ? `${displayCost}💰` : '—'}
+            {displayCost != null ? `${displayCost} 💰` : '—'}
           </span>
         </div>
         <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
@@ -305,23 +305,52 @@ export default function ShopOverlay({
     return map;
   }, [buyPhasePurchases, currentPlayerId, players]);
 
+  // Track which neutral cards the current player already bought this round (1 per round limit)
+  const myNeutralPurchasesThisRound = useMemo(() => {
+    const set = new Set<string>();
+    if (!buyPhasePurchases || !currentPlayerId) return set;
+    const myPurchases = buyPhasePurchases[currentPlayerId];
+    if (!myPurchases) return set;
+    for (const p of myPurchases) {
+      if (p.source === 'neutral') {
+        set.add(p.card_id);
+      }
+    }
+    return set;
+  }, [buyPhasePurchases, currentPlayerId]);
+
   const handleCardHover = useCallback((e: React.MouseEvent, card: Card, effectiveCost?: number | null) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setHoverVisible(false);
     setHoverState({ card, rect, effectiveCost });
   }, []);
 
+  // Keep a snapshot of the last hover state so we can animate out
+  const [displayedHover, setDisplayedHover] = useState<HoverState | null>(null);
+  const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleCardLeave = useCallback(() => {
     setHoverState(null);
     setHoverVisible(false);
   }, []);
 
-  // Trigger fade-in on hover
+  // Trigger fade-in on hover; on leave, delay unmount for exit animation
   useEffect(() => {
-    if (hoverState && animMode === 'normal') {
-      requestAnimationFrame(() => setHoverVisible(true));
-    } else if (hoverState) {
-      setHoverVisible(true);
+    if (hoverTimeoutRef.current) {
+      clearTimeout(hoverTimeoutRef.current);
+      hoverTimeoutRef.current = null;
+    }
+    if (hoverState) {
+      setDisplayedHover(hoverState);
+      if (animMode !== 'off') {
+        requestAnimationFrame(() => setHoverVisible(true));
+      } else {
+        setHoverVisible(true);
+      }
+    } else {
+      // Keep displayedHover alive during exit animation, then clear
+      const duration = animMode === 'off' ? 0 : animMode === 'fast' ? 60 : 120;
+      hoverTimeoutRef.current = setTimeout(() => setDisplayedHover(null), duration);
     }
   }, [hoverState, animMode]);
 
@@ -358,8 +387,8 @@ export default function ShopOverlay({
   }, [archetypeMarket, neutralMarket]);
 
   // Position hover preview above the card (fixed, viewport-relative)
-  const previewStyle = hoverState ? (() => {
-    const { rect } = hoverState;
+  const previewStyle = displayedHover ? (() => {
+    const { rect } = displayedHover;
     const previewHeight = 300;
     const previewWidth = 220;
     const spaceAbove = rect.top;
@@ -569,7 +598,7 @@ export default function ShopOverlay({
                   }>
                     <button
                       onClick={onReroll}
-                      disabled={disabled || (freeRerolls <= 0 && playerResources < 2)}
+                      disabled={disabled || (freeRerolls <= 0 && playerResources < 1)}
                       style={{
                         fontSize: 14,
                         padding: '8px 14px',
@@ -577,12 +606,12 @@ export default function ShopOverlay({
                         border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : playerResources >= 2 && !disabled ? '#cc7a2a' : '#555'}`,
                         borderRadius: 6,
                         color: (freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
-                        cursor: disabled || (freeRerolls <= 0 && playerResources < 2) ? 'not-allowed' : 'pointer',
+                        cursor: disabled || (freeRerolls <= 0 && playerResources < 1) ? 'not-allowed' : 'pointer',
                         whiteSpace: 'nowrap',
                         ...(freeRerolls > 0 && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
                       }}
                     >
-                      {freeRerolls > 0 ? `Re-roll (${freeRerolls} free)` : 'Re-roll · 2💰'}
+                      {freeRerolls > 0 ? `Re-roll (${freeRerolls} free)` : 'Re-roll · 1 💰'}
                     </button>
                   </Tooltip>
                 </div>
@@ -595,6 +624,7 @@ export default function ShopOverlay({
                 <Tooltip content="Purchases from the shared market are visible to all players. Each card has limited copies — once they're gone, they're gone for the game.">
                   <span style={{ fontSize: 20, fontWeight: 'bold', color: '#ccc', cursor: 'help' }}>Shared Market</span>
                 </Tooltip>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Limit 1 copy of each card per round</div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
                 {[...neutralMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
@@ -602,6 +632,7 @@ export default function ShopOverlay({
                   const canAfford = effCost !== null && playerResources >= (effCost ?? 0);
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
                   const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
+                  const alreadyBoughtThisRound = myNeutralPurchasesThisRound.has(stack.card.id);
                   return (
                     <CompactShopCard
                       key={stack.card.id}
@@ -612,8 +643,12 @@ export default function ShopOverlay({
                       onBuy={() => buyNeutralWithSound(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled || !!buyLocked}
-                      disabledTooltip={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : undefined}
+                      disabled={disabled || !!buyLocked || alreadyBoughtThisRound}
+                      disabledTooltip={
+                        buyLocked ? 'Cannot buy — Grand Strategy was played this round.'
+                        : alreadyBoughtThisRound ? 'Already purchased this round (limit 1 copy per round).'
+                        : undefined
+                      }
                       purchaseHighlight={!!purchasedBy}
                       currentTurnPurchaseInfo={turnPurchases}
                     />
@@ -652,20 +687,20 @@ export default function ShopOverlay({
               <Tooltip content={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : ''}>
               <button
                 onClick={buyUpgradeWithSound}
-                disabled={disabled || !!buyLocked || playerResources < 4}
+                disabled={disabled || !!buyLocked || playerResources < 5}
                 style={{
                   fontSize: 14,
                   padding: '8px 16px',
-                  background: playerResources >= 4 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
-                  border: `1px solid ${playerResources >= 4 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
+                  background: playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
+                  border: `1px solid ${playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
                   borderRadius: 6,
-                  color: playerResources >= 4 && !disabled && !buyLocked ? '#fff' : '#555',
-                  cursor: disabled || buyLocked || playerResources < 4 ? 'not-allowed' : 'pointer',
+                  color: playerResources >= 5 && !disabled && !buyLocked ? '#fff' : '#555',
+                  cursor: disabled || buyLocked || playerResources < 5 ? 'not-allowed' : 'pointer',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
                 }}
               >
-                Buy Upgrade Credit · 4💰
+                Buy Upgrade Credit · 5 💰
               </button>
               </Tooltip>
               </div>
@@ -678,14 +713,15 @@ export default function ShopOverlay({
       </div>
 
       {/* Floating hover preview (fixed, viewport-relative) */}
-      {hoverState && previewStyle && (
+      {displayedHover && previewStyle && (
         <div style={{
           ...previewStyle,
           opacity: hoverVisible ? 1 : 0,
-          transition: animMode === 'normal' ? 'opacity 0.15s ease' : 'none',
+          transform: hoverVisible ? 'scale(1)' : 'scale(0.9)',
+          transition: animMode !== 'off' ? `opacity ${animMode === 'fast' ? 0.06 : 0.12}s ease, transform ${animMode === 'fast' ? 0.06 : 0.12}s ease` : 'none',
         }}>
-          <CardFull card={shiftHeld ? getUpgradedPreview(hoverState.card) : hoverState.card} effectiveCost={shiftHeld ? undefined : hoverState.effectiveCost} showKeywordHints />
-          {shiftHeld && hasUpgradePreview(hoverState.card) && (
+          <CardFull card={shiftHeld ? getUpgradedPreview(displayedHover.card) : displayedHover.card} effectiveCost={shiftHeld ? undefined : displayedHover.effectiveCost} showKeywordHints />
+          {shiftHeld && hasUpgradePreview(displayedHover.card) && (
             <div style={{
               textAlign: 'center',
               marginTop: 4,
@@ -697,8 +733,8 @@ export default function ShopOverlay({
             </div>
           )}
           {(() => {
-            const buyer = neutralPurchaseMap.get(hoverState.card.id);
-            const turnPurchases = currentTurnNeutralPurchases.get(hoverState.card.id);
+            const buyer = neutralPurchaseMap.get(displayedHover.card.id);
+            const turnPurchases = currentTurnNeutralPurchases.get(displayedHover.card.id);
             if (!buyer && !turnPurchases) return null;
             return (
               <div style={{
@@ -717,7 +753,7 @@ export default function ShopOverlay({
                 gap: 2,
               }}>
                 {turnPurchases?.map((p, i) => (
-                  <div key={i}>{p.playerName} bought {p.count} this turn</div>
+                  <div key={i}>{p.playerName} bought {p.count} this round</div>
                 ))}
                 {buyer && <div style={{ color: '#888' }}>{buyer} purchased this last round</div>}
               </div>

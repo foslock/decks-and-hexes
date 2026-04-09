@@ -13,6 +13,10 @@ interface PhaseBannerProps {
   onComplete: () => void;
   /** When true, the banner holds at center until this prop becomes false. */
   holdUntilRelease?: boolean;
+  /** Whether the banner blocks interaction with the page (default true). */
+  blocking?: boolean;
+  /** Extra milliseconds to add to the hold duration at center. */
+  extraHoldMs?: number;
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -30,7 +34,7 @@ const PHASE_LABELS: Record<string, string> = {
  * Fast: same slide animation at 2x speed (~0.7s total).
  * Off: instant appear/disappear, no motion.
  */
-export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint, onComplete, holdUntilRelease }: PhaseBannerProps) {
+export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint, onComplete, holdUntilRelease, blocking = true, extraHoldMs = 0 }: PhaseBannerProps) {
   const animMode = useAnimationMode();
   // Stages: 'mount' (initial position, no transition) → 'enter' (slide/fade in)
   //       → 'hold' (pause at center) → 'exit' (slide/fade out) → done
@@ -51,7 +55,7 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
   const isOff = animMode === 'off';
   const speed = animMode === 'fast' ? 0.5 : 1;
   const enterMs = isOff ? 0 : Math.round(350 * speed);
-  const holdMs = isOff ? 1400 : Math.round(700 * speed);
+  const holdMs = isOff ? 1400 : Math.round(700 * speed) + Math.round(extraHoldMs * speed);
   const exitMs = isOff ? 0 : Math.round(350 * speed);
 
   // mount → enter: trigger the slide-in on the next frame so the browser
@@ -149,7 +153,7 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
       position: 'fixed',
       inset: 0,
       zIndex: 30000,
-      pointerEvents: 'auto',
+      pointerEvents: blocking ? 'auto' : 'none',
     }}>
       {/* Semi-transparent backdrop */}
       <div style={{

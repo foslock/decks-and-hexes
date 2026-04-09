@@ -555,6 +555,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [testVp, setTestVp] = useState('');
   const [testResources, setTestResources] = useState('');
   const [testRound, setTestRound] = useState('');
+  const [testDrawCount, setTestDrawCount] = useState('1');
   const [testActions, setTestActions] = useState('');
   // Multi-tile selection mode
   const [multiTileTargets, setMultiTileTargets] = useState<[number, number][]>([]);
@@ -1455,7 +1456,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (!card.stackable && activePlayer.planned_actions?.some(
         a => a.card.card_type === 'claim' && a.target_q === q && a.target_r === r
       )) {
-        setError(`You already have a claim on that tile this turn`);
+        setError(`You already have a claim on that tile this round`);
         return;
       }
     }
@@ -1595,9 +1596,28 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (card.card_type === 'claim' && !card.target_own_tile) {
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
-      if (tile && !tile.owner && tile.base_defense > card.power) {
-        setError(`${card.name} (power ${card.power}) is too weak to capture this tile (defense ${tile.base_defense})`);
-        return;
+      if (tile) {
+        let claimPower = card.power;
+        if (card.effects) {
+          for (const eff of card.effects) {
+            if (eff.type !== 'power_modifier') continue;
+            const mod = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
+            if (eff.condition === 'if_target_neutral' && !tile.owner) claimPower += mod;
+            if (eff.condition === 'if_adjacent_owned_gte') {
+              const threshold = eff.condition_threshold ?? 3;
+              let adjOwned = 0;
+              for (const [dq, dr] of HEX_DIRS) {
+                const nk = `${tile.q + dq},${tile.r + dr}`;
+                if (gameState.grid?.tiles[nk]?.owner === activePlayerId) adjOwned++;
+              }
+              if (adjOwned >= threshold) claimPower += mod;
+            }
+          }
+        }
+        if (tile.base_defense > claimPower) {
+          setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.base_defense})`);
+          return;
+        }
       }
       if (tile && tile.owner && card.unoccupied_only) {
         setError(`${card.name} can only target unoccupied tiles`);
@@ -1803,9 +1823,28 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Validate claim card restrictions
       if (card.card_type === 'claim') {
         if (!card.target_own_tile) {
-          if (tile && !tile.owner && tile.base_defense > card.power) {
-            setError(`${card.name} (power ${card.power}) is too weak to capture this tile (defense ${tile.base_defense})`);
-            return;
+          if (tile) {
+            let claimPower = card.power;
+            if (card.effects) {
+              for (const eff of card.effects) {
+                if (eff.type !== 'power_modifier') continue;
+                const mod = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
+                if (eff.condition === 'if_target_neutral' && !tile.owner) claimPower += mod;
+                if (eff.condition === 'if_adjacent_owned_gte') {
+                  const threshold = eff.condition_threshold ?? 3;
+                  let adjOwned = 0;
+                  for (const [dq, dr] of HEX_DIRS) {
+                    const nk = `${tile.q + dq},${tile.r + dr}`;
+                    if (gameState.grid?.tiles[nk]?.owner === activePlayerId) adjOwned++;
+                  }
+                  if (adjOwned >= threshold) claimPower += mod;
+                }
+              }
+            }
+            if (tile.base_defense > claimPower) {
+              setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.base_defense})`);
+              return;
+            }
           }
           if (tile && tile.owner && card.unoccupied_only) {
             setError(`${card.name} can only target unoccupied tiles`);
@@ -2587,7 +2626,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (!prev?.grid) return prev;
       const newTiles = { ...prev.grid.tiles };
       const tile = newTiles[step.tile_key];
-      if (tile && step.winner_id && step.outcome === 'claimed') {
+      if (tile && step.winner_id && (step.outcome === 'claimed' || step.outcome === 'auto_claim')) {
         newTiles[step.tile_key] = {
           ...tile,
           owner: step.winner_id,
@@ -2761,10 +2800,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [gameState.id, activePlayerId, onStateUpdate, activePlayer]);
 
-  const handleTestDrawCard = useCallback(async () => {
+  const handleTestDrawCard = useCallback(async (count: number = 1) => {
     try {
       setError(null);
-      const result = await api.testDrawCard(gameState.id, activePlayerId);
+      const result = await api.testDrawCard(gameState.id, activePlayerId, count);
       onStateUpdate(result.state);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -2949,8 +2988,27 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (tile.owner === activePlayerId) continue;
       // Skip immune tiles (Iron Wall / Stronghold)
       if (tile.immune) continue;
-      // Exclude neutral tiles too weak to capture
-      if (!tile.owner && tile.base_defense > card.power) continue;
+      // Exclude tiles too weak to capture (account for conditional power bonuses)
+      {
+        let effectivePower = card.power;
+        if (card.effects) {
+          for (const eff of card.effects) {
+            if (eff.type !== 'power_modifier') continue;
+            const mod = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
+            if (eff.condition === 'if_target_neutral' && !tile.owner) effectivePower += mod;
+            if (eff.condition === 'if_adjacent_owned_gte') {
+              const threshold = eff.condition_threshold ?? 3;
+              let adjOwned = 0;
+              for (const [dq, dr] of HEX_DIRS) {
+                const nk = `${tile.q + dq},${tile.r + dr}`;
+                if (tiles[nk]?.owner === activePlayerId) adjOwned++;
+              }
+              if (adjOwned >= threshold) effectivePower += mod;
+            }
+          }
+        }
+        if (tile.base_defense > effectivePower) continue;
+      }
       // Exclude occupied tiles for unoccupied_only cards
       if (tile.owner && card.unoccupied_only) continue;
       // Exclude tiles already claimed this turn (no stacking)
@@ -3797,13 +3855,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                                 style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>
-                          <div style={{ display: 'flex', gap: 4 }}>
+                          <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
+                            <div style={{ color: '#888', fontSize: 11, flexShrink: 0 }}>Draw</div>
+                            <input type="number" min={1} max={20} value={testDrawCount} onChange={e => setTestDrawCount(e.target.value)}
+                              style={{ width: 36, padding: '3px 4px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, textAlign: 'center' }} />
                             <button
-                              onClick={handleTestDrawCard}
-                              style={{ flex: 1, padding: '4px 8px', background: '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', marginTop: 4 }}
+                              onClick={() => handleTestDrawCard(Math.max(1, Number(testDrawCount) || 1))}
+                              style={{ flex: 1, padding: '4px 8px', background: '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}
                             >
-                              Draw Card
+                              Draw Cards
                             </button>
+                          </div>
+                          <div style={{ display: 'flex', gap: 4 }}>
                             <button
                               onClick={handleTestDiscardHand}
                               style={{ flex: 1, padding: '4px 8px', background: '#aa6633', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', marginTop: 4 }}
@@ -4812,6 +4875,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           onMidpoint={handleBannerMidpoint}
           onComplete={handleBannerComplete}
           holdUntilRelease={bannerHoldUntilRelease}
+          blocking={phaseBanner !== 'play' && phaseBanner !== 'buy'}
+          extraHoldMs={phaseBanner === 'upkeep' ? 500 : 0}
         />
       )}
 

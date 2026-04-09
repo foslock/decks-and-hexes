@@ -594,19 +594,38 @@ def _handle_draw_next_turn(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_auto_claim_adjacent_neutral(effect: Effect, ctx: EffectContext) -> None:
-    """Breakthrough: on success, claim one adjacent neutral tile."""
+    """Breakthrough: on success, randomly claim one adjacent neutral tile."""
     if not ctx.game.grid or ctx.action.target_q is None:
         return
     target_r = ctx.action.target_r if ctx.action.target_r is not None else 0
     adj_tiles = ctx.game.grid.get_adjacent(ctx.action.target_q, target_r)
-    for tile in adj_tiles:
-        if tile.owner is None and not tile.is_blocked:
-            tile.owner = ctx.player.id
-            tile.held_since_turn = ctx.game.current_round
-            ctx.game._log(
-                f"{ctx.player.name} auto-claims neutral tile {tile.key} from {ctx.card.name}",
-                actor=ctx.player.id)
-            break
+    candidates = [t for t in adj_tiles if t.owner is None and not t.is_blocked]
+    if candidates:
+        tile = ctx.game.rng.choice(candidates)
+        tile.owner = ctx.player.id
+        tile.held_since_turn = ctx.game.current_round
+        ctx.game._log(
+            f"{ctx.player.name} auto-claims neutral tile {tile.key} from {ctx.card.name}",
+            actor=ctx.player.id)
+        # Emit a resolution step so the frontend can animate the auto-claim
+        ctx.game.resolution_steps.append({
+            "tile_key": tile.key,
+            "q": tile.q,
+            "r": tile.r,
+            "contested": False,
+            "claimants": [{
+                "player_id": ctx.player.id,
+                "power": 0,
+                "source_q": ctx.action.target_q,
+                "source_r": target_r,
+            }],
+            "defender_id": None,
+            "defender_power": 0,
+            "winner_id": ctx.player.id,
+            "previous_owner": None,
+            "outcome": "auto_claim",
+            "card_name": ctx.card.name,
+        })
 
 
 def _handle_contest_cost(effect: Effect, ctx: EffectContext) -> None:

@@ -128,11 +128,12 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
 
   const isConsecrate = step?.outcome === 'consecrate';
   const isDefenseApplied = step?.outcome === 'defense_applied';
-  const isContested = !isConsecrate && !isDefenseApplied && step?.contested && numbers.length > 1;
+  const isAutoClaim = step?.outcome === 'auto_claim';
+  const isContested = !isConsecrate && !isDefenseApplied && !isAutoClaim && step?.contested && numbers.length > 1;
 
   // Timing
-  const moveMs = isOff ? 0 : Math.round((isDefenseApplied ? 300 : isConsecrate ? 600 : isContested ? 800 : 400) * animSpeed);
-  const growMs = isOff ? 0 : Math.round((isDefenseApplied ? 400 : isConsecrate ? 800 : isContested ? 1200 : 400) * animSpeed);
+  const moveMs = isOff ? 0 : Math.round((isAutoClaim ? 600 : isDefenseApplied ? 300 : isConsecrate ? 600 : isContested ? 800 : 400) * animSpeed);
+  const growMs = isOff ? 0 : Math.round((isAutoClaim ? 400 : isDefenseApplied ? 400 : isConsecrate ? 800 : isContested ? 1200 : 400) * animSpeed);
   const pauseMs = isOff ? 50 : Math.round((isDefenseApplied ? 100 : 200) * animSpeed);
 
   const hasPositionData = !!(gridTransform && gridRect);
@@ -312,8 +313,76 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
         );
       })()}
 
-      {/* Power numbers (skip for Consecrate and Defense Applied — custom animations handle them) */}
-      {!isConsecrate && !isDefenseApplied && numbers.map((num, i) => {
+      {/* Auto-claim animation — icon flies from source tile to auto-claimed tile */}
+      {isAutoClaim && step && (() => {
+        // Source is the Breakthrough target tile (where claim succeeded)
+        const claimant = step.claimants[0];
+        const srcQ = claimant?.source_q ?? step.q;
+        const srcR = claimant?.source_r ?? step.r;
+        const source = toScreen(srcQ, srcR);
+        const target = toScreen(step.q, step.r);
+        const color = step.winner_id ? playerColorStr(step.winner_id) : '#fff';
+
+        let x = source.x;
+        let y = source.y;
+        let scale = 0.5;
+        let opacity = 0;
+        let transition: string;
+
+        if (!numbersActive) {
+          x = source.x;
+          y = source.y;
+          scale = 0.5;
+          opacity = 0;
+          transition = 'none';
+        } else if (stage === 'numbers_move') {
+          // Icon flies from source to target
+          x = target.x;
+          y = target.y;
+          scale = 1.4;
+          opacity = 1;
+          transition = `all ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.1)`;
+        } else if (stage === 'winner_grow') {
+          // Settle at target
+          x = target.x;
+          y = target.y;
+          scale = 1;
+          opacity = 1;
+          transition = `all ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1)`;
+        } else {
+          x = target.x;
+          y = target.y;
+          scale = 1;
+          opacity = 0;
+          transition = `opacity ${pauseMs}ms ease`;
+        }
+
+        return (
+          <div
+            key="auto-claim-icon"
+            style={{
+              position: 'fixed',
+              left: x,
+              top: y,
+              transform: `translate(-50%, -50%) scale(${scale})`,
+              opacity,
+              transition,
+              fontSize: 24,
+              fontWeight: 'bold',
+              color: '#fff',
+              textShadow: `0 0 10px ${color}, 0 0 20px ${color}, 0 2px 4px rgba(0,0,0,0.8)`,
+              zIndex: 502,
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}
+          >
+            ⚔
+          </div>
+        );
+      })()}
+
+      {/* Power numbers (skip for Consecrate, Defense Applied, Auto-claim — custom animations handle them) */}
+      {!isConsecrate && !isDefenseApplied && !isAutoClaim && numbers.map((num, i) => {
         const color = playerColorStr(num.playerId);
         const isWinStage = stage === 'winner_grow';
 

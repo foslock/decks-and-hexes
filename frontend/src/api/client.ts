@@ -345,10 +345,11 @@ export async function testDiscardCard(
 export async function testDrawCard(
   gameId: string,
   playerId: string,
+  count: number = 1,
 ): Promise<{ message: string; state: GameState }> {
   return request(`/games/${gameId}/test/draw-card`, {
     method: 'POST',
-    body: JSON.stringify({ player_id: playerId }),
+    body: JSON.stringify({ player_id: playerId, count }),
   });
 }
 

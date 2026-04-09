@@ -195,7 +195,7 @@ cards:
     action_return: 2
     power: 0
     effect: "Discard 1 card. Gain 2 actions."
-    effect_upgraded: "Discard 1 card. Gain 2 actions. Gain 1 resource."
+    effect_upgraded: "Discard 1 card. Gain 2 actions. Gain 2 resources."
     secondary_effect: null
     secondary_timing: null
 
@@ -212,8 +212,8 @@ cards:
     buy_cost: 1
     action_return: 0
     power: 0
-    effect: "Gain 1 resource. If you have 0 actions, gain 1 action."
-    effect_upgraded: "Gain 2 resources. If you have 0 actions, gain 1 action."
+    effect: "Gain 2 resources. If you have 0 actions, gain 1 action."
+    effect_upgraded: "Gain 3 resources. If you have 0 actions, gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
