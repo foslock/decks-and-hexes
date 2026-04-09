@@ -995,7 +995,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             setVpPathPhase('fading_in');
           }
         } else {
-          // No claim steps — show reveal banner briefly, then transition to buy
+          // No claim steps or animations off — show reveal banner briefly, then transition to buy
+          // Clear the pre-resolve freeze so the grid shows post-resolve state
+          setResolveDisplayState(null);
           setInteractionBlocked(true);
           setBannerSubtitle('Battle & Expand');
           setPhaseBanner('reveal');
