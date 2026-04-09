@@ -61,6 +61,10 @@ let browserViewMemory: boolean = false;
 let browserSortMemory: SortMode = 'cost';
 let browserCollapseMemory: Record<string, boolean> | null = null;
 
+export function clearBrowserCollapseMemory() {
+  browserCollapseMemory = null;
+}
+
 function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = getCardDisplayColor(displayCard);

@@ -5,7 +5,7 @@ import { useSettings, type AnimationMode } from './SettingsContext';
 import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
-import CardBrowser from './CardBrowser';
+import CardBrowser, { clearBrowserCollapseMemory } from './CardBrowser';
 
 interface CardPackDef {
   id: string;
@@ -313,6 +313,7 @@ export default function LobbyScreen({
   // ── Player self-edit ─────────────────────────────────────
 
   const handleUpdateSelf = useCallback(async (updates: { name?: string; archetype?: string }) => {
+    if (updates.archetype) clearBrowserCollapseMemory();
     try {
       setError(null);
       await api.updateLobbyPlayer(lobbyCode, playerId, token, updates);
