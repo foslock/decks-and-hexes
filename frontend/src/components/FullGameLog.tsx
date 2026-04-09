@@ -12,7 +12,7 @@ interface FullGameLogProps {
 const PHASE_LABELS: Record<string, string> = {
   start_of_turn: 'Start',
   play: 'Play',
-  reveal: 'Reveal',
+  reveal: 'Resolve',
   buy: 'Buy',
   end_of_turn: 'End',
   setup: 'Setup',

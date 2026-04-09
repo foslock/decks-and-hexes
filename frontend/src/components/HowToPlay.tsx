@@ -233,7 +233,7 @@ const PAGES = [
     content: (
       <>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa', marginBottom: 16 }}>
-          Each round follows the same sequence of phases: Upkeep &rarr; Play &rarr; Reveal &rarr; Buy.
+          Each round follows the same sequence of phases: Upkeep &rarr; Play &rarr; Resolve &rarr; Buy.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
@@ -252,7 +252,7 @@ const PAGES = [
             </div>
           </div>
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
-            <div style={{ fontSize: 14, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>3. Reveal</div>
+            <div style={{ fontSize: 14, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>3. Resolve</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
               All played cards are revealed. Effects are resolved — if multiple players target the
               same tile, highest power wins (ties go to the defender). Territory changes hands.
