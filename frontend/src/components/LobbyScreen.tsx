@@ -39,10 +39,12 @@ const GRID_SIZES = [
   { id: 'large', name: 'Large', players: '4-6', tiles: 127, radius: 6 },
 ];
 
-const RECOMMENDED_VP: Record<string, number> = { small: 10, medium: 12, large: 14 };
+// Base VP targets for 2 players; subtract 1 VP per extra player
+const BASE_VP: Record<string, number> = { small: 10, medium: 14, large: 18 };
 
-function computeRecommendedVp(gridSizeId: string): number {
-  return RECOMMENDED_VP[gridSizeId] ?? 10;
+function computeRecommendedVp(gridSizeId: string, playerCount: number = 2): number {
+  const base = BASE_VP[gridSizeId] ?? 10;
+  return Math.max(4, base - Math.max(0, playerCount - 2));
 }
 
 const DIFFICULTIES = [
@@ -942,6 +944,57 @@ export default function LobbyScreen({
               </div>
             </div>
 
+            {/* VP Target */}
+            <div style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+              borderRadius: '0 0 8px 8px',
+            }}>
+              <div style={{ width: 90, flexShrink: 0 }}>
+                <Tooltip content="The number of Victory Points a player needs to win.">
+                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>VP Target</span>
+                </Tooltip>
+              </div>
+              {isHost ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val > 0) {
+                        handleConfigChange('vp_target', val);
+                      }
+                    }}
+                    style={{
+                      width: 52, padding: '0 6px', height: 26,
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#fff', fontSize: 13,
+                      fontWeight: 'bold', textAlign: 'center',
+                    }}
+                  />
+                  {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size, players.length) && (
+                    <button
+                      onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size, players.length))}
+                      style={{
+                        fontSize: 13, padding: '0 8px', height: 26,
+                        background: '#2a2a3e', border: '1px solid #555',
+                        borderRadius: 4, color: '#888', cursor: 'pointer',
+                      }}
+                    >
+                      Reset ({computeRecommendedVp(lobby.config.grid_size, players.length)})
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <strong style={{ color: '#fff' }}>
+                  {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
+                </strong>
+              )}
+            </div>
+
           </div>
 
           {/* Advanced settings (collapsible) */}
@@ -1059,56 +1112,6 @@ export default function LobbyScreen({
                 <span style={{ fontFamily: 'monospace', color: '#fff', fontWeight: 'bold', letterSpacing: 1 }}>
                   {lobby.config.map_seed || '------'}
                 </span>
-              )}
-            </div>
-
-            {/* VP Target */}
-            <div style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <div style={{ width: 90, flexShrink: 0 }}>
-                <Tooltip content="The number of Victory Points a player needs to win.">
-                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>VP Target</span>
-                </Tooltip>
-              </div>
-              {isHost ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <input
-                    type="number"
-                    min={1}
-                    value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      if (!isNaN(val) && val > 0) {
-                        handleConfigChange('vp_target', val);
-                      }
-                    }}
-                    style={{
-                      width: 52, padding: '0 6px', height: 26,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', fontSize: 13,
-                      fontWeight: 'bold', textAlign: 'center',
-                    }}
-                  />
-                  {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size) && (
-                    <button
-                      onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size))}
-                      style={{
-                        fontSize: 13, padding: '0 8px', height: 26,
-                        background: '#2a2a3e', border: '1px solid #555',
-                        borderRadius: 4, color: '#888', cursor: 'pointer',
-                      }}
-                    >
-                      Reset ({computeRecommendedVp(lobby.config.grid_size)})
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <strong style={{ color: '#fff' }}>
-                  {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size)}
-                </strong>
               )}
             </div>
 

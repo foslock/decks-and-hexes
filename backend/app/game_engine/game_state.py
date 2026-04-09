@@ -73,16 +73,18 @@ def tiles_per_vp(grid_size: GridSize) -> int:
 
 
 def compute_vp_target(grid_size: GridSize, player_count: int = 2, speed: str = "normal") -> int:
-    """Compute the recommended VP target based on grid size.
+    """Compute the recommended VP target based on grid size and player count.
 
-    Simple fixed targets: Small=10, Medium=15, Large=20.
+    Base targets for 2 players: Small=10, Medium=14, Large=18.
+    Subtract 1 VP per additional player beyond 2. Minimum 4.
     """
-    _RECOMMENDED: dict[GridSize, int] = {
+    _BASE: dict[GridSize, int] = {
         GridSize.SMALL: 10,
-        GridSize.MEDIUM: 15,
-        GridSize.LARGE: 20,
+        GridSize.MEDIUM: 14,
+        GridSize.LARGE: 18,
     }
-    return _RECOMMENDED.get(grid_size, 10)
+    base = _BASE.get(grid_size, 10)
+    return max(4, base - max(0, player_count - 2))
 
 
 
