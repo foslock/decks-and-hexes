@@ -18,7 +18,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   render() {
     if (this.state.error) {
       return (
-        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ textAlign: 'center', maxWidth: 400 }}>
             <div style={{ fontSize: 20, marginBottom: 12 }}>Something went wrong</div>
             <div style={{ fontSize: 13, color: '#888', marginBottom: 16 }}>{this.state.error.message}</div>
@@ -293,7 +293,7 @@ function AppInner() {
     if (!multiplayerGameState) {
       // Brief loading state while game state is being set — prevents flashing home screen
       return (
-        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <div style={{ color: '#666', fontSize: 14 }}>Loading game…</div>
         </div>
       );
@@ -321,7 +321,7 @@ function AppInner() {
   // Home screen
   return (
     <SettingsProvider>
-      <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh' }}>
+      <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100dvh' }}>
         <SetupScreen
           onCreateLobby={handleCreateLobby}
           onJoinLobby={handleJoinLobby}

@@ -373,7 +373,7 @@ export default function LobbyScreen({
   // ── Render ───────────────────────────────────────────────
 
   return (
-    <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100vh' }}>
+    <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100dvh' }}>
       {/* Settings gear — top right */}
       <div ref={settingsRef} style={{ position: 'fixed', top: 16, right: 16, zIndex: 100 }}>
         <button

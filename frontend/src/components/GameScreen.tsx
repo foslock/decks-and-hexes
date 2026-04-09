@@ -321,7 +321,7 @@ function PhaseIndicatorPill({ phase }: { phase: string }) {
           color: '#fff', fontWeight: 'bold', textTransform: 'uppercase', cursor: 'help',
         }}
       >
-        {phase.replace(/_/g, ' ')}
+        {PHASE_PILL_LABELS[phase] ?? phase.replace(/_/g, ' ')}
       </span>
       {rect && createPortal(
         <div style={{
@@ -3454,7 +3454,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#1a1a2e', color: '#fff' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', background: '#1a1a2e', color: '#fff' }}>
       {/* Full-width grid area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div
@@ -3641,7 +3641,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 backdropFilter: 'blur(4px)',
                 transition: 'all 0.2s ease',
                 width: 200,
-                maxHeight: 'calc(100vh - 300px)',
+                maxHeight: 'calc(100dvh - 300px)',
                 overflowY: 'auto',
               }}
             >
@@ -3736,7 +3736,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     backdropFilter: 'blur(4px)',
                     padding: PAD,
                     width: COL_W + PAD * 2 + 2, // card width + padding + border
-                    maxHeight: 'calc(100vh - 420px)',
+                    maxHeight: 'calc(100dvh - 420px)',
                     overflowY: 'auto',
                     boxSizing: 'border-box',
                   }}
