@@ -10,6 +10,25 @@ function axialToPixel(q: number, r: number): { x: number; y: number } {
   return { x, y };
 }
 
+function pixelToAxial(px: number, py: number): { q: number; r: number } {
+  const q = (2 / 3 * px) / HEX_SIZE;
+  const r = (-1 / 3 * px + Math.sqrt(3) / 3 * py) / HEX_SIZE;
+  return { q, r };
+}
+
+function axialRound(q: number, r: number): { q: number; r: number } {
+  const s = -q - r;
+  let rq = Math.round(q); let rr = Math.round(r); let rs = Math.round(s);
+  const dq = Math.abs(rq - q); const dr = Math.abs(rr - r); const ds = Math.abs(rs - s);
+  if (dq > dr && dq > ds) rq = -rr - rs;
+  else if (dr > ds) rr = -rq - rs;
+  return { q: rq, r: rr };
+}
+
+function hexDistance(q1: number, r1: number, q2: number, r2: number): number {
+  return (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2;
+}
+
 function drawHexagon(g: Graphics, x: number, y: number, size: number) {
   const points: number[] = [];
   for (let i = 0; i < 6; i++) {
@@ -113,16 +132,35 @@ export default function HeroAnimation() {
       const cardContainer = new Container();
       stage.addChild(cardContainer);
 
-      // --- Draw base grid (dim outlines) ---
-      const gridBase = new Graphics();
-      gridContainer.addChild(gridBase);
+      // --- Cursor proximity tracking ---
+      let cursorHex: { q: number; r: number } | null = null;
+      let cursorOnGrid = false;
+      let cursorFade = 0;
+      const CURSOR_FADE_MAX = 3; // max hex distance
+      const CURSOR_FADE_SPEED = 0.08;
+      stage.eventMode = 'static';
+      stage.hitArea = app.screen;
+      stage.on('pointermove', (e) => {
+        const local = gridContainer.toLocal(e.global);
+        const frac = pixelToAxial(local.x, local.y);
+        cursorHex = axialRound(frac.q, frac.r);
+      });
+      stage.on('pointerenter', () => { cursorOnGrid = true; });
+      stage.on('pointerleave', () => { cursorOnGrid = false; cursorHex = null; });
+
+      // --- Draw base grid (per-tile outlines for ripple support) ---
+      const gridOutlines: { g: Graphics; hexDist: number; px: number; py: number; q: number; r: number }[] = [];
       for (const hex of allHexes) {
         const { x, y } = axialToPixel(hex.q, hex.r);
-        gridBase.setStrokeStyle({ width: 1, color: 0x333355, alpha: 0.6 });
-        drawHexagon(gridBase, x, y, HEX_SIZE - 1);
-        gridBase.stroke();
+        const g = new Graphics();
+        g.setStrokeStyle({ width: 1, color: 0x333355, alpha: 0.6 });
+        drawHexagon(g, x, y, HEX_SIZE - 1);
+        g.stroke();
+        g.alpha = 0;
+        gridContainer.addChild(g);
+        const hexDist = (Math.abs(hex.q) + Math.abs(hex.r) + Math.abs(hex.q + hex.r)) / 2;
+        gridOutlines.push({ g, hexDist, px: x, py: y, q: hex.q, r: hex.r });
       }
-      gridBase.alpha = 0;
 
       // --- Hex neighbor lookup ---
       const HEX_DIRS = [[1,0],[0,1],[-1,1],[-1,0],[0,-1],[1,-1]];
@@ -139,7 +177,7 @@ export default function HeroAnimation() {
       }
 
       // --- Tile fill graphics (one per hex for individual alpha control) ---
-      const tileFills: { gBlue: Graphics; gRed: Graphics; key: string; isBlue: boolean; isBorder: boolean; targetAlpha: number; currentAlpha: number }[] = [];
+      const tileFills: { gBlue: Graphics; gRed: Graphics; key: string; isBlue: boolean; isBorder: boolean; targetAlpha: number; currentAlpha: number; px: number; py: number; hexDist: number }[] = [];
       for (const hex of allHexes) {
         const { x, y } = axialToPixel(hex.q, hex.r);
         const key = `${hex.q},${hex.r}`;
@@ -162,7 +200,8 @@ export default function HeroAnimation() {
         gRed.alpha = 0;
         gridContainer.addChild(gRed);
 
-        tileFills.push({ gBlue, gRed, key, isBlue, isBorder: border, targetAlpha: 0, currentAlpha: 0 });
+        const hexDist = (Math.abs(hex.q) + Math.abs(hex.r) + Math.abs(hex.q + hex.r)) / 2;
+        tileFills.push({ gBlue, gRed, key, isBlue, isBorder: border, targetAlpha: 0, currentAlpha: 0, px: x, py: y, hexDist });
       }
 
       // Sort tile fills so blue fills from left and red from right
@@ -247,6 +286,9 @@ export default function HeroAnimation() {
       const TILE_FILL_START = 400;
       const TILE_FILL_DUR = 1200;
       const TOTAL_ANIM = COLLISION_TIME + REBOUND_DUR; // 1500
+      const RIPPLE_WAVE_DELAY = 75; // ms delay per hex distance ring
+      const RIPPLE_DURATION = 700; // ms per tile settle
+      const RIPPLE_MAGNITUDE = 9; // px max outward push
 
       // Card positions
       const offscreenL = -CANVAS_W / 2 - cardW;
@@ -267,12 +309,28 @@ export default function HeroAnimation() {
         if (!startTimeRef.current) startTimeRef.current = performance.now();
         const elapsed = performance.now() - startTimeRef.current;
 
+        // Cursor proximity fade
+        const wantCursor = cursorOnGrid;
+        const cursorTarget = wantCursor ? 1 : 0;
+        cursorFade = cursorFade < cursorTarget
+          ? Math.min(1, cursorFade + CURSOR_FADE_SPEED)
+          : Math.max(0, cursorFade - CURSOR_FADE_SPEED);
+        const proximityFactor = (q: number, r: number): number => {
+          if (cursorFade <= 0 || !cursorHex) return 1;
+          const dist = hexDistance(cursorHex.q, cursorHex.r, q, r);
+          if (dist >= CURSOR_FADE_MAX) return 1;
+          const fade = 1 - dist / CURSOR_FADE_MAX; // 1 at cursor, 0 at max dist
+          return 1 - fade * 0.25 * cursorFade; // 25% max reduction
+        };
+
         // --- Grid base fade in ---
-        if (elapsed < GRID_FADE_START + GRID_FADE_DUR) {
-          const t = Math.max(0, (elapsed - GRID_FADE_START) / GRID_FADE_DUR);
-          gridBase.alpha = easeOutCubic(t);
-        } else {
-          gridBase.alpha = 1;
+        {
+          const gridAlpha = elapsed < GRID_FADE_START + GRID_FADE_DUR
+            ? easeOutCubic(Math.max(0, (elapsed - GRID_FADE_START) / GRID_FADE_DUR))
+            : 1;
+          for (const outline of gridOutlines) {
+            outline.g.alpha = gridAlpha * proximityFactor(outline.q, outline.r);
+          }
         }
 
         // --- Tile fills (staggered from opposing sides) ---
@@ -301,13 +359,40 @@ export default function HeroAnimation() {
         // Smooth tile alpha transitions (during enter animation, show base color)
         for (const tile of tileFills) {
           tile.currentAlpha = lerp(tile.currentAlpha, tile.targetAlpha, 0.15);
+          const [tq, tr] = tile.key.split(',').map(Number);
+          const pf = proximityFactor(tq, tr);
           if (tile.isBlue) {
-            tile.gBlue.alpha = tile.currentAlpha;
+            tile.gBlue.alpha = tile.currentAlpha * pf;
             tile.gRed.alpha = 0;
           } else {
-            tile.gRed.alpha = tile.currentAlpha;
+            tile.gRed.alpha = tile.currentAlpha * pf;
             tile.gBlue.alpha = 0;
           }
+        }
+
+        // --- Ripple displacement from collision ---
+        const RIPPLE_START = COLLISION_TIME - 100;
+        if (elapsed >= RIPPLE_START) {
+          const rippleElapsed = elapsed - RIPPLE_START;
+          const applyRipple = (items: { g?: Graphics; gBlue?: Graphics; gRed?: Graphics; hexDist: number; px: number; py: number }[]) => {
+            for (const item of items) {
+              const delay = item.hexDist * RIPPLE_WAVE_DELAY;
+              const localT = (rippleElapsed - delay) / RIPPLE_DURATION;
+              const targets = item.g ? [item.g] : [item.gBlue!, item.gRed!];
+              if (localT <= 0 || item.hexDist === 0 || localT >= 1) {
+                for (const t of targets) { t.x = 0; t.y = 0; }
+                continue;
+              }
+              const wave = Math.sin(localT * Math.PI) * Math.pow(1 - localT, 2);
+              const mag = RIPPLE_MAGNITUDE * wave;
+              const len = Math.sqrt(item.px * item.px + item.py * item.py) || 1;
+              const dx = (item.px / len) * mag;
+              const dy = (item.py / len) * mag;
+              for (const t of targets) { t.x = dx; t.y = dy; }
+            }
+          };
+          applyRipple(tileFills);
+          applyRipple(gridOutlines);
         }
 
         // --- Card enter animation (accelerating in) ---
@@ -347,10 +432,15 @@ export default function HeroAnimation() {
             blueState.rotation = restAngleL;
             redState.x = restR;
             redState.rotation = restAngleR;
-            // Snap tiles to full base color
+            // Snap tiles to full base color and clear any ripple displacement
             for (const tile of tileFills) {
               tile.currentAlpha = 0.45;
               tile.targetAlpha = 0.45;
+              tile.gBlue.x = 0; tile.gBlue.y = 0;
+              tile.gRed.x = 0; tile.gRed.y = 0;
+            }
+            for (const outline of gridOutlines) {
+              outline.g.x = 0; outline.g.y = 0;
             }
           }
 
@@ -372,27 +462,32 @@ export default function HeroAnimation() {
           // Tile breathing + border contest (ramps in over first 3s of idle)
           const contestRamp = Math.min(1, idleT / 3);
           for (const tile of tileFills) {
+            const [q, r] = tile.key.split(',').map(Number);
+            const pf = proximityFactor(q, r);
             const baseAlpha = 0.45 + Math.sin(idleT * 0.8) * 0.05;
             if (tile.isBorder && contestRamp > 0) {
-              const [q, r] = tile.key.split(',').map(Number);
               const phase = (q * 1.7 + r * 2.3);
               const contest = (Math.sin(idleT * 0.6 + phase) * 0.5 + 0.5) * contestRamp;
               if (tile.isBlue) {
-                tile.gBlue.alpha = baseAlpha * (1 - contest * 0.7);
-                tile.gRed.alpha = baseAlpha * contest * 0.7;
+                tile.gBlue.alpha = baseAlpha * (1 - contest * 0.7) * pf;
+                tile.gRed.alpha = baseAlpha * contest * 0.7 * pf;
               } else {
-                tile.gRed.alpha = baseAlpha * (1 - contest * 0.7);
-                tile.gBlue.alpha = baseAlpha * contest * 0.7;
+                tile.gRed.alpha = baseAlpha * (1 - contest * 0.7) * pf;
+                tile.gBlue.alpha = baseAlpha * contest * 0.7 * pf;
               }
             } else {
               if (tile.isBlue) {
-                tile.gBlue.alpha = baseAlpha;
+                tile.gBlue.alpha = baseAlpha * pf;
                 tile.gRed.alpha = 0;
               } else {
-                tile.gRed.alpha = baseAlpha;
+                tile.gRed.alpha = baseAlpha * pf;
                 tile.gBlue.alpha = 0;
               }
             }
+          }
+          // Apply proximity to outlines during idle
+          for (const outline of gridOutlines) {
+            outline.g.alpha = proximityFactor(outline.q, outline.r);
           }
           return;
         }

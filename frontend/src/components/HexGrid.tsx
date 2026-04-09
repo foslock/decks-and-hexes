@@ -514,7 +514,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
 
   const renderTiles = useCallback(() => {
     const hexContainer = hexContainerRef.current;
-    if (!hexContainer) return;
+    if (!hexContainer || hexContainer.destroyed) return;
 
     hexContainer.removeChildren();
     tileGraphicsRef.current.clear();
@@ -1963,6 +1963,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
 
   // Re-render tiles when data changes
   useEffect(() => {
+    if (!appRef.current) return;
     renderTiles();
     // Re-add VP path layer under tile icons/text (at the index saved before PASS 8)
     const vpG = vpPathGraphicsRef.current;
