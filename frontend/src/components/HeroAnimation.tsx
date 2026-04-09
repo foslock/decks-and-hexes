@@ -288,7 +288,7 @@ export default function HeroAnimation() {
       const TOTAL_ANIM = COLLISION_TIME + REBOUND_DUR; // 1500
       const RIPPLE_WAVE_DELAY = 75; // ms delay per hex distance ring
       const RIPPLE_DURATION = 700; // ms per tile settle
-      const RIPPLE_MAGNITUDE = 9; // px max outward push
+      const RIPPLE_MAGNITUDE = 13; // px max outward push
 
       // Card positions
       const offscreenL = -CANVAS_W / 2 - cardW;
@@ -371,7 +371,7 @@ export default function HeroAnimation() {
         }
 
         // --- Ripple displacement from collision ---
-        const RIPPLE_START = COLLISION_TIME - 100;
+        const RIPPLE_START = COLLISION_TIME - 180;
         if (elapsed >= RIPPLE_START) {
           const rippleElapsed = elapsed - RIPPLE_START;
           const applyRipple = (items: { g?: Graphics; gBlue?: Graphics; gRed?: Graphics; hexDist: number; px: number; py: number }[]) => {
