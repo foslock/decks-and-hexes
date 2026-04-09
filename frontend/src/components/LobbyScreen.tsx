@@ -34,9 +34,9 @@ const ARCHETYPES = [
 ];
 
 const GRID_SIZES = [
-  { id: 'small', name: 'Small (61 tiles)', players: '2-3', tiles: 61, radius: 4 },
-  { id: 'medium', name: 'Medium (91 tiles)', players: '3-4', tiles: 91, radius: 5 },
-  { id: 'large', name: 'Large (127 tiles)', players: '4-6', tiles: 127, radius: 6 },
+  { id: 'small', name: 'Small', players: '2-3', tiles: 61, radius: 4 },
+  { id: 'medium', name: 'Medium', players: '3-4', tiles: 91, radius: 5 },
+  { id: 'large', name: 'Large', players: '4-6', tiles: 127, radius: 6 },
 ];
 
 const RECOMMENDED_VP: Record<string, number> = { small: 10, medium: 12, large: 14 };

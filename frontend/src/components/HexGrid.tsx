@@ -609,7 +609,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           const hoverEdgeG = hoverEdgeGraphicsRef.current;
           if (hoverEdgeG) {
             hoverEdgeG.clear();
-            hoverEdgeG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.9, cap: 'round' });
+            hoverEdgeG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.8, cap: 'round' });
             for (const [, , vA, vB] of DIRECTIONS_WITH_EDGES) {
               const a = hexVertex(x, y, vA, HEX_SIZE);
               const b = hexVertex(x, y, vB, HEX_SIZE);
@@ -823,21 +823,30 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
             }
             if (tile.immune) {
               lines.push('Cannot be claimed by another player.');
-            } else if (tile.defense_power > 0) {
+            } else if (tile.defense_power > 0 && !tile.is_base) {
+              const isNeutral = tile.owner == null;
               const persistDef = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
               const tmpDef = tile.defense_power - persistDef;
               const parts: string[] = [];
               if (persistDef > 0) parts.push(`${persistDef} persistent`);
               if (tmpDef > 0) parts.push(`${tmpDef} temporary`);
               const breakdown = parts.length > 1 ? ` (${parts.join(' + ')})` : '';
-              lines.push(`Defense: ${tile.defense_power}${breakdown}. Claiming requires at least ${tile.defense_power + 1} power.`);
+              if (isNeutral) {
+                lines.push(`Neutral Defense: ${tile.defense_power}${breakdown}. Claiming requires at least ${tile.defense_power} power.`);
+              } else {
+                lines.push(`Defense: ${tile.defense_power}${breakdown}. Claiming requires at least ${tile.defense_power + 1} power.`);
+              }
             }
             if (tile.owner && playerInfoRef.current?.[tile.owner]) {
               const info = playerInfoRef.current[tile.owner];
               const label = ARCHETYPE_LABELS[info.archetype] || info.archetype;
               lines.push(`${info.name} (${label})`);
               if (!tile.is_base && tile.held_since_turn != null) {
-                lines.push(`Occupied since Round ${tile.held_since_turn}`);
+                if (tile.held_since_turn === 0) {
+                  lines.push(`Occupied by ${info.name} since the start.`);
+                } else {
+                  lines.push(`Occupied since Round ${tile.held_since_turn}`);
+                }
               }
             }
           }
