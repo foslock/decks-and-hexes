@@ -616,10 +616,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     subtitleParts: SubtitlePart[];
   };
   const [inPlayExitAnims, setInPlayExitAnims] = useState<InPlayExitAnim[]>([]);
+  // Snapshot of exit animation data, prepared on submit, consumed when play→reveal fires
+  const pendingExitAnimsRef = useRef<{ anims: InPlayExitAnim[]; prePlayDiscardCount: number } | null>(null);
+  // Deferred reveal setup — stored when play→reveal fires during exit animations (WS race)
+  const deferredRevealSetupRef = useRef<(() => void) | null>(null);
   // Override discard count during exit animations so it increments per discard anim
   const [discardCountOverride, setDiscardCountOverride] = useState<number | null>(null);
-  // Ref to hold deferred state update while exit animations play
-  const deferredStateUpdateRef = useRef<GameState | null>(null);
   // Purchase pill hover preview
   const [purchaseHover, setPurchaseHover] = useState<{ card: import('../types/game').Card; rect: DOMRect } | null>(null);
   const [purchaseHoverVisible, setPurchaseHoverVisible] = useState(false);
@@ -709,6 +711,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+  // True when the player has submitted (server-side) or exit animations are pending/playing
+  const playSubmitted = !!(activePlayer?.has_submitted_play || inPlayExitAnims.length > 0);
 
   // Grid rotation — starts oriented so active player's base is at the top
   const computeBaseRotation = useCallback((playerId: string): number => {
@@ -757,7 +761,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   // Show drag hint when a non-targeting engine card is selected and can be played
   useEffect(() => {
-    if (phase !== 'play' || !activePlayer || activePlayer.has_submitted_play || resolving || phaseBanner || showIntro || introSequence !== 'done') {
+    if (phase !== 'play' || !activePlayer || playSubmitted || resolving || phaseBanner || showIntro || introSequence !== 'done') {
       setShowDragHint(false);
       return;
     }
@@ -939,62 +943,77 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
     // play → reveal: set up resolve animation (works for both hotseat and multiplayer)
     if (prev === 'play' && phase === 'reveal') {
-      const steps = gameState.resolution_steps;
-      const hasSteps = steps && steps.length > 0;
+      // Immediately freeze the grid at pre-resolve state so it doesn't flash post-resolve tiles
+      const preResolveState: GameState = {
+        ...gameState,
+        grid: { ...gameState.grid, tiles: { ...oldTiles } },
+      };
+      setResolveDisplayState(preResolveState);
 
-      if (hasSteps && !animationOff) {
-        setSelectedCardIndex(null);
-        // Build pre-resolve display state with old tile ownership for animation
-        const preResolveState: GameState = {
-          ...gameState,
-          grid: {
-            ...gameState.grid,
-            tiles: { ...oldTiles },
-          },
-        };
-        setResolveDisplayState(preResolveState);
-        setResolutionSteps(steps);
-        setGridTransformSnapshot(gridTransformRef.current);
-        setGridRectSnapshot(gridContainerRef.current?.getBoundingClientRect() ?? null);
-        setResolving(true);
-        setInteractionBlocked(true);
-        setBannerSubtitle('Battle & Expand');
-        setPhaseBanner('reveal');
-        // Pre-compute chevron sources using pre-resolve tile state
-        const cachedChevrons: typeof resolveChevronCacheRef.current = [];
-        for (let i = 0; i < steps.length; i++) {
-          const step = steps[i];
-          if (step.outcome === 'defense_applied') continue; // defense steps use shield animation, not chevrons
-          for (const claimant of step.claimants) {
-            const color = PLAYER_COLORS[claimant.player_id] ?? 0xffffff;
-            const source = findNearestOwnedTile(step.q, step.r, oldTiles, claimant.player_id);
-            if (!source) continue;
-            cachedChevrons.push({
-              targetQ: step.q, targetR: step.r,
-              sourceQ: source.q, sourceR: source.r,
-              color, stepIndex: i,
-            });
+      // Full reveal setup (banner, chevrons, VP paths, resolve overlay)
+      const doRevealSetup = () => {
+        const steps = gameState.resolution_steps;
+        const hasSteps = steps && steps.length > 0;
+
+        if (hasSteps && !animationOff) {
+          setSelectedCardIndex(null);
+          setResolutionSteps(steps);
+          setGridTransformSnapshot(gridTransformRef.current);
+          setGridRectSnapshot(gridContainerRef.current?.getBoundingClientRect() ?? null);
+          setResolving(true);
+          setInteractionBlocked(true);
+          setBannerSubtitle('Battle & Expand');
+          setPhaseBanner('reveal');
+          // Pre-compute chevron sources using pre-resolve tile state
+          const cachedChevrons: typeof resolveChevronCacheRef.current = [];
+          for (let i = 0; i < steps.length; i++) {
+            const step = steps[i];
+            if (step.outcome === 'defense_applied') continue;
+            for (const claimant of step.claimants) {
+              const color = PLAYER_COLORS[claimant.player_id] ?? 0xffffff;
+              const source = findNearestOwnedTile(step.q, step.r, oldTiles, claimant.player_id);
+              if (!source) continue;
+              cachedChevrons.push({
+                targetQ: step.q, targetR: step.r,
+                sourceQ: source.q, sourceR: source.r,
+                color, stepIndex: i,
+              });
+            }
           }
+          resolveChevronCacheRef.current = cachedChevrons;
+          setChevronAlpha(0);
+          setChevronRevealPhase(true);
+          // Initialize VP paths for all players
+          setResolveLogEntries([]);
+          const allVpPaths: VpPath[] = [];
+          for (const pid of gameState.player_order) {
+            const color = PLAYER_COLORS[pid] ?? 0xffffff;
+            allVpPaths.push(...computePlayerVpPaths(oldTiles, pid, color).map(p => ({ ...p, noPulse: true })));
+          }
+          if (allVpPaths.length > 0) {
+            setVpPaths(allVpPaths);
+            setVpPathPhase('fading_in');
+          }
+        } else {
+          // No claim steps — show reveal banner briefly, then transition to buy
+          setInteractionBlocked(true);
+          setBannerSubtitle('Battle & Expand');
+          setPhaseBanner('reveal');
         }
-        resolveChevronCacheRef.current = cachedChevrons;
-        setChevronAlpha(0);
-        setChevronRevealPhase(true);
-        // Initialize VP paths for all players
-        setResolveLogEntries([]);
-        const allVpPaths: VpPath[] = [];
-        for (const pid of gameState.player_order) {
-          const color = PLAYER_COLORS[pid] ?? 0xffffff;
-          allVpPaths.push(...computePlayerVpPaths(oldTiles, pid, color).map(p => ({ ...p, noPulse: true })));
-        }
-        if (allVpPaths.length > 0) {
-          setVpPaths(allVpPaths);
-          setVpPathPhase('fading_in');
-        }
+      };
+
+      // If exit animations are pending (waiting-for-others case), play them before reveal
+      const pending = pendingExitAnimsRef.current;
+      if (pending && pending.anims.length > 0) {
+        pendingExitAnimsRef.current = null;
+        startExitAnims(pending.anims, pending.prePlayDiscardCount, doRevealSetup);
+      } else if (inPlayExitAnims.length > 0) {
+        // Exit animations already in progress (last-player + WS broadcast race)
+        // Defer reveal setup until they complete
+        deferredRevealSetupRef.current = doRevealSetup;
       } else {
-        // No claim steps — show reveal banner briefly, then transition to buy
-        setInteractionBlocked(true);
-        setBannerSubtitle('Battle & Expand');
-        setPhaseBanner('reveal');
+        // No exit anims — run reveal setup immediately
+        doRevealSetup();
       }
       return;
     }
@@ -1996,16 +2015,50 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     });
   }, [trashMode]);
 
+  // Start the in-play exit animations and call onComplete when done
+  const startExitAnims = useCallback((exitAnims: InPlayExitAnim[], prePlayDiscardCount: number, onComplete: () => void) => {
+    const STAGGER = Math.round(400 * animSpeed);
+    const TRASH_DUR = Math.round(500 * animSpeed);
+    const DISCARD_DUR = Math.round(1000 * animSpeed);
+    const lastDelay = (exitAnims.length - 1) * STAGGER;
+    const lastIsTrash = exitAnims[exitAnims.length - 1].type === 'trash';
+    const totalAnimTime = lastDelay + (lastIsTrash ? TRASH_DUR : DISCARD_DUR) + 100;
+
+    // Freeze discard count at pre-play value; it'll increment per discard anim
+    setDiscardCountOverride(prePlayDiscardCount);
+    setInPlayExitAnims(exitAnims);
+
+    // Stagger: activate each card after its delay, play sound, increment discard count
+    exitAnims.forEach((anim, i) => {
+      setTimeout(() => {
+        if (anim.type === 'trash') sound.cardTrash();
+        else {
+          sound.cardDiscard();
+          setDiscardCountOverride(prev => prev !== null ? prev + 1 : prev);
+        }
+        setInPlayExitAnims(prev => prev.map((a, j) => j === i ? { ...a, active: true } : a));
+      }, anim.delay);
+    });
+
+    // Clean up after all animations complete
+    setTimeout(() => {
+      setInPlayExitAnims([]);
+      setDiscardCountOverride(null);
+      onComplete();
+      // If a reveal setup was deferred (WS race), run it now
+      const deferredReveal = deferredRevealSetupRef.current;
+      if (deferredReveal) {
+        deferredRevealSetupRef.current = null;
+        deferredReveal();
+      }
+    }, totalAnimTime);
+  }, [animSpeed, sound]);
+
   const handleSubmitPlay = useCallback(async () => {
     try {
       setError(null);
 
-      // Snapshot positions of in-play cards for staggered exit animations
-      const STAGGER = Math.round(400 * animSpeed);
-      const TRASH_DUR = Math.round(500 * animSpeed);
-      const DISCARD_DUR = Math.round(1000 * animSpeed);
-      let totalAnimTime = 0;
-
+      // Snapshot positions of in-play cards for exit animations (consumed on play→reveal transition)
       if (activePlayer && animated && activePlayer.planned_actions.length > 0) {
         const discardEl = document.querySelector('[data-discard-pile]');
         const discardRect = discardEl?.getBoundingClientRect();
@@ -2019,7 +2072,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           if (!el) return;
           const rect = el.getBoundingClientRect();
           const isTrash = action.card.trash_on_use;
-          const delay = i * STAGGER;
+          const delay = i * Math.round(400 * animSpeed);
           const rotation = (Math.random() - 0.5) * 16; // ±8deg
           const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
           const priorNames = actions.slice(0, i).map(a => a.card.name);
@@ -2032,62 +2085,36 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         });
 
         if (exitAnims.length > 0) {
-          const lastDelay = (exitAnims.length - 1) * STAGGER;
-          const lastIsTrash = exitAnims[exitAnims.length - 1].type === 'trash';
-          totalAnimTime = lastDelay + (lastIsTrash ? TRASH_DUR : DISCARD_DUR) + 100;
-
-          // Freeze discard count at current value; it'll increment per discard anim
-          setDiscardCountOverride(activePlayer.discard_count);
-
-          setInPlayExitAnims(exitAnims);
-          // Stagger: activate each card after its delay, play sound, increment discard count
-          exitAnims.forEach((anim, i) => {
-            setTimeout(() => {
-              if (anim.type === 'trash') sound.cardTrash();
-              else {
-                sound.cardDiscard();
-                setDiscardCountOverride(prev => prev !== null ? prev + 1 : prev);
-              }
-              setInPlayExitAnims(prev => prev.map((a, j) => j === i ? { ...a, active: true } : a));
-            }, anim.delay);
-          });
-          // Clean up after all animations complete
-          setTimeout(() => {
-            setInPlayExitAnims([]);
-            setDiscardCountOverride(null);
-          }, totalAnimTime);
+          pendingExitAnimsRef.current = { anims: exitAnims, prePlayDiscardCount: activePlayer.discard_count };
         }
       }
 
+      // Submit to server immediately
       const result = await api.submitPlay(gameState.id, activePlayerId);
 
-      if (totalAnimTime > 0 && result.state.current_phase === 'reveal') {
-        // Defer state update until exit animations complete
-        deferredStateUpdateRef.current = result.state;
-        setTimeout(() => {
-          const deferred = deferredStateUpdateRef.current;
-          deferredStateUpdateRef.current = null;
-          if (deferred) onStateUpdate(deferred);
-        }, totalAnimTime);
-      } else {
-        // Apply immediately (no animations or not transitioning to reveal)
-        onStateUpdate(result.state);
+      if (result.state.current_phase === 'reveal' && pendingExitAnimsRef.current) {
+        // Last player to submit — start exit animations now; the useLayoutEffect
+        // will detect play→reveal (when state is applied) and defer reveal setup
+        // until these animations complete.
+        const { anims, prePlayDiscardCount } = pendingExitAnimsRef.current;
+        pendingExitAnimsRef.current = null;
+        startExitAnims(anims, prePlayDiscardCount, () => {});
       }
 
-      if (result.state.current_phase !== 'reveal') {
-        // Not all plans submitted yet — cycle to next local player
-        if (shouldCycle) {
-          const nextIndex = gameState.player_order.findIndex(
-            (pid, i) => i !== activePlayerIndex && localPlayerIds.includes(pid) && !gameState.players[pid].has_submitted_play && !gameState.players[pid].is_cpu,
-          );
-          if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
-        }
+      // Apply state immediately — useLayoutEffect handles play→reveal transition
+      onStateUpdate(result.state);
+
+      if (result.state.current_phase !== 'reveal' && shouldCycle) {
+        const nextIndex = gameState.player_order.findIndex(
+          (pid, i) => i !== activePlayerIndex && localPlayerIds.includes(pid) && !gameState.players[pid].has_submitted_play && !gameState.players[pid].is_cpu,
+        );
+        if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
       }
       setSelectedCardIndex(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, activePlayer, onStateUpdate, homePlayerIndex, shouldCycle, localPlayerIds, animated, animSpeed, sound]);
+  }, [gameState, activePlayerId, activePlayerIndex, activePlayer, onStateUpdate, homePlayerIndex, shouldCycle, localPlayerIds, animated, animSpeed, sound, startExitAnims]);
 
   const handleBuyArchetype = useCallback(async (cardId: string) => {
     try {
@@ -2241,7 +2268,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (e.key === 'Tab') {
         e.preventDefault();
         if (
-          phase === 'play' && activePlayer && !activePlayer.has_submitted_play &&
+          phase === 'play' && activePlayer && !playSubmitted &&
           !interactionBlocked && !resolving && activePlayer.hand.length > 0 &&
           multiTileCardIndex === null && !trashMode
         ) {
@@ -2285,6 +2312,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (e.repeat) return; // prevent repeated keydown from re-triggering
         e.preventDefault();
 
+        // Close any open overlays so the underlying action is visible
+        if (showCardBrowser) setShowCardBrowser(false);
+        if (showDeckViewer) setShowDeckViewer(false);
+        if (showShopOverlay) setShowShopOverlay(false);
+        if (showFullLog) setShowFullLog(false);
+        if (showUpgradePreview) setShowUpgradePreview(false);
+
         // Priority 0: Done reviewing
         if (reviewing && !resolving) {
           handleDoneReviewingRef.current?.();
@@ -2305,7 +2339,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         // Priority 2: Submit Play (only when no Play Card button is available)
         if (
-          phase === 'play' && activePlayer && !activePlayer.has_submitted_play &&
+          phase === 'play' && activePlayer && !playSubmitted &&
           !resolving && activePlayerEffects.length === 0 &&
           multiTileCardIndex === null && !trashMode
         ) {
@@ -2344,7 +2378,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
       if (trashMode) {
         handleTrashToggle(cardIndex);
-      } else if (phase === 'play' && !activePlayer.has_submitted_play && !interactionBlocked) {
+      } else if (phase === 'play' && !playSubmitted && !interactionBlocked) {
         setSelectedCardIndex(prev => prev === cardIndex ? null : cardIndex);
       }
     };
@@ -2362,7 +2396,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
+  }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -4436,7 +4470,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </>
               );
             })()}
-            {phase === 'play' && !resolving && !phaseBanner && !showIntro && introSequence === 'done' && activePlayer && !activePlayer.has_submitted_play && activePlayerEffects.length === 0 && multiTileCardIndex === null && !trashMode && (
+            {phase === 'play' && !resolving && !phaseBanner && !showIntro && introSequence === 'done' && activePlayer && !playSubmitted && activePlayerEffects.length === 0 && multiTileCardIndex === null && !trashMode && (
               <div style={{
                 opacity: submitButtonVisible ? 1 : 0,
                 transition: 'opacity 0.4s ease-in',
@@ -4563,7 +4597,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         </div>
 
         {/* Action counter — above hand panel (only when submit button is visible) */}
-        {phase === 'play' && activePlayer && !resolving && !phaseBanner && !showIntro && !activePlayer.has_submitted_play && introSequence === 'done' && (
+        {phase === 'play' && activePlayer && !resolving && !phaseBanner && !showIntro && !playSubmitted && introSequence === 'done' && (
           <div style={{ position: 'relative', zIndex: 30, opacity: submitButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
             <div
               className="action-counter-wrap"
@@ -4666,7 +4700,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               }}
               onDragStart={setDraggingCardIndex}
               onDragEnd={() => setDraggingCardIndex(null)}
-              disabled={phase !== 'play' || activePlayer.has_submitted_play || interactionBlocked}
+              disabled={phase !== 'play' || playSubmitted || interactionBlocked}
               deckSize={introSequence !== 'done' && !introHandReady ? activePlayer.deck_size + activePlayer.hand.length : activePlayer.deck_size}
               discardCount={discardCountOverride !== null ? discardCountOverride : activePlayer.discard_count}
               discardCards={activePlayer.discard}
@@ -4689,7 +4723,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               trashedCardIds={trashedCardIds.size > 0 ? trashedCardIds : undefined}
               claimBanned={!!gameState.claim_ban_rounds && gameState.claim_ban_rounds > 0}
               playerResources={activePlayer?.resources}
-              actionsRemaining={phase === 'play' && activePlayer && !activePlayer.has_submitted_play ? activePlayer.actions_available - activePlayer.actions_used : undefined}
+              actionsRemaining={phase === 'play' && activePlayer && !playSubmitted ? activePlayer.actions_available - activePlayer.actions_used : undefined}
               onCardHover={setHoveredCardIndex}
             />
             </div>

@@ -107,6 +107,7 @@ export default function HeroAnimation() {
       const gridContainer = new Container();
       gridContainer.x = centerX;
       gridContainer.y = centerY;
+      gridContainer.rotation = Math.PI / 6; // 30 degrees
       stage.addChild(gridContainer);
 
       const cardContainer = new Container();

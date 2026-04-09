@@ -113,6 +113,7 @@ export default function LobbyScreen({
   const [cardPacks, setCardPacks] = useState<CardPackDef[]>([]);
   const [showPackBrowser, setShowPackBrowser] = useState(false);
   const [showSeedHistory, setShowSeedHistory] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const seedHistoryRef = useRef<HTMLDivElement>(null);
 
   // Close seed history dropdown on outside click
@@ -493,6 +494,339 @@ export default function LobbyScreen({
           </div>
         </div>
 
+        {/* Players list */}
+        <div style={{ marginBottom: 24 }}>
+          <h3 style={{ marginBottom: 8 }}>Players ({players.length})</h3>
+          {players.map((p, playerIdx) => {
+            const isSelf = p.id === playerId;
+            const canEditArchetype = isSelf || (isHost && (p.is_cpu || p.is_local));
+            const canEditColor = isSelf || (isHost && (p.is_cpu || p.is_local));
+            const playerColor = p.color || '#888';
+            const usedColors = new Set(players.map(pl => pl.color));
+            const isDragging = dragIdx === playerIdx;
+            const isDragOver = dragOverIdx === playerIdx;
+            return (
+              <div
+                key={p.id}
+                draggable={isHost && players.length > 1}
+                onDragStart={(e) => {
+                  if (!isHost) return;
+                  setDragIdx(playerIdx);
+                  e.dataTransfer.effectAllowed = 'move';
+                  if (e.currentTarget instanceof HTMLElement) {
+                    e.dataTransfer.setDragImage(e.currentTarget, 0, 0);
+                  }
+                }}
+                onDragEnd={() => {
+                  setDragIdx(null);
+                  setDragOverIdx(null);
+                }}
+                onDragOver={(e) => {
+                  if (!isHost || dragIdx === null) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  setDragOverIdx(playerIdx);
+                }}
+                onDragLeave={() => {
+                  if (dragOverIdx === playerIdx) setDragOverIdx(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragIdx !== null && dragIdx !== playerIdx) {
+                    handleReorder(dragIdx, playerIdx);
+                  }
+                  setDragIdx(null);
+                  setDragOverIdx(null);
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  marginBottom: 8, padding: '8px 12px',
+                  background: isSelf ? '#2a2a4e' : '#1e1e36',
+                  border: isDragOver && dragIdx !== playerIdx
+                    ? '2px solid #4a9eff'
+                    : isSelf ? '1px solid #4a9eff' : '1px solid #333',
+                  borderRadius: 8,
+                  opacity: isDragging ? 0.4 : 1,
+                  cursor: isHost && players.length > 1 ? 'grab' : 'default',
+                  transition: 'border 0.15s ease, opacity 0.15s ease',
+                }}
+              >
+                {isHost && players.length > 1 && (
+                  <span style={{
+                    color: '#555', fontSize: 14, cursor: 'grab',
+                    flexShrink: 0, userSelect: 'none', lineHeight: 1,
+                  }}>
+                    ⠿
+                  </span>
+                )}
+                <span style={{ position: 'relative', flexShrink: 0 }}>
+                  <span
+                    onClick={canEditColor ? () => setColorPickerFor(colorPickerFor === p.id ? null : p.id) : undefined}
+                    style={{
+                      display: 'inline-block',
+                      width: 16, height: 16, borderRadius: '50%',
+                      background: playerColor,
+                      border: '2px solid rgba(255,255,255,0.3)',
+                      cursor: canEditColor ? 'pointer' : 'default',
+                      transition: 'transform 0.15s ease',
+                      transform: colorPickerFor === p.id ? 'scale(1.2)' : undefined,
+                    }}
+                    title={canEditColor ? 'Change color' : undefined}
+                  />
+                  {colorPickerFor === p.id && (
+                    <div
+                      ref={colorPickerRef}
+                      style={{
+                        position: 'absolute',
+                        top: 24, left: -4,
+                        background: '#2a2a3e', border: '1px solid #555',
+                        borderRadius: 8, padding: 8,
+                        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
+                        gap: 6, zIndex: 200,
+                        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+                      }}
+                    >
+                      {PLAYER_COLOR_OPTIONS.map((c) => {
+                        const taken = usedColors.has(c) && c !== p.color;
+                        return (
+                          <span
+                            key={c}
+                            onClick={taken ? undefined : () => handleChangeColor(p.id, c)}
+                            style={{
+                              position: 'relative',
+                              width: 24, height: 24, borderRadius: '50%',
+                              background: c,
+                              border: c === p.color ? '2px solid #fff' : '2px solid transparent',
+                              cursor: taken ? 'not-allowed' : 'pointer',
+                              opacity: taken ? 0.25 : 1,
+                              transition: 'transform 0.1s ease',
+                              overflow: 'hidden',
+                            }}
+                            onMouseEnter={(e) => { if (!taken) (e.target as HTMLElement).style.transform = 'scale(1.2)'; }}
+                            onMouseLeave={(e) => { (e.target as HTMLElement).style.transform = ''; }}
+                          >
+                            {taken && (
+                              <svg viewBox="0 0 24 24" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+                                <line x1="5" y1="5" x2="19" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                                <line x1="19" y1="5" x2="5" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                              </svg>
+                            )}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </span>
+                {(isSelf || (isHost && p.is_local)) && !p.is_cpu ? (
+                  <input
+                    value={p.name}
+                    maxLength={12}
+                    onChange={(e) => {
+                      if (isSelf) handleUpdateSelf({ name: e.target.value });
+                      else if (isHost && p.is_local) handleUpdatePlayer(p.id, { name: e.target.value });
+                    }}
+                    style={{
+                      flex: 1, minWidth: 0, padding: '6px 10px',
+                      background: '#2a2a3e', border: '1px solid #444',
+                      borderRadius: 6, color: '#fff', fontSize: 14,
+                    }}
+                  />
+                ) : (
+                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.name}
+                    {p.is_cpu && p.cpu_difficulty && !isHost && (
+                      <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>
+                        ({p.cpu_difficulty})
+                      </span>
+                    )}
+                  </span>
+                )}
+                {p.is_cpu && isHost && (
+                  <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                    {DIFFICULTIES.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
+                        style={{
+                          padding: '2px 6px', fontSize: 10,
+                          background: p.cpu_difficulty === d.id ? '#3a3a6e' : '#2a2a3e',
+                          border: p.cpu_difficulty === d.id ? '1px solid #4a9eff' : '1px solid #444',
+                          borderRadius: 4, color: p.cpu_difficulty === d.id ? '#fff' : '#888',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <span className="diff-full">{d.name}</span>
+                        <span className="diff-short">{d.short}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {canEditArchetype ? (
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {ARCHETYPES.map((arch) => (
+                      <Tooltip key={arch.id} content={arch.desc}>
+                        <button
+                          onClick={() => {
+                            if (isSelf) handleUpdateSelf({ archetype: arch.id });
+                            else if (isHost && (p.is_local || p.is_cpu)) handleUpdatePlayer(p.id, { archetype: arch.id });
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            background: p.archetype === arch.id ? '#3a3a6e' : '#2a2a3e',
+                            border: p.archetype === arch.id ? '2px solid #4a9eff' : '1px solid #444',
+                            borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 14,
+                          }}
+                        >
+                          {arch.icon}
+                        </button>
+                      </Tooltip>
+                    ))}
+                  </div>
+                ) : (
+                  (() => {
+                    const arch = ARCHETYPES.find(a => a.id === p.archetype);
+                    return arch ? (
+                      <span style={{
+                        padding: '4px 8px',
+                        background: '#3a3a6e',
+                        border: '1px solid #555',
+                        borderRadius: 6, fontSize: 13, color: '#ccc',
+                      }}>
+                        {arch.icon} {arch.name}
+                      </span>
+                    ) : null;
+                  })()
+                )}
+                {p.is_host && (
+                  <span style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
+                    background: '#ffd700', color: '#000', fontWeight: 'bold',
+                  }}>
+                    HOST
+                  </span>
+                )}
+                {p.is_local && (
+                  <span style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
+                    background: '#4a9eff', color: '#fff', fontWeight: 'bold',
+                  }}>
+                    LOCAL
+                  </span>
+                )}
+                {!p.has_returned && !p.is_cpu && (
+                  <span style={{
+                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
+                    background: '#555', color: '#ffaa4a', fontWeight: 'bold',
+                    animation: 'pulse 2s ease-in-out infinite',
+                  }}>
+                    WAITING
+                  </span>
+                )}
+                {isHost && !p.is_host && (
+                  <button
+                    onClick={() => handleRemovePlayer(p.id)}
+                    style={{
+                      padding: '4px 8px', background: 'transparent',
+                      border: '1px solid #555', borderRadius: 4,
+                      color: '#ff6666', cursor: 'pointer', fontSize: 11,
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {isHost && players.length < 6 && (
+            <div style={{ marginTop: 8 }}>
+              {lobby.config.test_mode && (!showAddLocal ? (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                  <button
+                    onClick={() => setShowAddLocal(true)}
+                    style={{
+                      flex: 1, padding: '8px', fontSize: 12,
+                      background: '#2a3a4e', border: '1px solid #4a6a8e',
+                      borderRadius: 6, color: '#8ab4ff', cursor: 'pointer',
+                    }}
+                  >
+                    + Local Player
+                  </button>
+                </div>
+              ) : (
+                <div style={{
+                  display: 'flex', gap: 4, marginBottom: 8,
+                  padding: '8px', background: '#2a3a4e', border: '1px solid #4a6a8e', borderRadius: 6,
+                  alignItems: 'center',
+                }}>
+                  <input
+                    value={localName}
+                    maxLength={12}
+                    onChange={(e) => setLocalName(e.target.value)}
+                    placeholder={`Player ${players.length + 1}`}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddLocal();
+                      if (e.key === 'Escape') { setShowAddLocal(false); setLocalName(''); }
+                    }}
+                    style={{
+                      flex: 1, padding: '6px 8px', fontSize: 12,
+                      background: '#1a2a3e', border: '1px solid #444',
+                      borderRadius: 4, color: '#fff',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {ARCHETYPES.map((arch) => (
+                      <button
+                        key={arch.id}
+                        onClick={() => setLocalArchetype(arch.id)}
+                        title={arch.name}
+                        style={{
+                          padding: '3px 6px', fontSize: 13,
+                          background: localArchetype === arch.id ? '#3a3a6e' : '#2a2a3e',
+                          border: localArchetype === arch.id ? '1px solid #4a9eff' : '1px solid #444',
+                          borderRadius: 4, color: '#fff', cursor: 'pointer',
+                        }}
+                      >
+                        {arch.icon}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    onClick={handleAddLocal}
+                    style={{
+                      padding: '6px 10px', fontSize: 12,
+                      background: '#4a9eff', border: 'none',
+                      borderRadius: 4, color: '#fff', cursor: 'pointer',
+                      fontWeight: 'bold',
+                    }}
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={() => { setShowAddLocal(false); setLocalName(''); }}
+                    style={{
+                      padding: '6px', background: 'transparent',
+                      border: 'none', color: '#888', cursor: 'pointer', fontSize: 12,
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => handleAddCpu('vanguard')}
+                style={{
+                  width: '100%', padding: '8px', fontSize: 12,
+                  background: '#2a2a3e', border: '1px solid #444',
+                  borderRadius: 6, color: '#aaa', cursor: 'pointer',
+                }}
+              >
+                + CPU Player
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* Game Settings (host editable, non-host read-only) */}
         <div style={{ marginBottom: 24 }}>
           <h3 style={{ marginBottom: 8 }}>Game Settings</h3>
@@ -550,6 +884,7 @@ export default function LobbyScreen({
               fontSize: 13, color: '#aaa',
               padding: '8px 12px', background: '#1e1e36',
               display: 'flex', alignItems: 'center', gap: 8,
+              borderRadius: '0 0 8px 8px',
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
                 <Tooltip content="The size of the hex grid.">
@@ -580,6 +915,28 @@ export default function LobbyScreen({
               </div>
             </div>
 
+          </div>
+
+          {/* Advanced settings (collapsible) */}
+          <button
+            onClick={() => setShowAdvanced(prev => !prev)}
+            style={{
+              width: '100%', padding: '8px 12px', marginTop: 8,
+              background: '#1e1e36', border: '1px solid #333',
+              borderRadius: showAdvanced ? '8px 8px 0 0' : 8,
+              color: '#888', fontSize: 13, fontWeight: 'bold',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+              textAlign: 'left',
+            }}
+          >
+            <span style={{ transform: showAdvanced ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+            Advanced
+          </button>
+          {showAdvanced && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', gap: 1,
+            background: '#333', borderRadius: '0 0 8px 8px',
+          }}>
             {/* Map Seed */}
             <div ref={seedHistoryRef} style={{
               fontSize: 13, color: '#aaa',
@@ -780,7 +1137,7 @@ export default function LobbyScreen({
               fontSize: 13, color: '#aaa',
               padding: '8px 12px', background: '#1e1e36',
               display: 'flex', alignItems: 'center', gap: 8,
-              borderRadius: isHost ? undefined : '0 0 8px 8px',
+              borderRadius: !isHost ? '0 0 8px 8px' : undefined,
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
                 <Tooltip content="The number of actions each player starts their round with.">
@@ -861,361 +1218,6 @@ export default function LobbyScreen({
               </div>
             )}
           </div>
-        </div>
-
-        {/* Players list */}
-        <div style={{ marginBottom: 24 }}>
-          <h3 style={{ marginBottom: 8 }}>Players ({players.length})</h3>
-          {players.map((p, playerIdx) => {
-            const isSelf = p.id === playerId;
-            const canEditArchetype = isSelf || (isHost && (p.is_cpu || p.is_local));
-            const canEditColor = isSelf || (isHost && (p.is_cpu || p.is_local));
-            const playerColor = p.color || '#888';
-            const usedColors = new Set(players.map(pl => pl.color));
-            const isDragging = dragIdx === playerIdx;
-            const isDragOver = dragOverIdx === playerIdx;
-            return (
-              <div
-                key={p.id}
-                draggable={isHost && players.length > 1}
-                onDragStart={(e) => {
-                  if (!isHost) return;
-                  setDragIdx(playerIdx);
-                  e.dataTransfer.effectAllowed = 'move';
-                  // Make drag image semi-transparent
-                  if (e.currentTarget instanceof HTMLElement) {
-                    e.dataTransfer.setDragImage(e.currentTarget, 0, 0);
-                  }
-                }}
-                onDragEnd={() => {
-                  setDragIdx(null);
-                  setDragOverIdx(null);
-                }}
-                onDragOver={(e) => {
-                  if (!isHost || dragIdx === null) return;
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = 'move';
-                  setDragOverIdx(playerIdx);
-                }}
-                onDragLeave={() => {
-                  if (dragOverIdx === playerIdx) setDragOverIdx(null);
-                }}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragIdx !== null && dragIdx !== playerIdx) {
-                    handleReorder(dragIdx, playerIdx);
-                  }
-                  setDragIdx(null);
-                  setDragOverIdx(null);
-                }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  marginBottom: 8, padding: '8px 12px',
-                  background: isSelf ? '#2a2a4e' : '#1e1e36',
-                  border: isDragOver && dragIdx !== playerIdx
-                    ? '2px solid #4a9eff'
-                    : isSelf ? '1px solid #4a9eff' : '1px solid #333',
-                  borderRadius: 8,
-                  opacity: isDragging ? 0.4 : 1,
-                  cursor: isHost && players.length > 1 ? 'grab' : 'default',
-                  transition: 'border 0.15s ease, opacity 0.15s ease',
-                }}
-              >
-                {/* Drag handle (host only) */}
-                {isHost && players.length > 1 && (
-                  <span style={{
-                    color: '#555', fontSize: 14, cursor: 'grab',
-                    flexShrink: 0, userSelect: 'none', lineHeight: 1,
-                  }}>
-                    ⠿
-                  </span>
-                )}
-                {/* Player color dot — clickable for color picker */}
-                <span style={{ position: 'relative', flexShrink: 0 }}>
-                  <span
-                    onClick={canEditColor ? () => setColorPickerFor(colorPickerFor === p.id ? null : p.id) : undefined}
-                    style={{
-                      display: 'inline-block',
-                      width: 16, height: 16, borderRadius: '50%',
-                      background: playerColor,
-                      border: '2px solid rgba(255,255,255,0.3)',
-                      cursor: canEditColor ? 'pointer' : 'default',
-                      transition: 'transform 0.15s ease',
-                      transform: colorPickerFor === p.id ? 'scale(1.2)' : undefined,
-                    }}
-                    title={canEditColor ? 'Change color' : undefined}
-                  />
-                  {colorPickerFor === p.id && (
-                    <div
-                      ref={colorPickerRef}
-                      style={{
-                        position: 'absolute',
-                        top: 24,
-                        left: -4,
-                        background: '#2a2a3e',
-                        border: '1px solid #555',
-                        borderRadius: 8,
-                        padding: 8,
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(4, 1fr)',
-                        gap: 6,
-                        zIndex: 200,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-                      }}
-                    >
-                      {PLAYER_COLOR_OPTIONS.map((c) => {
-                        const taken = usedColors.has(c) && c !== p.color;
-                        return (
-                          <span
-                            key={c}
-                            onClick={taken ? undefined : () => handleChangeColor(p.id, c)}
-                            style={{
-                              position: 'relative',
-                              width: 24, height: 24, borderRadius: '50%',
-                              background: c,
-                              border: c === p.color ? '2px solid #fff' : '2px solid transparent',
-                              cursor: taken ? 'not-allowed' : 'pointer',
-                              opacity: taken ? 0.25 : 1,
-                              transition: 'transform 0.1s ease',
-                              overflow: 'hidden',
-                            }}
-                            onMouseEnter={(e) => { if (!taken) (e.target as HTMLElement).style.transform = 'scale(1.2)'; }}
-                            onMouseLeave={(e) => { (e.target as HTMLElement).style.transform = ''; }}
-                          >
-                            {taken && (
-                              <svg viewBox="0 0 24 24" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-                                <line x1="5" y1="5" x2="19" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-                                <line x1="19" y1="5" x2="5" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-                              </svg>
-                            )}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  )}
-                </span>
-                {/* Name — editable for self and host-controlled local players */}
-                {(isSelf || (isHost && p.is_local)) && !p.is_cpu ? (
-                  <input
-                    value={p.name}
-                    maxLength={12}
-                    onChange={(e) => {
-                      if (isSelf) handleUpdateSelf({ name: e.target.value });
-                      else if (isHost && p.is_local) handleUpdatePlayer(p.id, { name: e.target.value });
-                    }}
-                    style={{
-                      flex: 1, minWidth: 0, padding: '6px 10px',
-                      background: '#2a2a3e', border: '1px solid #444',
-                      borderRadius: 6, color: '#fff', fontSize: 14,
-                    }}
-                  />
-                ) : (
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.name}
-                    {p.is_cpu && p.cpu_difficulty && !isHost && (
-                      <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>
-                        ({p.cpu_difficulty})
-                      </span>
-                    )}
-                  </span>
-                )}
-
-                {/* CPU difficulty selector (host only) */}
-                {p.is_cpu && isHost && (
-                  <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                    {DIFFICULTIES.map((d) => (
-                      <button
-                        key={d.id}
-                        onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
-                        style={{
-                          padding: '2px 6px', fontSize: 10,
-                          background: p.cpu_difficulty === d.id ? '#3a3a6e' : '#2a2a3e',
-                          border: p.cpu_difficulty === d.id ? '1px solid #4a9eff' : '1px solid #444',
-                          borderRadius: 4, color: p.cpu_difficulty === d.id ? '#fff' : '#888',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span className="diff-full">{d.name}</span>
-                        <span className="diff-short">{d.short}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {/* Archetype selector */}
-                {canEditArchetype ? (
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {ARCHETYPES.map((arch) => (
-                      <Tooltip key={arch.id} content={arch.desc}>
-                        <button
-                          onClick={() => {
-                            if (isSelf) handleUpdateSelf({ archetype: arch.id });
-                            else if (isHost && (p.is_local || p.is_cpu)) handleUpdatePlayer(p.id, { archetype: arch.id });
-                          }}
-                          style={{
-                            padding: '4px 8px',
-                            background: p.archetype === arch.id ? '#3a3a6e' : '#2a2a3e',
-                            border: p.archetype === arch.id ? '2px solid #4a9eff' : '1px solid #444',
-                            borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 14,
-                          }}
-                        >
-                          {arch.icon}
-                        </button>
-                      </Tooltip>
-                    ))}
-                  </div>
-                ) : (
-                  /* Read-only archetype badge */
-                  (() => {
-                    const arch = ARCHETYPES.find(a => a.id === p.archetype);
-                    return arch ? (
-                      <span style={{
-                        padding: '4px 8px',
-                        background: '#3a3a6e',
-                        border: '1px solid #555',
-                        borderRadius: 6, fontSize: 13, color: '#ccc',
-                      }}>
-                        {arch.icon} {arch.name}
-                      </span>
-                    ) : null;
-                  })()
-                )}
-
-                {/* Badges */}
-                {p.is_host && (
-                  <span style={{
-                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
-                    background: '#ffd700', color: '#000', fontWeight: 'bold',
-                  }}>
-                    HOST
-                  </span>
-                )}
-                {p.is_local && (
-                  <span style={{
-                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
-                    background: '#4a9eff', color: '#fff', fontWeight: 'bold',
-                  }}>
-                    LOCAL
-                  </span>
-                )}
-                {!p.has_returned && !p.is_cpu && (
-                  <span style={{
-                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
-                    background: '#555', color: '#ffaa4a', fontWeight: 'bold',
-                    animation: 'pulse 2s ease-in-out infinite',
-                  }}>
-                    WAITING
-                  </span>
-                )}
-
-                {/* Remove button (host can remove non-self) */}
-                {isHost && !p.is_host && (
-                  <button
-                    onClick={() => handleRemovePlayer(p.id)}
-                    style={{
-                      padding: '4px 8px', background: 'transparent',
-                      border: '1px solid #555', borderRadius: 4,
-                      color: '#ff6666', cursor: 'pointer', fontSize: 11,
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Add player buttons (host only) */}
-          {isHost && players.length < 6 && (
-            <div style={{ marginTop: 8 }}>
-              {/* Add Local Player (test mode only) */}
-              {lobby.config.test_mode && (!showAddLocal ? (
-                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  <button
-                    onClick={() => setShowAddLocal(true)}
-                    style={{
-                      flex: 1, padding: '8px', fontSize: 12,
-                      background: '#2a3a4e', border: '1px solid #4a6a8e',
-                      borderRadius: 6, color: '#8ab4ff', cursor: 'pointer',
-                    }}
-                  >
-                    + Local Player
-                  </button>
-                </div>
-              ) : (
-                <div style={{
-                  display: 'flex', gap: 4, marginBottom: 8,
-                  padding: '8px', background: '#2a3a4e', border: '1px solid #4a6a8e', borderRadius: 6,
-                  alignItems: 'center',
-                }}>
-                  <input
-                    value={localName}
-                    maxLength={12}
-                    onChange={(e) => setLocalName(e.target.value)}
-                    placeholder={`Player ${players.length + 1}`}
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddLocal();
-                      if (e.key === 'Escape') { setShowAddLocal(false); setLocalName(''); }
-                    }}
-                    style={{
-                      flex: 1, padding: '6px 8px', fontSize: 12,
-                      background: '#1a2a3e', border: '1px solid #444',
-                      borderRadius: 4, color: '#fff',
-                    }}
-                  />
-                  <div style={{ display: 'flex', gap: 2 }}>
-                    {ARCHETYPES.map((arch) => (
-                      <button
-                        key={arch.id}
-                        onClick={() => setLocalArchetype(arch.id)}
-                        title={arch.name}
-                        style={{
-                          padding: '3px 6px', fontSize: 13,
-                          background: localArchetype === arch.id ? '#3a3a6e' : '#2a2a3e',
-                          border: localArchetype === arch.id ? '1px solid #4a9eff' : '1px solid #444',
-                          borderRadius: 4, color: '#fff', cursor: 'pointer',
-                        }}
-                      >
-                        {arch.icon}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={handleAddLocal}
-                    style={{
-                      padding: '6px 10px', fontSize: 12,
-                      background: '#4a9eff', border: 'none',
-                      borderRadius: 4, color: '#fff', cursor: 'pointer',
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    Add
-                  </button>
-                  <button
-                    onClick={() => { setShowAddLocal(false); setLocalName(''); }}
-                    style={{
-                      padding: '6px', background: 'transparent',
-                      border: 'none', color: '#888', cursor: 'pointer', fontSize: 12,
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-
-              {/* Add CPU button */}
-              <button
-                onClick={() => handleAddCpu('vanguard')}
-                style={{
-                  width: '100%', padding: '8px', fontSize: 12,
-                  background: '#2a2a3e', border: '1px solid #444',
-                  borderRadius: 6, color: '#aaa', cursor: 'pointer',
-                }}
-              >
-                + CPU Player
-              </button>
-            </div>
           )}
         </div>
 
