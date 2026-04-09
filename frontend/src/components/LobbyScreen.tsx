@@ -14,6 +14,14 @@ interface CardPackDef {
   archetype_card_ids: Record<string, string[]> | null;
 }
 
+function getDailyPackId(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `daily_${y}${m}${d}`;
+}
+
 const PLAYER_COLOR_OPTIONS = [
   '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', '#911eb4',
   '#42d4f4', '#f032e6', '#bfef45', '#fabed4', '#469990', '#dcbeff',
@@ -132,7 +140,16 @@ export default function LobbyScreen({
   useEffect(() => {
     fetch(`${api.BASE}/card-packs`)
       .then(res => res.json())
-      .then((data: { packs: CardPackDef[] }) => setCardPacks(data.packs))
+      .then((data: { packs: CardPackDef[] }) => {
+        setCardPacks(data.packs);
+        // Auto-select today's daily pack for host if currently on default
+        if (isHost && lobby.config.card_pack === 'everything') {
+          const dailyId = getDailyPackId();
+          if (data.packs.some(p => p.id.startsWith('daily_'))) {
+            handleConfigChange('card_pack', dailyId);
+          }
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -843,26 +860,35 @@ export default function LobbyScreen({
               borderRadius: '8px 8px 0 0',
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
-                <Tooltip content="Decides which cards will be available in the game.">
+                <Tooltip content={(lobby.config.card_pack || '').startsWith('daily_')
+                  ? "This pack changes every day — a fresh selection of 10 neutral market cards generated from today's date."
+                  : "Decides which cards will be available in the game."}>
                   <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Card Pack</span>
                 </Tooltip>
               </div>
               {isHost && cardPacks.length > 0 ? (
                 <select
-                  value={lobby.config.card_pack || 'everything'}
-                  onChange={(e) => handleConfigChange('card_pack', e.target.value)}
+                  value={(lobby.config.card_pack || 'everything').startsWith('daily_') ? 'daily' : (lobby.config.card_pack || 'everything')}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    handleConfigChange('card_pack', val === 'daily' ? getDailyPackId() : val);
+                  }}
                   style={{
                     background: '#2a2a3e', color: '#fff', border: '1px solid #555',
                     borderRadius: 4, padding: '0 8px', height: 26, fontSize: 13, cursor: 'pointer',
                   }}
                 >
-                  {cardPacks.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
+                  {cardPacks.map(p => {
+                    // Collapse all daily_* packs into a single "daily" option
+                    if (p.id.startsWith('daily_')) {
+                      return <option key="daily" value="daily">{p.name}</option>;
+                    }
+                    return <option key={p.id} value={p.id}>{p.name}</option>;
+                  })}
                 </select>
               ) : (
                 <strong style={{ color: '#fff' }}>
-                  {cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything'))?.name || lobby.config.card_pack || 'Everything'}
+                  {cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything') || (p.id.startsWith('daily_') && (lobby.config.card_pack || '').startsWith('daily_')))?.name || lobby.config.card_pack || 'Everything'}
                 </strong>
               )}
               <button
@@ -1298,7 +1324,9 @@ export default function LobbyScreen({
         )}
       </div>
       {showPackBrowser && (() => {
-        const pack = cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything'));
+        const packId = lobby.config.card_pack || 'everything';
+        const pack = cardPacks.find(p => p.id === packId)
+          || (packId.startsWith('daily_') ? cardPacks.find(p => p.id.startsWith('daily_')) : undefined);
         return (
           <CardBrowser
             onClose={() => setShowPackBrowser(false)}

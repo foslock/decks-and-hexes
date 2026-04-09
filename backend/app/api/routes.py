@@ -466,7 +466,10 @@ async def get_game_log(game_id: str, player_id: Optional[str] = None) -> dict[st
 @router.get("/card-packs")
 async def list_card_packs() -> dict[str, Any]:
     """List all available card packs with their metadata."""
-    return {"packs": [pack.to_dict() for pack in CARD_PACKS.values()]}
+    from app.game_engine.card_packs import get_today_daily_pack
+    daily = get_today_daily_pack(_get_card_registry())
+    packs = [daily.to_dict()] + [pack.to_dict() for pack in CARD_PACKS.values()]
+    return {"packs": packs}
 
 
 @router.get("/cards")

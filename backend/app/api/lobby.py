@@ -474,7 +474,14 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
         lobby.config.granted_actions = req.granted_actions
 
     if req.card_pack is not None:
-        if req.card_pack not in CARD_PACKS:
+        if req.card_pack.startswith("daily_"):
+            try:
+                seed_val = int(req.card_pack.split("_", 1)[1])
+                if seed_val < 20200101 or seed_val > 29991231:
+                    raise ValueError
+            except (ValueError, IndexError):
+                raise HTTPException(400, f"Invalid daily pack seed: {req.card_pack}")
+        elif req.card_pack not in CARD_PACKS:
             raise HTTPException(400, f"Invalid card pack: {req.card_pack}")
         lobby.config.card_pack = req.card_pack
 

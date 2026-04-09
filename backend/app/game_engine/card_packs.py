@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any, Optional
+
+from app.game_engine.cards import Archetype, CardType, Card
 
 
 @dataclass
@@ -162,6 +166,84 @@ CARD_PACKS: dict[str, CardPack] = {
 DEFAULT_PACK_ID = "everything"
 
 
-def get_pack(pack_id: str) -> CardPack:
+def _get_purchasable_neutrals(card_registry: dict[str, Card]) -> list[Card]:
+    """Return all purchasable neutral market cards from the registry."""
+    return [
+        c for c in card_registry.values()
+        if c.archetype == Archetype.NEUTRAL and not c.starter and c.buy_cost is not None
+    ]
+
+
+def generate_daily_pack(seed: int, card_registry: dict[str, Card]) -> CardPack:
+    """Generate a deterministic 10-card daily pack from a date seed (YYYYMMDD)."""
+    neutrals = _get_purchasable_neutrals(card_registry)
+    rng = random.Random(seed)
+    rng.shuffle(neutrals)
+
+    selected = neutrals[:9]
+    remaining = neutrals[9:]
+
+    # Constraint check: at least 1 Claim, 1 Engine, 1 low-cost (1-2), 1 high-cost (4+)
+    constraints: list[tuple[str, Any, Any]] = [
+        ("type", CardType.CLAIM, lambda c: c.card_type == CardType.CLAIM),
+        ("type", CardType.ENGINE, lambda c: c.card_type == CardType.ENGINE),
+        ("cost_low", None, lambda c: c.buy_cost is not None and c.buy_cost <= 2),
+        ("cost_high", None, lambda c: c.buy_cost is not None and c.buy_cost >= 4),
+    ]
+
+    for _label, _val, check_fn in constraints:
+        if any(check_fn(c) for c in selected):
+            continue
+        # Find a replacement from remaining pool
+        candidates = [c for c in remaining if check_fn(c)]
+        if not candidates:
+            continue
+        replacement = candidates[0]
+        # Swap out a card whose traits are redundantly represented
+        for i in range(len(selected) - 1, -1, -1):
+            card = selected[i]
+            # Check this card's type and cost tier are still covered by others
+            others = [c for j, c in enumerate(selected) if j != i]
+            type_covered = any(c.card_type == card.card_type for c in others)
+            if type_covered:
+                selected[i] = replacement
+                remaining.remove(replacement)
+                remaining.append(card)
+                break
+
+    # Wildcard: 1 more card from remaining
+    rng.shuffle(remaining)
+    if remaining:
+        selected.append(remaining[0])
+
+    # Format display name from seed
+    try:
+        date_obj = datetime.strptime(str(seed), "%Y%m%d")
+        name = f"The Daily — {date_obj.strftime('%b')} {date_obj.day}"
+    except ValueError:
+        name = "The Daily"
+
+    return CardPack(
+        id=f"daily_{seed}",
+        name=name,
+        neutral_card_ids=[c.id for c in selected],
+        archetype_card_ids=None,
+    )
+
+
+def get_today_daily_pack(card_registry: dict[str, Card]) -> CardPack:
+    """Generate the daily pack for today's UTC date."""
+    today = date.today()
+    seed = int(today.strftime("%Y%m%d"))
+    return generate_daily_pack(seed, card_registry)
+
+
+def get_pack(pack_id: str, card_registry: dict[str, Card] | None = None) -> CardPack:
     """Return the pack for the given ID, falling back to 'everything'."""
+    if pack_id.startswith("daily_") and card_registry is not None:
+        try:
+            seed = int(pack_id.split("_", 1)[1])
+            return generate_daily_pack(seed, card_registry)
+        except (ValueError, IndexError):
+            pass
     return CARD_PACKS.get(pack_id, CARD_PACKS[DEFAULT_PACK_ID])
