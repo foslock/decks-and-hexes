@@ -134,6 +134,32 @@ function axialToPixel(q: number, r: number): { x: number; y: number } {
   return { x, y };
 }
 
+/** Inverse of axialToPixel — convert local pixel position to fractional axial coords. */
+function pixelToAxial(px: number, py: number): { q: number; r: number } {
+  const q = (2 / 3 * px) / HEX_SIZE;
+  const r = (-1 / 3 * px + Math.sqrt(3) / 3 * py) / HEX_SIZE;
+  return { q, r };
+}
+
+/** Round fractional axial coords to nearest hex. */
+function axialRound(q: number, r: number): { q: number; r: number } {
+  const s = -q - r;
+  let rq = Math.round(q);
+  let rr = Math.round(r);
+  let rs = Math.round(s);
+  const dq = Math.abs(rq - q);
+  const dr = Math.abs(rr - r);
+  const ds = Math.abs(rs - s);
+  if (dq > dr && dq > ds) rq = -rr - rs;
+  else if (dr > ds) rr = -rq - rs;
+  return { q: rq, r: rr };
+}
+
+/** Hex distance between two axial coordinates. */
+function hexDistance(q1: number, r1: number, q2: number, r2: number): number {
+  return (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2;
+}
+
 function drawHexagon(g: Graphics, x: number, y: number, size: number) {
   const points: number[] = [];
   for (let i = 0; i < 6; i++) {
@@ -383,6 +409,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
   tooltipsEnabledRef.current = tooltipsEnabled;
   const disableHoverRef = useRef(disableHover);
   disableHoverRef.current = disableHover;
+  // Cursor proximity fade on neutral tiles
+  const cursorHexRef = useRef<{ q: number; r: number } | null>(null);
+  const cursorOnGridRef = useRef(false);
+  const cursorFadeRef = useRef(0); // 0 = no effect, 1 = full proximity fade
   const reviewPulseTilesRef = useRef(reviewPulseTiles);
   reviewPulseTilesRef.current = reviewPulseTiles;
   const onTileHoverRef = useRef(onTileHover);
@@ -484,7 +514,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
 
   const renderTiles = useCallback(() => {
     const hexContainer = hexContainerRef.current;
-    if (!hexContainer) return;
+    if (!hexContainer || hexContainer.destroyed) return;
 
     hexContainer.removeChildren();
     tileGraphicsRef.current.clear();
@@ -753,6 +783,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
             hexC.addChild(lbl);
             previewInGroupRef.current = false;
           }
+          lbl.eventMode = 'none';
           previewLabelRef.current = lbl;
         } else {
           // Not a valid target — clear any stale preview
@@ -931,6 +962,61 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
 
         hexContainer.addChild(sg);
       }
+    }
+
+    // === PASS 2c: Contested edge teeth — small triangles along borders between opposing players ===
+    {
+      const TEETH_COUNT = 4;
+      const TOOTH_DEPTH = 5; // px inward from edge
+      const TOOTH_ALPHA = 0.55;
+      const teethG = new Graphics();
+
+      for (const [, tile] of Object.entries(tiles)) {
+        if (!tile.owner) continue;
+        const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+
+        let tileAlpha = 1.0;
+        if (bp !== undefined && bp < 1) {
+          tileAlpha = buildAlpha(tile.q, tile.r);
+          if (tileAlpha <= 0) continue;
+        }
+
+        for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+          const nKey = `${tile.q + dq},${tile.r + dr}`;
+          const neighbor = tiles[nKey];
+          // Only draw on edges between two differently-owned player tiles
+          if (!neighbor?.owner || neighbor.owner === tile.owner) continue;
+
+          const a = hexVertex(cx, cy, vA, HEX_SIZE);
+          const b = hexVertex(cx, cy, vB, HEX_SIZE);
+          // Inward normal (toward tile center)
+          const inX = cx - (a.x + b.x) / 2;
+          const inY = cy - (a.y + b.y) / 2;
+          const inLen = Math.sqrt(inX * inX + inY * inY);
+          const nrmX = (inX / inLen) * TOOTH_DEPTH;
+          const nrmY = (inY / inLen) * TOOTH_DEPTH;
+
+          // Draw triangles along this edge, colored with the neighbor's (opposing) color
+          const color = PLAYER_COLORS[neighbor.owner] ?? 0x666666;
+          teethG.fill({ color, alpha: TOOTH_ALPHA * tileAlpha });
+          for (let t = 0; t < TEETH_COUNT; t++) {
+            const t0 = (t + 0.15) / TEETH_COUNT;
+            const tMid = (t + 0.5) / TEETH_COUNT;
+            const t1 = (t + 0.85) / TEETH_COUNT;
+            // Base points on the edge
+            const bx0 = a.x + (b.x - a.x) * t0;
+            const by0 = a.y + (b.y - a.y) * t0;
+            const bx1 = a.x + (b.x - a.x) * t1;
+            const by1 = a.y + (b.y - a.y) * t1;
+            // Apex point inward
+            const apex_x = a.x + (b.x - a.x) * tMid + nrmX;
+            const apex_y = a.y + (b.y - a.y) * tMid + nrmY;
+            teethG.poly([bx0, by0, bx1, by1, apex_x, apex_y], true);
+            teethG.fill();
+          }
+        }
+      }
+      hexContainer.addChild(teethG);
     }
 
     // === PASS 3: Base grid edges — each edge drawn exactly once ===
@@ -1310,6 +1396,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         group.addChild(star);
 
         hexContainer.addChild(group);
+        group.eventMode = 'none';
         textChildrenRef.current.push(group);
         vpGroups.set(key, group);
       }
@@ -1374,6 +1461,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         }
 
         hexContainer.addChild(group);
+        group.eventMode = 'none';
         textChildrenRef.current.push(group);
       }
 
@@ -1395,6 +1483,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         if (flipHash) mountain.scale.x = -1;
         mtnGroup.addChild(mountain);
         hexContainer.addChild(mtnGroup);
+        mtnGroup.eventMode = 'none';
         textChildrenRef.current.push(mtnGroup);
       }
 
@@ -1463,6 +1552,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           actionLabel.alpha = labelAlpha;
           actionLabel.rotation = counterRot;
           hexContainer.addChild(actionLabel);
+          actionLabel.eventMode = 'none';
           textChildrenRef.current.push(actionLabel);
         }
         tileLabelRef.current.set(key, actionLabel);
@@ -1515,6 +1605,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           vpGroup.addChild(defGroup);
         } else {
           hexContainer.addChild(defGroup);
+          defGroup.eventMode = 'none';
           textChildrenRef.current.push(defGroup);
         }
         tileLabelRef.current.set(key, defGroup);
@@ -1636,6 +1727,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           mtLabel.alpha = sLabelAlpha * 0.7;
           mtLabel.rotation = counterRot;
           hexContainer.addChild(mtLabel);
+          mtLabel.eventMode = 'none';
           textChildrenRef.current.push(mtLabel);
         }
       }
@@ -1669,6 +1761,21 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
       app.stage.addChild(hexContainer);
 
       renderTiles();
+
+      // Track pointer over the stage for cursor proximity fade
+      app.stage.eventMode = 'static';
+      app.stage.hitArea = app.screen;
+      app.stage.on('pointermove', (e) => {
+        const local = hexContainer.toLocal(e.global);
+        const frac = pixelToAxial(local.x, local.y);
+        const snapped = axialRound(frac.q, frac.r);
+        cursorHexRef.current = snapped;
+      });
+      app.stage.on('pointerenter', () => { cursorOnGridRef.current = true; });
+      app.stage.on('pointerleave', () => {
+        cursorOnGridRef.current = false;
+        cursorHexRef.current = null;
+      });
 
       // Create VP path graphics layer — inserted under tile icons/text but above hex fills
       const vpPathG = new Graphics();
@@ -1795,6 +1902,50 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
       };
       app.ticker.add(rotationTickerFn);
 
+      // Cursor proximity fade ticker — dims neutral tile backgrounds near cursor
+      const FADE_MAX_DIST = 3;
+      const FADE_SPEED = 0.08; // per frame (~60fps → ~300ms transition)
+      const cursorFadeTickerFn = () => {
+        // Animate the effect multiplier in/out based on interactivity and cursor presence
+        const wantFade = !disableHoverRef.current && cursorOnGridRef.current;
+        const target = wantFade ? 1 : 0;
+        const prev = cursorFadeRef.current;
+        if (prev !== target) {
+          cursorFadeRef.current = prev < target
+            ? Math.min(1, prev + FADE_SPEED)
+            : Math.max(0, prev - FADE_SPEED);
+        }
+
+        const fade = cursorFadeRef.current;
+        const cursor = cursorHexRef.current;
+        const tileMap = tileGraphicsRef.current;
+
+        for (const [key, entry] of tileMap) {
+          // Only affect neutral (unowned, non-blocked) tiles
+          if (entry.isBlocked || entry.baseColor !== TILE_COLORS.normal) {
+            entry.g.alpha = 1;
+            continue;
+          }
+          if (fade <= 0 || !cursor) {
+            entry.g.alpha = 1;
+            continue;
+          }
+          const tile = tilesRef.current[key];
+          if (!tile) { entry.g.alpha = 1; continue; }
+          const dist = hexDistance(cursor.q, cursor.r, tile.q, tile.r);
+          if (dist >= FADE_MAX_DIST) {
+            entry.g.alpha = 1;
+            continue;
+          }
+          // Closer tiles get lower opacity: near-0 at cursor, 1 at max distance
+          const proximityAlpha = dist / FADE_MAX_DIST;
+          // Blend between normal (1) and proximity alpha based on fade multiplier
+          // Clamp to 0.01 minimum so PixiJS still delivers pointer events
+          entry.g.alpha = Math.max(0.01, 1 - fade * (1 - proximityAlpha));
+        }
+      };
+      app.ticker.add(cursorFadeTickerFn);
+
       // Re-fit whenever the canvas is resized
       app.renderer.on('resize', fitGrid);
     });
@@ -1812,6 +1963,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
 
   // Re-render tiles when data changes
   useEffect(() => {
+    if (!appRef.current) return;
     renderTiles();
     // Re-add VP path layer under tile icons/text (at the index saved before PASS 8)
     const vpG = vpPathGraphicsRef.current;

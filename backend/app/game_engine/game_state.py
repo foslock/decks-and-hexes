@@ -672,7 +672,7 @@ def create_game(
     num_players = len(player_configs)
 
     game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode, card_pack=card_pack, map_seed=map_seed)
-    pack = get_pack(card_pack)
+    pack = get_pack(card_pack, card_registry)
     game.grid = generate_hex_grid(grid_size, num_players, grid_rng)
 
     # Set VP target: explicit override > dynamic computation
