@@ -732,30 +732,35 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   // "Drag a card" hint — shown once per round if no card played after 5s in play phase
   const [showDragHint, setShowDragHint] = useState(false);
-  const dragHintShownRoundRef = useRef<number>(-1);
+  const playedTargetlessRef = useRef(false);
 
+  // Reset targetless tracking each round
+  useEffect(() => {
+    playedTargetlessRef.current = false;
+  }, [gameState.current_round]);
+
+  // Show drag hint when a non-targeting engine card is selected and can be played
   useEffect(() => {
     if (phase !== 'play' || !activePlayer || activePlayer.has_submitted_play || resolving || phaseBanner || showIntro || introSequence !== 'done') {
       setShowDragHint(false);
       return;
     }
-    if (dragHintShownRoundRef.current === gameState.current_round) return;
-    if (activePlayer.planned_actions.length > 0) {
+    if (selectedCardIndex === null) {
       setShowDragHint(false);
       return;
     }
-    const timer = setTimeout(() => {
-      setShowDragHint(true);
-      dragHintShownRoundRef.current = gameState.current_round;
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [phase, activePlayer, resolving, phaseBanner, showIntro, introSequence, gameState.current_round]);
-
-  useEffect(() => {
-    if (activePlayer && activePlayer.planned_actions.length > 0) {
-      setShowDragHint(false);
-    }
-  }, [activePlayer?.planned_actions.length]);
+    const card = activePlayer.hand[selectedCardIndex];
+    if (!card) { setShowDragHint(false); return; }
+    // Only for non-targeting cards (engine without target, or non-claim/defense)
+    const isTargetless = card.card_type === 'engine' && !needsOpponentTarget(card) && !card.target_own_tile;
+    if (!isTargetless) { setShowDragHint(false); return; }
+    // Don't show if already played a targetless card this round
+    if (playedTargetlessRef.current) { setShowDragHint(false); return; }
+    // Check player has actions remaining
+    const actionsUsed = activePlayer.planned_actions?.length ?? 0;
+    if (actionsUsed >= activePlayer.actions_available) { setShowDragHint(false); return; }
+    setShowDragHint(true);
+  }, [phase, activePlayer, resolving, phaseBanner, showIntro, introSequence, selectedCardIndex]);
 
   // Build subtitle context for dynamic card value resolution
   const subtitleContext: CardSubtitleContext = useMemo(() => {
@@ -1475,6 +1480,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return;
     }
 
+    playedTargetlessRef.current = true;
     await executePlayCard(cardIndex);
   }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode]);
 
@@ -2929,6 +2935,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       candidates = adjacentTiles;
     }
 
+    // Adjacency bridge (Road Builder): precompute whether we need the bridge check
+    const needsBridge = card.effects?.some(e => e.type === 'adjacency_bridge') ?? false;
+    // Build set of all owned tile coords for bridge BFS
+    const ownedSet = needsBridge
+      ? new Set<string>(Object.keys(tiles).filter(k => tiles[k].owner === activePlayerId))
+      : null;
+
     for (const key of candidates) {
       const tile = tiles[key];
       if (!tile || tile.is_blocked) continue;
@@ -2942,6 +2955,39 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (tile.owner && card.unoccupied_only) continue;
       // Exclude tiles already claimed this turn (no stacking)
       if (alreadyClaimed.has(key)) continue;
+      // Adjacency bridge: tile must connect 2+ disconnected territory groups
+      if (needsBridge && ownedSet) {
+        // Find owned neighbors of this tile
+        const ownedNeighbors: string[] = [];
+        for (const [dq, dr] of HEX_DIRS) {
+          const nk = `${tile.q + dq},${tile.r + dr}`;
+          if (ownedSet.has(nk)) ownedNeighbors.push(nk);
+        }
+        if (ownedNeighbors.length < 2) continue;
+        // BFS to count distinct groups among owned neighbors
+        const visited = new Set<string>();
+        let groups = 0;
+        for (const start of ownedNeighbors) {
+          if (visited.has(start)) continue;
+          groups++;
+          if (groups >= 2) break;
+          // BFS through owned tiles from this neighbor
+          const queue = [start];
+          visited.add(start);
+          while (queue.length > 0) {
+            const cur = queue.pop()!;
+            const [cq, cr] = cur.split(',').map(Number);
+            for (const [dq, dr] of HEX_DIRS) {
+              const nk = `${cq + dq},${cr + dr}`;
+              if (!visited.has(nk) && ownedSet.has(nk)) {
+                visited.add(nk);
+                queue.push(nk);
+              }
+            }
+          }
+        }
+        if (groups < 2) continue;
+      }
       valid.add(key);
     }
     return valid;
@@ -2994,7 +3040,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const valid = new Set(getValidClaimTiles(card));
     // For claim cards (not unoccupied_only, not target_own_tile which is already handled),
     // also include own tiles as valid defensive placements
-    if (card.card_type === 'claim' && !card.unoccupied_only && !card.target_own_tile) {
+    const isBridge = card.effects?.some(e => e.type === 'adjacency_bridge') ?? false;
+    if (card.card_type === 'claim' && !card.unoccupied_only && !card.target_own_tile && !isBridge) {
       const tiles = gameState.grid?.tiles;
       if (tiles) {
         const alreadyClaimed = new Set<string>();
@@ -4307,7 +4354,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 color: '#aaa',
                 whiteSpace: 'nowrap',
               }}>
-                Drag a card to the grid to play it.
+                {isMobile ? 'Drag card out to play.' : 'Drag card out or double-click to play.'}
               </span>
             </div>
           )}
