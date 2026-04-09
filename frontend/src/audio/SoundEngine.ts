@@ -62,6 +62,12 @@ class SoundEngine {
     sounds.cardDiscard(ctx, this.dest, this.noise);
   }
 
+  cardTrash() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.cardTrash(ctx, this.dest, this.noise);
+  }
+
   cardPurchase() {
     if (!this.ok()) return;
     const ctx = this.ensureContext();

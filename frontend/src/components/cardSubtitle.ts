@@ -389,7 +389,16 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`✂️${count}`));
       }
+      if (eff.type === 'play_resource_cost') {
+        const cost = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        parts.push(p(`-${cost}💰`));
+      }
     }
+  }
+
+  // Extra action cost (heavy cards like Siege Tower, Elite Vanguard)
+  if (card.action_cost > 1) {
+    parts.push(p(`-${card.action_cost - 1}⚡`));
   }
 
   // Trash on use

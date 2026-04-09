@@ -9,6 +9,7 @@ export function makeCard(overrides: Partial<Card> = {}): Card {
     power: 1,
     resource_gain: 0,
     action_return: 0,
+    action_cost: 1,
     timing: 'immediate',
     buy_cost: null,
     is_upgraded: false,

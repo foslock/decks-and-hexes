@@ -55,6 +55,7 @@ class Card:
     power: int = 0
     resource_gain: int = 0
     action_return: int = 0  # 0=standard, 1=net-neutral(↺), 2=net-positive(↑)
+    action_cost: int = 1  # actions consumed to play (default 1, heavy cards cost 2)
     timing: Timing = Timing.IMMEDIATE
     buy_cost: Optional[int] = None
     upgrade_cost: Optional[int] = None
@@ -158,6 +159,7 @@ class Card:
             "power": self.effective_power,
             "resource_gain": self.effective_resource_gain,
             "action_return": self.effective_action_return,
+            "action_cost": self.action_cost,
             "timing": self.timing.value,
             "buy_cost": self.buy_cost,
             "is_upgraded": self.is_upgraded,

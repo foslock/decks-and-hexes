@@ -54,9 +54,10 @@ cards:
     type: Claim
     buy_cost: 5
     action_return: 0
+    action_cost: 2
     power: 1
-    effect: "Claim: Power 1. +1 power for each other tile you own adjacent to the target tile."
-    effect_upgraded: "Claim: Power 2. +1 power for each other tile you own adjacent to the target tile."
+    effect: "Claim: Power 1. +1 power for each other tile you own adjacent to the target tile. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 2. +1 power for each other tile you own adjacent to the target tile. Costs 2 actions to play."
     secondary_effect: null
     secondary_timing: null
 

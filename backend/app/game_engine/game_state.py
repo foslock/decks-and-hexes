@@ -1003,6 +1003,13 @@ def play_card(game: GameState, player_id: str, card_index: int,
         if player.resources < 3:
             return False, "Need 3 resources to play Debt"
 
+    # Play resource cost (e.g. Mercenary)
+    play_cost_effect = next((e for e in card.effects if e.type == EffectType.PLAY_RESOURCE_COST), None)
+    if play_cost_effect:
+        cost = play_cost_effect.effective_value(card.is_upgraded)
+        if player.resources < cost:
+            return False, f"Need {cost} resources to play {card.name}"
+
     # Global claim ban (Snowy Holiday) — no player can play Claim cards this round
     if card.card_type == CardType.CLAIM and game.claim_ban_rounds > 0:
         return False, "Claim cards are banned this round (Snowy Holiday)"
@@ -1012,9 +1019,10 @@ def play_card(game: GameState, player_id: str, card_index: int,
         return False, "Must discard before playing another card"
 
     # Check action availability
-    net_cost = 1 - card.effective_action_return
-    if player.actions_used >= player.actions_available and net_cost > 0:
-        return False, "No action slots available"
+    actions_remaining = player.actions_available - player.actions_used
+    net_cost = card.action_cost - card.effective_action_return
+    if actions_remaining < card.action_cost and net_cost > 0:
+        return False, f"Need {card.action_cost} actions to play {card.name}" if card.action_cost > 1 else "No action slots available"
 
     # Validate target for claim cards
     if card.card_type == CardType.CLAIM and target_q is not None:
@@ -1252,7 +1260,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         effective_draw_cards=snapshotted_draw_cards,
     )
     player.planned_actions.append(action)
-    player.actions_used += 1
+    player.actions_used += card.action_cost
 
     # Handle immediate effects (↺ and ↑ return actions)
     if card.effective_action_return > 0:

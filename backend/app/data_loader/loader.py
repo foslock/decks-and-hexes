@@ -236,6 +236,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         power=_safe_int(entry.get("power", 0)),
         resource_gain=resource_gain,
         action_return=_safe_int(entry.get("action_return", 0)),
+        action_cost=_safe_int(entry.get("action_cost", 1)),
         timing=timing,
         buy_cost=_safe_optional_int(entry.get("buy_cost")),
         starter=starter,

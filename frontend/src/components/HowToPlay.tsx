@@ -109,7 +109,7 @@ const PAGES = [
     content: (
       <>
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa' }}>
-          Every card costs <strong style={{ color: '#fff' }}>1 action</strong> to play. You start each
+          Most cards cost <strong style={{ color: '#fff' }}>1 action</strong> to play. You start each
           round with a set number of actions, though some cards grant extra actions when played.
         </p>
         <div style={{

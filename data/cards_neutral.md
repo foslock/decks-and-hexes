@@ -92,9 +92,14 @@ cards:
 
     action_return: 0
     power: 3
-    effect: "Claim: Power 3."
-    effect_upgraded: "Claim: Power 4."
+    effect: "Claim: Power 3. You must pay 2 resources to play this card."
+    effect_upgraded: "Claim: Power 4. You must pay 2 resources to play this card."
     trash_on_use: false
+
+    effects:
+      - type: play_resource_cost
+        value: 2
+        timing: immediate
 
   - id: neutral_land_grant
     name: Land Grant
@@ -348,9 +353,10 @@ cards:
     buy_cost: 8
 
     action_return: 0
+    action_cost: 2
     power: 6
-    effect: "Claim: Power 6."
-    effect_upgraded: "Claim: Power 8."
+    effect: "Claim: Power 6. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 8. Costs 2 actions to play."
     trash_on_use: false
 
   - id: neutral_reclaim

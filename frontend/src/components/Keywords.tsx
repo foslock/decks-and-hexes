@@ -23,7 +23,7 @@ const KEYWORDS: Record<string, string> = {
   'VP': 'Victory Points; first player to reach the VP target wins the game.',
   'Re-roll': 'Shuffle and redraw your 3 archetype market cards for 2 resources.',
 'Resource': 'Currency spent during the Buy phase to purchase cards or upgrade credits.',
-  'Action': 'A slot used to play a card; each card costs 1 action to play.',
+  'Action': 'A slot used to play a card. Most cards cost 1 action to play.',
   'Tile': 'A hex on the board that can be claimed, defended, or scored.',
 };
 

@@ -688,6 +688,15 @@ def _handle_conditional_action_return(effect: Effect, ctx: EffectContext) -> Non
         visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
+def _handle_play_resource_cost(effect: Effect, ctx: EffectContext) -> None:
+    """Mercenary: deduct resource cost when played."""
+    cost = effect.effective_value(ctx.card.is_upgraded)
+    ctx.player.resources -= cost
+    ctx.game._log(
+        f"{ctx.player.name} pays {cost} resources to play {ctx.card.name}",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
 # Stub handlers for complex effects
 def _handle_stub(effect: Effect, ctx: EffectContext) -> None:
     """Placeholder for not-yet-implemented effects."""
@@ -737,6 +746,7 @@ def _handle_grant_stackable(effect: Effect, ctx: EffectContext) -> None:
 
 
 register_handler(EffectType.GRANT_STACKABLE, _handle_grant_stackable)
+register_handler(EffectType.PLAY_RESOURCE_COST, _handle_play_resource_cost)
 
 def _handle_trash_opponent_card(effect: Effect, ctx: EffectContext) -> None:
     """Spoils of War: if claim wins a contested tile, trash the opponent's claim card."""

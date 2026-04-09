@@ -72,6 +72,10 @@ interface CardHandProps {
   subtitleContext?: CardSubtitleContext;
   /** When true, claim cards are banned (Snowy Holiday) — shown dimmed and unplayable */
   claimBanned?: boolean;
+  /** Player's current resources — used to dim cards with play_resource_cost when insufficient */
+  playerResources?: number;
+  /** Actions remaining (available - used) — used to dim cards that cost more actions than available */
+  actionsRemaining?: number;
   /** Called when the user hovers over a card (index) or leaves all cards (null). */
   onCardHover?: (index: number | null) => void;
 }
@@ -472,6 +476,8 @@ export default function CardHand({
   trashedCardIds,
   subtitleContext,
   claimBanned,
+  playerResources,
+  actionsRemaining,
   onCardHover,
 }: CardHandProps) {
   const animated = useAnimated();
@@ -555,7 +561,7 @@ export default function CardHand({
       }, duration);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHoveringPreview, hoveredIndex, hoveredRect]);
+  }, [isHoveringPreview, hoveredIndex, hoveredRect, cards]);
 
   // Card reflow animation is handled via direct DOM manipulation — see useLayoutEffect blocks.
 
@@ -724,7 +730,9 @@ export default function CardHand({
       setShuffleDisplayCount(0);
       sound.deckShuffle();
       const duration = Math.round(2500 * (animSpeed || 0.5));
-      shuffleAnimRef.current = { target: deckSize, startTime: performance.now(), duration };
+      // Target includes deferred cards so it shows the full deck before draws
+      const target = deckSize + deferredDrawnCardsRef.current.size;
+      shuffleAnimRef.current = { target, startTime: performance.now(), duration };
     } else if (hasNewCards && shuffling && !animationOff) {
       // Cards drawn while shuffle is already in progress (e.g. test mode draw button)
       // — add them to the deferred set so they animate in after shuffle ends
@@ -1561,11 +1569,16 @@ export default function CardHand({
             const isDiscardingAll = discardAll && departingAnims.has(card.id);
             const isAnimating = (!!entering && !entering.active) || isDiscardingAll || isDeferredDuringShuffle;
             const isClaimBanned = claimBanned && card.card_type === 'claim';
+            const playCostEff = card.effects?.find((e: any) => e.type === 'play_resource_cost');
+            const cantAfford = playCostEff && playerResources !== undefined &&
+              playerResources < ((card.is_upgraded && playCostEff.upgraded_value != null) ? playCostEff.upgraded_value : playCostEff.value);
+            const notEnoughActions = actionsRemaining !== undefined && actionsRemaining < (card.action_cost ?? 1);
+            const isDimmed = isClaimBanned || cantAfford || notEnoughActions;
             const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode && !isAnimating;
             // FLIP reflow transforms are applied directly to DOM elements (not via React state)
             const baseTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'translateY(0)';
             let cardTransform = baseTransform;
-            let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : isClaimBanned ? 0.4 : 1;
+            let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : isDimmed ? 0.4 : 1;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';

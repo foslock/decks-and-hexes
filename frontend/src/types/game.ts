@@ -22,6 +22,7 @@ export interface Card {
   power: number;
   resource_gain: number;
   action_return: number;
+  action_cost: number;
   timing: string;
   buy_cost: number | null;
   is_upgraded: boolean;

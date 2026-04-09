@@ -93,6 +93,12 @@ export function cardDiscard(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
   noise(ctx, noiseBuf, dest, 0.06, 0.18, 'bandpass', 800, 3000, 15);
 }
 
+/** Paper rip — sharp highpass noise burst with downward sweep */
+export function cardTrash(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
+  noise(ctx, noiseBuf, dest, 0.10, 0.15, 'highpass', 4000, 1200, 3);
+  noise(ctx, noiseBuf, dest, 0.05, 0.10, 'bandpass', 2500, 600, 2);
+}
+
 /** Two quick tones + shimmer */
 export function cardPurchase(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
   oscAt(ctx, dest, 'square', 1200, 0.04, 0, 0.08, 5);

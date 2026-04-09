@@ -199,6 +199,7 @@ def _deserialize_card_inline(ref: dict[str, Any]) -> Card:
         power=ref.get("power", 0),
         resource_gain=ref.get("resource_gain", 0),
         action_return=ref.get("action_return", 0),
+        action_cost=ref.get("action_cost", 1),
         timing=Timing(ref.get("timing", "immediate")),
         buy_cost=ref.get("buy_cost"),
         is_upgraded=ref.get("is_upgraded", False),

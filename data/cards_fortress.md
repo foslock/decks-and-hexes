@@ -258,9 +258,10 @@ cards:
     type: Claim
     buy_cost: 6
     action_return: 0
+    action_cost: 2
     power: 5
-    effect: "Claim: Power 5. If the target tile has any defense bonuses, gain +2 power."
-    effect_upgraded: "Claim: Power 7. If the target tile has any defense bonuses, gain +3 power."
+    effect: "Claim: Power 5. If the target tile has any defense bonuses, gain +2 power. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 7. If the target tile has any defense bonuses, gain +3 power. Costs 2 actions to play."
     secondary_effect: null
     secondary_timing: null
 

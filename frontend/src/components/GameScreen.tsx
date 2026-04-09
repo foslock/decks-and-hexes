@@ -18,7 +18,7 @@ import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandl
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
-import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
+import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
 
@@ -392,6 +392,7 @@ const DEBT_CARD_OBJ: Card = {
   power: 0,
   resource_gain: -3,
   action_return: 0,
+  action_cost: 1,
   timing: 'immediate',
   buy_cost: null,
   is_upgraded: false,
@@ -607,6 +608,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // In-play card list hover preview
   const [inPlayHoverIndex, setInPlayHoverIndex] = useState<number | null>(null);
   const inPlayContainerRef = useRef<HTMLDivElement>(null);
+  const inPlayCardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  // Staggered exit animations for in-play cards when submitting
+  type InPlayExitAnim = {
+    card: Card; rect: DOMRect; active: boolean; type: 'trash' | 'discard';
+    targetX: number; targetY: number; rotation: number; delay: number;
+    subtitleParts: SubtitlePart[];
+  };
+  const [inPlayExitAnims, setInPlayExitAnims] = useState<InPlayExitAnim[]>([]);
+  // Override discard count during exit animations so it increments per discard anim
+  const [discardCountOverride, setDiscardCountOverride] = useState<number | null>(null);
+  // Ref to hold deferred state update while exit animations play
+  const deferredStateUpdateRef = useRef<GameState | null>(null);
   // Purchase pill hover preview
   const [purchaseHover, setPurchaseHover] = useState<{ card: import('../types/game').Card; rect: DOMRect } | null>(null);
   const [purchaseHoverVisible, setPurchaseHoverVisible] = useState(false);
@@ -1316,7 +1329,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (tc) trashing.add(tc.id);
       }
     }
-    if (trashing.size > 0) setTrashedCardIds(trashing);
+    if (trashing.size > 0) {
+      setTrashedCardIds(trashing);
+      sound.cardTrash();
+    }
 
     // Compute screen position for card animation
     const drag = dragReleaseRef.current;
@@ -1429,6 +1445,26 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (card.card_type === 'claim' && gameState.claim_ban_rounds && gameState.claim_ban_rounds > 0) {
       setError('Claim cards are banned this round (Snowy Holiday)');
       return;
+    }
+
+    // Play resource cost (e.g. Mercenary)
+    const playCostEff = card.effects?.find((e: any) => e.type === 'play_resource_cost');
+    if (playCostEff) {
+      const cost = (card.is_upgraded && playCostEff.upgraded_value != null) ? playCostEff.upgraded_value : playCostEff.value;
+      if ((activePlayer.resources ?? 0) < cost) {
+        setError(`Need ${cost} resources to play ${card.name}`);
+        return;
+      }
+    }
+
+    // Action cost check (heavy cards cost 2 actions)
+    const actionCost = card.action_cost ?? 1;
+    if (actionCost > 1) {
+      const actionsLeft = activePlayer.actions_available - activePlayer.actions_used;
+      if (actionsLeft < actionCost) {
+        setError(`Need ${actionCost} actions to play ${card.name}`);
+        return;
+      }
     }
 
     // Validate the tile is a legal target before entering any card choice UI (e.g. Demon Pact trash selection).
@@ -1963,11 +1999,80 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const handleSubmitPlay = useCallback(async () => {
     try {
       setError(null);
+
+      // Snapshot positions of in-play cards for staggered exit animations
+      const STAGGER = Math.round(400 * animSpeed);
+      const TRASH_DUR = Math.round(500 * animSpeed);
+      const DISCARD_DUR = Math.round(1000 * animSpeed);
+      let totalAnimTime = 0;
+
+      if (activePlayer && animated && activePlayer.planned_actions.length > 0) {
+        const discardEl = document.querySelector('[data-discard-pile]');
+        const discardRect = discardEl?.getBoundingClientRect();
+        const discardCx = discardRect ? discardRect.left + discardRect.width / 2 : window.innerWidth - 40;
+        const discardCy = discardRect ? discardRect.top + discardRect.height / 2 : window.innerHeight - 40;
+        const exitAnims: InPlayExitAnim[] = [];
+
+        const actions = activePlayer.planned_actions;
+        actions.forEach((action, i) => {
+          const el = inPlayCardRefs.current.get(i);
+          if (!el) return;
+          const rect = el.getBoundingClientRect();
+          const isTrash = action.card.trash_on_use;
+          const delay = i * STAGGER;
+          const rotation = (Math.random() - 0.5) * 16; // ±8deg
+          const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
+          const priorNames = actions.slice(0, i).map(a => a.card.name);
+          const ctx: CardSubtitleContext = { ...frozenSubtitleContext, powerFrozen: true, playedCardNames: priorNames, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
+          const subtitleParts = buildCardSubtitle(c, ctx);
+          exitAnims.push({
+            card: c, rect, active: false, type: isTrash ? 'trash' : 'discard',
+            targetX: discardCx, targetY: discardCy, rotation, delay, subtitleParts,
+          });
+        });
+
+        if (exitAnims.length > 0) {
+          const lastDelay = (exitAnims.length - 1) * STAGGER;
+          const lastIsTrash = exitAnims[exitAnims.length - 1].type === 'trash';
+          totalAnimTime = lastDelay + (lastIsTrash ? TRASH_DUR : DISCARD_DUR) + 100;
+
+          // Freeze discard count at current value; it'll increment per discard anim
+          setDiscardCountOverride(activePlayer.discard_count);
+
+          setInPlayExitAnims(exitAnims);
+          // Stagger: activate each card after its delay, play sound, increment discard count
+          exitAnims.forEach((anim, i) => {
+            setTimeout(() => {
+              if (anim.type === 'trash') sound.cardTrash();
+              else {
+                sound.cardDiscard();
+                setDiscardCountOverride(prev => prev !== null ? prev + 1 : prev);
+              }
+              setInPlayExitAnims(prev => prev.map((a, j) => j === i ? { ...a, active: true } : a));
+            }, anim.delay);
+          });
+          // Clean up after all animations complete
+          setTimeout(() => {
+            setInPlayExitAnims([]);
+            setDiscardCountOverride(null);
+          }, totalAnimTime);
+        }
+      }
+
       const result = await api.submitPlay(gameState.id, activePlayerId);
 
-      // Apply the state — if phase is now 'reveal', the phase change effect
-      // will detect play→reveal and set up the resolve animation automatically.
-      onStateUpdate(result.state);
+      if (totalAnimTime > 0 && result.state.current_phase === 'reveal') {
+        // Defer state update until exit animations complete
+        deferredStateUpdateRef.current = result.state;
+        setTimeout(() => {
+          const deferred = deferredStateUpdateRef.current;
+          deferredStateUpdateRef.current = null;
+          if (deferred) onStateUpdate(deferred);
+        }, totalAnimTime);
+      } else {
+        // Apply immediately (no animations or not transitioning to reveal)
+        onStateUpdate(result.state);
+      }
 
       if (result.state.current_phase !== 'reveal') {
         // Not all plans submitted yet — cycle to next local player
@@ -1982,7 +2087,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, homePlayerIndex, shouldCycle, localPlayerIds]);
+  }, [gameState, activePlayerId, activePlayerIndex, activePlayer, onStateUpdate, homePlayerIndex, shouldCycle, localPlayerIds, animated, animSpeed, sound]);
 
   const handleBuyArchetype = useCallback(async (cardId: string) => {
     try {
@@ -3624,6 +3729,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       return (
                         <div
                           key={i}
+                          ref={(el) => { if (el) inPlayCardRefs.current.set(i, el); else inPlayCardRefs.current.delete(i); }}
                           onPointerEnter={() => setInPlayHoverIndex(i)}
                           onPointerLeave={() => setInPlayHoverIndex(null)}
                           style={{
@@ -3636,7 +3742,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                             marginBottom: GAP,
                             breakInside: 'avoid' as const,
                             cursor: 'default',
-                            transition: 'background 0.1s',
+                            transition: 'background 0.1s, opacity 0.15s',
+                            opacity: inPlayExitAnims[i]?.active ? 0 : 1,
                             ...(inPlayHoverIndex === i ? { background: '#3a3a5e' } : {}),
                           }}
                         >
@@ -3682,6 +3789,109 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 document.body
               );
             })()}
+
+            {/* Staggered exit animation portals for in-play cards */}
+            {inPlayExitAnims.length > 0 && createPortal(
+              <>
+                {inPlayExitAnims.map((anim, idx) => {
+                  const typeColor = getCardDisplayColor(anim.card);
+                  const cardInner = (
+                    <div style={{
+                      width: anim.rect.width, padding: '3px 6px', background: '#2a2a3e',
+                      border: `1px solid ${typeColor}`, borderRadius: 5,
+                      color: '#fff', boxSizing: 'border-box',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {anim.card.name}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                        {anim.subtitleParts.map((part, j) => renderSubtitlePart(part, j))}
+                      </div>
+                    </div>
+                  );
+
+                  if (anim.type === 'trash') {
+                    // Tear animation: two halves split, rotate outward, rise, fade
+                    const durMs = Math.round(500 * animSpeed);
+                    const fadeDurMs = Math.round(300 * animSpeed);
+                    const halfW = anim.rect.width / 2;
+                    const dy = anim.active ? -120 : 0;
+                    return [
+                      <div key={`tear-L-${idx}`} style={{
+                        position: 'fixed', left: anim.rect.left, top: anim.rect.top,
+                        width: halfW, height: anim.rect.height, overflow: 'hidden',
+                        transform: anim.active
+                          ? `translate(${-10}px, ${dy}px) rotate(-8deg)`
+                          : 'translate(0, 0) rotate(0deg)',
+                        transformOrigin: 'right center',
+                        opacity: anim.active ? 0 : 1,
+                        transition: anim.active
+                          ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in ${Math.round(durMs * 0.4)}ms`
+                          : 'none',
+                        pointerEvents: 'none', zIndex: 9990,
+                      }}>
+                        <div style={{ width: anim.rect.width }}>{cardInner}</div>
+                      </div>,
+                      <div key={`tear-R-${idx}`} style={{
+                        position: 'fixed', left: anim.rect.left + halfW, top: anim.rect.top,
+                        width: halfW, height: anim.rect.height, overflow: 'hidden',
+                        transform: anim.active
+                          ? `translate(${10}px, ${dy}px) rotate(8deg)`
+                          : 'translate(0, 0) rotate(0deg)',
+                        transformOrigin: 'left center',
+                        opacity: anim.active ? 0 : 1,
+                        transition: anim.active
+                          ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in ${Math.round(durMs * 0.4)}ms`
+                          : 'none',
+                        pointerEvents: 'none', zIndex: 9990,
+                      }}>
+                        <div style={{ width: anim.rect.width, marginLeft: -halfW }}>{cardInner}</div>
+                      </div>,
+                    ];
+                  }
+
+                  // Discard arc animation: arc toward discard pile, smooth scale with eased grow/shrink, late fade
+                  const durMs = Math.round(1000 * animSpeed);
+                  const dx = anim.targetX - (anim.rect.left + anim.rect.width / 2);
+                  const dy = anim.targetY - (anim.rect.top + anim.rect.height / 2);
+                  const rot = anim.rotation;
+                  const animName = `inPlayArc_${idx}`;
+                  // Scale uses a sine-like curve: 1 → 1.5 peak at ~30% → back to 0.5 at end
+                  const arcPeak = -50;
+                  const keyframes = `@keyframes ${animName} {
+                    0% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
+                    15% { transform: translate(${dx * 0.08}px, ${dy * 0.08 + arcPeak * 0.6}px) scale(1.35) rotate(${rot * 0.1}deg); opacity: 1; }
+                    30% { transform: translate(${dx * 0.2}px, ${dy * 0.2 + arcPeak}px) scale(1.5) rotate(${rot * 0.25}deg); opacity: 1; }
+                    50% { transform: translate(${dx * 0.4}px, ${dy * 0.4 + arcPeak * 0.7}px) scale(1.35) rotate(${rot * 0.45}deg); opacity: 1; }
+                    70% { transform: translate(${dx * 0.6}px, ${dy * 0.6 + arcPeak * 0.2}px) scale(1.0) rotate(${rot * 0.7}deg); opacity: 1; }
+                    85% { transform: translate(${dx * 0.8}px, ${dy * 0.8}px) scale(0.7) rotate(${rot * 0.88}deg); opacity: 1; }
+                    90% { transform: translate(${dx * 0.88}px, ${dy * 0.88}px) scale(0.6) rotate(${rot * 0.93}deg); opacity: 1; }
+                    100% { transform: translate(${dx}px, ${dy}px) scale(0.5) rotate(${rot}deg); opacity: 0; }
+                  }`;
+                  return (
+                    <div key={`arc-${idx}`}>
+                      <style>{keyframes}</style>
+                      <div style={{
+                        position: 'fixed',
+                        left: anim.rect.left,
+                        top: anim.rect.top,
+                        width: anim.rect.width,
+                        height: anim.rect.height,
+                        animation: anim.active ? `${animName} ${durMs}ms linear forwards` : 'none',
+                        pointerEvents: 'none',
+                        zIndex: 9990,
+                        transformOrigin: 'center center',
+                      }}>
+                        {cardInner}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>,
+              document.body
+            )}
           </div>
 
           {/* Purchase pill hover preview (fixed, portal) */}
@@ -4040,6 +4250,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               selectedCard && selectedCardIndex !== null && multiTileCardIndex === null && (
               <>
                 <button
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => handleTestDiscardCard(selectedCardIndex)}
                   style={{
                     padding: '6px 16px',
@@ -4058,6 +4269,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   Discard
                 </button>
                 <button
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => handleTestTrashCard(selectedCardIndex)}
                   style={{
                     padding: '6px 16px',
@@ -4099,6 +4311,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   </div>
                 )}
                 <button
+                  onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => handleUpgradeCard(selectedCardIndex)}
                   disabled={activePlayer.upgrade_credits < 1 && !gameState.test_mode}
                   style={{
@@ -4435,10 +4648,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               </span>
             </div>
           )}
-          {activePlayer && introSequence !== 'overlay' && introSequence !== 'hud_fadein' && (
+          {activePlayer && introSequence !== 'overlay' && (
             <div style={{
-              opacity: introSequence === 'done' || introSequence === 'draw' ? 1 : 0,
-              transition: 'opacity 0.8s ease-in',
+              opacity: hudVisible ? 1 : 0,
+              transition: 'opacity 2.5s ease',
             }}>
             <CardHand
               playerId={activePlayerId}
@@ -4455,7 +4668,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onDragEnd={() => setDraggingCardIndex(null)}
               disabled={phase !== 'play' || activePlayer.has_submitted_play || interactionBlocked}
               deckSize={introSequence !== 'done' && !introHandReady ? activePlayer.deck_size + activePlayer.hand.length : activePlayer.deck_size}
-              discardCount={activePlayer.discard_count}
+              discardCount={discardCountOverride !== null ? discardCountOverride : activePlayer.discard_count}
               discardCards={activePlayer.discard}
               deckCards={activePlayer.deck_cards}
               inPlayCards={inPlayCards}
@@ -4475,6 +4688,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               closePopups={showShopOverlay || showCardBrowser || showDeckViewer}
               trashedCardIds={trashedCardIds.size > 0 ? trashedCardIds : undefined}
               claimBanned={!!gameState.claim_ban_rounds && gameState.claim_ban_rounds > 0}
+              playerResources={activePlayer?.resources}
+              actionsRemaining={phase === 'play' && activePlayer && !activePlayer.has_submitted_play ? activePlayer.actions_available - activePlayer.actions_used : undefined}
               onCardHover={setHoveredCardIndex}
             />
             </div>

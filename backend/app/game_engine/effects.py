@@ -131,6 +131,7 @@ class EffectType(str, Enum):
     ABANDON_TILE = "abandon_tile"                          # Exodus: give up a tile you own
     ABANDON_AND_BLOCK = "abandon_and_block"                # Scorched Retreat: give up tile, make it blocked
     MANDATORY_SELF_TRASH = "mandatory_self_trash"          # Demon Pact: trash exactly N cards (required)
+    PLAY_RESOURCE_COST = "play_resource_cost"              # Mercenary: must pay resources to play
 
 
 class ConditionType(str, Enum):
