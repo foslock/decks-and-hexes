@@ -70,6 +70,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     cpu_difficulty: null,
     has_left: false,
     free_rerolls: 0,
+    buy_locked: false,
     pending_discard: 0,
     ...overrides,
   };
@@ -85,6 +86,7 @@ export function makeTile(q: number, r: number, overrides: Partial<HexTile> = {})
     owner: null,
     defense_power: 0,
     base_defense: 0,
+    permanent_defense_bonus: 0,
     held_since_turn: null,
     is_base: false,
     base_owner: null,

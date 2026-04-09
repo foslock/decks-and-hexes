@@ -267,6 +267,16 @@ export function upgradeCard(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
   src.stop(now + 0.31);
 }
 
+/** Rising harden — defense fortified */
+export function resolveDefenseFortify(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
+  // Low rumbling foundation that rises
+  osc(ctx, dest, 'sine', 150, 0.07, 0.25, 10, 250);
+  // Metallic clang layered on top
+  osc(ctx, dest, 'triangle', 400, 0.05, 0.15, 5, 600);
+  // Short noise burst for "stone/metal" texture
+  noise(ctx, noiseBuf, dest, 0.04, 0.1, 'bandpass', 1200, 2400, 5);
+}
+
 /** Low-mid tone with pitch drop — tile claimed */
 export function resolveTileOccupied(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
   osc(ctx, dest, 'sine', 300, 0.08, 0.2, 10, 220);

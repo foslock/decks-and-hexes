@@ -41,6 +41,7 @@ interface ActiveNumber {
   endX: number;
   endY: number;
   isWinner: boolean;
+  isDefender: boolean;
 }
 
 type StepStage = 'numbers_move' | 'winner_grow' | 'done';
@@ -106,6 +107,7 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
         endX: target.x,
         endY: target.y,
         isWinner: claimant.player_id === step.winner_id,
+        isDefender: claimant.player_id === step.defender_id,
       });
     }
     // If there's a defender who wasn't in claimants, add their number
@@ -119,17 +121,19 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
         endX: target.x,
         endY: target.y,
         isWinner: step.defender_id === step.winner_id,
+        isDefender: true,
       });
     }
   }
 
   const isConsecrate = step?.outcome === 'consecrate';
-  const isContested = !isConsecrate && step?.contested && numbers.length > 1;
+  const isDefenseApplied = step?.outcome === 'defense_applied';
+  const isContested = !isConsecrate && !isDefenseApplied && step?.contested && numbers.length > 1;
 
   // Timing
-  const moveMs = isOff ? 0 : Math.round((isConsecrate ? 600 : isContested ? 800 : 400) * animSpeed);
-  const growMs = isOff ? 0 : Math.round((isConsecrate ? 800 : isContested ? 1200 : 400) * animSpeed);
-  const pauseMs = isOff ? 50 : Math.round(200 * animSpeed);
+  const moveMs = isOff ? 0 : Math.round((isDefenseApplied ? 300 : isConsecrate ? 600 : isContested ? 800 : 400) * animSpeed);
+  const growMs = isOff ? 0 : Math.round((isDefenseApplied ? 400 : isConsecrate ? 800 : isContested ? 1200 : 400) * animSpeed);
+  const pauseMs = isOff ? 50 : Math.round((isDefenseApplied ? 100 : 200) * animSpeed);
 
   const hasPositionData = !!(gridTransform && gridRect);
 
@@ -162,7 +166,13 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
 
     if (stage === 'numbers_move' && numbersActive) {
       fireStepApply(currentIdx);
-      if (isContested) sound.resolveContested(); else sound.resolveTileOccupied();
+      if (isDefenseApplied) {
+        sound.resolveDefenseFortify();
+      } else if (isContested) {
+        sound.resolveContested();
+      } else {
+        sound.resolveTileOccupied();
+      }
       const t = setTimeout(() => setStage('winner_grow'), moveMs);
       return () => clearTimeout(t);
     }
@@ -202,6 +212,58 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
       pointerEvents: 'none',
       zIndex: 500,
     }}>
+      {/* Defense applied animation — shield values grow/shrink */}
+      {isDefenseApplied && step && (() => {
+        const target = toScreen(step.q, step.r);
+        const permDef = step.defense_permanent ?? 0;
+        const tempDef = step.defense_temporary ?? 0;
+        const color = step.winner_id ? playerColorStr(step.winner_id) : '#fff';
+        let scale = 0;
+        let opacity = 0;
+        let transition: string;
+        if (!numbersActive) {
+          scale = 0.3;
+          opacity = 0;
+          transition = 'none';
+        } else if (stage === 'numbers_move') {
+          scale = 1.6;
+          opacity = 1;
+          transition = `all ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.2)`;
+        } else if (stage === 'winner_grow') {
+          scale = 1;
+          opacity = 1;
+          transition = `all ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1)`;
+        } else {
+          scale = 1;
+          opacity = 0;
+          transition = `opacity ${pauseMs}ms ease`;
+        }
+        return (
+          <div
+            key="defense-shield"
+            style={{
+              position: 'fixed',
+              left: target.x,
+              top: target.y,
+              transform: `translate(-50%, -50%) scale(${scale})`,
+              opacity,
+              transition,
+              fontSize: 22,
+              fontWeight: 'bold',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+              zIndex: 502,
+              textShadow: `0 0 8px ${color}, 0 2px 4px rgba(0,0,0,0.8)`,
+            }}
+          >
+            <span style={{ color: '#fff' }}>🛡{permDef}</span>
+            {step.defense_immunity
+              ? <span style={{ color: '#66ccff' }}>+∞</span>
+              : tempDef > 0 && <span style={{ color: '#66ccff' }}>+{tempDef}</span>}
+          </div>
+        );
+      })()}
+
       {/* Consecrate star animation */}
       {isConsecrate && step && (() => {
         const target = toScreen(step.q, step.r);
@@ -250,8 +312,8 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
         );
       })()}
 
-      {/* Power numbers (skip for Consecrate — star animation handles it) */}
-      {!isConsecrate && numbers.map((num, i) => {
+      {/* Power numbers (skip for Consecrate and Defense Applied — custom animations handle them) */}
+      {!isConsecrate && !isDefenseApplied && numbers.map((num, i) => {
         const color = playerColorStr(num.playerId);
         const isWinStage = stage === 'winner_grow';
 
@@ -316,7 +378,7 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
               whiteSpace: 'nowrap',
             }}
           >
-            {num.power}
+            {num.isDefender ? '🛡' : '⚔'} {num.power}
           </div>
         );
       })}

@@ -180,6 +180,7 @@ def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
         "owner": tile.owner,
         "defense_power": tile.defense_power,
         "base_defense": tile.base_defense,
+        "permanent_defense_bonus": tile.permanent_defense_bonus,
         "held_since_turn": tile.held_since_turn,
         "capture_count": tile.capture_count,
         "is_base": tile.is_base,

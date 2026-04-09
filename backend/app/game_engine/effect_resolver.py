@@ -474,10 +474,15 @@ def _handle_gain_vp(effect: Effect, ctx: EffectContext) -> None:
 
 def _handle_tile_immunity(effect: Effect, ctx: EffectContext) -> None:
     """Iron Wall / Stronghold: make a tile immune to claims."""
+    all_keys: list[str] = []
     if ctx.target_tile_key:
-        ctx.player.turn_modifiers.immune_tiles[ctx.target_tile_key] = effect.duration
+        all_keys.append(ctx.target_tile_key)
+    for eq, er in ctx.action.extra_targets:
+        all_keys.append(f"{eq},{er}")
+    for tk in all_keys:
+        ctx.player.turn_modifiers.immune_tiles[tk] = effect.duration
         ctx.game._log(
-            f"{ctx.player.name} protects tile {ctx.target_tile_key} for {effect.duration} round(s)",
+            f"{ctx.player.name} protects tile {tk} for {effect.duration} round(s)",
             actor=ctx.player.id)
 
 
@@ -490,10 +495,18 @@ def _handle_ignore_defense(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_buy_restriction(effect: Effect, ctx: EffectContext) -> None:
-    """Blitz Rush: player cannot buy cards this round."""
+    """Grand Strategy / Stampede: player cannot buy cards this round."""
     ctx.player.turn_modifiers.buy_locked = True
     ctx.game._log(f"{ctx.player.name} cannot purchase cards this round",
-                  visible_to=[ctx.player.id], actor=ctx.player.id)
+                  actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": "Buy Forfeited",
+        "effect_type": "buy_restriction",
+        "value": 0,
+    })
 
 
 def _handle_cost_reduction(effect: Effect, ctx: EffectContext) -> None:
@@ -506,6 +519,13 @@ def _handle_cost_reduction(effect: Effect, ctx: EffectContext) -> None:
     ctx.player.turn_modifiers.cost_reductions.append(reduction)
     ctx.game._log(f"{ctx.player.name} gains a cost reduction from {ctx.card.name}",
                   visible_to=[ctx.player.id], actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect_type": "cost_reduction",
+        "effect": f"-{effect.value} Shop Discount",
+    })
 
 
 def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
@@ -531,12 +551,20 @@ def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_grant_actions_next_turn(effect: Effect, ctx: EffectContext) -> None:
-    """Forced March: give other players extra actions next turn."""
+    """Battle Cry / Forced March: give other players extra actions next turn."""
     ev = effect.effective_value(ctx.card.is_upgraded)
     if effect.target == "all_others":
         for pid, other in ctx.game.players.items():
             if pid != ctx.player.id:
                 other.turn_modifiers.extra_actions_next_turn += ev
+                ctx.game.player_effects.append({
+                    "source_player_id": ctx.player.id,
+                    "target_player_id": pid,
+                    "card_name": ctx.card.name,
+                    "effect": f"+{ev} Action{'s' if ev > 1 else ''} next round",
+                    "effect_type": "grant_actions_next_turn",
+                    "value": ev,
+                })
         ctx.game._log(
             f"{ctx.player.name} grants {ev} extra action(s) to all other players next turn",
             actor=ctx.player.id)
@@ -547,6 +575,14 @@ def _handle_grant_actions_next_turn(effect: Effect, ctx: EffectContext) -> None:
             ctx.game._log(
                 f"{ctx.player.name} grants {ev} extra action(s) to {other_player.name} next turn",
                 actor=ctx.player.id)
+            ctx.game.player_effects.append({
+                "source_player_id": ctx.player.id,
+                "target_player_id": ctx.action.target_player_id,
+                "card_name": ctx.card.name,
+                "effect": f"+{ev} Action{'s' if ev > 1 else ''} next round",
+                "effect_type": "grant_actions_next_turn",
+                "value": ev,
+            })
 
 
 def _handle_draw_next_turn(effect: Effect, ctx: EffectContext) -> None:
@@ -870,23 +906,38 @@ def _handle_vp_from_contested_wins(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_permanent_defense(effect: Effect, ctx: EffectContext) -> None:
-    """Entrench: permanently increase a tile's defense (persists until captured)."""
-    if not ctx.target_tile_key or not ctx.game.grid:
+    """Entrench / Twin Cities: permanently increase a tile's defense (persists until captured)."""
+    if not ctx.game.grid:
         return
-    parts = ctx.target_tile_key.split(",")
-    if len(parts) != 2:
-        return
-    tile = ctx.game.grid.get_tile(int(parts[0]), int(parts[1]))
-    if tile and tile.owner == ctx.player.id:
-        bonus = effect.value
-        if ctx.card.is_upgraded:
-            bonus = effect.metadata.get("upgraded_value", bonus)
-        tile.permanent_defense_bonus += bonus
-        tile.defense_power += bonus  # also apply immediately this round
-        ctx.game._log(
-            f"{ctx.player.name} permanently fortifies tile {ctx.target_tile_key} "
-            f"(+{bonus} defense, now {tile.defense_power})",
-            actor=ctx.player.id)
+    bonus = effect.value
+    if ctx.card.is_upgraded:
+        bonus = effect.metadata.get("upgraded_value", bonus)
+
+    # Collect all target tiles: primary + extra targets
+    tile_keys: list[str] = []
+    if ctx.target_tile_key:
+        tile_keys.append(ctx.target_tile_key)
+    for eq, er in ctx.extra_targets:
+        tile_keys.append(f"{eq},{er}")
+    # Also check action.extra_targets (set during resolve, not play)
+    if ctx.action.extra_targets:
+        for eq, er in ctx.action.extra_targets:
+            k = f"{eq},{er}"
+            if k not in tile_keys:
+                tile_keys.append(k)
+
+    for tk in tile_keys:
+        parts = tk.split(",")
+        if len(parts) != 2:
+            continue
+        tile = ctx.game.grid.get_tile(int(parts[0]), int(parts[1]))
+        if tile and tile.owner == ctx.player.id:
+            tile.permanent_defense_bonus += bonus
+            tile.defense_power += bonus  # also apply immediately this round
+            ctx.game._log(
+                f"{ctx.player.name} permanently fortifies tile {tk} "
+                f"(+{bonus} defense, now {tile.defense_power})",
+                actor=ctx.player.id)
 
 
 register_handler(EffectType.PERMANENT_DEFENSE, _handle_permanent_defense)
@@ -901,7 +952,15 @@ def _handle_free_reroll(effect: Effect, ctx: EffectContext) -> None:
     ctx.player.turn_modifiers.free_rerolls += count
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} grants {count} free market re-roll(s)",
-        visible_to=[ctx.player.id], actor=ctx.player.id)
+        actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": f"+{count} Free Re-roll{'s' if count > 1 else ''}",
+        "effect_type": "free_reroll",
+        "value": count,
+    })
 
 
 def _handle_resource_drain(effect: Effect, ctx: EffectContext) -> None:
@@ -1206,14 +1265,23 @@ def _handle_next_turn_bonus(effect: Effect, ctx: EffectContext) -> None:
 
     parts = []
     if extra_draw > 0:
-        parts.append(f"+{extra_draw} card(s)")
+        parts.append(f"+{extra_draw} {'card' if extra_draw == 1 else 'cards'}")
     if extra_resources > 0:
-        parts.append(f"+{extra_resources} resource(s)")
+        parts.append(f"+{extra_resources} {'resource' if extra_resources == 1 else 'resources'}")
     if extra_actions > 0:
-        parts.append(f"+{extra_actions} action(s)")
+        parts.append(f"+{extra_actions} {'action' if extra_actions == 1 else 'actions'}")
+    effect_text = ", ".join(parts) + " next round"
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} queues next-turn bonus: {', '.join(parts)}",
-        visible_to=[ctx.player.id], actor=ctx.player.id)
+        actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": effect_text,
+        "effect_type": "next_turn_bonus",
+        "value": 0,
+    })
 
 
 def _handle_mulligan(effect: Effect, ctx: EffectContext) -> None:

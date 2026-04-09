@@ -5,6 +5,7 @@ import type { LogEntry } from '../api/client';
 interface FullGameLogProps {
   gameId: string;
   playerId?: string;
+  mapSeed?: string;
   onClose: () => void;
 }
 
@@ -18,7 +19,7 @@ const PHASE_LABELS: Record<string, string> = {
   game_over: 'Game Over',
 };
 
-export default function FullGameLog({ gameId, playerId, onClose }: FullGameLogProps) {
+export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: FullGameLogProps) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterRound, setFilterRound] = useState<number | null>(null);
@@ -48,6 +49,24 @@ export default function FullGameLog({ gameId, playerId, onClose }: FullGameLogPr
   const filtered = filterRound !== null
     ? entries.filter((e) => e.round === filterRound)
     : entries;
+
+  const handleDownload = () => {
+    const lines = entries.map((e) => {
+      const phase = PHASE_LABELS[e.phase] || e.phase;
+      return `R${e.round} [${phase}] ${e.message}`;
+    });
+    const text = lines.join('\n');
+    const date = new Date().toISOString().slice(0, 10);
+    const seed = mapSeed || 'unknown';
+    const filename = `game-log_seed-${seed}_${date}.txt`;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div
@@ -122,6 +141,21 @@ export default function FullGameLog({ gameId, playerId, onClose }: FullGameLogPr
             ))}
           </div>
 
+          <button
+            onClick={handleDownload}
+            disabled={entries.length === 0}
+            style={{
+              padding: '4px 12px',
+              background: entries.length > 0 ? '#2a5a2e' : '#333',
+              border: '1px solid #555',
+              borderRadius: 4,
+              color: entries.length > 0 ? '#fff' : '#555',
+              cursor: entries.length > 0 ? 'pointer' : 'not-allowed',
+              fontSize: 12,
+            }}
+          >
+            Download
+          </button>
           <button
             onClick={onClose}
             style={{

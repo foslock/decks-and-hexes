@@ -393,12 +393,12 @@ class TestBuyRestriction:
 
         success, msg = play_card(game, "p1", 0)
         assert success, msg
-        assert player.turn_modifiers.buy_locked is True
 
-        # Submit plans and advance to buy phase
+        # Effect is on_resolution — submit and resolve to trigger it
         submit_play(game, "p1")
         submit_play(game, "p0")
         assert game.current_phase == Phase.REVEAL
+        assert player.turn_modifiers.buy_locked is True
         for pid in game.player_order:
             advance_resolve(game, pid)
         assert game.current_phase == Phase.BUY
@@ -447,11 +447,9 @@ class TestTileImmunity:
         iron_wall = _copy_card(card_registry["fortress_iron_wall"], "test_iw")
         fort.hand = [iron_wall] + fort.hand[1:]
 
-        # Fort plays Iron Wall on their tile
+        # Fort plays Iron Wall on their tile (immunity applied on_resolution)
         success, msg = play_card(game, "f0", 0, target_q=tile_q, target_r=tile_r)
         assert success, msg
-        tile_key = f"{tile_q},{tile_r}"
-        assert tile_key in fort.turn_modifiers.immune_tiles
 
         # Give attacker a strong claim card targeting that tile
         claim = _make_card("strong_claim", "Strong Claim", CardType.CLAIM,
@@ -714,6 +712,13 @@ class TestCostReduction:
         success, _ = play_card(game, "f0", 0)
         assert success
 
+        # Cost reduction resolves on_resolution — submit and resolve
+        submit_play(game, "f0")
+        submit_play(game, "p1")
+        assert game.current_phase == Phase.REVEAL
+        for pid in game.player_order:
+            advance_resolve(game, pid)
+
         # Should have a cost reduction active
         assert len(player.turn_modifiers.cost_reductions) == 1
         assert player.turn_modifiers.cost_reductions[0]["amount"] == 1
@@ -739,7 +744,9 @@ class TestGrantActions:
 
         # Actions don't increase this turn
         assert other.actions_available == initial_actions
-        # But extra actions are queued for next turn
+        # Effect is on_resolution — submit and resolve to trigger it
+        submit_play(game, "p0")
+        submit_play(game, "p1")
         assert other.turn_modifiers.extra_actions_next_turn == 1
 
 

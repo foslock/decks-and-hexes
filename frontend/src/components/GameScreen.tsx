@@ -25,7 +25,8 @@ import { useSound } from '../audio/useSound';
 /** Check if an engine card needs an opponent target (forced discard or inject rubble). */
 function needsOpponentTarget(card: Card): boolean {
   return (card.forced_discard > 0) ||
-    (card.effects?.some(e => e.type === 'inject_rubble') ?? false);
+    (card.effects?.some(e => e.type === 'inject_rubble') ?? false) ||
+    (card.effects?.some(e => e.type === 'grant_actions_next_turn' && e.target === 'chosen_player') ?? false);
 }
 
 /**
@@ -555,10 +556,19 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [testResources, setTestResources] = useState('');
   const [testRound, setTestRound] = useState('');
   const [testActions, setTestActions] = useState('');
-  // Surge multi-target mode
-  const [surgeTargets, setSurgeTargets] = useState<[number, number][]>([]);
-  const [surgeCardIndex, setSurgeCardIndex] = useState<number | null>(null);
-  const [surgePrimaryTarget, setSurgePrimaryTarget] = useState<[number, number] | null>(null);
+  // Multi-tile selection mode
+  const [multiTileTargets, setMultiTileTargets] = useState<[number, number][]>([]);
+  const [multiTileCardIndex, setMultiTileCardIndex] = useState<number | null>(null);
+  const [multiTilePrimaryTarget, setMultiTilePrimaryTarget] = useState<[number, number] | null>(null);
+  // Clear multi-tile mode when selected card changes away from the multi-tile card
+  useEffect(() => {
+    if (multiTileCardIndex !== null && selectedCardIndex !== multiTileCardIndex) {
+      setMultiTileCardIndex(null);
+      setMultiTilePrimaryTarget(null);
+      setMultiTileTargets([]);
+    }
+  }, [selectedCardIndex, multiTileCardIndex]);
+
   // Trash/discard selection mode (for cards like Thin the Herd, Consolidate, Reduce)
   const [trashMode, setTrashMode] = useState<{
     cardIndex: number;
@@ -930,6 +940,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const cachedChevrons: typeof resolveChevronCacheRef.current = [];
         for (let i = 0; i < steps.length; i++) {
           const step = steps[i];
+          if (step.outcome === 'defense_applied') continue; // defense steps use shield animation, not chevrons
           for (const claimant of step.claimants) {
             const color = PLAYER_COLORS[claimant.player_id] ?? 0xffffff;
             const source = findNearestOwnedTile(step.q, step.r, oldTiles, claimant.player_id);
@@ -1361,9 +1372,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setTrashMode(null);
         setTrashSelectedIndices(new Set());
       }
-      setSurgeTargets([]);
-      setSurgeCardIndex(null);
-      setSurgePrimaryTarget(null);
+      setMultiTileTargets([]);
+      setMultiTileCardIndex(null);
+      setMultiTilePrimaryTarget(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -1590,18 +1601,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
     // Multi-target card (Surge): enter multi-target selection mode on drag
     if (card.multi_target_count > 0) {
-      setSurgeCardIndex(cardIndex);
-      setSurgePrimaryTarget([q, r]);
-      setSurgeTargets([]);
+      setMultiTileCardIndex(cardIndex);
+      setMultiTilePrimaryTarget([q, r]);
+      setMultiTileTargets([]);
       setSelectedCardIndex(cardIndex);
       return;
     }
 
     // Multi-tile defense card (Bulwark, etc.): enter multi-target selection mode
     if (card.card_type === 'defense' && (card.defense_target_count ?? 1) > 1) {
-      setSurgeCardIndex(cardIndex);
-      setSurgePrimaryTarget([q, r]);
-      setSurgeTargets([]);
+      setMultiTileCardIndex(cardIndex);
+      setMultiTilePrimaryTarget([q, r]);
+      setMultiTileTargets([]);
       setSelectedCardIndex(cardIndex);
       return;
     }
@@ -1650,7 +1661,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       for (const [pid, playerActions] of Object.entries(revealedActionsRef.current)) {
         const name = gameState.players[pid]?.name ?? pid;
         for (const action of playerActions) {
-          if (actionTileKey(action) === clickedKey) {
+          const isPrimary = actionTileKey(action) === clickedKey;
+          const isExtra = action.extra_targets?.some(([eq, er]: [number, number]) => `${eq},${er}` === clickedKey);
+          if (isPrimary || isExtra) {
             entries.push({ playerId: pid, playerName: name, card: action.card });
           }
         }
@@ -1665,14 +1678,31 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (phase !== 'play' || !activePlayer) return;
 
     // Multi-target mode (Surge or multi-tile Defense): adding extra targets
-    if (surgeCardIndex !== null && surgePrimaryTarget) {
+    if (multiTileCardIndex !== null && multiTilePrimaryTarget) {
       const tileKey = `${q},${r}`;
-      // Don't allow duplicate targets or the primary target
-      if (surgeTargets.some(([tq, tr]) => tq === q && tr === r)) return;
-      if (surgePrimaryTarget[0] === q && surgePrimaryTarget[1] === r) return;
+      // Clicking primary target: deselect it by shifting the first extra target to primary
+      if (multiTilePrimaryTarget[0] === q && multiTilePrimaryTarget[1] === r) {
+        if (multiTileTargets.length > 0) {
+          setMultiTilePrimaryTarget(multiTileTargets[0]);
+          setMultiTileTargets(prev => prev.slice(1));
+        } else {
+          // No extra targets — cancel multi-target mode entirely
+          setMultiTileCardIndex(null);
+          setMultiTilePrimaryTarget(null);
+          setMultiTileTargets([]);
+          setSelectedCardIndex(null);
+        }
+        return;
+      }
+      // Clicking an already-selected extra target deselects it
+      const existingIdx = multiTileTargets.findIndex(([tq, tr]) => tq === q && tr === r);
+      if (existingIdx !== -1) {
+        setMultiTileTargets(prev => prev.filter((_, i) => i !== existingIdx));
+        return;
+      }
 
-      const surgeCard = activePlayer.hand[surgeCardIndex];
-      const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
+      const multiTileCard = activePlayer.hand[multiTileCardIndex];
+      const isDefenseMulti = multiTileCard?.card_type === 'defense' && (multiTileCard?.defense_target_count ?? 1) > 1;
 
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || tile.is_blocked) return;
@@ -1680,15 +1710,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (isDefenseMulti) {
         // Defense multi-target: must select own tiles
         if (tile.owner !== activePlayerId) return;
-        const maxExtra = (surgeCard?.defense_target_count ?? 1) - 1;
-        if (surgeTargets.length >= maxExtra) return;
+        const maxExtra = (multiTileCard?.defense_target_count ?? 1) - 1;
+        if (multiTileTargets.length >= maxExtra) {
+          // At max: drop oldest, add new
+          setMultiTileTargets(prev => [...prev.slice(1), [q, r]]);
+          sound.tileSelect();
+          return;
+        }
       } else {
         // Claim multi-target (Surge): must select non-own tiles
         if (tile.owner === activePlayerId) return;
-        const maxExtra = surgeCard?.multi_target_count ?? 0;
-        if (surgeTargets.length >= maxExtra) return;
+        const maxExtra = multiTileCard?.multi_target_count ?? 0;
+        if (multiTileTargets.length >= maxExtra) {
+          setMultiTileTargets(prev => [...prev.slice(1), [q, r]]);
+          sound.tileSelect();
+          return;
+        }
       }
-      setSurgeTargets(prev => [...prev, [q, r]]);
+      setMultiTileTargets(prev => [...prev, [q, r]]);
       sound.tileSelect();
       return;
     }
@@ -1770,41 +1809,41 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         // Multi-target card (Surge): enter multi-target selection mode
         if (card.multi_target_count > 0) {
-          setSurgeCardIndex(selectedCardIndex);
-          setSurgePrimaryTarget([q, r]);
-          setSurgeTargets([]);
+          setMultiTileCardIndex(selectedCardIndex);
+          setMultiTilePrimaryTarget([q, r]);
+          setMultiTileTargets([]);
           return;
         }
       }
 
       // Multi-tile defense card: enter multi-target selection mode
       if (card.card_type === 'defense' && (card.defense_target_count ?? 1) > 1) {
-        setSurgeCardIndex(selectedCardIndex);
-        setSurgePrimaryTarget([q, r]);
-        setSurgeTargets([]);
+        setMultiTileCardIndex(selectedCardIndex);
+        setMultiTilePrimaryTarget([q, r]);
+        setMultiTileTargets([]);
         return;
       }
 
       sound.tileSelect();
       await playCardAtTile(selectedCardIndex, q, r);
     }
-  }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile, surgeCardIndex, surgePrimaryTarget, surgeTargets, activePlayerId, reviewing, gameState.players, actionTileKey, sound]);
+  }, [phase, activePlayer, selectedCardIndex, gameState.grid, playCardAtTile, multiTileCardIndex, multiTilePrimaryTarget, multiTileTargets, activePlayerId, reviewing, gameState.players, actionTileKey, sound]);
 
   const handlePlayEngine = useCallback(async () => {
     if (selectedCardIndex === null) return;
     await playCardNoTarget(selectedCardIndex);
   }, [selectedCardIndex, playCardNoTarget]);
 
-  // Confirm Surge multi-target selection
-  const handleConfirmSurge = useCallback(async () => {
-    if (surgeCardIndex === null || !surgePrimaryTarget) return;
-    await playCardAtTile(surgeCardIndex, surgePrimaryTarget[0], surgePrimaryTarget[1], surgeTargets);
-  }, [surgeCardIndex, surgePrimaryTarget, surgeTargets, playCardAtTile]);
+  // Confirm multi-tile target selection
+  const handleConfirmMultiTile = useCallback(async () => {
+    if (multiTileCardIndex === null || !multiTilePrimaryTarget) return;
+    await playCardAtTile(multiTileCardIndex, multiTilePrimaryTarget[0], multiTilePrimaryTarget[1], multiTileTargets);
+  }, [multiTileCardIndex, multiTilePrimaryTarget, multiTileTargets, playCardAtTile]);
 
-  const handleCancelSurge = useCallback(() => {
-    setSurgeCardIndex(null);
-    setSurgePrimaryTarget(null);
-    setSurgeTargets([]);
+  const handleCancelMultiTile = useCallback(() => {
+    setMultiTileCardIndex(null);
+    setMultiTilePrimaryTarget(null);
+    setMultiTileTargets([]);
   }, []);
 
   // Confirm trash/discard selection
@@ -2041,7 +2080,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (
           phase === 'play' && activePlayer && !activePlayer.has_submitted_play &&
           !interactionBlocked && !resolving && activePlayer.hand.length > 0 &&
-          surgeCardIndex === null && !trashMode
+          multiTileCardIndex === null && !trashMode
         ) {
           const len = activePlayer.hand.length;
           if (e.shiftKey) {
@@ -2092,7 +2131,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         // Priority 1: Play selected engine card (only non-targeting engines)
         if (
           phase === 'play' && activePlayer && !resolving &&
-          selectedCardIndex !== null && surgeCardIndex === null && !trashMode
+          selectedCardIndex !== null && multiTileCardIndex === null && !trashMode
         ) {
           const card = activePlayer.hand[selectedCardIndex];
           if (card?.card_type === 'engine' && !needsOpponentTarget(card) && !card.target_own_tile) {
@@ -2105,7 +2144,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (
           phase === 'play' && activePlayer && !activePlayer.has_submitted_play &&
           !resolving && activePlayerEffects.length === 0 &&
-          surgeCardIndex === null && !trashMode
+          multiTileCardIndex === null && !trashMode
         ) {
           const hasPlayableEngine = selectedCardIndex !== null &&
             activePlayer.hand[selectedCardIndex]?.card_type === 'engine';
@@ -2160,7 +2199,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, surgeCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
+  }, [activePlayer, phase, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -2555,6 +2594,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           vp_value: step.vp_value,
         };
       }
+      // Defense applied: update tile defense values so labels re-render
+      if (tile && step.outcome === 'defense_applied') {
+        const permDef = step.defense_permanent ?? 0;
+        const tempDef = step.defense_temporary ?? 0;
+        newTiles[step.tile_key] = {
+          ...tile,
+          defense_power: permDef + tempDef,
+          permanent_defense_bonus: permDef - tile.base_defense,
+          ...(step.defense_immunity ? { immune: true } : {}),
+        };
+      }
 
       // Move resolved claim cards from planned_actions → discard for each claimant
       const newPlayers = { ...prev.players };
@@ -2793,9 +2843,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const name = player?.name ?? pid;
       for (const action of playerActions) {
         const key = actionTileKey(action);
+        const entry = { playerId: pid, playerName: name, card: action.card, effectivePower: action.effective_power, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
         if (key) {
           if (!map.has(key)) map.set(key, []);
-          map.get(key)!.push({ playerId: pid, playerName: name, card: action.card, effectivePower: action.effective_power, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards });
+          map.get(key)!.push(entry);
+        }
+        // Also include extra targets (multi-target cards like Surge, Twin Cities, Bulwark)
+        if (action.extra_targets) {
+          for (const [eq, er] of action.extra_targets) {
+            const extraKey = `${eq},${er}`;
+            if (!map.has(extraKey)) map.set(extraKey, []);
+            map.get(extraKey)!.push(entry);
+          }
         }
       }
     }
@@ -2875,6 +2934,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (!tile || tile.is_blocked) continue;
       // Skip own tiles (can't claim what you own)
       if (tile.owner === activePlayerId) continue;
+      // Skip immune tiles (Iron Wall / Stronghold)
+      if (tile.immune) continue;
       // Exclude neutral tiles too weak to capture
       if (!tile.owner && tile.base_defense > card.power) continue;
       // Exclude occupied tiles for unoccupied_only cards
@@ -3060,7 +3121,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (!activePlayer?.planned_actions) return undefined;
     const map = new Map<string, PlannedActionIcon>();
 
-    const addToMap = (key: string, type: string, power: number, name: string, card: Card, effectivePower?: number) => {
+    const addToMap = (key: string, type: string, power: number, name: string, card: Card, effectivePower?: number, isPermanentDef?: boolean) => {
       const existing = map.get(key);
       if (existing) {
         // Stackable: accumulate power from multiple cards on the same tile
@@ -3068,8 +3129,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         existing.name = `${existing.name} + ${name}`;
         existing.card = card;
         existing.allCards.push({ card, effectivePower });
+        if (isPermanentDef) {
+          existing.permanentDefPower += power;
+        } else if (type === 'defense' || type === 'claim') {
+          existing.tempDefPower += power;
+        }
       } else {
-        map.set(key, { type, power, name, card, allCards: [{ card, effectivePower }] });
+        const permDef = isPermanentDef ? power : 0;
+        const tmpDef = !isPermanentDef && (type === 'defense' || type === 'claim') ? power : 0;
+        map.set(key, { type, power, name, card, allCards: [{ card, effectivePower }], permanentDefPower: permDef, tempDefPower: tmpDef });
       }
     };
 
@@ -3079,14 +3147,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         // Engine cards targeting own tiles (Scorched Retreat, Exodus) get 'abandon' type
         const type = action.card.card_type === 'engine' && action.card.target_own_tile ? 'abandon' : action.card.card_type;
         const effectivePow = action.effective_power ?? action.card.power;
-        const power = type === 'defense' ? action.card.defense_bonus : effectivePow;
-        addToMap(key, type, power, action.card.name, action.card, effectivePow);
+        // For permanent_defense effects (e.g. Twin Cities), use effect value instead of defense_bonus
+        const permDefEffect = action.card.effects?.find(e => e.type === 'permanent_defense');
+        const defBonus = permDefEffect
+          ? (action.card.is_upgraded && permDefEffect.upgraded_value != null ? permDefEffect.upgraded_value : permDefEffect.value)
+          : action.card.defense_bonus;
+        const power = type === 'defense' ? defBonus : effectivePow;
+        const isPermDef = !!permDefEffect;
+        addToMap(key, type, power, action.card.name, action.card, effectivePow, isPermDef);
 
         // Also show defense overlay on extra targets (multi-tile defense like Bulwark)
         if (type === 'defense' && action.extra_targets) {
           for (const [eq, er] of action.extra_targets) {
             const extraKey = `${eq},${er}`;
-            addToMap(extraKey, type, action.card.defense_bonus, action.card.name, action.card);
+            addToMap(extraKey, type, defBonus, action.card.name, action.card, undefined, isPermDef);
           }
         }
         // Also show claim overlay on extra targets (Surge)
@@ -3129,9 +3203,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         <div
           ref={gridContainerRef}
           style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}
-          onClick={() => {
-            if (tileClickedRef.current) { tileClickedRef.current = false; return; }
-            setSelectedCardIndex(null);
+          onPointerDown={(e) => {
+            // Small delay to let pixi's pointerdown handler fire first and set tileClickedRef
+            requestAnimationFrame(() => {
+              if (tileClickedRef.current) { tileClickedRef.current = false; return; }
+              setSelectedCardIndex(null);
+            });
           }}
         >
           {displayState.grid && (
@@ -3140,9 +3217,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onTileClick={handleTileClick}
               highlightTiles={(() => {
                 if (phase !== 'play') return undefined;
-                if (surgeCardIndex !== null) {
-                  const surgeCard = activePlayer?.hand[surgeCardIndex];
-                  const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
+                if (multiTileCardIndex !== null) {
+                  const multiTileCard = activePlayer?.hand[multiTileCardIndex];
+                  const isDefenseMulti = multiTileCard?.card_type === 'defense' && (multiTileCard?.defense_target_count ?? 1) > 1;
                   if (isDefenseMulti) {
                     const ownTiles = new Set<string>();
                     for (const [k, t] of Object.entries(displayState.grid.tiles)) {
@@ -3150,7 +3227,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     }
                     return ownTiles;
                   }
-                  return getValidClaimTiles(surgeCard);
+                  return getValidClaimTiles(multiTileCard);
                 }
                 const card = highlightCard?.card_type === 'claim' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
@@ -3202,9 +3279,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 }
                 return undefined;
               })()}
-              surgeTargets={surgeCardIndex !== null ? [
-                ...(surgePrimaryTarget ? [surgePrimaryTarget] : []),
-                ...surgeTargets,
+              multiTileTargets={multiTileCardIndex !== null ? [
+                ...(multiTilePrimaryTarget ? [multiTilePrimaryTarget] : []),
+                ...multiTileTargets,
               ] : undefined}
               borderTiles={phase === 'play' ? adjacentTiles : undefined}
               playerInfo={playerInfo}
@@ -3213,6 +3290,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
               plannedActions={phase === 'play' ? plannedActions : undefined}
               previewCard={phase === 'play' ? (() => {
+                // In multi-tile selection mode, lock preview to the active card
+                if (multiTileCardIndex !== null) {
+                  const sc = activePlayer?.hand[multiTileCardIndex] ?? null;
+                  return sc ? withEffectivePower(sc, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0) : null;
+                }
                 const raw = highlightCard?.card_type === 'claim' || highlightCard?.card_type === 'defense' ? highlightCard
                   : (highlightCard?.card_type === 'engine' && (needsOpponentTarget(highlightCard) || highlightCard?.target_own_tile)) ? highlightCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
@@ -3221,6 +3303,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               })() : null}
               previewValidTiles={(() => {
                 if (phase !== 'play') return undefined;
+                // In multi-tile selection mode, lock valid tiles to the active card
+                if (multiTileCardIndex !== null) {
+                  const sc = activePlayer?.hand[multiTileCardIndex] ?? null;
+                  return sc ? getAllValidPlayTiles(sc) : undefined;
+                }
                 const card = highlightCard?.card_type === 'claim' || highlightCard?.card_type === 'defense' ? highlightCard
                   : (highlightCard?.card_type === 'engine' && (needsOpponentTarget(highlightCard) || highlightCard?.target_own_tile)) ? highlightCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
@@ -3752,6 +3839,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onBuyUpgrade={handleBuyUpgrade}
               onReroll={handleReroll}
               disabled={phase !== 'buy' || activePlayerId !== gameState.current_buyer_id}
+              buyLocked={!!activePlayer.buy_locked}
               onClose={() => setShowShopOverlay(false)}
               testMode={!!gameState.test_mode}
               effectiveBuyCosts={activePlayer?.effective_buy_costs}
@@ -3803,7 +3891,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               </div>
             )}
             {/* Sequential buy: waiting for current buyer */}
-            {phase === 'buy' && activePlayer && activePlayer.has_ended_turn && activePlayerId !== gameState.current_buyer_id && !phaseBanner && (() => {
+            {phase === 'buy' && activePlayer && activePlayerId !== gameState.current_buyer_id && !phaseBanner && (() => {
               const buyerId = gameState.current_buyer_id;
               const buyerName = buyerId ? gameState.players[buyerId]?.name : null;
               return buyerName ? (
@@ -3825,7 +3913,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             })()}
             {/* Test-mode Discard & Trash buttons */}
             {gameState.test_mode && phase === 'play' && activePlayer && !resolving &&
-              selectedCard && selectedCardIndex !== null && surgeCardIndex === null && (
+              selectedCard && selectedCardIndex !== null && multiTileCardIndex === null && (
               <>
                 <button
                   onClick={() => handleTestDiscardCard(selectedCardIndex)}
@@ -3868,7 +3956,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             {/* Upgrade button — shown when a card is selected during play phase */}
             {phase === 'play' && activePlayer && !resolving && selectedCard && selectedCardIndex !== null &&
               !selectedCard.is_upgraded && hasUpgradePreview(selectedCard) &&
-              (activePlayer.upgrade_credits > 0 || gameState.test_mode) && surgeCardIndex === null && !trashMode && (
+              (activePlayer.upgrade_credits > 0 || gameState.test_mode) && multiTileCardIndex === null && !trashMode && (
               <div
                 style={{ position: 'relative', display: 'inline-block' }}
                 onMouseEnter={() => setShowUpgradePreview(true)}
@@ -3906,21 +3994,21 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </div>
             )}
-            {/* Multi-target confirm/cancel (Surge or Defense) */}
-            {phase === 'play' && surgeCardIndex !== null && surgePrimaryTarget && (() => {
-              const surgeCard = activePlayer?.hand[surgeCardIndex];
-              const isDefenseMulti = surgeCard?.card_type === 'defense' && (surgeCard?.defense_target_count ?? 1) > 1;
+            {/* Multi-tile confirm/cancel (Surge card or multi-target Defense) */}
+            {phase === 'play' && multiTileCardIndex !== null && multiTilePrimaryTarget && (() => {
+              const multiTileCard = activePlayer?.hand[multiTileCardIndex];
+              const isDefenseMulti = multiTileCard?.card_type === 'defense' && (multiTileCard?.defense_target_count ?? 1) > 1;
               const maxTotal = isDefenseMulti
-                ? (surgeCard?.defense_target_count ?? 1)
-                : 1 + (surgeCard?.multi_target_count ?? 0);
+                ? (multiTileCard?.defense_target_count ?? 1)
+                : 1 + (multiTileCard?.multi_target_count ?? 0);
               const label = isDefenseMulti ? 'Defend' : 'Surge';
               return (
                 <>
                   <span style={{ fontSize: 12, color: '#aaa' }}>
-                    {label}: {1 + surgeTargets.length}/{maxTotal} tiles selected
+                    {label}: {1 + multiTileTargets.length}/{maxTotal} tiles selected
                   </span>
                   <button
-                    onClick={handleCancelSurge}
+                    onClick={handleCancelMultiTile}
                     style={{
                       padding: '6px 16px',
                       background: '#555',
@@ -3937,7 +4025,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     Cancel
                   </button>
                   <IrreversibleButton
-                    onClick={handleConfirmSurge}
+                    onClick={handleConfirmMultiTile}
                     tooltip={`Confirm all selected tiles for this ${label} card.`}
                     style={{
                       padding: '6px 16px',
@@ -4011,7 +4099,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </>
               );
             })()}
-            {phase === 'play' && !resolving && !phaseBanner && !showIntro && introSequence === 'done' && activePlayer && !activePlayer.has_submitted_play && activePlayerEffects.length === 0 && surgeCardIndex === null && !trashMode && (
+            {phase === 'play' && !resolving && !phaseBanner && !showIntro && introSequence === 'done' && activePlayer && !activePlayer.has_submitted_play && activePlayerEffects.length === 0 && multiTileCardIndex === null && !trashMode && (
               <div style={{
                 opacity: submitButtonVisible ? 1 : 0,
                 transition: 'opacity 0.4s ease-in',
@@ -4069,7 +4157,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 Resolving...
               </button>
             )}
-            {reviewing && !resolving && (
+            {reviewing && !resolving && !activePlayer?.has_acknowledged_resolve && (
               <button
                 onClick={handleDoneReviewing}
                 style={{
@@ -4112,7 +4200,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </HoldToSubmitButton>
               </div>
             )}
-            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && activePlayerId === gameState.current_buyer_id && (
               <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
                 <button
                   disabled
@@ -4270,6 +4358,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         <FullGameLog
           gameId={gameState.id}
           playerId={activePlayerId}
+          mapSeed={gameState.map_seed}
           onClose={() => setShowFullLog(false)}
         />
       )}
@@ -4649,7 +4738,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     <div style={{ fontSize: 13, fontWeight: 'bold', color: '#fff', marginBottom: 2 }}>
                       {effect.card_name}
                     </div>
-                    <div style={{ fontSize: 12, color: '#ff6666', fontWeight: 'bold' }}>
+                    <div style={{ fontSize: 12, color: ['grant_actions_next_turn', 'free_reroll', 'grant_land_grants', 'cease_fire', 'next_turn_bonus', 'cost_reduction'].includes(effect.effect_type) ? '#4aff6a' : effect.effect_type === 'buy_restriction' ? '#ffaa44' : '#ff6666', fontWeight: 'bold' }}>
                       {effect.effect}
                     </div>
                   </div>

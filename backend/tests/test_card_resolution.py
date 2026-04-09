@@ -765,7 +765,9 @@ class TestVanguardSurgeProtocol:
         assert success
         # Actions don't increase this turn
         assert other.actions_available == initial_other_actions
-        # But extra actions are queued for next turn
+        # Effect is on_resolution — submit and resolve to trigger it
+        submit_play(game, "p0")
+        submit_play(game, "p1")
         assert other.turn_modifiers.extra_actions_next_turn == 1
 
 
@@ -1515,7 +1517,7 @@ class TestFortressWarCouncil:
         assert card.buy_cost == 3
 
     def test_war_council_buy_restriction(self, card_registry):
-        """War Council: sets buy_locked on player."""
+        """War Council: sets buy_locked on player (on_resolution)."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
         wc = _copy_card(card_registry["fortress_war_council"], "test_wc")
@@ -1523,6 +1525,9 @@ class TestFortressWarCouncil:
 
         success, _ = play_card(game, "p0", 0)
         assert success
+        # Effect is on_resolution — submit and resolve to trigger it
+        submit_play(game, "p0")
+        submit_play(game, "p1")
         assert player.turn_modifiers.buy_locked
 
 
@@ -3306,6 +3311,9 @@ class TestSwarmPlague:
         # No immediate trashing — effect is queued for next turn
         assert len(p0.hand) == p0_hand_before
         assert len(p1.hand) == p1_hand_before - 1  # -1 played only
+        # Effect is on_resolution — submit and resolve to trigger it
+        submit_play(game, "p0")
+        submit_play(game, "p1")
         # Both players have plague queued
         assert p0.turn_modifiers.plague_trash_next_turn == 1
         assert p1.turn_modifiers.plague_trash_next_turn == 1
@@ -3328,6 +3336,9 @@ class TestSwarmPlague:
         p1.hand = [plague] + p1.hand[1:]
         success, msg = play_card(game, "p1", 0)
         assert success, msg
+        # Effect is on_resolution — submit and resolve to trigger it
+        submit_play(game, "p0")
+        submit_play(game, "p1")
         # Only p0 has plague queued (upgraded spares self)
         assert p0.turn_modifiers.plague_trash_next_turn == 1
         assert p1.turn_modifiers.plague_trash_next_turn == 0

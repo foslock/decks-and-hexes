@@ -325,6 +325,7 @@ class Player:
             ) if self.is_cpu else None,
             "has_left": self.has_left,
             "free_rerolls": self.turn_modifiers.free_rerolls,
+            "buy_locked": self.turn_modifiers.buy_locked,
             "pending_discard": self.pending_discard,
         }
 
@@ -468,9 +469,17 @@ class GameState:
             pdata["effective_buy_costs"] = effective_costs
             players_dict[pid] = pdata
 
+        # Compute immune tiles from all players' turn modifiers
+        grid_dict = self.grid.to_dict() if self.grid else None
+        if grid_dict:
+            for pid in self.player_order:
+                for tile_key in self.players[pid].turn_modifiers.immune_tiles:
+                    if tile_key in grid_dict["tiles"]:
+                        grid_dict["tiles"][tile_key]["immune"] = True
+
         result: dict[str, Any] = {
             "id": self.id,
-            "grid": self.grid.to_dict() if self.grid else None,
+            "grid": grid_dict,
             "players": players_dict,
             "player_order": self.player_order,
             "current_phase": self.current_phase.value,
@@ -990,7 +999,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         return False, f"{card.name} cannot be played"
 
     # Debt card: requires 3 resources to play (self-trash)
-    if card.name == "Debt" and card.trash_immune:
+    if card.name == "Debt":
         if player.resources < 3:
             return False, "Need 3 resources to play Debt"
 
@@ -1022,6 +1031,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
         else:
             if tile.is_blocked:
                 return False, "Cannot claim blocked tile"
+
+            # Check tile immunity — other players' immune tiles cannot be targeted
+            if tile.owner and tile.owner != player_id:
+                for pid_check in game.player_order:
+                    if pid_check == player_id:
+                        continue
+                    if f"{target_q},{_target_r}" in game.players[pid_check].turn_modifiers.immune_tiles:
+                        return False, "This tile is immune to claims this round"
 
             # Check range requirement (adjacency_required + claim_range)
             if card.adjacency_required:
@@ -1367,6 +1384,17 @@ def execute_reveal(game: GameState) -> GameState:
     game.player_effects = []
     game._log("=== Reveal & Resolve ===")
 
+    # Log each player's played cards
+    for pid in game.player_order:
+        player = game.players[pid]
+        if player.has_left:
+            continue
+        if player.planned_actions:
+            card_names = [a.card.name for a in player.planned_actions]
+            game._log(f"{player.name} played: {', '.join(card_names)}", actor=pid)
+        else:
+            game._log(f"{player.name} played no cards", actor=pid)
+
     assert game.grid is not None
 
     # Collect all claims by tile
@@ -1430,6 +1458,84 @@ def execute_reveal(game: GameState) -> GameState:
                     f"{game.players[cpid].name}'s claim on {tile_key} fails — tile is now blocked terrain",
                     actor=cpid)
             del claims_by_tile[tile_key]
+
+    # ── Pre-resolve defense cards BEFORE claims ──────────────────────
+    # Defense cards are applied first so their bonuses count during claim resolution.
+    defense_actions: list[tuple[str, PlannedAction]] = []
+    non_defense_other: list[tuple[str, PlannedAction]] = []
+    for pid, action in other_actions:
+        if action.card.card_type == CardType.DEFENSE:
+            defense_actions.append((pid, action))
+        else:
+            non_defense_other.append((pid, action))
+    other_actions = non_defense_other
+
+    for pid, action in defense_actions:
+        player = game.players[pid]
+        card = action.card
+
+        # Resource / draw effects for ON_RESOLUTION defense cards
+        if card.timing == Timing.ON_RESOLUTION:
+            if card.effective_resource_gain > 0:
+                player.resources += card.effective_resource_gain
+            if card.effective_draw_cards > 0:
+                drawn = player.deck.draw(card.effective_draw_cards, game.rng)
+                player.hand.extend(drawn)
+
+        # Apply defense bonus to target tile(s)
+        has_perm_def = card.effects and any(
+            e.type == EffectType.PERMANENT_DEFENSE for e in card.effects
+        )
+        if action.target_q is not None and not has_perm_def:
+            _action_target_r = action.target_r if action.target_r is not None else 0
+            tile = game.grid.get_tile(action.target_q, _action_target_r)
+            if tile and tile.owner == pid:
+                tile.defense_power += card.effective_defense_bonus
+                game._log(f"{player.name} fortifies tile {action.target_q},{action.target_r} (+{card.effective_defense_bonus} defense)")
+            for et_q, et_r in action.extra_targets:
+                et_tile = game.grid.get_tile(et_q, et_r)
+                if et_tile and et_tile.owner == pid:
+                    et_tile.defense_power += card.effective_defense_bonus
+                    game._log(f"{player.name} fortifies tile {et_q},{et_r} (+{card.effective_defense_bonus} defense)")
+
+        # Resolve structured on_resolution effects (permanent_defense, defense_per_adjacent, etc.)
+        if card.effects:
+            resolve_on_resolution_effects(game, player, card, action)
+
+        # Build defense resolution steps for frontend animation
+        is_immunity = card.effects and any(e.type == EffectType.TILE_IMMUNITY for e in card.effects)
+        all_target_keys: list[str] = []
+        if action.target_q is not None:
+            _tr = action.target_r if action.target_r is not None else 0
+            all_target_keys.append(f"{action.target_q},{_tr}")
+        for et_q, et_r in action.extra_targets:
+            all_target_keys.append(f"{et_q},{et_r}")
+        for tk in all_target_keys:
+            t = game.grid.tiles.get(tk)
+            if t and t.owner == pid:
+                step_dict: dict[str, Any] = {
+                    "tile_key": tk,
+                    "q": t.q, "r": t.r,
+                    "contested": False,
+                    "claimants": [{"player_id": pid, "power": 0, "source_q": None, "source_r": None}],
+                    "defender_id": pid,
+                    "defender_power": t.defense_power,
+                    "winner_id": pid,
+                    "previous_owner": pid,
+                    "outcome": "defense_applied",
+                    "defense_permanent": t.base_defense + t.permanent_defense_bonus,
+                    "defense_temporary": t.defense_power - t.base_defense - t.permanent_defense_bonus,
+                }
+                if is_immunity:
+                    step_dict["defense_immunity"] = True
+                game.resolution_steps.append(step_dict)
+
+        # Trash on use
+        if card.effective_trash_on_use:
+            player.trash.append(card)
+            game._log(f"{card.name} is trashed after use")
+        else:
+            player.deck.add_to_discard([card])
 
     # Check for tile immunity — remove immune tiles from claims
     for pid in game.player_order:
@@ -1643,7 +1749,8 @@ def execute_reveal(game: GameState) -> GameState:
                     defender_id=defender_id,
                 )
 
-    # Resolve non-claim actions (on_resolution effects)
+    # Resolve non-claim, non-defense actions (on_resolution effects)
+    # (Defense cards were already resolved before claims above.)
     for pid, action in other_actions:
         player = game.players[pid]
         card = action.card
@@ -1654,20 +1761,6 @@ def execute_reveal(game: GameState) -> GameState:
             if card.effective_draw_cards > 0:
                 drawn = player.deck.draw(card.effective_draw_cards, game.rng)
                 player.hand.extend(drawn)
-
-        # Defense bonus applied to target tile(s)
-        if card.card_type == CardType.DEFENSE and action.target_q is not None:
-            _action_target_r = action.target_r if action.target_r is not None else 0
-            tile = game.grid.get_tile(action.target_q, _action_target_r)
-            if tile and tile.owner == pid:
-                tile.defense_power += card.effective_defense_bonus
-                game._log(f"{player.name} fortifies tile {action.target_q},{action.target_r} (+{card.effective_defense_bonus} defense)")
-            # Apply defense bonus to extra targets (multi-tile defense cards like Bulwark)
-            for et_q, et_r in action.extra_targets:
-                et_tile = game.grid.get_tile(et_q, et_r)
-                if et_tile and et_tile.owner == pid:
-                    et_tile.defense_power += card.effective_defense_bonus
-                    game._log(f"{player.name} fortifies tile {et_q},{et_r} (+{card.effective_defense_bonus} defense)")
 
         # Forced discards
         if card.forced_discard > 0 and action.target_player_id:
@@ -1729,7 +1822,9 @@ def execute_reveal(game: GameState) -> GameState:
         rotated_order = game.player_order[fpi:] + game.player_order[:fpi]
         pid_rank = {pid: i for i, pid in enumerate(rotated_order)}
 
-        def step_sort_key(step: dict[str, Any]) -> tuple[int, int, int]:
+        def step_sort_key(step: dict[str, Any]) -> tuple[int, int, int, int]:
+            # Defense-applied steps always come first (0), then claims/other (1)
+            is_defense = 0 if step.get("outcome") == "defense_applied" else 1
             # Primary: rank of the earliest claimant in turn order
             claimant_ids = [c["player_id"] for c in step.get("claimants", [])]
             min_rank = min((pid_rank.get(pid, n) for pid in claimant_ids), default=n)
@@ -1737,7 +1832,7 @@ def execute_reveal(game: GameState) -> GameState:
             # resolve before their fights)
             contested = 1 if step.get("contested") else 0
             # Tertiary: stable sort by tile position for determinism
-            return (min_rank, contested, step.get("q", 0) * 1000 + step.get("r", 0))
+            return (is_defense, min_rank, contested, step.get("q", 0) * 1000 + step.get("r", 0))
 
         game.resolution_steps.sort(key=step_sort_key)
 
@@ -1758,6 +1853,14 @@ def execute_reveal(game: GameState) -> GameState:
             if not claimed_opponent_tile:
                 player.turn_modifiers.extra_draws_next_turn += bonus
                 game._log(f"{player.name} draws {bonus} extra card(s) next turn (Cease Fire)")
+                game.player_effects.append({
+                    "source_player_id": pid,
+                    "target_player_id": pid,
+                    "card_name": "Cease Fire",
+                    "effect": f"+{bonus} Cards next round",
+                    "effect_type": "cease_fire",
+                    "value": bonus,
+                })
             else:
                 game._log(f"{player.name}'s Cease Fire bonus forfeited — claimed an opponent tile")
 
@@ -1963,7 +2066,7 @@ def spend_upgrade_credit(
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
-    if player.upgrade_credits <= 0:
+    if player.upgrade_credits <= 0 and not game.test_mode:
         return False, "No upgrade credits available"
     if card_index < 0 or card_index >= len(player.hand):
         return False, "Invalid card index"
@@ -1976,7 +2079,8 @@ def spend_upgrade_credit(
         card.name = card.name_upgraded
     if card.upgrade_description:
         card.description = card.upgrade_description
-    player.upgrade_credits -= 1
+    if not game.test_mode:
+        player.upgrade_credits -= 1
     game._log(
         f"{player.name} upgrades {card.name} "
         f"({player.upgrade_credits} credits remaining)"

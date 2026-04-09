@@ -7,9 +7,11 @@ export interface HexTile {
   owner: string | null;
   defense_power: number;
   base_defense: number;
+  permanent_defense_bonus: number;
   held_since_turn: number | null;
   is_base: boolean;
   base_owner: string | null;
+  immune?: boolean;  // tile has claim immunity this round (Iron Wall / Stronghold)
 }
 
 export interface Card {
@@ -103,6 +105,7 @@ export interface Player {
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
   has_left: boolean;
   free_rerolls: number;
+  buy_locked: boolean;
   pending_discard: number;
 }
 
@@ -128,8 +131,11 @@ export interface ResolutionStep {
   defender_power: number;
   winner_id: string | null;
   previous_owner: string | null;
-  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate';
+  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate' | 'defense_applied';
   vp_value?: number;  // Consecrate: new VP value of the tile after enhancement
+  defense_permanent?: number;  // defense_applied: persistent defense after application
+  defense_temporary?: number;  // defense_applied: temporary defense after application
+  defense_immunity?: boolean;  // defense_applied: tile has immunity (Iron Wall / Stronghold)
 }
 
 export interface PlayerEffect {

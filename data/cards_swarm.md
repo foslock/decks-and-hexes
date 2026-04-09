@@ -6,7 +6,7 @@
 # EDITING NOTES:
 # - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - timing: "immediate" | "on_resolution" | "next_turn"
-# - stackable: true = this card can be played on a tile where you already have a claim this turn
+# - stackable: true = this card can be played on a tile where you already have a claim this round
 # - upgraded: the "+" version of the card after spending an upgrade credit
 
 cards:
@@ -121,8 +121,8 @@ cards:
     buy_cost: 1
     action_return: 0
     power: 1
-    effect: "Claim: Power 1. If you play another Rabble card this turn, gain 1 action."
-    effect_upgraded: "Claim: Power 1. If you play another Rabble+ card this turn, gain 1 action. Additionally, +1 power per Rabble+ played this turn."
+    effect: "Claim: Power 1. If you play another Rabble card this round, gain 1 action."
+    effect_upgraded: "Claim: Power 1. If you play another Rabble+ card this round, gain 1 action. Additionally, +1 power per Rabble+ played this round."
     secondary_effect: null
     secondary_timing: null
 
@@ -139,8 +139,8 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 2
-    effect: "Claim: Power 2. Stackable. Each other claim you play on the same tile this turn gets +1 power."
-    effect_upgraded: "Claim: Power 3. Stackable. Each other claim you play on the same tile this turn gets +1 power."
+    effect: "Claim: Power 2. Stackable. Each other claim you play on the same tile this round gets +1 power."
+    effect_upgraded: "Claim: Power 3. Stackable. Each other claim you play on the same tile this round gets +1 power."
     secondary_effect: null
     secondary_timing: null
     stackable: true
@@ -238,7 +238,7 @@ cards:
 
     effects:
       - type: buy_restriction
-        timing: immediate
+        timing: on_resolution
 
   - id: swarm_consecrate
     name: Consecrate
@@ -390,15 +390,15 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 0
-    effect: "At the beginning of next turn, every player (including you) trashes a random card from their hand."
-    effect_upgraded: "At the beginning of next turn, every opponent trashes a random card from their hand."
+    effect: "At the beginning of next round, every player (including you) trashes a random card from their hand."
+    effect_upgraded: "At the beginning of next round, every opponent trashes a random card from their hand."
     secondary_effect: null
     secondary_timing: null
     note: "Symmetrical disruption that favors Swarm — their cheap cards are expendable, but opponents may lose key pieces. Upgrade removes self-cost."
 
     effects:
       - type: global_random_trash
-        timing: immediate
+        timing: on_resolution
         target: all_players
 
   - id: swarm_infestation
@@ -409,8 +409,8 @@ cards:
     action_return: 0
     power: 0
     trash_on_use: true
-    effect: "Choose an opponent. Add 3 Rubble cards to their discard pile. Trash this card."
-    effect_upgraded: "Choose an opponent. Add 4 Rubble cards to their discard pile. Trash this card."
+    effect: "Target opponent adds 3 Rubble cards to their discard pile. Trash this card."
+    effect_upgraded: "Target opponent adds 4 Rubble cards to their discard pile. Trash this card."
     secondary_effect: null
     secondary_timing: null
     note: "Aggressive deck pollution. Rubble clogs the opponent's hand slots, reducing their effective draws."

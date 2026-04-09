@@ -283,7 +283,7 @@ def make_debt_card() -> Card:
         card_type=CardType.ENGINE,
         resource_gain=-3,
         trash_on_use=True,
-        trash_immune=True,
+        trash_immune=False,
         description=f"Pay 3 resources to trash this card. One is given to the VP leader at the beginning of each round, starting round {DEBT_START_ROUND}.",
     )
 

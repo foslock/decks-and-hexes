@@ -151,7 +151,7 @@ const PAGES = [
             <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.defense, marginBottom: 4 }}>🛡️ Defense Cards</div>
             <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
               Protect tiles you own by boosting their defense. A defended tile is harder
-              for opponents to take.
+              for opponents to take. Applied before any claims in a round.
             </div>
           </div>
           <div style={{

@@ -37,6 +37,8 @@ interface ShopOverlayProps {
   onBuyUpgrade: () => void;
   onReroll: () => void;
   disabled: boolean;
+  /** Grand Strategy: player cannot buy any cards this round */
+  buyLocked?: boolean;
   onClose?: () => void;
   testMode?: boolean;
   /** Neutral market purchases from last round (by other players) */
@@ -205,6 +207,7 @@ export default function ShopOverlay({
   onBuyUpgrade,
   onReroll,
   disabled,
+  buyLocked,
   onClose,
   testMode,
   neutralPurchasesLastRound,
@@ -551,7 +554,8 @@ export default function ShopOverlay({
                         onBuy={() => buyArchetypeWithSound(card.id)}
                         onHover={handleCardHover}
                         onLeave={handleCardLeave}
-                        disabled={disabled}
+                        disabled={disabled || !!buyLocked}
+                        disabledTooltip={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : undefined}
                       />
                     );
                   })}
@@ -608,7 +612,8 @@ export default function ShopOverlay({
                       onBuy={() => buyNeutralWithSound(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled}
+                      disabled={disabled || !!buyLocked}
+                      disabledTooltip={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : undefined}
                       purchaseHighlight={!!purchasedBy}
                       currentTurnPurchaseInfo={turnPurchases}
                     />
@@ -644,23 +649,25 @@ export default function ShopOverlay({
                     </span>
                   </>
                 )}
+              <Tooltip content={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : ''}>
               <button
                 onClick={buyUpgradeWithSound}
-                disabled={disabled || playerResources < 4}
+                disabled={disabled || !!buyLocked || playerResources < 4}
                 style={{
                   fontSize: 14,
                   padding: '8px 16px',
-                  background: playerResources >= 4 && !disabled ? '#cc7a2a' : '#333',
-                  border: `1px solid ${playerResources >= 4 && !disabled ? '#cc7a2a' : '#555'}`,
+                  background: playerResources >= 4 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
+                  border: `1px solid ${playerResources >= 4 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
                   borderRadius: 6,
-                  color: playerResources >= 4 && !disabled ? '#fff' : '#555',
-                  cursor: disabled || playerResources < 4 ? 'not-allowed' : 'pointer',
+                  color: playerResources >= 4 && !disabled && !buyLocked ? '#fff' : '#555',
+                  cursor: disabled || buyLocked || playerResources < 4 ? 'not-allowed' : 'pointer',
                   whiteSpace: 'nowrap',
                   flexShrink: 0,
                 }}
               >
                 Buy Upgrade Credit · 4💰
               </button>
+              </Tooltip>
               </div>
               <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
                 Upgrade credits can be spent during your play phase to upgrade any card in your hand.

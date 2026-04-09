@@ -115,17 +115,17 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
     opacity = (stage === 'mount' || stage === 'exit') ? 0 : 1;
     transition = 'none';
   } else {
-    // Normal / Fast: slide left → center → right (fast uses shorter durations)
+    // Normal / Fast: fade in from small left offset, fade out to small right offset
     switch (stage) {
       case 'mount':
-        transform = 'translate(-100%, -50%)';
-        opacity = 1;
+        transform = 'translate(calc(-50% - 30px), -50%)';
+        opacity = 0;
         transition = 'none';
         break;
       case 'enter':
         transform = 'translate(-50%, -50%)';
         opacity = 1;
-        transition = `transform ${enterMs}ms cubic-bezier(0.0, 0.0, 0.15, 1.0)`;
+        transition = `transform ${enterMs}ms ease-out, opacity ${enterMs}ms ease-out`;
         break;
       case 'hold':
         transform = 'translate(-50%, -50%)';
@@ -133,9 +133,9 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
         transition = 'none';
         break;
       case 'exit':
-        transform = 'translate(0%, -50%)';
+        transform = 'translate(calc(-50% + 30px), -50%)';
         opacity = 0;
-        transition = `transform ${exitMs}ms cubic-bezier(0.85, 0.0, 1.0, 1.0), opacity ${exitMs}ms cubic-bezier(0.85, 0.0, 1.0, 1.0)`;
+        transition = `transform ${exitMs}ms ease-in, opacity ${exitMs}ms ease-in`;
         break;
     }
   }

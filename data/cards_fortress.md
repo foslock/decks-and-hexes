@@ -6,7 +6,7 @@
 # EDITING NOTES:
 # - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - timing: "immediate" | "on_resolution" | "next_turn"
-# - stackable: true = this card can be played on a tile where you already have a claim this turn
+# - stackable: true = this card can be played on a tile where you already have a claim this round
 # - upgraded: the "+" version of the card after spending an upgrade credit
 
 cards:
@@ -99,7 +99,7 @@ cards:
     effects:
       - type: tile_immunity
         duration: 1
-        timing: immediate
+        timing: on_resolution
 
   - id: fortress_garrison
     name: Garrison
@@ -128,7 +128,7 @@ cards:
     action_return: 0
     power: 2
     effect: "Claim: Power 2. If the target is a neutral tile, claim it automatically."
-    effect_upgraded: "Claim: Power 3. If the target is a neutral tile, claim it automatically and draw 1 card next turn."
+    effect_upgraded: "Claim: Power 3. If the target is a neutral tile, claim it automatically and draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
 
@@ -144,15 +144,15 @@ cards:
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Gain 1 resource. Your next purchase this turn costs 1 less. Gain 1 action."
-    effect_upgraded: "Gain 2 resources. Your next purchase this turn costs 1 less. Gain 1 action."
+    effect: "Gain 1 resource. Your next purchase this round costs 1 less. Gain 1 action."
+    effect_upgraded: "Gain 2 resources. Your next purchase this round costs 1 less. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: cost_reduction
         value: 1
-        timing: immediate
+        timing: on_resolution
         metadata: {scope: "any_one_card"}
 
   - id: fortress_entrench
@@ -173,7 +173,7 @@ cards:
     effects:
       - type: permanent_defense
         value: 1
-        timing: immediate
+        timing: on_resolution
         metadata: {upgraded_value: 2}
 
   - id: fortress_war_of_attrition
@@ -183,8 +183,8 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 2
-    effect: "Claim: Power 2. If the defender holds, they draw 1 fewer card next turn."
-    effect_upgraded: "Claim: Power 3. If the defender holds, they draw 1 fewer card next turn."
+    effect: "Claim: Power 2. If the defender holds, they draw 1 fewer card next round."
+    effect_upgraded: "Claim: Power 3. If the defender holds, they draw 1 fewer card next round."
     secondary_effect: null
     secondary_timing: on_resolution
 
@@ -211,7 +211,7 @@ cards:
     effects:
       - type: tile_immunity
         duration: 2
-        timing: immediate
+        timing: on_resolution
 
   - id: fortress_overwhelming_force
     name: Juggernaut
@@ -287,7 +287,7 @@ cards:
     effects:
       - type: permanent_defense
         value: 3
-        timing: immediate
+        timing: on_resolution
         metadata: {upgraded_value: 5}
 
   - id: fortress_war_council
@@ -299,14 +299,14 @@ cards:
     power: 0
     draw_cards: 2
     upgraded_draw_cards: 3
-    effect: "Draw 2 cards. Gain 1 action. You cannot buy any cards this turn."
-    effect_upgraded: "Draw 3 cards. Gain 1 action. You cannot buy any cards this turn."
+    effect: "Draw 2 cards. Gain 1 action. You cannot buy any cards this round."
+    effect_upgraded: "Draw 3 cards. Gain 1 action. You cannot buy any cards this round."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: buy_restriction
-        timing: immediate
+        timing: on_resolution
 
   - id: fortress_iron_discipline
     name: Iron Discipline
@@ -399,8 +399,8 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 0
-    effect: "Gain 2 resources for each tile that was captured from you last turn."
-    effect_upgraded: "Gain 4 resources for each tile that was captured from you last turn."
+    effect: "Gain 2 resources for each tile that was captured from you last round."
+    effect_upgraded: "Gain 4 resources for each tile that was captured from you last round."
     secondary_effect: null
     secondary_timing: null
     note: "Turns territorial losses into economic fuel. Creates a deterrent: opponents know that taking Fortress tiles feeds their economy."
@@ -438,8 +438,8 @@ cards:
     action_return: 0
     power: 0
     trash_on_use: true
-    effect: "Next turn, no player can play Claim cards. Trash this card."
-    effect_upgraded: "Next turn, no player can play Claim cards. Draw 2 cards. Trash this card."
+    effect: "Next round, no player can play Claim cards. Trash this card."
+    effect_upgraded: "Next round, no player can play Claim cards. Draw 2 cards. Trash this card."
     secondary_effect: null
     secondary_timing: null
     note: "The panic button. Buys Fortress one turn of absolute safety. The upgraded version draws cards so the stalled turn isn't wasted."

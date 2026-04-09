@@ -110,6 +110,12 @@ class SoundEngine {
     sounds.defeatJingle(ctx, this.dest);
   }
 
+  resolveDefenseFortify() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.resolveDefenseFortify(ctx, this.dest, this.noise);
+  }
+
   resolveTileOccupied() {
     if (!this.ok()) return;
     const ctx = this.ensureContext();

@@ -6,7 +6,7 @@
 # EDITING NOTES:
 # - action_return: 0 = standard, 1 = gain 1 action (net neutral), 2 = gain 2 actions (net +1)
 # - timing: "immediate" | "on_resolution" | "next_turn"
-# - stackable: true = this card can be played on a tile where you already have a claim this turn
+# - stackable: true = this card can be played on a tile where you already have a claim this round
 # - upgraded: the "+" version of the card after spending an upgrade credit
 
 cards:
@@ -43,7 +43,7 @@ cards:
     upgraded_power: 3
     effect: "Claim: Power 2."
     effect_upgraded: "Claim: Power 3."
-    secondary_effect: "If successful, draw 1 card next turn."
+    secondary_effect: "If successful, draw 1 card next round."
     secondary_timing: on_resolution
 
     effects:
@@ -72,8 +72,8 @@ cards:
     buy_cost: 5
     action_return: 0
     power: 3
-    effect: "Claim: Power 3. If you played another Claim card this turn, +2 power."
-    effect_upgraded: "Claim: Power 3. If you played another Claim card this turn, +3 power."
+    effect: "Claim: Power 3. If you played another Claim card this round, +2 power."
+    effect_upgraded: "Claim: Power 3. If you played another Claim card this round, +3 power."
     secondary_effect: null
     secondary_timing: null
 
@@ -182,7 +182,7 @@ cards:
     upgraded_unoccupied_only: false
     effect: "Claim: Power 1 on any adjacent neutral tile."
     effect_upgraded: "Claim: Power 3 on any adjacent tile."
-    secondary_effect: "If successful, draw 1 card next turn."
+    secondary_effect: "If successful, draw 1 card next round."
     secondary_timing: on_resolution
 
     effects:
@@ -198,8 +198,8 @@ cards:
     buy_cost: 5
     action_return: 1
     power: 0
-    effect: "Gain 3 resources. Draw 1 card next turn. Gain 1 action."
-    effect_upgraded: "Gain 4 resources. Draw 1 card next turn. Gain 1 action."
+    effect: "Gain 3 resources. Draw 1 card next round. Gain 1 action."
+    effect_upgraded: "Gain 4 resources. Draw 1 card next round. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -247,15 +247,15 @@ cards:
     buy_cost: 4
     action_return: 2
     power: 0
-    effect: "Gain 2 actions. One other player of your choice gains 1 extra action next turn."
-    effect_upgraded: "Gain 2 actions. Two other players of your choice each gain 1 extra action next turn."
+    effect: "Target opponent gains 1 extra action next round. Gain 2 actions."
+    effect_upgraded: "Two target opponents gain 1 extra action next round. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: grant_actions_next_turn
         value: 1
-        timing: immediate
+        timing: on_resolution
         target: chosen_player
 
   - id: vanguard_spoils_of_war
@@ -303,8 +303,8 @@ cards:
     power: 0
     unplayable: true
     vp_formula: contested_wins
-    effect: "Passive: While in your hand, if you win 2 or more contested tiles this turn, this card permanently gains +1 VP."
-    effect_upgraded: "Passive: While in your hand, if you win 2 or more contested tiles this turn, this card permanently gains +2 VP."
+    effect: "Passive: While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +1 VP."
+    effect_upgraded: "Passive: While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +2 VP."
     secondary_effect: null
     secondary_timing: null
     note: "Escalating VP engine — grows each round you hit the threshold while in hand. Takes up a hand slot when drawn."
@@ -327,8 +327,8 @@ cards:
     upgraded_defense_bonus: 3
     resource_gain: 0
     upgraded_resource_gain: 0
-    effect: "One tile you own gains +2 defense this round. If an opponent's claim on this tile fails, draw 1 card next turn."
-    effect_upgraded: "One tile you own gains +3 defense this round. If an opponent's claim on this tile fails, draw 1 card next turn."
+    effect: "One tile you own gains +2 defense this round. If an opponent's claim on this tile fails, draw 1 card next round."
+    effect_upgraded: "One tile you own gains +3 defense this round. If an opponent's claim on this tile fails, draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
 

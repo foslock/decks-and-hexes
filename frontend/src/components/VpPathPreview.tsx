@@ -128,6 +128,7 @@ function buildDemoTiles(): Record<string, HexTile> {
         owner: null,
         defense_power: 0,
         base_defense: 0,
+        permanent_defense_bonus: 0,
         held_since_turn: null,
         is_base: false,
         base_owner: null,

@@ -10,7 +10,7 @@ import Tooltip from './Tooltip';
  */
 const KEYWORDS: Record<string, string> = {
   'Claim': 'Contest ownership of a hex tile using this card\'s power against the current defense.',
-  'Defense': 'Add defense strength to a tile you own, making it harder for opponents to claim.',
+  'Defense': 'Add defense strength to a tile you own, making it harder for opponents to claim. Applied before any claims in a round.',
   'Engine': 'Gain resources, draw cards, or trigger effects without targeting a tile.',
   'Power': 'Determines the strength of a claim; highest power wins the contested tile.',
   'Draw': 'Take additional cards from your deck into your hand.',

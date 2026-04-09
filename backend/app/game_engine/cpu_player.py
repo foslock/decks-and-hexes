@@ -544,7 +544,7 @@ class CPUPlayer:
         score = 0.0
 
         # Debt card: high priority to play if we can afford it (removes dead weight)
-        if card.name == "Debt" and card.trash_immune:
+        if card.name == "Debt":
             action = {"type": "play_card", "card_index": card_index}
             if player.resources >= 3:
                 return (15.0, action)  # Always play Debt if affordable

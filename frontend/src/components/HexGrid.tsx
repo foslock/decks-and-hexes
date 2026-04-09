@@ -64,6 +64,10 @@ export interface PlannedActionIcon {
   card: Card;
   /** All individual cards played on this tile (for multi-card hover preview) */
   allCards: { card: Card; effectivePower?: number }[];
+  /** Permanent defense power from cards with permanent_defense effects */
+  permanentDefPower: number;
+  /** Temporary defense power from other defense/claim cards */
+  tempDefPower: number;
 }
 
 export interface ClaimChevron {
@@ -94,7 +98,7 @@ interface HexGridProps {
   tiles: Record<string, HexTile>;
   onTileClick: (q: number, r: number, shiftKey?: boolean) => void;
   highlightTiles?: Set<string>;
-  surgeTargets?: [number, number][];
+  multiTileTargets?: [number, number][];
   playerInfo?: Record<string, PlayerInfo>;
   transformRef?: React.MutableRefObject<GridTransform | null>;
   borderTiles?: Set<string>;
@@ -345,7 +349,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -356,7 +360,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const borderTilesRef = useRef(borderTiles);
   const activePlayerIdRef = useRef(activePlayerId);
   const plannedActionsRef = useRef(plannedActions);
-  const surgeTargetsRef = useRef(surgeTargets);
+  const multiTileTargetsRef = useRef(multiTileTargets);
   const previewCardRef = useRef(previewCard);
   const previewValidTilesRef = useRef(previewValidTiles);
   const claimChevronsRef = useRef(claimChevrons);
@@ -369,8 +373,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   const highlightEdgesRef = useRef<Graphics[]>([]);
   const hoveredTileRef = useRef<string | null>(null);
   const hoverEdgeGraphicsRef = useRef<Graphics | null>(null);
-  const previewLabelRef = useRef<Text | null>(null);
-  const tileLabelRef = useRef<Map<string, Text>>(new Map());
+  const previewLabelRef = useRef<Text | Container | null>(null);
+  const tileLabelRef = useRef<Map<string, Text | Container>>(new Map());
   const hiddenLabelKeyRef = useRef<string | null>(null);
   const tileGraphicsRef = useRef<Map<string, { g: Graphics; baseColor: number; isBlocked: boolean; baseAlpha: number }>>(new Map());
   const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card; totalPower?: number; displayName?: string; allCards?: { card: Card; effectivePower?: number }[] } | null>(null);
@@ -407,7 +411,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
   borderTilesRef.current = borderTiles;
   activePlayerIdRef.current = activePlayerId;
   plannedActionsRef.current = plannedActions;
-  surgeTargetsRef.current = surgeTargets;
+  multiTileTargetsRef.current = multiTileTargets;
   previewCardRef.current = previewCard;
   previewValidTilesRef.current = previewValidTiles;
   claimChevronsRef.current = claimChevrons;
@@ -616,6 +620,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           const isDefensive = !isPlayerTarget && !isAbandonEffect && (pCard.card_type === 'defense' || isOwnTile);
           let previewText: string;
           let previewColor: number;
+          let previewPower = 0;
           const isConsecratePreview = pCard.effects?.some(e => e.type === 'enhance_vp_tile');
           if (isConsecratePreview) {
             previewText = '+ ★';
@@ -632,26 +637,93 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             previewText = '🎯';
             previewColor = 0xff6666;
           } else {
-            // Defense cards show their bonus; claim/other cards show their power
-            let previewPower = pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power;
-            // For stackable cards, add power from any already-planned action on this tile
+            // Compute effective power (applies conditional modifiers like Garrison's if_defending_owned)
+            const permDefEffect = pCard.effects?.find(e => e.type === 'permanent_defense');
+            const defPower = permDefEffect
+              ? (pCard.is_upgraded && permDefEffect.upgraded_value != null ? permDefEffect.upgraded_value : permDefEffect.value)
+              : pCard.defense_bonus;
+            const isPermanentDefense = !!permDefEffect;
+            const isImmunityPreview = !!pCard.effects?.some(e => e.type === 'tile_immunity');
+            let basePower = pCard.card_type === 'defense' ? defPower : pCard.power;
+            if (pCard.effects) {
+              for (const eff of pCard.effects) {
+                if (eff.type !== 'power_modifier') continue;
+                const mod = pCard.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+                if (eff.condition === 'if_defending_owned' && isOwnTile) basePower += mod;
+                if (eff.condition === 'if_target_has_defense' && tile.defense_power > 0) basePower += mod;
+                if (eff.condition === 'if_contested') basePower += mod;
+              }
+            }
+            previewPower = basePower;
             const existingPlanned = plannedActionsRef.current?.get(key);
             if (pCard.stackable && existingPlanned) {
-              previewPower = existingPlanned.power + (pCard.card_type === 'defense' ? pCard.defense_bonus : pCard.power);
+              previewPower = existingPlanned.power + basePower;
             }
-            const icon = isDefensive ? '🛡' : '⚔';
-            const prefix = isDefensive ? '+' : '';
-            const spacing = isDefensive ? '' : ' ';
-            previewText = `${icon}${spacing}${prefix}${previewPower}`;
-            previewColor = 0xffffff;
+
+            if (isImmunityPreview) {
+              const existingPersistent = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+              if (existingPersistent > 0) {
+                previewText = '';  // handled by two-part label below
+                previewColor = 0xffffff;
+              } else {
+                previewText = '🛡+∞';
+                previewColor = 0x66ccff;
+              }
+            } else if (!isDefensive) {
+              previewText = `⚔ ${previewPower}`;
+              previewColor = 0xffffff;
+            } else if (isPermanentDefense) {
+              const existingPersistent = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+              previewText = `🛡${existingPersistent + previewPower}`;
+              previewColor = 0xffffff;
+            } else {
+              const existingPersistent = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+              if (existingPersistent > 0) {
+                previewText = '';
+                previewColor = 0xffffff;
+              } else {
+                previewText = `🛡+${previewPower}`;
+                previewColor = 0x66ccff;
+              }
+            }
           }
           const claimFontSize = 21;
-          const lbl = new Text({
-            text: previewText,
-            style: new TextStyle({ fontSize: claimFontSize, fill: previewColor, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
-            resolution: Math.ceil(window.devicePixelRatio || 2),
-          });
-          lbl.anchor.set(0.5);
+          // Two-part label for temp defense on tile with existing persistent defense
+          const existingPersistent = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+          const permDefEffect2 = pCard?.effects?.find(e => e.type === 'permanent_defense');
+          const isPermanentDef2 = !!permDefEffect2;
+          const isImmunityCard = !!pCard?.effects?.some(e => e.type === 'tile_immunity');
+          const isTwoPartPreview = isDefensive && !isPermanentDef2 && existingPersistent > 0
+            && !pCard?.effects?.some(e => e.type === 'enhance_vp_tile')
+            && !(pCard?.card_type === 'engine' && pCard?.target_own_tile);
+          let lbl: Text | Container;
+          if (isTwoPartPreview || (isImmunityCard && existingPersistent > 0)) {
+            const tmpLabel = isImmunityCard ? '+∞' : `+${previewPower}`;
+            const container = new Container();
+            const baseT = new Text({
+              text: `🛡${existingPersistent}`,
+              style: new TextStyle({ fontSize: claimFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            baseT.anchor.set(1, 0.5);
+            container.addChild(baseT);
+            const tmpT = new Text({
+              text: tmpLabel,
+              style: new TextStyle({ fontSize: claimFontSize, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            tmpT.anchor.set(0, 0.5);
+            tmpT.position.set(1, 0);
+            container.addChild(tmpT);
+            lbl = container;
+          } else {
+            lbl = new Text({
+              text: previewText,
+              style: new TextStyle({ fontSize: claimFontSize, fill: previewColor, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            (lbl as Text).anchor.set(0.5);
+          }
           lbl.alpha = 0.7;
           // If VP tile, add preview inside the VP group so it stays grouped with the star
           const vpGroup = vpGroupsRef.current.get(key);
@@ -676,8 +748,18 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
 
         // Planned action card tooltip (always shown — critical gameplay info)
         const plannedAction = plannedActionsRef.current?.get(key);
+        // Also show card preview for multi-tile-selected tiles (not yet confirmed)
+        const multiTileCard = previewCardRef.current;
+        const isMultiTileTarget = multiTileCard && multiTileTargetsRef.current?.some(([sq, sr]) => `${sq},${sr}` === key);
         if (plannedAction) {
           setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name, allCards: plannedAction.allCards });
+        } else if (isMultiTileTarget && multiTileCard) {
+          const permDef = multiTileCard.effects?.find(e => e.type === 'permanent_defense');
+          const defPow = permDef
+            ? (multiTileCard.is_upgraded && permDef.upgraded_value != null ? permDef.upgraded_value : permDef.value)
+            : multiTileCard.defense_bonus;
+          const power = multiTileCard.card_type === 'defense' ? defPow : multiTileCard.power;
+          setTooltip({ x: e.global.x, y: e.global.y, card: multiTileCard, totalPower: power, displayName: multiTileCard.name, allCards: [{ card: multiTileCard, effectivePower: power }] });
         } else if (tooltipsEnabledRef.current) {
           // Non-critical info tooltips (gated by Tooltips setting)
           const lines: string[] = [];
@@ -685,12 +767,23 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
             lines.push('This tile cannot be claimed.');
           } else {
             if (tile.is_base) {
-              lines.push(`Base tile — Defense ${tile.defense_power}. Can be raided for Spoils and Rubble.`);
+              const basePersist = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+              const baseTemp = tile.defense_power - basePersist;
+              const baseBreakdown = baseTemp > 0 ? ` (${basePersist} persistent + ${baseTemp} temporary)` : '';
+              lines.push(`Base tile — Defense ${tile.defense_power}${baseBreakdown}. Can be raided for Spoils and Rubble.`);
             } else if (tile.is_vp) {
               lines.push(`VP Tile — worth ${tile.vp_value} VP when connected to your base.`);
             }
-            if (tile.defense_power > 0) {
-              lines.push(`Claiming this tile requires at least ${tile.defense_power} power.`);
+            if (tile.immune) {
+              lines.push('Cannot be claimed by another player.');
+            } else if (tile.defense_power > 0) {
+              const persistDef = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+              const tmpDef = tile.defense_power - persistDef;
+              const parts: string[] = [];
+              if (persistDef > 0) parts.push(`${persistDef} persistent`);
+              if (tmpDef > 0) parts.push(`${tmpDef} temporary`);
+              const breakdown = parts.length > 1 ? ` (${parts.join(' + ')})` : '';
+              lines.push(`Defense: ${tile.defense_power}${breakdown}. Claiming requires at least ${tile.defense_power + 1} power.`);
             }
             if (tile.owner && playerInfoRef.current?.[tile.owner]) {
               const info = playerInfoRef.current[tile.owner];
@@ -1137,28 +1230,19 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     hoverEdgeGraphicsRef.current = hoverEdgeG;
     hexContainer.addChild(hoverEdgeG);
 
-    // === PASS 7b: Surge target markers ===
-    const sTargets = surgeTargetsRef.current;
+    // === PASS 7b: Multi-tile target markers ===
+    const sTargets = multiTileTargetsRef.current;
     if (sTargets && sTargets.length > 0) {
-      const surgeG = new Graphics();
+      const multiTileG = new Graphics();
       for (let i = 0; i < sTargets.length; i++) {
         const [sq, sr] = sTargets[i];
         const { x: sx, y: sy } = axialToPixel(sq, sr);
-        // Pulsing ring to mark selected surge targets
-        surgeG.setStrokeStyle({ width: 3, color: 0xffff00, alpha: 0.9 });
-        drawHexagon(surgeG, sx, sy, HEX_SIZE - 2);
-        surgeG.stroke();
-        // Number label
-        const numLabel = new Text({
-          text: `${i + 1}`,
-          style: new TextStyle({ fontSize: 16, fill: 0xffff00, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
-          resolution: Math.ceil(window.devicePixelRatio || 2),
-        });
-        numLabel.anchor.set(0.5);
-        numLabel.position.set(sx, sy);
-        hexContainer.addChild(numLabel);
+        // Yellow ring to mark selected multi-tile targets
+        multiTileG.setStrokeStyle({ width: 3, color: 0xffff00, alpha: 0.9 });
+        drawHexagon(multiTileG, sx, sy, HEX_SIZE - 2);
+        multiTileG.stroke();
       }
-      hexContainer.addChild(surgeG);
+      hexContainer.addChild(multiTileG);
     }
 
     // Record child index before PASS 8 — VP path layer will be inserted here
@@ -1233,20 +1317,44 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         castle.alpha = 0.8;
         group.addChild(castle);
 
-        if (tile.defense_power > 0) {
-          const baseDef = new Text({
-            text: `🛡${tile.defense_power}`,
-            style: new TextStyle({
-              fontSize: 13,
-              fill: 0xffffff,
-              fontWeight: 'bold',
-              stroke: { color: 0x000000, width: 2 },
-            }),
-            resolution: Math.ceil(window.devicePixelRatio || 2),
-          });
-          baseDef.anchor.set(0.5);
-          baseDef.position.set(0, 9);
-          group.addChild(baseDef);
+        if (tile.defense_power > 0 || tile.immune) {
+          const persistentDef = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+          const tempDef = tile.defense_power - persistentDef;
+          const isImmune = !!tile.immune;
+          const defContainer = new Container();
+          defContainer.position.set(0, 9);
+
+          if (persistentDef > 0) {
+            const hasTmp = isImmune || tempDef > 0;
+            const baseText = new Text({
+              text: `🛡${persistentDef}`,
+              style: new TextStyle({ fontSize: 13, fill: 0xffffff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            baseText.anchor.set(hasTmp ? 1 : 0.5, 0.5);
+            defContainer.addChild(baseText);
+
+            if (hasTmp) {
+              const tmpText = new Text({
+                text: isImmune ? '+∞' : `+${tempDef}`,
+                style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+                resolution: Math.ceil(window.devicePixelRatio || 2),
+              });
+              tmpText.anchor.set(0, 0.5);
+              tmpText.position.set(1, 0);
+              defContainer.addChild(tmpText);
+            }
+          } else {
+            const tmpText = new Text({
+              text: isImmune ? '🛡+∞' : `🛡+${tempDef}`,
+              style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            tmpText.anchor.set(0.5, 0.5);
+            defContainer.addChild(tmpText);
+          }
+
+          group.addChild(defContainer);
         }
 
         hexContainer.addChild(group);
@@ -1285,31 +1393,49 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
         const isRubbleEffect = plannedAction.type === 'engine' && plannedAction.card.effects?.some(e => e.type === 'inject_rubble');
         const isPlayerTarget = plannedAction.type === 'engine' && (plannedAction.card.forced_discard > 0 || isRubbleEffect);
         const isDefensivePlay = !isPlayerTarget && !isAbandon && (plannedAction.type === 'defense' || tile.owner === activePlayer);
-        const label = isConsecrate
-          ? '+ ★'
-          : isAbandon
-          ? (isBlock ? '🚧' : '↘')
-          : isRubbleEffect
-            ? '🪨'
-            : isPlayerTarget
-              ? '🎯'
-              : isDefensivePlay
-                ? `🛡+${plannedAction.power}`
-                : `⚔ ${plannedAction.power}`;
-        const labelColor = isConsecrate ? 0xffd700 : isAbandon ? 0xff9944 : isPlayerTarget ? 0xff6666 : 0xffffff;
         const claimFontSize = isAbandon ? 24 : isPlayerTarget ? 13 : 21;
+        const actionStroke = { color: 0x000000, width: 2 };
 
-        const actionLabel = new Text({
-          text: label,
-          style: new TextStyle({
-            fontSize: claimFontSize,
-            fill: labelColor,
-            fontWeight: 'bold',
-            stroke: { color: 0x000000, width: 2 },
-          }),
-          resolution: Math.ceil(window.devicePixelRatio || 2),
-        });
-        actionLabel.anchor.set(0.5);
+        let actionLabel: Text | Container;
+        if (isConsecrate) {
+          actionLabel = new Text({ text: '+ ★', style: new TextStyle({ fontSize: claimFontSize, fill: 0xffd700, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+          (actionLabel as Text).anchor.set(0.5);
+        } else if (isAbandon) {
+          actionLabel = new Text({ text: isBlock ? '🚧' : '↘', style: new TextStyle({ fontSize: claimFontSize, fill: 0xff9944, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+          (actionLabel as Text).anchor.set(0.5);
+        } else if (isRubbleEffect) {
+          actionLabel = new Text({ text: '🪨', style: new TextStyle({ fontSize: claimFontSize, fill: 0xff6666, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+          (actionLabel as Text).anchor.set(0.5);
+        } else if (isPlayerTarget) {
+          actionLabel = new Text({ text: '🎯', style: new TextStyle({ fontSize: 13, fill: 0xff6666, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+          (actionLabel as Text).anchor.set(0.5);
+        } else if (!isDefensivePlay) {
+          actionLabel = new Text({ text: `⚔ ${plannedAction.power}`, style: new TextStyle({ fontSize: claimFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+          (actionLabel as Text).anchor.set(0.5);
+        } else {
+          // Check if any card on this tile grants immunity
+          const hasImmunity = plannedAction.allCards.some(c => c.card.effects?.some(e => e.type === 'tile_immunity'));
+          const tilePersist = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+          const totalPersist = tilePersist + plannedAction.permanentDefPower;
+          const tmpLabel = hasImmunity ? '+∞' : `+${plannedAction.tempDefPower}`;
+          const totalTemp = hasImmunity ? 1 : plannedAction.tempDefPower; // truthy check
+          if (totalPersist > 0 && totalTemp > 0) {
+            actionLabel = new Container();
+            const bT = new Text({ text: `🛡${totalPersist}`, style: new TextStyle({ fontSize: claimFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+            bT.anchor.set(1, 0.5);
+            actionLabel.addChild(bT);
+            const tT = new Text({ text: tmpLabel, style: new TextStyle({ fontSize: claimFontSize, fill: 0x66ccff, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+            tT.anchor.set(0, 0.5);
+            tT.position.set(1, 0);
+            actionLabel.addChild(tT);
+          } else if (totalPersist > 0 && !totalTemp) {
+            actionLabel = new Text({ text: `🛡${totalPersist}`, style: new TextStyle({ fontSize: claimFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+            (actionLabel as Text).anchor.set(0.5);
+          } else {
+            actionLabel = new Text({ text: `🛡${tmpLabel}`, style: new TextStyle({ fontSize: claimFontSize, fill: 0x66ccff, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+            (actionLabel as Text).anchor.set(0.5);
+          }
+        }
 
         // If this is a VP tile, add the action label into the VP group so it stays grouped with the star
         const vpGroup = vpGroups.get(key);
@@ -1324,33 +1450,178 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
           textChildrenRef.current.push(actionLabel);
         }
         tileLabelRef.current.set(key, actionLabel);
-      } else if (tile.defense_power > 0 && !tile.is_base) {
-        const defColor = 0xffffff;
-        const def = new Text({
-          text: `🛡${tile.defense_power}`,
-          style: new TextStyle({
-            fontSize: 13,
-            fill: defColor,
-            fontWeight: 'bold',
-            stroke: { color: 0x000000, width: 2 },
-          }),
-          resolution: Math.ceil(window.devicePixelRatio || 2),
-        });
-        def.anchor.set(0.5);
-
-        // If this is a VP tile, add defense into the VP group so it stays grouped with the star
+      } else if ((tile.defense_power > 0 || tile.immune) && !tile.is_base) {
+        const persistentDef = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
+        const tempDef = tile.defense_power - persistentDef;
+        const isImmune = !!tile.immune;
         const vpGroup = vpGroups.get(key);
+
+        const defGroup = new Container();
         if (vpGroup) {
-          def.position.set(0, 12); // local offset below star
-          vpGroup.addChild(def);
+          defGroup.position.set(0, 12);
         } else {
-          def.position.set(x, y);
-          def.alpha = labelAlpha;
-          def.rotation = counterRot;
-          hexContainer.addChild(def);
-          textChildrenRef.current.push(def);
+          defGroup.position.set(x, y);
+          defGroup.rotation = counterRot;
+          defGroup.alpha = labelAlpha;
         }
-        tileLabelRef.current.set(key, def);
+
+        if (persistentDef > 0) {
+          const hasTmp = isImmune || tempDef > 0;
+          const baseText = new Text({
+            text: `🛡${persistentDef}`,
+            style: new TextStyle({ fontSize: 13, fill: 0xffffff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          baseText.anchor.set(hasTmp ? 1 : 0.5, 0.5);
+          defGroup.addChild(baseText);
+
+          if (hasTmp) {
+            const tmpText = new Text({
+              text: isImmune ? '+∞' : `+${tempDef}`,
+              style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            tmpText.anchor.set(0, 0.5);
+            tmpText.position.set(1, 0);
+            defGroup.addChild(tmpText);
+          }
+        } else {
+          const tmpText = new Text({
+            text: isImmune ? '🛡+∞' : `🛡+${tempDef}`,
+            style: new TextStyle({ fontSize: 13, fill: 0x66ccff, fontWeight: 'bold', stroke: { color: 0x000000, width: 2 } }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          tmpText.anchor.set(0.5, 0.5);
+          defGroup.addChild(tmpText);
+        }
+
+        if (vpGroup) {
+          vpGroup.addChild(defGroup);
+        } else {
+          hexContainer.addChild(defGroup);
+          textChildrenRef.current.push(defGroup);
+        }
+        tileLabelRef.current.set(key, defGroup);
+      }
+    }
+
+    // Multi-tile target preview labels — show effective power on each selected tile
+    const multiTilePreviewCard = previewCardRef.current;
+    if (sTargets && sTargets.length > 0 && multiTilePreviewCard) {
+      const isDefenseCard = multiTilePreviewCard.card_type === 'defense';
+      const mtPermDefEffect = multiTilePreviewCard.effects?.find(e => e.type === 'permanent_defense');
+      const isImmunityCard = multiTilePreviewCard.effects?.some(e => e.type === 'tile_immunity') ?? false;
+      const isPermanentDef = !!mtPermDefEffect;
+      const mtDefPower = mtPermDefEffect
+        ? (multiTilePreviewCard.is_upgraded && mtPermDefEffect.upgraded_value != null ? mtPermDefEffect.upgraded_value : mtPermDefEffect.value)
+        : multiTilePreviewCard.defense_bonus;
+      const cardPower = isDefenseCard ? mtDefPower : multiTilePreviewCard.power;
+      for (let i = 0; i < sTargets.length; i++) {
+        const [sq, sr] = sTargets[i];
+        const sKey = `${sq},${sr}`;
+        const sTile = tiles[sKey];
+        if (!sTile) continue;
+        const { x: sx, y: sy } = axialToPixel(sq, sr);
+        const sLabelAlpha = buildAlpha(sq, sr);
+
+        // Combine with existing planned action power on this tile
+        const existingPlanned = planned?.get(sKey);
+        let previewPower = cardPower;
+        if (existingPlanned && multiTilePreviewCard.stackable) {
+          previewPower = existingPlanned.power + cardPower;
+        }
+
+        const isDefensivePlay = isDefenseCard || sTile.owner === activePlayer;
+
+        // Hide existing label on this tile
+        const existingLabel = tileLabelRef.current.get(sKey);
+        if (existingLabel) existingLabel.visible = false;
+
+        const mtFontSize = 21;
+        const mtStroke = { color: 0x000000, width: 2 };
+        let mtLabel: Text | Container;
+        const tilePersist = sTile.base_defense + (sTile.permanent_defense_bonus ?? 0);
+
+        if (!isDefensivePlay) {
+          mtLabel = new Text({
+            text: `⚔ ${previewPower}`,
+            style: new TextStyle({ fontSize: mtFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: mtStroke }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          (mtLabel as Text).anchor.set(0.5);
+        } else if (isImmunityCard) {
+          // Immunity cards show +∞ as temporary defense
+          if (tilePersist > 0) {
+            mtLabel = new Container();
+            const bT = new Text({
+              text: `🛡${tilePersist}`,
+              style: new TextStyle({ fontSize: mtFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: mtStroke }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            bT.anchor.set(1, 0.5);
+            mtLabel.addChild(bT);
+            const tT = new Text({
+              text: `+∞`,
+              style: new TextStyle({ fontSize: mtFontSize, fill: 0x66ccff, fontWeight: 'bold', stroke: mtStroke }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            tT.anchor.set(0, 0.5);
+            tT.position.set(1, 0);
+            mtLabel.addChild(tT);
+          } else {
+            mtLabel = new Text({
+              text: `🛡+∞`,
+              style: new TextStyle({ fontSize: mtFontSize, fill: 0x66ccff, fontWeight: 'bold', stroke: mtStroke }),
+              resolution: Math.ceil(window.devicePixelRatio || 2),
+            });
+            (mtLabel as Text).anchor.set(0.5);
+          }
+        } else if (isPermanentDef) {
+          mtLabel = new Text({
+            text: `🛡${tilePersist + previewPower}`,
+            style: new TextStyle({ fontSize: mtFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: mtStroke }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          (mtLabel as Text).anchor.set(0.5);
+        } else if (tilePersist > 0) {
+          // Two-part: persistent white + temp blue
+          mtLabel = new Container();
+          const bT = new Text({
+            text: `🛡${tilePersist}`,
+            style: new TextStyle({ fontSize: mtFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: mtStroke }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          bT.anchor.set(1, 0.5);
+          mtLabel.addChild(bT);
+          const tT = new Text({
+            text: `+${previewPower}`,
+            style: new TextStyle({ fontSize: mtFontSize, fill: 0x66ccff, fontWeight: 'bold', stroke: mtStroke }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          tT.anchor.set(0, 0.5);
+          tT.position.set(1, 0);
+          mtLabel.addChild(tT);
+        } else {
+          mtLabel = new Text({
+            text: `🛡+${previewPower}`,
+            style: new TextStyle({ fontSize: mtFontSize, fill: 0x66ccff, fontWeight: 'bold', stroke: mtStroke }),
+            resolution: Math.ceil(window.devicePixelRatio || 2),
+          });
+          (mtLabel as Text).anchor.set(0.5);
+        }
+        mtLabel.alpha = 0.7;
+
+        const vpGroup = vpGroups.get(sKey);
+        if (vpGroup) {
+          mtLabel.position.set(0, 8);
+          vpGroup.addChild(mtLabel);
+        } else {
+          mtLabel.position.set(sx, sy);
+          mtLabel.alpha = sLabelAlpha * 0.7;
+          mtLabel.rotation = counterRot;
+          hexContainer.addChild(mtLabel);
+          textChildrenRef.current.push(mtLabel);
+        }
       }
     }
 
@@ -1537,7 +1808,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, surgeTarge
     if (pulseG && hexContainerRef.current) {
       hexContainerRef.current.addChild(pulseG);
     }
-  }, [tiles, highlightTiles, activePlayerId, plannedActions, surgeTargets, claimChevrons, connectedVpTiles, buildProgress, renderTiles]);
+  }, [tiles, highlightTiles, activePlayerId, plannedActions, multiTileTargets, claimChevrons, connectedVpTiles, buildProgress, renderTiles]);
 
   // Review mode: pulsing outlines on tiles that had cards played
   useEffect(() => {

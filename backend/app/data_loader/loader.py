@@ -113,9 +113,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         if match:
             draw_cards = int(match.group(1))
 
-    # Parse defense_bonus from effect text
+    # Parse defense_bonus from effect text (skip cards with permanent_defense effects)
+    has_permanent_defense_effect = any(
+        e.get("type") == "permanent_defense" for e in entry.get("effects", [])
+    )
     defense_bonus = _safe_int(entry.get("defense_bonus", 0))
-    if defense_bonus == 0 and "defense" in effect.lower():
+    if defense_bonus == 0 and "defense" in effect.lower() and not has_permanent_defense_effect:
         match = re.search(r'\+(\d+)\s+defense', effect)
         if match:
             defense_bonus = int(match.group(1))
@@ -215,7 +218,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             if m:
                 upgraded_draw_cards = int(m.group(1))
 
-        if upgraded_defense_bonus is None and "defense" in effect_upgraded.lower():
+        if upgraded_defense_bonus is None and "defense" in effect_upgraded.lower() and not has_permanent_defense_effect:
             m = re.search(r'\+(\d+)\s+defense', effect_upgraded)
             if m:
                 upgraded_defense_bonus = int(m.group(1))

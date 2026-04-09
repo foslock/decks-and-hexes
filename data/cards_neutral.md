@@ -121,8 +121,8 @@ cards:
     power: 0
     forced_discard: 1
     upgraded_forced_discard: 2
-    effect: "Choose a target opponent. That opponent draws 1 fewer card at the start of their next turn."
-    effect_upgraded: "Choose a target opponent. That opponent draws 2 fewer cards at the start of their next turn."
+    effect: "Target opponent draws 1 fewer cards at the start of the next round."
+    effect_upgraded: "Target opponent draws 2 fewer cards at the start of the next round."
     trash_on_use: false
 
   - id: neutral_cease_fire
@@ -133,8 +133,8 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Draw 2 cards next turn if you did not claim any opponent-owned tiles this turn."
-    effect_upgraded: "Draw 3 cards next turn if you did not claim any opponent-owned tiles this turn."
+    effect: "Draw 2 cards next round if you did not successfully claim any opponent-owned tiles this round."
+    effect_upgraded: "Draw 3 cards next round if you did not successfully claim any opponent-owned tiles this round."
     trash_on_use: false
     effects:
       - type: cease_fire
@@ -178,14 +178,14 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 1 free archetype market re-roll this turn."
-    effect_upgraded: "Gain 2 free archetype market re-rolls this turn."
+    effect: "Gain 1 free archetype market re-roll this round."
+    effect_upgraded: "Gain 2 free archetype market re-rolls this round."
     trash_on_use: false
     effects:
       - type: free_reroll
         value: 1
         upgraded_value: 2
-        timing: immediate
+        timing: on_resolution
 
   - id: neutral_militia
     name: Militia
@@ -215,6 +215,7 @@ cards:
     action_return: 0
     power: 3
     adjacency_required: false
+    unoccupied_only: true
     effect: "Claim: Power 3 on any neutral tile on the board, ignoring adjacency restrictions."
     effect_upgraded: "Claim: Power 4 on any neutral tile on the board, ignoring adjacency restrictions."
     trash_on_use: false
@@ -241,7 +242,7 @@ cards:
 
     action_return: 2
     power: 0
-    effect: "Gain 2 actions. All other players gain 1 extra action next turn."
+    effect: "Gain 2 actions. All other players gain 1 extra action next round."
     effect_upgraded: "Gain 2 actions."
     trash_on_use: false
     note: "The shared action gain creates diplomatic tension — upgrading removes the downside entirely."
@@ -249,7 +250,7 @@ cards:
       - type: grant_actions_next_turn
         value: 1
         upgraded_value: 0
-        timing: immediate
+        timing: on_resolution
         target: all_others
 
   - id: neutral_rally_cry
@@ -260,8 +261,8 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "All Claim cards in your hand gain Stackable this turn. Trash this card."
-    effect_upgraded: "All Claim cards in your hand gain Stackable and +1 power this turn. Draw 1 card. Trash this card."
+    effect: "All Claim cards in your hand gain Stackable this round. Trash this card."
+    effect_upgraded: "All Claim cards in your hand gain Stackable and +1 power this round. Draw 1 card. Trash this card."
     trash_on_use: true
     effects:
       - type: grant_stackable
@@ -384,7 +385,7 @@ cards:
     trash_on_use: true
     effects:
       - type: grant_land_grants
-        timing: immediate
+        timing: on_resolution
         target: all_players
 
   # ── NEW SYNERGY CARDS ─────────────────────────────────────────────────
@@ -471,8 +472,8 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 1 action for each other card you've played this turn (max 3). Trash this card."
-    effect_upgraded: "Gain 1 action for each other card you've played this turn (max 4). Draw 1 card. Trash this card."
+    effect: "Gain 1 action for each other card you've played this round (max 3). Trash this card."
+    effect_upgraded: "Gain 1 action for each other card you've played this round (max 4). Draw 1 card. Trash this card."
     trash_on_use: true
     effects:
       - type: actions_per_cards_played
@@ -508,11 +509,11 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "At the start of your next turn, draw 1 card and gain 1 resource."
-    effect_upgraded: "At the start of your next turn, draw 1 card, gain 1 resource, and gain 1 action."
+    effect: "At the start of your next round, draw 1 card and gain 1 resource."
+    effect_upgraded: "At the start of your next round, draw 1 card, gain 1 resource, and gain 1 action."
     trash_on_use: false
     effects:
       - type: next_turn_bonus
         timing: on_resolution
         metadata: {draw: 1, resources: 1, upgraded_actions: 1}
-    note: "Invest an action now for a better next turn. The upgraded version's extra action is particularly strong for setting up big combo turns."
+    note: "Invest an action now for a better next round. The upgraded version's extra action is particularly strong for setting up big combo turns."

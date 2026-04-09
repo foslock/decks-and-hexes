@@ -85,9 +85,9 @@ class TestDebtCardProperties:
         debt = make_debt_card()
         assert debt.card_type == CardType.ENGINE
 
-    def test_debt_card_is_trash_immune(self):
+    def test_debt_card_is_not_trash_immune(self):
         debt = make_debt_card()
-        assert debt.trash_immune is True
+        assert debt.trash_immune is False
 
     def test_debt_card_is_trash_on_use(self):
         debt = make_debt_card()
@@ -309,12 +309,10 @@ class TestRoundLimit:
 
 
 class TestTrashImmunity:
-    def test_debt_not_trashed_by_other_effects(self, card_registry):
-        """Debt cards cannot be trashed by other card effects."""
+    def test_debt_can_be_trashed_by_other_effects(self, card_registry):
+        """Debt cards can be trashed by other card effects."""
         debt = make_debt_card()
-        assert debt.trash_immune is True
-        # The actual trash immunity enforcement is tested in effect_resolver
-        # tests — here we just verify the flag is set correctly
+        assert debt.trash_immune is False
 
 
 # ── Financier Card ──────────────────────────────────────────────────
