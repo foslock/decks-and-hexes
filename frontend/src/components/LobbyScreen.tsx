@@ -1333,6 +1333,7 @@ export default function LobbyScreen({
             packNeutralIds={pack?.neutral_card_ids}
             packArchetypeIds={pack?.archetype_card_ids}
             packName={pack?.name}
+            playerArchetype={lobby.players[playerId]?.archetype}
           />
         );
       })()}

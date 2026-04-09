@@ -56,9 +56,10 @@ function sortCards(cards: Card[], mode: SortMode): Card[] {
   });
 }
 
-// Persists view mode and sort mode across opens
+// Persists view mode, sort mode, and collapse state across opens
 let browserViewMemory: boolean = false;
 let browserSortMemory: SortMode = 'cost';
+let browserCollapseMemory: Record<string, boolean> | null = null;
 
 function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
@@ -178,14 +179,25 @@ interface CardBrowserProps {
   packName?: string;
   /** Callback when shift+clicking a card (test mode: add to hand) */
   onShiftClickCard?: (cardId: string) => void;
+  /** Player's selected archetype — used for default collapse state */
+  playerArchetype?: string;
 }
 
-export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds, packName, onShiftClickCard }: CardBrowserProps) {
+export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds, packName, onShiftClickCard, playerArchetype }: CardBrowserProps) {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullView, setFullViewRaw] = useState(() => browserViewMemory);
   const [sortMode, setSortModeRaw] = useState<SortMode>(() => browserSortMemory);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    if (browserCollapseMemory) return browserCollapseMemory;
+    if (!playerArchetype) return {};  // home screen: all expanded
+    // Lobby/game: only neutral + player's archetype expanded
+    const init: Record<string, boolean> = {};
+    for (const arch of ARCHETYPE_ORDER) {
+      if (arch !== 'neutral' && arch !== playerArchetype) init[arch] = true;
+    }
+    return init;
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const shiftHeld = useShiftKey();
 
@@ -212,7 +224,11 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
   }, []);
 
   const toggleCollapse = (archetype: string) => {
-    setCollapsed(prev => ({ ...prev, [archetype]: !prev[archetype] }));
+    setCollapsed(prev => {
+      const next = { ...prev, [archetype]: !prev[archetype] };
+      browserCollapseMemory = next;
+      return next;
+    });
   };
 
   // Apply pack filtering: keep starters always, filter neutrals and archetype cards by pack

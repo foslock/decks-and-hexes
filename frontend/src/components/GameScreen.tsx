@@ -4760,6 +4760,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             packArchetypeIds={pack?.archetype_card_ids}
             packName={pack?.name}
             onShiftClickCard={gameState.test_mode ? handleTestGiveCard : undefined}
+            playerArchetype={activePlayer?.archetype}
           />
         );
       })()}
