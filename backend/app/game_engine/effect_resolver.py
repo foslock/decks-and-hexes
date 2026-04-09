@@ -267,10 +267,11 @@ def check_condition(
         return False
 
     if condition == ConditionType.IF_PLAYED_SAME_NAME:
-        # Rabble: check if another card with same name was played this turn
+        # Rabble: check if another Rabble/Rabble+ was played this turn
+        base_name = card.name.rstrip("+")
         same_name = [
             a for a in player.planned_actions
-            if a.card.name == card.name and a.card.id != card.id
+            if a.card.name.rstrip("+") == base_name and a.card.id != card.id
         ]
         return len(same_name) > 0
 

@@ -587,10 +587,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Intro overlay state — skip on reconnection or when animations are off
   const skipIntro = skipIntroProp || animationOff;
   const [showIntro, setShowIntro] = useState(!skipIntro);
-  // Intro sequence after overlay: 'overlay' → 'hud_fadein' → 'grid_build' → 'shuffle' → 'draw' → 'done'
-  const [introSequence, setIntroSequence] = useState<'overlay' | 'hud_fadein' | 'grid_build' | 'shuffle' | 'draw' | 'done'>(skipIntro ? 'done' : 'overlay');
+  // Intro sequence after overlay: 'overlay' → 'hud_fadein' → 'grid_build' → 'draw' → 'done'
+  const [introSequence, setIntroSequence] = useState<'overlay' | 'hud_fadein' | 'grid_build' | 'draw' | 'done'>(skipIntro ? 'done' : 'overlay');
   // HUD visibility (fades in during intro)
   const [hudVisible, setHudVisible] = useState(skipIntro ? true : false);
+  // Whether the hand area has faded in and is ready for draw animations
+  const [introHandReady, setIntroHandReady] = useState(skipIntro);
   // Grid build-from-center progress (0→1 during intro, undefined after)
   const [gridBuildProgress, setGridBuildProgress] = useState<number | undefined>(skipIntro ? undefined : 0);
   // Banner label override (for "Begin!" on first turn)
@@ -768,6 +770,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // Count Debt cards in hand + draw pile + discard (not trash)
     const debtCount = [...activePlayer.hand, ...activePlayer.deck_cards, ...activePlayer.discard]
       .filter(c => c.name === 'Debt').length;
+    // Names of cards already played this round (for conditional_action_return)
+    const playedCardNames = activePlayer.planned_actions?.map(a => a.card.name) ?? [];
     return {
       claimsWonLastRound: activePlayer.claims_won_last_round,
       tileCount: activePlayer.tile_count,
@@ -778,8 +782,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       tilesLostLastRound: activePlayer.tiles_lost_last_round,
       vpHexCount: gameState.grid ? countConnectedVpTiles(gameState.grid.tiles, activePlayerId) : 0,
       debtCount,
+      playedCardNames,
     };
-  }, [activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand, activePlayer.trash, activePlayer.deck_size, activePlayer.deck_cards, activePlayer.discard, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId]);
+  }, [activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand, activePlayer.trash, activePlayer.deck_size, activePlayer.deck_cards, activePlayer.discard, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId, activePlayer.planned_actions]);
 
   // Context for played/revealed cards: power is already frozen on card.power, skip re-resolution
   const frozenSubtitleContext: CardSubtitleContext = useMemo(() => ({
@@ -1610,7 +1615,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 const nk = `${tile.q + dq},${tile.r + dr}`;
                 if (gameState.grid?.tiles[nk]?.owner === activePlayerId) adjOwned++;
               }
-              if (adjOwned >= threshold) claimPower += mod;
+              if (eff.metadata?.per_tile) {
+                claimPower += mod * adjOwned;
+              } else if (adjOwned >= threshold) {
+                claimPower += mod;
+              }
             }
           }
         }
@@ -1837,7 +1846,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     const nk = `${tile.q + dq},${tile.r + dr}`;
                     if (gameState.grid?.tiles[nk]?.owner === activePlayerId) adjOwned++;
                   }
-                  if (adjOwned >= threshold) claimPower += mod;
+                  if (eff.metadata?.per_tile) {
+                    claimPower += mod * adjOwned;
+                  } else if (adjOwned >= threshold) {
+                    claimPower += mod;
+                  }
                 }
               }
             }
@@ -2270,7 +2283,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setInteractionBlocked(true);
   }, [animationOff]);
 
-  // Intro sequence: hud_fadein → grid_build → shuffle → draw → "Begin!" banner
+  // Intro sequence: hud_fadein → grid_build → draw → "Begin!" banner
   useEffect(() => {
     if (introSequence === 'hud_fadein') {
       // Fade in HUD elements over 2.5s, then start grid build
@@ -2280,7 +2293,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return () => clearTimeout(timer);
     }
     if (introSequence === 'grid_build') {
-      // Animate grid build from center over ~1.5s, then start shuffle + draw concurrently
+      // Animate grid build from center over ~1.5s, then start card draw
       const buildDuration = Math.round(1500 * animSpeed) || 600;
       const startTime = performance.now();
       let raf: number;
@@ -2292,29 +2305,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           raf = requestAnimationFrame(tick);
         } else {
           setGridBuildProgress(undefined); // fully built, no more prop
-          setIntroSequence('shuffle');
+          setIntroSequence('draw');
         }
       };
       raf = requestAnimationFrame(tick);
       return () => cancelAnimationFrame(raf);
     }
-    if (introSequence === 'shuffle') {
-      // Show shuffle animation scaled by speed
-      const duration = Math.round(2000 * animSpeed) || 800;
-      const timer = setTimeout(() => setIntroSequence('draw'), duration);
-      return () => clearTimeout(timer);
-    }
     if (introSequence === 'draw') {
-      // Cards are now being passed to CardHand — entering animations will play.
-      // Wait for all cards to finish their staggered draw animation, then
+      // First let the hand area fade in, then pass cards to trigger draw animations.
+      const fadeDuration = 800;
+      const fadeTimer = setTimeout(() => setIntroHandReady(true), fadeDuration);
+      // Wait for fade + all cards to finish their staggered draw animation, then
       // mark intro done. The phase effect will detect upkeep and show banners.
       const handSize = activePlayer?.hand.length ?? 0;
-      const drawDuration = handSize * 500 + 500;
+      const drawDuration = fadeDuration + handSize * 500 + 500;
       const timer = setTimeout(() => {
         sound.beginJingle();
         setIntroSequence('done');
       }, drawDuration);
-      return () => clearTimeout(timer);
+      return () => { clearTimeout(fadeTimer); clearTimeout(timer); };
     }
   }, [introSequence, animated, activePlayer, gameState, animSpeed]);
 
@@ -3003,7 +3012,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 const nk = `${tile.q + dq},${tile.r + dr}`;
                 if (tiles[nk]?.owner === activePlayerId) adjOwned++;
               }
-              if (adjOwned >= threshold) effectivePower += mod;
+              if (eff.metadata?.per_tile) {
+                effectivePower += mod * adjOwned;
+              } else if (adjOwned >= threshold) {
+                effectivePower += mod;
+              }
             }
           }
         }
@@ -3605,7 +3618,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     {actions.map((action, i) => {
                       const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
                       const typeColor = getCardDisplayColor(c);
-                      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
+                      const priorNames = actions.slice(0, i).map(a => a.card.name);
+                      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
                       const statParts = buildCardSubtitle(c, ctx);
                       return (
                         <div
@@ -4337,7 +4351,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         {/* Action counter — above hand panel (only when submit button is visible) */}
         {phase === 'play' && activePlayer && !resolving && !phaseBanner && !showIntro && !activePlayer.has_submitted_play && introSequence === 'done' && (
-          <div style={{ position: 'relative', zIndex: 30 }}>
+          <div style={{ position: 'relative', zIndex: 30, opacity: submitButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
             <div
               className="action-counter-wrap"
               style={{
@@ -4421,10 +4435,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               </span>
             </div>
           )}
-          {activePlayer && introSequence !== 'overlay' && introSequence !== 'hud_fadein' && introSequence !== 'grid_build' && (
+          {activePlayer && introSequence !== 'overlay' && introSequence !== 'hud_fadein' && (
+            <div style={{
+              opacity: introSequence === 'done' || introSequence === 'draw' ? 1 : 0,
+              transition: 'opacity 0.8s ease-in',
+            }}>
             <CardHand
               playerId={activePlayerId}
-              cards={introSequence === 'shuffle' ? [] : activePlayer.hand}
+              cards={introSequence !== 'done' && !introHandReady ? [] : activePlayer.hand}
               selectedIndex={selectedCardIndex}
               onSelect={(idx) => { setSelectedCardIndex(idx); }}
               onDragPlay={handleDragPlay}
@@ -4436,7 +4454,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onDragStart={setDraggingCardIndex}
               onDragEnd={() => setDraggingCardIndex(null)}
               disabled={phase !== 'play' || activePlayer.has_submitted_play || interactionBlocked}
-              deckSize={activePlayer.deck_size}
+              deckSize={introSequence !== 'done' && !introHandReady ? activePlayer.deck_size + activePlayer.hand.length : activePlayer.deck_size}
               discardCount={activePlayer.discard_count}
               discardCards={activePlayer.discard}
               deckCards={activePlayer.deck_cards}
@@ -4444,7 +4462,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               discardAll={discardingAll}
               onDiscardAllComplete={handleDiscardAllComplete}
               lastPlayedTarget={lastPlayedTarget}
-              forceShuffleAnim={introSequence === 'shuffle' || testShuffleAnim}
+              forceShuffleAnim={testShuffleAnim}
               trashMode={trashMode ? {
                 playedCardIndex: trashMode.cardIndex,
                 selectedIndices: trashSelectedIndices,
@@ -4459,6 +4477,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               claimBanned={!!gameState.claim_ban_rounds && gameState.claim_ban_rounds > 0}
               onCardHover={setHoveredCardIndex}
             />
+            </div>
           )}
         </div>
       </div>
@@ -4534,7 +4553,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               })();
               const typeColor = REVIEW_TYPE_COLORS[entry.card.card_type] || '#555';
               const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
-              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: entry.effectiveResourceGain, effectiveDrawCards: entry.effectiveDrawCards };
+              const playerActions = revealedActionsRef.current?.[entry.playerId] ?? [];
+              const actionIdx = playerActions.findIndex(a => a.card.id === entry.card.id);
+              const priorNames = actionIdx > 0 ? playerActions.slice(0, actionIdx).map(a => a.card.name) : [];
+              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: entry.effectiveResourceGain, effectiveDrawCards: entry.effectiveDrawCards };
               const statParts = buildCardSubtitle(c, ctx);
               return (
                 <div key={i} style={{ marginBottom: i < cards.length - 1 ? 6 : 0 }}>
@@ -4583,6 +4605,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const POPUP_W = 180;
         const REVIEW_TYPE_COLORS = CARD_TYPE_COLORS;
         const REVIEW_EMOJI: Record<string, string> = { claim: '⚔️', defense: '🛡️', engine: '⚙️', passive: '📜' };
+        const reviewPlayedCardNames = actions.map(a => a.card.name);
         return (
           <div style={{
             position: 'fixed',
@@ -4604,7 +4627,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             {actions.map((action, i) => {
               const typeColor = REVIEW_TYPE_COLORS[action.card.card_type] || '#555';
               const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
-              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
+              const priorNames = actions.slice(0, i).map(a => a.card.name);
+              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
               const statParts = buildCardSubtitle(c, ctx);
               return (
                 <div key={i} style={{

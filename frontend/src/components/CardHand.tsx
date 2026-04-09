@@ -643,6 +643,8 @@ export default function CardHand({
   const discardAllFiredRef = useRef(false);
   // Cards drawn during a shuffle — held back until shuffle animation finishes
   const deferredDrawnCardsRef = useRef<Set<string>>(new Set());
+  // Number of cards visually still in the draw pile (animating out) — counts down per card
+  const [drawPileBonus, setDrawPileBonus] = useState(0);
   // Bumped when deferred cards need Phase 2 re-computation after shuffle ends
   const [phase2Trigger, setPhase2Trigger] = useState(0);
   // Separate prev-cards tracking for shuffle detection (useLayoutEffect updates prevCardsRef before useEffect)
@@ -743,6 +745,7 @@ export default function CardHand({
       prevCardsRef.current = cards;
       setEnteringAnims(new Map());
       setDepartingAnims(new Map());
+      setDrawPileBonus(0);
       return;
     }
 
@@ -779,6 +782,12 @@ export default function CardHand({
           });
         });
         setEnteringAnims(p => new Map([...p, ...entries]));
+        // Bump draw pile display count so cards appear to leave the pile one-by-one
+        setDrawPileBonus(b => b + immediateCards.length);
+        immediateCards.forEach((_, i) => {
+          const delay = Math.round(i * 500 * animSpeed);
+          setTimeout(() => setDrawPileBonus(b => Math.max(0, b - 1)), delay);
+        });
       }
     }
 
@@ -1138,6 +1147,12 @@ export default function CardHand({
             });
           });
           setEnteringAnims(p => new Map([...p, ...entries]));
+          // Bump draw pile display count so deferred cards appear to leave one-by-one
+          setDrawPileBonus(b => b + deferredCards.length);
+          deferredCards.forEach((_, i) => {
+            const delay = Math.round(i * 500 * animSpeed);
+            setTimeout(() => setDrawPileBonus(b => Math.max(0, b - 1)), delay);
+          });
           // Bump trigger so Phase 2 re-runs to compute offsets for these cards
           setPhase2Trigger(n => n + 1);
         }
@@ -1502,7 +1517,7 @@ export default function CardHand({
             }}
           >
             <span style={{ fontSize: 24, fontWeight: 'bold', color: '#fff', lineHeight: 1 }}>
-              {shuffling ? shuffleDisplayCount : deckSize}
+              {shuffling ? shuffleDisplayCount : deckSize + drawPileBonus}
             </span>
             <span style={{ fontSize: 9, color: '#888' }}>Draw</span>
           </button>

@@ -662,7 +662,11 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
                     const nKey = `${tile.q + dq},${tile.r + dr}`;
                     if (allTiles[nKey]?.owner === pid) adjOwned++;
                   }
-                  if (adjOwned >= threshold) basePower += mod;
+                  if (eff.metadata?.per_tile) {
+                    basePower += mod * adjOwned;
+                  } else if (adjOwned >= threshold) {
+                    basePower += mod;
+                  }
                 }
               }
             }

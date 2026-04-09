@@ -30,6 +30,8 @@ export interface CardSubtitleContext {
   debtCount?: number;
   /** Override for dynamic draw count (e.g. Financier), snapshotted at play time */
   effectiveDrawCards?: number;
+  /** Names of cards already played this round (for conditional_action_return / if_played_same_name) */
+  playedCardNames?: string[];
 }
 
 /** A single segment of a card subtitle. */
@@ -324,6 +326,15 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
           parts.push(p(`${condParts} · +1💰`));
         } else {
           parts.push(p(condParts));
+        }
+      }
+      if (eff.type === 'conditional_action_return' && eff.condition === 'if_played_same_name') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        const baseName = card.name.replace(/\+$/, '');
+        const met = ctx?.playedCardNames?.some(n => n.replace(/\+$/, '') === baseName) ?? false;
+        if (met) {
+          // In hand: glow yellow; in-play (powerFrozen): static resolved
+          parts.push({ text: `+${val}⚡`, glow: !ctx?.powerFrozen });
         }
       }
       if (eff.type === 'grant_land_grants') {

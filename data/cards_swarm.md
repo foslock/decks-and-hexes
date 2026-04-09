@@ -52,7 +52,7 @@ cards:
     name: Overwhelm
     name_upgraded: Overwhelm+
     type: Claim
-    buy_cost: 2
+    buy_cost: 5
     action_return: 0
     power: 1
     effect: "Claim: Power 1. +1 power for each other tile you own adjacent to the target tile."
@@ -118,18 +118,18 @@ cards:
     name: Rabble
     name_upgraded: Rabble+
     type: Claim
-    buy_cost: 1
+    buy_cost: 2
     action_return: 0
     power: 1
-    effect: "Claim: Power 1. If you play another Rabble card this round, gain 1 action."
-    effect_upgraded: "Claim: Power 1. If you play another Rabble+ card this round, gain 1 action. Additionally, +1 power per Rabble+ played this round."
+    effect: "Claim: Power 1. If you have played another Rabble card this round, gain 1 action."
+    effect_upgraded: "Claim: Power 1. If you have played another Rabble card this round, gain 1 action. Additionally, +1 power per Rabble played this round."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: conditional_action_return
         value: 1
-        timing: on_resolution
+        timing: immediate
         condition: if_played_same_name
 
   - id: swarm_dog_pile
