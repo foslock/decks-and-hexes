@@ -186,6 +186,8 @@ export default function GameOverOverlay({
     }}>
       <style>{`
         .go-row:hover { background: rgba(74, 158, 255, 0.1) !important; }
+        .go-btn { transition: box-shadow 0.2s ease, transform 0.2s ease; }
+        .go-btn:not(:disabled):hover { box-shadow: 0 0 12px rgba(160, 170, 255, 0.45); transform: translateY(-1px); }
       `}</style>
 
       {/* Victory / Defeat banner */}
@@ -323,6 +325,7 @@ export default function GameOverOverlay({
               : 'Return to Lobby';
           return (
             <button
+              className="go-btn"
               onClick={() => { if (!disabled) { setReturnedToLobby(true); onReturnToLobby(); } }}
               disabled={disabled}
               style={{
@@ -342,6 +345,7 @@ export default function GameOverOverlay({
           );
         })()}
         <button
+          className="go-btn"
           onClick={onExitGame}
           style={{
             padding: '12px 32px',

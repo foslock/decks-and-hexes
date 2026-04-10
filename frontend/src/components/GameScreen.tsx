@@ -3624,7 +3624,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 setReviewTilePopupPos({ x: sx, y: sy });
               } : undefined}
               onTileHoverEnd={reviewing ? () => setReviewHoveredTile(null) : undefined}
-              paused={showShopOverlay || showCardBrowser || showDeckViewer || showUpgradePreview}
+              paused={showShopOverlay || showCardBrowser || showDeckViewer || showUpgradePreview || showGameOver}
             />
           )}
 
