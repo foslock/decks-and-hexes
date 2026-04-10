@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import type { Card, MarketStack } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
@@ -111,6 +111,31 @@ function CompactShopCard({
   const typeColor = getCardDisplayColor(card);
   const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
   const soldOut = remaining === 0;
+
+  // Refs + one-shot layout measurement for title / subtitle shrink-to-fit.
+  // Previously this used inline ref callbacks that re-ran on every parent
+  // render, forcing a synchronous layout read+write for every compact card
+  // on every render burst (shop has up to ~18 cards — that's ~36 forced
+  // layouts per parent render). We only need to measure once: the card
+  // instance is stable for the lifetime of this React tree node (the
+  // parent keys by card.id) and the card container width is a constant.
+  const titleSpanRef = useRef<HTMLSpanElement>(null);
+  const subtitleSpanRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const titleEl = titleSpanRef.current;
+    if (titleEl?.parentElement) {
+      const scale = Math.min(1, titleEl.parentElement.clientWidth / titleEl.scrollWidth);
+      titleEl.style.setProperty('--title-scale', String(scale));
+    }
+    const subEl = subtitleSpanRef.current;
+    if (subEl?.parentElement) {
+      const scale = Math.min(1, subEl.parentElement.clientWidth / subEl.scrollWidth);
+      subEl.style.setProperty('--sub-scale', String(scale));
+    }
+    // Re-measure if the card's visual content changes. card.id is stable
+    // per slot so this effectively runs once on mount; including name and
+    // current_vp guards against in-place mutations (e.g. VP updates).
+  }, [card.id, card.name, card.current_vp, card.description]);
   const buyColor = soldOut || !canAfford || disabled ? '#333' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase
     ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this round`).join('\n')
@@ -149,12 +174,7 @@ function CompactShopCard({
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
           <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-              if (el) {
-                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                el.style.setProperty('--title-scale', String(scale));
-              }
-            }}>
+            <span ref={titleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }}>
               {card.name}
             </span>
           </div>
@@ -163,12 +183,7 @@ function CompactShopCard({
           </span>
         </div>
         <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
-          <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-            if (el) {
-              const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-              el.style.setProperty('--sub-scale', String(scale));
-            }
-          }}>
+          <span ref={subtitleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }}>
           {buildCardSubtitle(card).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp }))}
           </span>
         </div>

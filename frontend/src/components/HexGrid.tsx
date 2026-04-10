@@ -1763,11 +1763,20 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
     const app = new Application();
     let destroyed = false;
 
+    // Cap resolution on mobile to keep the WebGL backbuffer from blowing up on
+    // iPhones with devicePixelRatio 3 + antialias 4x. A raw DPR-3 full-screen
+    // canvas can approach iOS Safari's texture memory budget; capping at 2
+    // halves GPU memory with negligible visual difference on small screens.
+    const rawDpr = window.devicePixelRatio || 1;
+    const isMobileUA = /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+      || ('ontouchstart' in window && (navigator.maxTouchPoints ?? 0) > 0);
+    const resolution = isMobileUA ? Math.min(rawDpr, 2) : rawDpr;
+
     app.init({
       background: '#1a1a2e',
       resizeTo: containerRef.current,
       antialias: true,
-      resolution: window.devicePixelRatio || 1,
+      resolution,
       autoDensity: true,
     }).then(() => {
       if (destroyed) { app.destroy(); return; }
