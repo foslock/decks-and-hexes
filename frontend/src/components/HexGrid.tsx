@@ -528,7 +528,26 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
     const hexContainer = hexContainerRef.current;
     if (!hexContainer || hexContainer.destroyed) return;
 
-    hexContainer.removeChildren();
+    // Destroy orphaned children before re-rendering. `removeChildren()` alone
+    // only detaches the display objects from the container — it does NOT free
+    // their underlying GPU textures, geometry, or JS memory. Over a long game
+    // this re-renders ~hundreds of times (once per tile/highlight/planned
+    // action change), accumulating tens of thousands of dead Graphics/Text/
+    // Container objects in the WebGL context and blowing up Safari's memory
+    // budget after ~10 minutes.
+    //
+    // Preserve the ref-managed VP-path and review-pulse graphics: they are
+    // re-added to the container by the caller effect after `renderTiles`
+    // finishes, so destroying them here would invalidate those refs.
+    const preservedVp = vpPathGraphicsRef.current;
+    const preservedPulse = reviewPulseGraphicsRef.current;
+    const oldChildren = hexContainer.removeChildren();
+    for (const child of oldChildren) {
+      if (child === preservedVp || child === preservedPulse) continue;
+      // destroy({children: true}) recursively frees nested Containers/Text
+      // (e.g. the multi-line labels pushed into textChildrenRef).
+      child.destroy({ children: true });
+    }
     tileGraphicsRef.current.clear();
 
     const tiles = tilesRef.current;
