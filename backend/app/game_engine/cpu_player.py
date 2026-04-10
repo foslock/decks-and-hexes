@@ -62,6 +62,87 @@ def _game_progress(game: Any) -> float:
     return min(1.0, max(0.0, float(progress)))
 
 
+def _is_vp_leader(game: Any, player_id: str, strict: bool = True) -> bool:
+    """Return True if *player_id* is the VP leader.
+
+    When *strict* is True, ties do not count as leading. Uses derived VP
+    (compute_player_vp) so passive-VP cards and held VP hexes are counted.
+    """
+    from .game_state import compute_player_vp
+    my_vp = compute_player_vp(game, player_id)
+    for pid in game.players:
+        if pid == player_id:
+            continue
+        other_vp = compute_player_vp(game, pid)
+        if strict and other_vp >= my_vp:
+            return False
+        if (not strict) and other_vp > my_vp:
+            return False
+    return True
+
+
+def _iter_all_player_cards(player: Any) -> list[Card]:
+    """All cards currently in a player's active deck (hand + draw + discard).
+
+    Trashed cards and planned_actions are intentionally excluded — the former
+    are gone, the latter are already accounted for in hand when considering
+    deck composition for buy decisions at the start of the buy phase.
+    """
+    cards: list[Card] = list(player.hand)
+    deck = getattr(player, "deck", None)
+    if deck is not None:
+        cards.extend(deck.cards)
+        cards.extend(deck.discard)
+    return cards
+
+
+def _deck_composition(player: Any) -> dict[str, float]:
+    """Return ratios describing the player's active deck.
+
+    Keys:
+      - total: total card count (int, cast to float for arithmetic)
+      - high_power_claim_ratio: fraction of deck that is a claim with base
+        power >= 3 (after upgrades)
+      - resource_gain_ratio: fraction of deck that grants at least 1 resource
+        when played (Gather, most engine cards)
+      - claim_count: absolute count of claim cards (int) — used as a floor
+        when deciding whether to trash Explore.
+    """
+    cards = _iter_all_player_cards(player)
+    total = len(cards)
+    if total == 0:
+        return {
+            "total": 0.0,
+            "high_power_claim_ratio": 0.0,
+            "resource_gain_ratio": 0.0,
+            "claim_count": 0,
+        }
+    high_power_claims = sum(
+        1 for c in cards
+        if c.card_type == CardType.CLAIM and c.effective_power >= 3
+    )
+    resource_gain = sum(
+        1 for c in cards if c.effective_resource_gain > 0
+    )
+    claim_count = sum(1 for c in cards if c.card_type == CardType.CLAIM)
+    return {
+        "total": float(total),
+        "high_power_claim_ratio": high_power_claims / total,
+        "resource_gain_ratio": resource_gain / total,
+        "claim_count": claim_count,
+    }
+
+
+def _owns_passive_vp(player: Any) -> bool:
+    """True if the player's active deck contains any passive-VP card
+    (e.g. Land Grant). The CPU should lean harder into VP-generating plays
+    when this is the case."""
+    for c in _iter_all_player_cards(player):
+        if getattr(c, "passive_vp", 0) and c.passive_vp > 0:
+            return True
+    return False
+
+
 def _adapt_weights(weights: StrategyWeights, game: Any, player_id: str) -> StrategyWeights:
     """Adjust strategy weights based on VP standing (adaptive play style).
 
@@ -426,18 +507,21 @@ class CPUPlayer:
                               card: Card, weights: StrategyWeights) -> float:
         """Score a tile as a claim target."""
         score = 1.0  # base score for any claim
+        passive_vp_mult = 1.3 if _owns_passive_vp(player) else 1.0
 
-        # VP hex bonus
+        # VP hex bonus — strongly prioritize claiming VP tiles.
         if tile.is_vp:
-            score += tile.vp_value * 8.0 * weights.vp_hex_priority
+            score += tile.vp_value * 12.0 * weights.vp_hex_priority * passive_vp_mult
 
-        # VP denial: enemy VP hex that will score next turn gets a big bonus
-        # (tiles score at start of turn for tiles held since previous turn)
+        # VP denial: any opponent-held VP hex is a high-priority contest target,
+        # regardless of how long they've held it. Even a freshly captured VP tile
+        # will start scoring next round if left alone.
         if tile.is_vp and tile.owner is not None and tile.owner != self.player_id:
+            score += tile.vp_value * 10.0 * weights.vp_hex_priority * passive_vp_mult
+            # Extra bonus when the tile is about to score (held since a prior round).
             held_since = getattr(tile, "held_since_turn", None)
             if held_since is not None and held_since < game.current_round:
-                # This tile is actively scoring VP for the opponent — deny it!
-                score += tile.vp_value * 6.0 * weights.vp_hex_priority
+                score += tile.vp_value * 4.0 * weights.vp_hex_priority
 
         # Neutral vs enemy tile
         if tile.owner is None:
@@ -462,7 +546,7 @@ class CPUPlayer:
         adj_tiles = game.grid.get_adjacent(tile.q, tile.r)
         for adj in adj_tiles:
             if adj.is_vp and adj.owner != self.player_id:
-                score += 1.5 * weights.vp_hex_priority
+                score += 2.5 * weights.vp_hex_priority * passive_vp_mult
 
         # Connectivity: prefer tiles that connect territory
         owned_neighbors = sum(1 for adj in adj_tiles if adj.owner == self.player_id)
@@ -531,12 +615,17 @@ class CPUPlayer:
 
         # Score each tile for defense priority
         tile_scores: list[tuple[float, Any]] = []
+        passive_vp_mult = 1.3 if _owns_passive_vp(player) else 1.0
+        # Typical enemy claim power baseline — used to decide whether the tile
+        # is at real risk of being captured next round. ~3 matches most mid-tier
+        # claim cards in the shared market.
+        ENEMY_CLAIM_BASELINE = 3
         for tile in player_tiles:
             score = 2.0 * weights.defense  # base defense value
 
             # VP tiles get much higher defense priority
             if tile.is_vp:
-                score += tile.vp_value * 6.0 * weights.vp_hex_priority
+                score += tile.vp_value * 8.0 * weights.vp_hex_priority * passive_vp_mult
 
             # Tiles with enemy neighbors (frontier tiles) need defense more
             adj_tiles = game.grid.get_adjacent(tile.q, tile.r)
@@ -547,7 +636,21 @@ class CPUPlayer:
             owned_neighbors = sum(
                 1 for adj in adj_tiles if adj.owner == self.player_id
             )
-            score += enemy_neighbors * 2.0
+            score += enemy_neighbors * 3.5
+
+            # Risk-of-loss: if our current defense on this tile is below the
+            # typical enemy claim power and we have at least one enemy
+            # neighbor, the tile is actively at risk of being taken next
+            # round. Bump the score so the CPU shores it up.
+            current_defense = tile.defense_power + getattr(tile, "permanent_defense_bonus", 0)
+            if enemy_neighbors >= 1 and current_defense < ENEMY_CLAIM_BASELINE:
+                shortfall = ENEMY_CLAIM_BASELINE - current_defense
+                risk_bonus = shortfall * 2.0 * weights.defense
+                if tile.is_vp:
+                    risk_bonus *= 2.0  # losing a VP tile is catastrophic
+                if tile.is_base:
+                    risk_bonus *= 1.5  # losing base spawns rubble
+                score += risk_bonus
 
             # Tiles with no enemy neighbors don't need defense as much
             if enemy_neighbors == 0:
@@ -650,7 +753,12 @@ class CPUPlayer:
                         score -= 5.0  # can't use it — no valid targets
 
             elif effect.type == EffectType.GRANT_LAND_GRANTS:
-                if effect.target == "chosen_player":
+                # Granting Land Grants (Diplomat / Diplomacy) hands free VP to
+                # opponents. Only worthwhile when we are already ahead — playing
+                # it from behind just helps the leaderboard catch up to us.
+                if not _is_vp_leader(game, self.player_id, strict=False):
+                    score -= 50.0  # effectively veto playing Diplomat when not leading
+                elif effect.target == "chosen_player":
                     # Fortress Diplomacy: you get 1/2, target opponent gets 1
                     self_grants = 2 if card.is_upgraded else 1
                     net_advantage = self_grants - 1  # 0 base, +1 upgraded
@@ -956,19 +1064,41 @@ class CPUPlayer:
                 best_pid = pid
         return best_pid
 
+    # Minimum number of claim cards the CPU wants to keep in the active deck
+    # before it will consider trashing Explore cards. Below this floor, Gather
+    # is trashed instead (or nothing) so the CPU still has a way to take tiles.
+    _MIN_CLAIMS_TO_KEEP_EXPLORE = 4
+
     def _pick_cards_to_trash_for_value(self, player: Any, count: int,
                                        exclude_index: int) -> list[int]:
-        """Pick cards to trash for resource value (Consolidate). Prefer starters and cheap cards."""
+        """Pick cards to trash for resource value (Consolidate). Prefer
+        starters and cheap cards. Explore is preferred over Gather as long as
+        trashing it would leave at least _MIN_CLAIMS_TO_KEEP_EXPLORE claim
+        cards in the deck."""
+        total_claims = sum(
+            1 for c in _iter_all_player_cards(player)
+            if c.card_type == CardType.CLAIM
+        )
         scored = []
         for i, card in enumerate(player.hand):
             if i == exclude_index:
                 continue
             if card.buy_cost is None:
                 continue  # can't gain resources from cards with no buy cost
-            # Prefer trashing: starters > cheap cards > expensive cards
+            # Prefer trashing: Explore > Gather > rubble > cheap > expensive.
             score = 0.0
-            if card.starter:
-                score += 5.0 + (card.buy_cost or 0)  # starters are great trash targets
+            is_explore = card.starter and card.name == "Explore"
+            is_gather = card.starter and card.name == "Gather"
+            if is_explore:
+                # Only favor trashing Explore while we have a claim surplus.
+                if total_claims - 1 >= self._MIN_CLAIMS_TO_KEEP_EXPLORE:
+                    score += 7.0 + (card.buy_cost or 0)
+                else:
+                    score += 1.0  # keep Explore — we need the claim pressure
+            elif is_gather:
+                score += 5.5 + (card.buy_cost or 0)  # still a fine trash target
+            elif card.starter:
+                score += 5.0 + (card.buy_cost or 0)
             elif card.unplayable and card.passive_vp <= 0:
                 score += 4.0 + (card.buy_cost or 0)  # dead weight like Rubble
             else:
@@ -980,14 +1110,32 @@ class CPUPlayer:
 
     def _pick_cards_to_trash(self, player: Any, count: int,
                              exclude_index: int) -> list[int]:
-        """Pick the worst cards in hand to trash (permanent removal)."""
+        """Pick the worst cards in hand to trash (permanent removal).
+
+        Prefers Explore over Gather so the CPU thins its starter claim cards
+        first, but only as long as the resulting deck still has at least
+        _MIN_CLAIMS_TO_KEEP_EXPLORE claim cards — below that floor Gather
+        (which is not a claim) is preferred instead."""
+        total_claims = sum(
+            1 for c in _iter_all_player_cards(player)
+            if c.card_type == CardType.CLAIM
+        )
         scored = []
         for i, card in enumerate(player.hand):
             if i == exclude_index:
                 continue
             score = 0.0
-            if card.starter:
-                score -= 3.0  # strongly prefer trashing starters
+            is_explore = card.starter and card.name == "Explore"
+            is_gather = card.starter and card.name == "Gather"
+            if is_explore:
+                if total_claims - 1 >= self._MIN_CLAIMS_TO_KEEP_EXPLORE:
+                    score -= 5.0  # strongly prefer trashing Explore
+                else:
+                    score += 1.0  # keep Explore to maintain claim pressure
+            elif is_gather:
+                score -= 3.5  # gather is the next best starter to trash
+            elif card.starter:
+                score -= 3.0  # any other starter
             if card.buy_cost is not None:
                 score += card.buy_cost * 0.5  # expensive cards less trashable
             else:
@@ -1096,6 +1244,10 @@ class CPUPlayer:
         from .game_state import calculate_dynamic_buy_cost, UPGRADE_CREDIT_COST, player_owns_card_by_name
 
         scored: list[tuple[float, dict[str, Any]]] = []
+        # Compute deck composition once so per-card scoring can apply
+        # rebalancing multipliers (keep claims >= ~10% high-power, resource
+        # gain >= ~33% of deck).
+        composition = _deck_composition(player)
 
         # Score archetype market cards
         for card in player.archetype_market:
@@ -1105,7 +1257,7 @@ class CPUPlayer:
             cost = calculate_dynamic_buy_cost(game, player, card)
             if cost > player.resources:
                 continue
-            score = self._score_card_for_purchase(card, player, weights, cost, game)
+            score = self._score_card_for_purchase(card, player, weights, cost, game, composition)
             scored.append((score, {"source": "archetype", "card_id": card.id}))
 
         # Score neutral market cards (limit 1 copy per card per round)
@@ -1124,7 +1276,7 @@ class CPUPlayer:
             cost = calculate_dynamic_buy_cost(game, player, card_obj)
             if cost > player.resources:
                 continue
-            score = self._score_card_for_purchase(card_obj, player, weights, cost, game)
+            score = self._score_card_for_purchase(card_obj, player, weights, cost, game, composition)
             scored.append((score, {"source": "neutral", "card_id": base_id}))
 
         # Score upgrade credits
@@ -1137,11 +1289,17 @@ class CPUPlayer:
 
     def _score_card_for_purchase(self, card: Card, player: Any,
                                  weights: StrategyWeights,
-                                 cost: int, game: Any = None) -> float:
+                                 cost: int, game: Any = None,
+                                 composition: Optional[dict[str, float]] = None) -> float:
         """Score a card for purchase.
 
         Tempo-sensitive: early game favors cheap cards and deck thinning,
         late game favors high-power finishers and VP effects.
+
+        If *composition* is provided, under-represented archetypes get a
+        multiplier boost: decks with less than ~10% high-power claims favor
+        high-power claim purchases, and decks with less than ~33% resource
+        gain cards favor resource-gain engine purchases.
         """
         score = 0.0
         progress = _game_progress(game) if game else 0.5
@@ -1293,6 +1451,34 @@ class CPUPlayer:
         )
         if has_vp_effect:
             score *= 1.0 + 0.5 * progress  # up to +50% late
+
+        # ── Deck composition rebalancing ────────────────────────────
+        if composition is not None and composition["total"] > 0:
+            # Keep at least ~10% of the deck as high-power claim cards. When
+            # under that floor, strongly favor buying high-power claims.
+            is_high_power_claim = (
+                card.card_type == CardType.CLAIM and card.effective_power >= 3
+            )
+            if is_high_power_claim and composition["high_power_claim_ratio"] < 0.10:
+                score *= 1.7
+            # Keep at least ~33% of the deck as resource-gain cards. When
+            # under that floor, boost resource-gain purchases.
+            is_resource_gain = card.effective_resource_gain > 0
+            if is_resource_gain and composition["resource_gain_ratio"] < 0.33:
+                score *= 1.5
+
+        # Passive-VP feedback loop: once we own at least one passive-VP card
+        # (e.g. Land Grant), lean harder into VP-generating purchases — the
+        # endgame plan becomes "finish the VP race", not "out-tempo the table".
+        if _owns_passive_vp(player):
+            has_vp_any = card.passive_vp > 0 or card.vp_formula or any(
+                e.type in (EffectType.GAIN_VP, EffectType.ENHANCE_VP_TILE,
+                           EffectType.GRANT_LAND_GRANTS,
+                           EffectType.VP_FROM_CONTESTED_WINS)
+                for e in card.effects
+            )
+            if has_vp_any:
+                score *= 1.25
 
         # Cost efficiency: penalize expensive cards
         if cost > 0:
