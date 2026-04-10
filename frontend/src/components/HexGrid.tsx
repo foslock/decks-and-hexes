@@ -2055,13 +2055,32 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
   useEffect(() => {
     const app = appRef.current;
     const container = hexContainerRef.current;
-    if (!app || !container || !reviewPulseTiles || reviewPulseTiles.size === 0) {
-      // Clean up if no review tiles
-      if (reviewPulseGraphicsRef.current && container) {
-        container.removeChild(reviewPulseGraphicsRef.current);
-        reviewPulseGraphicsRef.current.destroy();
+
+    // Helper: tear down the review pulse graphics and ticker fn safely.
+    // The HexGrid unmount path runs multiple effect cleanups; by the time
+    // this one runs the PIXI app may have already been destroyed by the
+    // init-effect cleanup, in which case `app.ticker` is null and
+    // `container.destroyed` is true. Guard every PIXI call so we don't
+    // crash on the way out of a game.
+    const teardown = (pulseFn?: () => void) => {
+      if (pulseFn && app && app.ticker) {
+        try { app.ticker.remove(pulseFn); } catch { /* already torn down */ }
+      }
+      const pulseG = reviewPulseGraphicsRef.current;
+      if (pulseG) {
+        if (container && !container.destroyed && pulseG.parent === container) {
+          try { container.removeChild(pulseG); } catch { /* already detached */ }
+        }
+        if (!pulseG.destroyed) {
+          try { pulseG.destroy(); } catch { /* already destroyed */ }
+        }
         reviewPulseGraphicsRef.current = null;
       }
+    };
+
+    if (!app || !container || !reviewPulseTiles || reviewPulseTiles.size === 0) {
+      // Nothing to render — make sure any previous graphics are cleaned up.
+      teardown();
       return;
     }
 
@@ -2089,14 +2108,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
     };
     app.ticker.add(reviewPulseFn);
 
-    return () => {
-      app.ticker.remove(reviewPulseFn);
-      if (reviewPulseGraphicsRef.current && container) {
-        container.removeChild(reviewPulseGraphicsRef.current);
-        reviewPulseGraphicsRef.current.destroy();
-        reviewPulseGraphicsRef.current = null;
-      }
-    };
+    return () => teardown(reviewPulseFn);
   }, [reviewPulseTiles]);
 
   return (
