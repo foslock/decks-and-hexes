@@ -244,6 +244,30 @@ export default function ShopOverlay({
   // Track archetype market slots so purchased cards show a placeholder instead of disappearing
   const [archetypeSlots, setArchetypeSlots] = useState<Array<{ card: Card; purchased: boolean }>>([]);
 
+  // When the shop is too narrow to fit cards + re-roll on one row, switch to a
+  // stacked layout: cards wrap across multiple rows, re-roll centered below.
+  const archetypeRowRef = useRef<HTMLDivElement>(null);
+  const [archetypeNarrow, setArchetypeNarrow] = useState(false);
+  useEffect(() => {
+    const el = archetypeRowRef.current;
+    if (!el) return;
+    const numCards = Math.max(1, archetypeSlots.length);
+    // Width needed to keep cards + re-roll on a single row, matching the
+    // wide-mode flex layout below (cards in a 60% centered lane, reroll in
+    // a 20% lane on the right). The cards lane must fit all card widths +
+    // inter-card gaps (8px), and the whole row is framed by 20%/20% gutters.
+    const REROLL_LANE = 160; // reroll button + padding
+    const cardsLane = numCards * COMPACT_CARD_WIDTH + Math.max(0, numCards - 1) * 8;
+    // cardsLane occupies the middle 60%, so full wide-layout width ≈ cardsLane / 0.6.
+    // Also require reroll lane to fit in its 20% slot.
+    const minWide = Math.max(cardsLane / 0.6, REROLL_LANE * 5);
+    const observer = new ResizeObserver(([entry]) => {
+      setArchetypeNarrow(entry.contentRect.width < minWide);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [archetypeSlots.length]);
+
   useEffect(() => {
     setArchetypeSlots(prev => {
       const currentIds = new Set(archetypeMarket.map(c => c.id));
@@ -515,12 +539,31 @@ export default function ShopOverlay({
                 <Tooltip content="These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.">
                   <span style={{ fontSize: 20, fontWeight: 'bold', color: '#ccc', cursor: 'help' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
                 </Tooltip>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>New card options every round</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                {/* Left spacer — 1/5 */}
-                <div style={{ flex: '0 0 20%' }} />
-                {/* Archetype cards — centered 3/5 */}
-                <div style={{ flex: '0 0 60%', display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'flex-start' }}>
+              <div
+                ref={archetypeRowRef}
+                style={{
+                  display: 'flex',
+                  flexDirection: archetypeNarrow ? 'column' : 'row',
+                  alignItems: 'center',
+                  rowGap: archetypeNarrow ? 12 : 0,
+                }}
+              >
+                {/* Left spacer — 1/5 (wide layout only, preserves symmetric centering) */}
+                {!archetypeNarrow && <div style={{ flex: '0 0 20%' }} />}
+                {/* Archetype cards — centered 3/5 in wide, full width in narrow */}
+                <div
+                  style={{
+                    flex: archetypeNarrow ? '0 0 auto' : '0 0 60%',
+                    width: archetypeNarrow ? '100%' : undefined,
+                    display: 'flex',
+                    gap: 8,
+                    flexWrap: 'wrap',
+                    justifyContent: 'center',
+                    alignItems: 'flex-start',
+                  }}
+                >
                   {archetypeSlots.length === 0 && (
                     <span style={{ color: '#666', fontSize: 12 }}>No cards available</span>
                   )}
@@ -613,8 +656,15 @@ export default function ShopOverlay({
                   })}
                 </div>
 
-                {/* Re-roll button — 1/5 */}
-                <div style={{ flex: '0 0 20%', display: 'flex', justifyContent: 'center' }}>
+                {/* Re-roll button — 1/5 in wide mode, centered below in narrow mode */}
+                <div
+                  style={{
+                    flex: archetypeNarrow ? '0 0 auto' : '0 0 20%',
+                    width: archetypeNarrow ? '100%' : undefined,
+                    display: 'flex',
+                    justifyContent: 'center',
+                  }}
+                >
                   <Tooltip content={freeRerolls > 0
                     ? `You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`
                     : 'Re-rolling replaces your archetype market cards.'
