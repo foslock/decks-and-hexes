@@ -565,6 +565,14 @@ class CPUPlayer:
             power_margin = est_power - tile.defense_power
             score += power_margin * 0.5
 
+        # Card-power preference: apply a flat bonus proportional to the card's
+        # effective power so the CPU gravitates toward playing its strongest
+        # claim cards rather than burning weak Explores while high-power cards
+        # sit in hand. Uses estimated effective power so Mob Rule / Ambush /
+        # flank bonuses are rewarded appropriately on the selected tile.
+        est_power_flat = self._estimate_effective_power(game, player, tile, card)
+        score += est_power_flat * 1.2
+
         return score
 
     def _pick_extra_targets(self, game: Any, player: Any, card: Card,
