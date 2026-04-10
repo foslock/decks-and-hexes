@@ -2174,6 +2174,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const result = await api.upgradeCard(gameState.id, activePlayerId, cardIndex);
       sound.upgradeCard();
       onStateUpdate(result.state);
+      // Upgrade button unmounts once the card is upgraded (no more preview),
+      // so its onMouseLeave never fires. Clear the preview state manually —
+      // otherwise `showUpgradePreview` stays true and keeps the HexGrid
+      // `paused` prop true forever, freezing the PIXI ticker.
+      setShowUpgradePreview(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
