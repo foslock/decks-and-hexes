@@ -759,25 +759,32 @@ export default function ShopOverlay({
                     </span>
                   </>
                 )}
-              <Tooltip content={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : ''}>
-              <button
-                onClick={buyUpgradeWithSound}
-                disabled={disabled || !!buyLocked || playerResources < 5}
-                style={{
-                  fontSize: 14,
-                  padding: '8px 16px',
-                  background: playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
-                  border: `1px solid ${playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
-                  borderRadius: 6,
-                  color: playerResources >= 5 && !disabled && !buyLocked ? '#fff' : '#555',
-                  cursor: disabled || buyLocked || playerResources < 5 ? 'not-allowed' : 'pointer',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                }}
-              >
-                Buy Upgrade Credit · 5 💰
-              </button>
-              </Tooltip>
+              {(() => {
+                const upgradeButton = (
+                  <button
+                    onClick={buyUpgradeWithSound}
+                    disabled={disabled || !!buyLocked || playerResources < 5}
+                    style={{
+                      fontSize: 14,
+                      padding: '8px 16px',
+                      background: playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
+                      border: `1px solid ${playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
+                      borderRadius: 6,
+                      color: playerResources >= 5 && !disabled && !buyLocked ? '#fff' : '#555',
+                      cursor: disabled || buyLocked || playerResources < 5 ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    Buy Upgrade Credit · 5 💰
+                  </button>
+                );
+                return buyLocked ? (
+                  <Tooltip content="Cannot buy — Grand Strategy was played this round.">
+                    {upgradeButton}
+                  </Tooltip>
+                ) : upgradeButton;
+              })()}
               </div>
               <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
                 Upgrade credits can be spent during your play phase to upgrade any card in your hand.
