@@ -442,7 +442,9 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
   const textChildrenRef = useRef<(Text | Container)[]>([]);
   // Track VP tile indicator groups so hover preview labels can be parented inside them
   const vpGroupsRef = useRef<Map<string, Container>>(new Map());
-  // Whether the current preview label is inside a VP group (skip individual counter-rotation)
+  // Track base tile indicator groups so defense preview labels stack with the castle/defense indicator
+  const baseGroupsRef = useRef<Map<string, Container>>(new Map());
+  // Whether the current preview label is inside a VP/base group (skip individual counter-rotation)
   const previewInGroupRef = useRef(false);
 
   tilesRef.current = tiles;
@@ -653,10 +655,19 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         // Preview card label on valid highlighted tiles
         const pCard = previewCardRef.current;
         const hexC = hexContainerRef.current;
-        // Restore any previously hidden label
+        // Restore any previously hidden label — unless the tile is currently
+        // a multi-tile target, whose label is intentionally kept hidden by
+        // the multi-tile preview pass so the per-tile preview number can
+        // take its slot.
         if (hiddenLabelKeyRef.current) {
-          const prev = tileLabelRef.current.get(hiddenLabelKeyRef.current);
-          if (prev) prev.visible = true;
+          const hiddenKey = hiddenLabelKeyRef.current;
+          const isPersistentlyHidden = multiTileTargetsRef.current?.some(
+            ([sq, sr]) => `${sq},${sr}` === hiddenKey,
+          ) ?? false;
+          if (!isPersistentlyHidden) {
+            const prev = tileLabelRef.current.get(hiddenKey);
+            if (prev) prev.visible = true;
+          }
           hiddenLabelKeyRef.current = null;
         }
         const isOwnTile = tile.owner === activePlayerIdRef.current;
@@ -802,11 +813,18 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
             (lbl as Text).anchor.set(0.5);
           }
           lbl.alpha = 0.7;
-          // If VP tile, add preview inside the VP group so it stays grouped with the star
+          // If VP tile, add preview inside the VP group so it stays grouped with the star.
+          // If base tile and this is a defensive preview, add inside the base group so it stacks
+          // with the castle and replaces the static defense indicator (already hidden via tileLabelRef).
           const vpGroup = vpGroupsRef.current.get(key);
+          const baseGroup = baseGroupsRef.current.get(key);
           if (vpGroup) {
             lbl.position.set(0, 8); // local offset below star within group
             vpGroup.addChild(lbl);
+            previewInGroupRef.current = true;
+          } else if (baseGroup && isDefensive) {
+            lbl.position.set(0, 9); // local offset below castle within base group
+            baseGroup.addChild(lbl);
             previewInGroupRef.current = true;
           } else {
             lbl.position.set(x, y);
@@ -906,8 +924,14 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           previewLabelRef.current = null;
         }
         if (hiddenLabelKeyRef.current) {
-          const prev = tileLabelRef.current.get(hiddenLabelKeyRef.current);
-          if (prev) prev.visible = true;
+          const hiddenKey = hiddenLabelKeyRef.current;
+          const isPersistentlyHidden = multiTileTargetsRef.current?.some(
+            ([sq, sr]) => `${sq},${sr}` === hiddenKey,
+          ) ?? false;
+          if (!isPersistentlyHidden) {
+            const prev = tileLabelRef.current.get(hiddenKey);
+            if (prev) prev.visible = true;
+          }
           hiddenLabelKeyRef.current = null;
         }
         setTooltip(null);
@@ -1397,6 +1421,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
     const counterRot = -currentRotationRef.current;
     const vpGroups = new Map<string, Container>(); // tile key → VP indicator group container
     vpGroupsRef.current = vpGroups;
+    const baseGroups = new Map<string, Container>(); // tile key → base tile indicator group container
+    baseGroupsRef.current = baseGroups;
     for (const [key, tile] of Object.entries(tiles)) {
       const { x, y } = axialToPixel(tile.q, tile.r);
       const labelAlpha = buildAlpha(tile.q, tile.r);
@@ -1419,6 +1445,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         group.position.set(x, y);
         group.rotation = counterRot;
         group.alpha = labelAlpha;
+        group.eventMode = 'none';
+        group.interactiveChildren = false;
 
         const star = new Text({
           text: starText,
@@ -1433,10 +1461,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         });
         star.anchor.set(0.5);
         star.position.set(0, -8);
+        star.eventMode = 'none';
         group.addChild(star);
 
         hexContainer.addChild(group);
-        group.eventMode = 'none';
         textChildrenRef.current.push(group);
         vpGroups.set(key, group);
       }
@@ -1447,6 +1475,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         group.position.set(x, y);
         group.rotation = counterRot;
         group.alpha = labelAlpha;
+        group.eventMode = 'none';
+        group.interactiveChildren = false;
 
         const castle = new Text({
           text: '🏰',
@@ -1458,7 +1488,12 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         castle.anchor.set(0.5);
         castle.position.set(1, -11);
         castle.alpha = 0.8;
+        castle.eventMode = 'none';
         group.addChild(castle);
+
+        // Register the base group so hover/planned-action defense labels can
+        // be parented into it and replace the static defense indicator below.
+        baseGroups.set(key, group);
 
         if (tile.defense_power > 0 || tile.immune) {
           const persistentDef = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
@@ -1498,10 +1533,12 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           }
 
           group.addChild(defContainer);
+          // Register the defense indicator so hover/planned-action defense
+          // previews can hide it and parent themselves into the base group.
+          tileLabelRef.current.set(key, defContainer);
         }
 
         hexContainer.addChild(group);
-        group.eventMode = 'none';
         textChildrenRef.current.push(group);
       }
 
@@ -1513,6 +1550,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         mtnGroup.position.set(x, y);
         mtnGroup.rotation = counterRot;
         mtnGroup.alpha = labelAlpha;
+        mtnGroup.eventMode = 'none';
+        mtnGroup.interactiveChildren = false;
         const mountain = new Text({
           text: '⛰️',
           style: new TextStyle({ fontSize: 40, fill: 0x888888 }),
@@ -1520,10 +1559,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         });
         mountain.anchor.set(0.5);
         mountain.position.set(0, -4);
+        mountain.eventMode = 'none';
         if (flipHash) mountain.scale.x = -1;
         mtnGroup.addChild(mountain);
         hexContainer.addChild(mtnGroup);
-        mtnGroup.eventMode = 'none';
         textChildrenRef.current.push(mtnGroup);
       }
 
@@ -1582,11 +1621,23 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
           }
         }
 
-        // If this is a VP tile, add the action label into the VP group so it stays grouped with the star
+        // If this is a VP tile, add the action label into the VP group so it stays grouped with the star.
+        // If this is a base tile, hide the static defense indicator — the planned action label
+        // replaces it regardless of whether it's a defensive placement or an attack against the base,
+        // so the existing (and now misleading) defense number doesn't compete for visual space.
         const vpGroup = vpGroups.get(key);
+        const baseGroup = baseGroups.get(key);
+        if (baseGroup) {
+          const existing = tileLabelRef.current.get(key);
+          if (existing) existing.visible = false;
+        }
         if (vpGroup) {
           actionLabel.position.set(0, 8); // local offset below star
           vpGroup.addChild(actionLabel);
+        } else if (baseGroup && isDefensivePlay) {
+          // Defensive placement on a base: stack the label below the castle.
+          actionLabel.position.set(0, 9); // local offset below castle
+          baseGroup.addChild(actionLabel);
         } else {
           actionLabel.position.set(x, y);
           actionLabel.alpha = labelAlpha;
@@ -1759,9 +1810,14 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         mtLabel.alpha = 0.7;
 
         const vpGroup = vpGroups.get(sKey);
+        const baseGroup = baseGroups.get(sKey);
         if (vpGroup) {
           mtLabel.position.set(0, 8);
           vpGroup.addChild(mtLabel);
+        } else if (baseGroup && isDefensivePlay) {
+          // existing defense indicator already hidden via tileLabelRef above
+          mtLabel.position.set(0, 9);
+          baseGroup.addChild(mtLabel);
         } else {
           mtLabel.position.set(sx, sy);
           mtLabel.alpha = sLabelAlpha * 0.7;

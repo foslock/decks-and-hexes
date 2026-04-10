@@ -944,6 +944,215 @@ class TestSwarmSurge:
         assert t1.owner == "p1"
         assert t2.owner == "p1"
 
+    def test_surge_rejects_non_adjacent_targets(self, card_registry):
+        """Surge: targets must be adjacent to each other (connected subgraph)."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p1"]
+        surge = _copy_card(card_registry["swarm_surge"], "test_surge_nonadj")
+        player.hand = [surge] + player.hand[1:]
+
+        # Find two neutral tiles adjacent to p1 that are NOT adjacent to each other.
+        assert game.grid is not None
+        candidates = _find_n_adjacent_neutrals(game, "p1", 10)
+        pair: tuple[tuple[int, int], tuple[int, int]] | None = None
+        for i, a in enumerate(candidates):
+            for b in candidates[i + 1:]:
+                ta = game.grid.get_tile(*a)
+                tb = game.grid.get_tile(*b)
+                assert ta is not None and tb is not None
+                if ta.distance_to(tb) > 1:
+                    pair = (a, b)
+                    break
+            if pair:
+                break
+        if pair is None:
+            pytest.skip("Need two non-adjacent neutral tiles adjacent to p1")
+
+        (q1, r1), (q2, r2) = pair
+        success, msg = play_card(
+            game, "p1", 0,
+            target_q=q1, target_r=r1,
+            extra_targets=[(q2, r2)],
+        )
+        assert not success
+        assert "adjacent" in (msg or "").lower()
+
+        # Neither tile should have been claimed
+        assert game.grid.get_tile(q1, r1).owner is None
+        assert game.grid.get_tile(q2, r2).owner is None
+
+    def test_surge_extra_target_blocks_later_claim(self, card_registry):
+        """A Surge extra target is locked against later non-stackable claims."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p1"]
+        surge = _copy_card(card_registry["swarm_surge"], "test_surge_lock")
+        explore = _copy_card(card_registry["neutral_explore"], "test_explore_lock")
+        player.hand = [surge, explore] + player.hand[2:]
+
+        targets = _find_n_adjacent_neutrals(game, "p1", 2)
+        if len(targets) < 2:
+            pytest.skip("Need 2 adjacent neutral tiles")
+        (q1, r1), (q2, r2) = targets[0], targets[1]
+        # Make sure they're directly adjacent (Surge requires it)
+        assert game.grid.get_tile(q1, r1).distance_to(game.grid.get_tile(q2, r2)) == 1
+
+        # Play Surge on (q1,r1) with (q2,r2) as extra
+        ok, msg = play_card(
+            game, "p1", 0,
+            target_q=q1, target_r=r1,
+            extra_targets=[(q2, r2)],
+        )
+        assert ok, msg
+
+        # Now try to play Explore (non-stackable) on the extra target — should fail.
+        ok, msg = play_card(game, "p1", 0, target_q=q2, target_r=r2)
+        assert not ok
+        assert "stackable" in (msg or "").lower()
+
+
+class TestBaseRaidPopups:
+    """Base raids emit Raided/Spoils/Defended popups and never transfer the base."""
+
+    def _setup_raid_scenario(self, card_registry, attacker_power: int, base_defense: int):
+        """Set up p0 attacking p1's base with a custom-power claim card."""
+        game = _make_2p_game(card_registry)
+        assert game.grid is not None
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+
+        # Locate p1's base and force defense to a known value.
+        p1_base = next(t for t in game.grid.tiles.values() if t.is_base and t.base_owner == "p1")
+        p1_base.base_defense = base_defense
+        p1_base.defense_power = base_defense
+        p1_base.permanent_defense_bonus = 0
+
+        # Make sure p0 has a tile adjacent to p1's base.
+        for adj in game.grid.get_adjacent(p1_base.q, p1_base.r):
+            if adj.is_blocked or adj.is_base:
+                continue
+            adj.owner = "p0"
+            break
+
+        # Give p0 a claim card with the exact power we want.
+        claim = _copy_card(card_registry["neutral_mercenary"], "test_raid_claim")
+        claim.power = attacker_power
+        claim.adjacency_required = True
+        p0.hand = [claim] + p0.hand[1:]
+        p0.resources = 10
+
+        return game, p0, p1, p1_base
+
+    def test_successful_raid_emits_rubble_and_spoils(self, card_registry):
+        """Successful base raid: emits Raided + Spoils popups, base stays owned."""
+        game, p0, p1, p1_base = self._setup_raid_scenario(
+            card_registry, attacker_power=5, base_defense=2,
+        )
+        original_owner = p1_base.owner
+        original_base_owner = p1_base.base_owner
+
+        success, msg = play_card(game, "p0", 0, target_q=p1_base.q, target_r=p1_base.r)
+        assert success, msg
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        # Base tile is NOT transferred — only its defense reset.
+        assert p1_base.owner == original_owner
+        assert p1_base.base_owner == original_base_owner
+
+        # Expect exactly one rubble popup targeted at p1 and one spoils popup at p0.
+        rubble = [e for e in game.player_effects if e["effect_type"] == "base_raid_rubble"]
+        spoils = [e for e in game.player_effects if e["effect_type"] == "base_raid_spoils"]
+        assert len(rubble) == 1
+        assert len(spoils) == 1
+
+        r = rubble[0]
+        assert r["target_player_id"] == "p1"
+        assert r["source_player_id"] == "p0"
+        assert r["card_name"] == "Raided"
+        assert r["effect"] == "+3 Rubble"  # 5 attacker - 2 defense = 3 rubble
+        assert r["value"] == 3
+        assert r["added_card_name"] == "Rubble"
+        assert r["added_card_count"] == 3
+        assert r["source_q"] == p1_base.q and r["source_r"] == p1_base.r
+
+        s = spoils[0]
+        assert s["target_player_id"] == "p0"
+        assert s["source_player_id"] == "p0"
+        assert s["card_name"] == "Spoils"
+        assert s["effect"] == "+1 Spoils"
+        assert s["added_card_name"] == "Spoils"
+        assert s["added_card_count"] == 1
+
+        # Rubble/Spoils cards landed in the correct discard piles.
+        assert sum(1 for c in p1.deck.discard if c.name == "Rubble") == 3
+        assert sum(1 for c in p0.deck.discard if c.name == "Spoils") == 1
+
+    def test_defended_raid_emits_defended_popup(self, card_registry):
+        """Defended base raid: emits a Defended popup above the base owner."""
+        # Start with defense low enough to allow play-time validation,
+        # then boost it above the attacker's power before reveal so the
+        # defender wins at resolution time.
+        game, p0, p1, p1_base = self._setup_raid_scenario(
+            card_registry, attacker_power=2, base_defense=1,
+        )
+
+        success, msg = play_card(game, "p0", 0, target_q=p1_base.q, target_r=p1_base.r)
+        assert success, msg
+
+        # Boost defense so the raid will be repelled at resolve time.
+        p1_base.base_defense = 5
+        p1_base.defense_power = 5
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        # No rubble, no spoils — the raid was repelled.
+        assert not any(e["effect_type"] == "base_raid_rubble" for e in game.player_effects)
+        assert not any(e["effect_type"] == "base_raid_spoils" for e in game.player_effects)
+        assert sum(1 for c in p1.deck.discard if c.name == "Rubble") == 0
+
+        defended = [e for e in game.player_effects if e["effect_type"] == "base_raid_defended"]
+        assert len(defended) == 1
+        d = defended[0]
+        assert d["target_player_id"] == "p1"
+        assert d["source_player_id"] == "p0"
+        assert d["card_name"] == "Defended"
+        assert "repel" in d["effect"].lower()
+
+    def test_defense_held_no_popup_on_non_base(self, card_registry):
+        """Defended non-base tile does NOT trigger a base_raid_defended popup."""
+        game = _make_2p_game(card_registry)
+        assert game.grid is not None
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+
+        # Find a neutral tile adjacent to p0, assign to p1 with low defense
+        # so the play-time validation passes; defense is boosted before reveal.
+        q, r = _find_adjacent_neutral(game, "p0")
+        assert q is not None
+        target = game.grid.get_tile(q, r)
+        target.owner = "p1"
+        target.base_defense = 1
+        target.defense_power = 1
+
+        claim = _copy_card(card_registry["neutral_mercenary"], "test_weak_claim")
+        claim.power = 2
+        p0.hand = [claim] + p0.hand[1:]
+        p0.resources = 10
+
+        success, msg = play_card(game, "p0", 0, target_q=target.q, target_r=target.r)
+        assert success, msg
+
+        # Boost defense above attacker power before reveal.
+        target.base_defense = 5
+        target.defense_power = 5
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        assert not any(e["effect_type"] == "base_raid_defended" for e in game.player_effects)
+
 
 class TestSwarmOverwhelm:
     def test_overwhelm_power_scales_with_adjacent(self, card_registry):
