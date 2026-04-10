@@ -384,6 +384,7 @@ def _serialize_player(player: Player, registry: dict[str, Card]) -> dict[str, An
         "tiles_lost_last_round": player.tiles_lost_last_round,
         "pending_discard": player.pending_discard,
         "_prev_market_ids": player._prev_market_ids,
+        "_prev_market_ids_prev": player._prev_market_ids_prev,
         "_prev_market_types": player._prev_market_types,
     }
 
@@ -445,6 +446,7 @@ def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Play
         pending_discard=data.get("pending_discard", 0),
     )
     player._prev_market_ids = data.get("_prev_market_ids", [])
+    player._prev_market_ids_prev = data.get("_prev_market_ids_prev", [])
     player._prev_market_types = data.get("_prev_market_types", [])
     return player
 

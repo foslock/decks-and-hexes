@@ -101,7 +101,9 @@ def _draw_archetype_market(
     buying in the Buy phase.
 
     When *player* is provided, hidden heuristics improve roll quality:
-      1. No consecutive repeats — cards from the previous roll are excluded.
+      1. 3-roll exclusion — cards from either of the two previous rolls are
+         excluded, so any given card appears at most once in every three
+         consecutive rolls (natural rolls and player re-rolls combined).
       2. Affordability guarantee — if the player has >= 2 resources, at least
          one card in the result will be affordable.
       3. Type diversity correction — if the previous roll was mono-type, at
@@ -114,6 +116,7 @@ def _draw_archetype_market(
         result = list(eligible)
         rng.shuffle(result)
         if player is not None:
+            player._prev_market_ids_prev = player._prev_market_ids
             player._prev_market_ids = [c.id for c in result]
             player._prev_market_types = [c.card_type.value for c in result]
         return result
@@ -122,8 +125,9 @@ def _draw_archetype_market(
     restricted = list(eligible)
 
     if player is not None:
-        # Heuristic 1: no consecutive repeats
-        prev_ids = set(player._prev_market_ids)
+        # Heuristic 1: exclude cards seen in either of the last two rolls so
+        # any card appears at most once per 3-roll window.
+        prev_ids = set(player._prev_market_ids) | set(player._prev_market_ids_prev)
         if prev_ids:
             filtered = [c for c in restricted if c.id not in prev_ids]
             if len(filtered) >= count:
@@ -159,6 +163,7 @@ def _draw_archetype_market(
 
     # --- Step 4: record state for next roll ---
     if player is not None:
+        player._prev_market_ids_prev = player._prev_market_ids
         player._prev_market_ids = [c.id for c in result]
         player._prev_market_types = [c.card_type.value for c in result]
 
@@ -256,8 +261,12 @@ class Player:
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
     tiles_lost_last_round: int = 0  # tiles captured from this player last round (for Robin Hood)
     pending_discard: int = 0  # deferred discard count (e.g. Regroup: draw first, then discard)
-    # Smart roll state — hidden heuristics for archetype market draws (not serialized)
+    # Smart roll state — hidden heuristics for archetype market draws.
+    # _prev_market_ids is the most recent roll; _prev_market_ids_prev is the
+    # roll before that. Together they enforce the "no repeats within any
+    # 3-roll window" rule across natural rolls and re-rolls.
     _prev_market_ids: list[str] = field(default_factory=list)
+    _prev_market_ids_prev: list[str] = field(default_factory=list)
     _prev_market_types: list[str] = field(default_factory=list)
 
     @property
@@ -2048,8 +2057,9 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 player.resources -= effective_cost
         player.archetype_market.remove(target)
         player.archetype_deck.remove(target)
-        player._prev_market_ids = []
-        player._prev_market_types = []
+        # Note: _prev_market_ids / _prev_market_ids_prev are intentionally
+        # NOT cleared on purchase — they feed the 3-roll exclusion window,
+        # which should span natural rolls, re-rolls, AND purchases.
         player.deck.add_to_discard([target])
         game.buy_phase_purchases.setdefault(player_id, []).append({
             "card_id": target.id, "card_name": target.name,
