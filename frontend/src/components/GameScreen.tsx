@@ -2879,7 +2879,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (!prev?.grid) return prev;
       const newTiles = { ...prev.grid.tiles };
       const tile = newTiles[step.tile_key];
-      if (tile && step.winner_id && (step.outcome === 'claimed' || step.outcome === 'auto_claim')) {
+      // Base tiles never change ownership on a successful claim — the raid
+      // generates Rubble/Spoils via player_effect popups instead. Preserve
+      // the base tile's color during the resolve animation.
+      if (tile && step.winner_id && (step.outcome === 'claimed' || step.outcome === 'auto_claim') && !tile.is_base) {
         newTiles[step.tile_key] = {
           ...tile,
           owner: step.winner_id,
@@ -2929,8 +2932,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return { ...prev, grid: { ...prev.grid, tiles: newTiles }, players: newPlayers };
     });
 
-    // Recompute VP paths affected by this tile change
-    if (step.outcome === 'claimed' && step.winner_id && step.previous_owner) {
+    // Recompute VP paths affected by this tile change.
+    // Base tiles never change hands on a raid, so their VP paths are intact.
+    const stepTile = resolveDisplayTilesRef.current?.[step.tile_key];
+    if (step.outcome === 'claimed' && step.winner_id && step.previous_owner && !stepTile?.is_base) {
       const lostTileKey = step.tile_key;
       const loserId = step.previous_owner;
 
@@ -3743,8 +3748,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             />
           )}
 
-          {/* ── Top-left overlay: round info + upkeep + expandable player panel ── */}
-          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 210, width: 'fit-content', opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
+          {/* ── Top-left overlay: round info + upkeep + expandable player panel ──
+              Wrapper is pointer-events: none so background regions pass clicks
+              through to the hex grid canvas underneath (e.g. enemy base tiles
+              in the top-left corner). Interactive children below explicitly
+              opt back in with pointer-events: auto. */}
+          <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 210, width: 'fit-content', opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
             {/* Round / Phase / VP target */}
             <div style={{
               background: 'rgba(10, 10, 20, 0.85)',
@@ -3754,6 +3763,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               backdropFilter: 'blur(4px)',
               border: '1px solid #333',
               width: 'fit-content',
+              pointerEvents: hudVisible ? 'auto' : 'none',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, whiteSpace: 'nowrap' }}>
                 <span style={{
@@ -3801,6 +3811,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 width: 200,
                 maxHeight: 'calc(100dvh - 300px)',
                 overflowY: 'auto',
+                pointerEvents: hudVisible ? 'auto' : 'none',
               }}
             >
               {(playerPanelExpanded || forcePlayerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp) ? (
@@ -4112,8 +4123,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             document.body
           )}
 
-          {/* ── Top-right: action buttons + gear ── */}
-          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', flexDirection: narrowTop ? 'column' : 'row', gap: 8, alignItems: narrowTop ? 'flex-end' : 'flex-start', zIndex: 210, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: hudVisible ? 'auto' : 'none' }}>
+          {/* ── Top-right: action buttons + gear ──
+              Wrapper is pointer-events: none so gap/background regions pass
+              clicks through to the hex grid canvas underneath (e.g. enemy
+              base tiles in the top-right corner). Each interactive child
+              below explicitly opts back in with pointer-events: auto. */}
+          <div style={{ position: 'absolute', top: 12, right: 12, display: 'flex', flexDirection: narrowTop ? 'column' : 'row', gap: 8, alignItems: narrowTop ? 'flex-end' : 'flex-start', zIndex: 210, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
             <button
               className="hud-btn"
               onClick={() => { setShowCardBrowser(true); setShowDeckViewer(false); setShowShopOverlay(false); }}
@@ -4126,6 +4141,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 fontSize: 13,
                 fontWeight: 'bold',
                 cursor: 'pointer',
+                pointerEvents: hudVisible ? 'auto' : 'none',
               }}
             >
               <span style={{ textDecoration: 'underline' }}>C</span>ards
@@ -4142,6 +4158,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 fontSize: 13,
                 fontWeight: 'bold',
                 cursor: 'pointer',
+                pointerEvents: hudVisible ? 'auto' : 'none',
               }}
             >
               <span style={{ textDecoration: 'underline' }}>D</span>eck
@@ -4159,6 +4176,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 fontWeight: 'bold',
                 cursor: 'pointer',
                 borderColor: phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? '#4a9eff' : '#555',
+                pointerEvents: hudVisible ? 'auto' : 'none',
                 ...(phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? {
                   animation: animationMode !== 'off' ? 'shopPulse 2s ease-in-out infinite' : undefined,
                   boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
@@ -4169,7 +4187,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             </button>
 
             {/* Gear icon dropdown */}
-            <div ref={settingsRef} style={{ position: 'relative', order: narrowTop ? -1 : undefined }}>
+            <div ref={settingsRef} style={{ position: 'relative', order: narrowTop ? -1 : undefined, pointerEvents: hudVisible ? 'auto' : 'none' }}>
               <button
                 className="hud-btn"
                 onClick={() => setSettingsExpanded(p => !p)}
@@ -4400,11 +4418,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             )}
           </div>
 
-          {/* Bottom bar: buttons (right) */}
-          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'flex-end', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
+          {/* Bottom bar: buttons (right) —
+              Wrapper is pointer-events: none so the full-width bar (including
+              the left spacer) passes clicks through to the hex grid canvas
+              underneath. Only the button column opts back into pointer events. */}
+          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'flex-end', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
             <div style={{ flex: 1 }} />
             {/* Buttons + waiting indicators — right aligned, stacked vertically */}
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, pointerEvents: 'auto' }}>
             {/* Multiplayer: waiting for other players indicator */}
             {isMultiplayer && activePlayer && (
               (phase === 'play' && activePlayer.has_submitted_play && !resolving) ||
@@ -5153,6 +5174,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         for (let i = 0; i < activePlayerEffects.length; i++) {
           const effect = activePlayerEffects[i];
           if (!effect.added_card_name || !effect.added_card_count || effect.source_q == null || effect.source_r == null) continue;
+          // Base raids use the Raided/Spoils popup only — skip the flying
+          // rubble/spoils card animation.
+          if (effect.effect_type === 'base_raid_rubble' || effect.effect_type === 'base_raid_spoils') continue;
 
           const stackIdx = stackIndices[i];
           const effectDelay = stackIdx * STAGGER_DELAY;
@@ -5289,7 +5313,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     <div style={{ fontSize: 13, fontWeight: 'bold', color: '#fff', marginBottom: 2 }}>
                       {effect.card_name}
                     </div>
-                    <div style={{ fontSize: 12, color: ['grant_actions_next_turn', 'free_reroll', 'grant_land_grants', 'cease_fire', 'next_turn_bonus', 'cost_reduction'].includes(effect.effect_type) ? '#4aff6a' : effect.effect_type === 'buy_restriction' ? '#ffaa44' : '#ff6666', fontWeight: 'bold' }}>
+                    <div style={{ fontSize: 12, color: ['grant_actions_next_turn', 'free_reroll', 'grant_land_grants', 'cease_fire', 'next_turn_bonus', 'cost_reduction', 'base_raid_spoils', 'base_raid_defended'].includes(effect.effect_type) ? '#4aff6a' : effect.effect_type === 'buy_restriction' ? '#ffaa44' : '#ff6666', fontWeight: 'bold' }}>
                       {effect.effect}
                     </div>
                   </div>

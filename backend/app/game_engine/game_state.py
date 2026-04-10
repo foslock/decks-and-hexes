@@ -1760,7 +1760,7 @@ def execute_reveal(game: GameState) -> GameState:
                     game.player_effects.append({
                         "source_player_id": winner_id,
                         "target_player_id": base_owner_id,
-                        "card_name": "Base Raid",
+                        "card_name": "Raided",
                         "effect": f"+{rubble_count} Rubble",
                         "effect_type": "base_raid_rubble",
                         "value": rubble_count,
@@ -1772,7 +1772,7 @@ def execute_reveal(game: GameState) -> GameState:
                     game.player_effects.append({
                         "source_player_id": winner_id,
                         "target_player_id": winner_id,
-                        "card_name": "Base Raid",
+                        "card_name": "Spoils",
                         "effect": "+1 Spoils",
                         "effect_type": "base_raid_spoils",
                         "value": 1,
@@ -1794,6 +1794,23 @@ def execute_reveal(game: GameState) -> GameState:
                 game._log(f"{game.players[winner_id].name} claims tile {tile_key} (power {max_power})")
         else:
             game._log(f"{tile.owner and game.players[tile.owner].name} defends tile {tile_key}")
+            # Defended base raid: emit a "Defended" popup above the base owner
+            # so the player sees their base held. Only fires if an opponent
+            # actually tried to claim the base this round.
+            if tile.is_base and tile.owner:
+                base_owner_id = tile.owner
+                attacker_ids = [pid for pid, _ in claims if pid != base_owner_id]
+                if attacker_ids:
+                    game.player_effects.append({
+                        "source_player_id": attacker_ids[0],
+                        "target_player_id": base_owner_id,
+                        "card_name": "Defended",
+                        "effect": "Raid repelled",
+                        "effect_type": "base_raid_defended",
+                        "value": 0,
+                        "source_q": tile.q,
+                        "source_r": tile.r,
+                    })
 
     # Resolve on_resolution effects for claim cards
     for tile_key, claims in claims_by_tile.items():
