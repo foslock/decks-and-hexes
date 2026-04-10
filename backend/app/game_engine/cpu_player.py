@@ -58,7 +58,8 @@ def _game_progress(game: Any) -> float:
     Uses current round relative to max rounds.
     """
     max_r = getattr(game, "max_rounds", 20) or 20
-    return min(1.0, max(0.0, (game.current_round - 1) / max(1, max_r - 1)))
+    progress = (game.current_round - 1) / max(1, max_r - 1)
+    return min(1.0, max(0.0, float(progress)))
 
 
 def _adapt_weights(weights: StrategyWeights, game: Any, player_id: str) -> StrategyWeights:
