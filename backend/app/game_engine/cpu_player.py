@@ -728,12 +728,15 @@ class CPUPlayer:
                 return None  # Can't afford — skip
 
         # Hard veto: never play a Land-Grant-granting card (Diplomat / Diplomacy)
-        # unless we are currently the VP leader. Handing free VP to opponents from
-        # behind just helps them catch up. We skip the card entirely here rather
-        # than penalising its score, because _pick() shifts negative scores back
-        # into the positive range and would still let noise pick it.
+        # unless we are STRICTLY ahead of every opponent. Handing free VP to
+        # opponents from behind — or while tied — just helps them catch up. In
+        # particular, at game start everyone is tied at 0 VP, and a non-strict
+        # check would treat every CPU as a "leader" and let them play Diplomat
+        # freely. We skip the card entirely here rather than penalising its
+        # score, because _pick() shifts negative scores back into the positive
+        # range and would still let noise pick it.
         if any(e.type == EffectType.GRANT_LAND_GRANTS for e in card.effects):
-            if not _is_vp_leader(game, self.player_id, strict=False):
+            if not _is_vp_leader(game, self.player_id, strict=True):
                 return None
 
         # Resource gain
