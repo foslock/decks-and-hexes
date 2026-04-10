@@ -3755,6 +3755,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               const PAD = 6;
               const actions = activePlayer.planned_actions;
               const GAP = 4;
+              // Fade out while the player is dragging any card so they can drop
+              // on tiles hidden beneath the list.
+              const isDraggingCard = draggingCardIndex !== null;
               return (
                 <div
                   ref={inPlayContainerRef}
@@ -3770,6 +3773,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     maxHeight: 'calc(100dvh - 420px)',
                     overflowY: 'auto',
                     boxSizing: 'border-box',
+                    opacity: isDraggingCard ? 0 : 1,
+                    pointerEvents: isDraggingCard ? 'none' : 'auto',
+                    transition: 'opacity 0.15s ease-out',
                   }}
                 >
                   <style>{`
