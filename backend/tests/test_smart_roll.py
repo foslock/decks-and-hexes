@@ -64,6 +64,68 @@ class TestNoConsecutiveRepeats:
             )
             prev_ids = roll_ids
 
+    def test_third_roll_excludes_both_previous_rolls(self):
+        """Cards from rolls 1 and 2 should both be excluded from roll 3."""
+        cards = [_make_card(f"c{i}") for i in range(12)]
+        player = _make_player()
+        rng = random.Random(7)
+
+        roll1 = _draw_archetype_market(cards, 3, rng, player)
+        roll2 = _draw_archetype_market(cards, 3, rng, player)
+        roll3 = _draw_archetype_market(cards, 3, rng, player)
+
+        roll1_ids = {c.id for c in roll1}
+        roll2_ids = {c.id for c in roll2}
+        roll3_ids = {c.id for c in roll3}
+
+        assert roll1_ids.isdisjoint(roll3_ids), (
+            f"Roll 3 repeated cards from roll 1: {roll1_ids & roll3_ids}"
+        )
+        assert roll2_ids.isdisjoint(roll3_ids), (
+            f"Roll 3 repeated cards from roll 2: {roll2_ids & roll3_ids}"
+        )
+
+    def test_fourth_roll_may_reuse_roll1(self):
+        """Roll 4 excludes rolls 2 and 3, but roll 1 cards are eligible again."""
+        # Deck of exactly 9 cards means rolls 1,2,3 cover ALL cards, so roll 4
+        # must reuse cards from roll 1 (the oldest roll that's now eligible).
+        cards = [_make_card(f"c{i}") for i in range(9)]
+        player = _make_player()
+        rng = random.Random(11)
+
+        roll1 = _draw_archetype_market(cards, 3, rng, player)
+        roll2 = _draw_archetype_market(cards, 3, rng, player)
+        roll3 = _draw_archetype_market(cards, 3, rng, player)
+        roll4 = _draw_archetype_market(cards, 3, rng, player)
+
+        roll1_ids = {c.id for c in roll1}
+        roll2_ids = {c.id for c in roll2}
+        roll3_ids = {c.id for c in roll3}
+        roll4_ids = {c.id for c in roll4}
+
+        # Roll 4 must not share with the two most recent rolls.
+        assert roll2_ids.isdisjoint(roll4_ids)
+        assert roll3_ids.isdisjoint(roll4_ids)
+        # And since the deck only holds 9 cards, roll 4 should be exactly roll 1.
+        assert roll4_ids == roll1_ids
+
+    def test_three_roll_window_over_many_iterations(self):
+        """Over many consecutive rolls, no card appears in any 3-roll window."""
+        cards = [_make_card(f"c{i}") for i in range(14)]
+        player = _make_player()
+        rng = random.Random(2026)
+
+        history: list[set[str]] = []
+        for _ in range(30):
+            roll = _draw_archetype_market(cards, 3, rng, player)
+            roll_ids = {c.id for c in roll}
+            # Current roll should be disjoint from the previous two.
+            for prev in history[-2:]:
+                assert prev.isdisjoint(roll_ids), (
+                    f"3-roll window violated: {prev & roll_ids}"
+                )
+            history.append(roll_ids)
+
     def test_small_deck_relaxes_repeat_constraint(self):
         """With only 4 cards in the pool, some overlap is unavoidable — should not crash."""
         cards = [_make_card(f"c{i}") for i in range(4)]

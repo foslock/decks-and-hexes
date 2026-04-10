@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import type { Card, MarketStack } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
@@ -111,6 +111,31 @@ function CompactShopCard({
   const typeColor = getCardDisplayColor(card);
   const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
   const soldOut = remaining === 0;
+
+  // Refs + one-shot layout measurement for title / subtitle shrink-to-fit.
+  // Previously this used inline ref callbacks that re-ran on every parent
+  // render, forcing a synchronous layout read+write for every compact card
+  // on every render burst (shop has up to ~18 cards — that's ~36 forced
+  // layouts per parent render). We only need to measure once: the card
+  // instance is stable for the lifetime of this React tree node (the
+  // parent keys by card.id) and the card container width is a constant.
+  const titleSpanRef = useRef<HTMLSpanElement>(null);
+  const subtitleSpanRef = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const titleEl = titleSpanRef.current;
+    if (titleEl?.parentElement) {
+      const scale = Math.min(1, titleEl.parentElement.clientWidth / titleEl.scrollWidth);
+      titleEl.style.setProperty('--title-scale', String(scale));
+    }
+    const subEl = subtitleSpanRef.current;
+    if (subEl?.parentElement) {
+      const scale = Math.min(1, subEl.parentElement.clientWidth / subEl.scrollWidth);
+      subEl.style.setProperty('--sub-scale', String(scale));
+    }
+    // Re-measure if the card's visual content changes. card.id is stable
+    // per slot so this effectively runs once on mount; including name and
+    // current_vp guards against in-place mutations (e.g. VP updates).
+  }, [card.id, card.name, card.current_vp, card.description]);
   const buyColor = soldOut || !canAfford || disabled ? '#333' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase
     ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this round`).join('\n')
@@ -149,12 +174,7 @@ function CompactShopCard({
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
           <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-              if (el) {
-                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                el.style.setProperty('--title-scale', String(scale));
-              }
-            }}>
+            <span ref={titleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }}>
               {card.name}
             </span>
           </div>
@@ -163,12 +183,7 @@ function CompactShopCard({
           </span>
         </div>
         <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
-          <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-            if (el) {
-              const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-              el.style.setProperty('--sub-scale', String(scale));
-            }
-          }}>
+          <span ref={subtitleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }}>
           {buildCardSubtitle(card).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp }))}
           </span>
         </div>
@@ -500,12 +515,18 @@ export default function ShopOverlay({
                 <Tooltip content="These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.">
                   <span style={{ fontSize: 20, fontWeight: 'bold', color: '#ccc', cursor: 'help' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
                 </Tooltip>
+                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>New card options every round</div>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                {/* Left spacer — 1/5 */}
-                <div style={{ flex: '0 0 20%' }} />
-                {/* Archetype cards — centered 3/5 */}
-                <div style={{ flex: '0 0 60%', display: 'flex', gap: 8, justifyContent: 'center', alignItems: 'flex-start' }}>
+              {/* Archetype cards — full-width wrap row, centered */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  justifyContent: 'center',
+                  alignItems: 'flex-start',
+                }}
+              >
                   {archetypeSlots.length === 0 && (
                     <span style={{ color: '#666', fontSize: 12 }}>No cards available</span>
                   )}
@@ -598,31 +619,53 @@ export default function ShopOverlay({
                   })}
                 </div>
 
-                {/* Re-roll button — 1/5 */}
-                <div style={{ flex: '0 0 20%', display: 'flex', justifyContent: 'center' }}>
-                  <Tooltip content={freeRerolls > 0
-                    ? `You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`
-                    : 'Re-rolling replaces your archetype market cards.'
-                  }>
+              {/* Re-roll — below archetype cards, matching the upgrade-credit row style */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 12 }}>
+                <div style={{ flexShrink: 0 }}>
+                  {freeRerolls > 0 ? (
+                    <Tooltip content={`You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`}>
+                      <button
+                        onClick={onReroll}
+                        disabled={disabled || (freeRerolls <= 0 && playerResources < 1)}
+                        style={{
+                          fontSize: 14,
+                          padding: '8px 16px',
+                          background: '#2a5a2e',
+                          border: '1px solid #4aff6a',
+                          borderRadius: 6,
+                          color: !disabled ? '#fff' : '#555',
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          ...(disabled ? {} : { animation: 'shopPurchasePulse 2s ease-in-out infinite' }),
+                        }}
+                      >
+                        {`Re-roll (${freeRerolls} free)`}
+                      </button>
+                    </Tooltip>
+                  ) : (
                     <button
                       onClick={onReroll}
-                      disabled={disabled || (freeRerolls <= 0 && playerResources < 1)}
+                      disabled={disabled || playerResources < 1}
                       style={{
                         fontSize: 14,
-                        padding: '8px 14px',
-                        background: freeRerolls > 0 ? '#2a5a2e' : playerResources >= 2 && !disabled ? '#cc7a2a' : '#333',
-                        border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : playerResources >= 2 && !disabled ? '#cc7a2a' : '#555'}`,
+                        padding: '8px 16px',
+                        background: playerResources >= 2 && !disabled ? '#cc7a2a' : '#333',
+                        border: `1px solid ${playerResources >= 2 && !disabled ? '#cc7a2a' : '#555'}`,
                         borderRadius: 6,
-                        color: (freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
-                        cursor: disabled || (freeRerolls <= 0 && playerResources < 1) ? 'not-allowed' : 'pointer',
+                        color: playerResources >= 2 && !disabled ? '#fff' : '#555',
+                        cursor: disabled || playerResources < 1 ? 'not-allowed' : 'pointer',
                         whiteSpace: 'nowrap',
-                        ...(freeRerolls > 0 && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
+                        flexShrink: 0,
                       }}
                     >
-                      {freeRerolls > 0 ? `Re-roll (${freeRerolls} free)` : 'Re-roll · 1 💰'}
+                      Re-roll · 1 💰
                     </button>
-                  </Tooltip>
+                  )}
                 </div>
+                <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
+                  Cards given from a re-roll are guaranteed to be different from existing cards.
+                </span>
               </div>
             </div>
 
@@ -694,25 +737,32 @@ export default function ShopOverlay({
                     </span>
                   </>
                 )}
-              <Tooltip content={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : ''}>
-              <button
-                onClick={buyUpgradeWithSound}
-                disabled={disabled || !!buyLocked || playerResources < 5}
-                style={{
-                  fontSize: 14,
-                  padding: '8px 16px',
-                  background: playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
-                  border: `1px solid ${playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
-                  borderRadius: 6,
-                  color: playerResources >= 5 && !disabled && !buyLocked ? '#fff' : '#555',
-                  cursor: disabled || buyLocked || playerResources < 5 ? 'not-allowed' : 'pointer',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                }}
-              >
-                Buy Upgrade Credit · 5 💰
-              </button>
-              </Tooltip>
+              {(() => {
+                const upgradeButton = (
+                  <button
+                    onClick={buyUpgradeWithSound}
+                    disabled={disabled || !!buyLocked || playerResources < 5}
+                    style={{
+                      fontSize: 14,
+                      padding: '8px 16px',
+                      background: playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
+                      border: `1px solid ${playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
+                      borderRadius: 6,
+                      color: playerResources >= 5 && !disabled && !buyLocked ? '#fff' : '#555',
+                      cursor: disabled || buyLocked || playerResources < 5 ? 'not-allowed' : 'pointer',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
+                    }}
+                  >
+                    Buy Upgrade Credit · 5 💰
+                  </button>
+                );
+                return buyLocked ? (
+                  <Tooltip content="Cannot buy — Grand Strategy was played this round.">
+                    {upgradeButton}
+                  </Tooltip>
+                ) : upgradeButton;
+              })()}
               </div>
               <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
                 Upgrade credits can be spent during your play phase to upgrade any card in your hand.

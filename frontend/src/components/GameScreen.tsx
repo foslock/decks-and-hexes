@@ -2223,25 +2223,36 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer, homePlayerIndex, shouldCycle, localPlayerIds]);
 
-  // Hot-seat auto-switch: when the current buyer changes (e.g. after a CPU buys
-  // or another player ends their buy turn), switch to the new buyer if they are
-  // a local player controlled by this browser. Also auto-open the shop for them.
+  // Hot-seat auto-switch: when the current buyer changes MID-BUY-PHASE (e.g. after
+  // a CPU buys or another player ends their buy turn), switch to the new buyer if
+  // they are a local player controlled by this browser. Also auto-open the shop.
+  //
+  // We intentionally skip the FIRST buyer assignment of each buy phase — that is
+  // the reveal→buy transition, which is owned by handleBannerComplete (it opens
+  // the shop after the "Grow Your Deck" banner animation). If we opened it here
+  // as well, the shop would mount while the banner was still playing, which on
+  // iPhone caused two heavy layout bursts back-to-back over the active PIXI
+  // canvas and was a likely contributor to the iOS Safari tab crash.
   const prevBuyerIdRef = useRef<string | null>(null);
   useEffect(() => {
-    const buyerId = gameState.current_buyer_id;
-    if (buyerId && buyerId !== prevBuyerIdRef.current && gameState.current_phase === 'buy') {
-      // Auto-switch if the new buyer is a local (non-CPU) player
-      if (localPlayerIds.includes(buyerId) && !gameState.players[buyerId]?.is_cpu) {
-        const buyerIndex = gameState.player_order.indexOf(buyerId);
-        if (buyerIndex >= 0) {
-          setActivePlayerIndex(buyerIndex);
-          setSelectedCardIndex(null);
-        }
-        // Auto-open shop when it becomes this player's turn to buy
-        setShowShopOverlay(true);
-      }
+    if (gameState.current_phase !== 'buy') {
+      // Reset so the next buy phase's first buyer is treated as the initial.
+      prevBuyerIdRef.current = null;
+      return;
     }
+    const buyerId = gameState.current_buyer_id;
+    const isInitialBuyer = prevBuyerIdRef.current === null;
     prevBuyerIdRef.current = buyerId;
+    if (isInitialBuyer) return; // handleBannerComplete owns the initial open
+    if (!buyerId) return;
+    if (localPlayerIds.includes(buyerId) && !gameState.players[buyerId]?.is_cpu) {
+      const buyerIndex = gameState.player_order.indexOf(buyerId);
+      if (buyerIndex >= 0) {
+        setActivePlayerIndex(buyerIndex);
+        setSelectedCardIndex(null);
+      }
+      setShowShopOverlay(true);
+    }
   }, [gameState.current_buyer_id, gameState.current_phase, gameState.player_order, gameState.players, localPlayerIds]);
 
   // CPU buying delay: when the current buyer is a CPU, wait 1.5s so the user
@@ -3613,6 +3624,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 setReviewTilePopupPos({ x: sx, y: sy });
               } : undefined}
               onTileHoverEnd={reviewing ? () => setReviewHoveredTile(null) : undefined}
+              paused={showShopOverlay || showCardBrowser || showDeckViewer || showUpgradePreview || showGameOver}
             />
           )}
 
