@@ -244,30 +244,6 @@ export default function ShopOverlay({
   // Track archetype market slots so purchased cards show a placeholder instead of disappearing
   const [archetypeSlots, setArchetypeSlots] = useState<Array<{ card: Card; purchased: boolean }>>([]);
 
-  // When the shop is too narrow to fit cards + re-roll on one row, switch to a
-  // stacked layout: cards wrap across multiple rows, re-roll centered below.
-  const archetypeRowRef = useRef<HTMLDivElement>(null);
-  const [archetypeNarrow, setArchetypeNarrow] = useState(false);
-  useEffect(() => {
-    const el = archetypeRowRef.current;
-    if (!el) return;
-    const numCards = Math.max(1, archetypeSlots.length);
-    // Width needed to keep cards + re-roll on a single row, matching the
-    // wide-mode flex layout below (cards in a 60% centered lane, reroll in
-    // a 20% lane on the right). The cards lane must fit all card widths +
-    // inter-card gaps (8px), and the whole row is framed by 20%/20% gutters.
-    const REROLL_LANE = 160; // reroll button + padding
-    const cardsLane = numCards * COMPACT_CARD_WIDTH + Math.max(0, numCards - 1) * 8;
-    // cardsLane occupies the middle 60%, so full wide-layout width ≈ cardsLane / 0.6.
-    // Also require reroll lane to fit in its 20% slot.
-    const minWide = Math.max(cardsLane / 0.6, REROLL_LANE * 5);
-    const observer = new ResizeObserver(([entry]) => {
-      setArchetypeNarrow(entry.contentRect.width < minWide);
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [archetypeSlots.length]);
-
   useEffect(() => {
     setArchetypeSlots(prev => {
       const currentIds = new Set(archetypeMarket.map(c => c.id));
@@ -541,29 +517,16 @@ export default function ShopOverlay({
                 </Tooltip>
                 <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>New card options every round</div>
               </div>
+              {/* Archetype cards — full-width wrap row, centered */}
               <div
-                ref={archetypeRowRef}
                 style={{
                   display: 'flex',
-                  flexDirection: archetypeNarrow ? 'column' : 'row',
-                  alignItems: 'center',
-                  rowGap: archetypeNarrow ? 12 : 0,
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  justifyContent: 'center',
+                  alignItems: 'flex-start',
                 }}
               >
-                {/* Left spacer — 1/5 (wide layout only, preserves symmetric centering) */}
-                {!archetypeNarrow && <div style={{ flex: '0 0 20%' }} />}
-                {/* Archetype cards — centered 3/5 in wide, full width in narrow */}
-                <div
-                  style={{
-                    flex: archetypeNarrow ? '0 0 auto' : '0 0 60%',
-                    width: archetypeNarrow ? '100%' : undefined,
-                    display: 'flex',
-                    gap: 8,
-                    flexWrap: 'wrap',
-                    justifyContent: 'center',
-                    alignItems: 'flex-start',
-                  }}
-                >
                   {archetypeSlots.length === 0 && (
                     <span style={{ color: '#666', fontSize: 12 }}>No cards available</span>
                   )}
@@ -656,38 +619,53 @@ export default function ShopOverlay({
                   })}
                 </div>
 
-                {/* Re-roll button — 1/5 in wide mode, centered below in narrow mode */}
-                <div
-                  style={{
-                    flex: archetypeNarrow ? '0 0 auto' : '0 0 20%',
-                    width: archetypeNarrow ? '100%' : undefined,
-                    display: 'flex',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Tooltip content={freeRerolls > 0
-                    ? `You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`
-                    : 'Re-rolling replaces your archetype market cards.'
-                  }>
+              {/* Re-roll — below archetype cards, matching the upgrade-credit row style */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 12 }}>
+                <div style={{ flexShrink: 0 }}>
+                  {freeRerolls > 0 ? (
+                    <Tooltip content={`You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`}>
+                      <button
+                        onClick={onReroll}
+                        disabled={disabled || (freeRerolls <= 0 && playerResources < 1)}
+                        style={{
+                          fontSize: 14,
+                          padding: '8px 16px',
+                          background: '#2a5a2e',
+                          border: '1px solid #4aff6a',
+                          borderRadius: 6,
+                          color: !disabled ? '#fff' : '#555',
+                          cursor: disabled ? 'not-allowed' : 'pointer',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          ...(disabled ? {} : { animation: 'shopPurchasePulse 2s ease-in-out infinite' }),
+                        }}
+                      >
+                        {`Re-roll (${freeRerolls} free)`}
+                      </button>
+                    </Tooltip>
+                  ) : (
                     <button
                       onClick={onReroll}
-                      disabled={disabled || (freeRerolls <= 0 && playerResources < 1)}
+                      disabled={disabled || playerResources < 1}
                       style={{
                         fontSize: 14,
-                        padding: '8px 14px',
-                        background: freeRerolls > 0 ? '#2a5a2e' : playerResources >= 2 && !disabled ? '#cc7a2a' : '#333',
-                        border: `1px solid ${freeRerolls > 0 ? '#4aff6a' : playerResources >= 2 && !disabled ? '#cc7a2a' : '#555'}`,
+                        padding: '8px 16px',
+                        background: playerResources >= 2 && !disabled ? '#cc7a2a' : '#333',
+                        border: `1px solid ${playerResources >= 2 && !disabled ? '#cc7a2a' : '#555'}`,
                         borderRadius: 6,
-                        color: (freeRerolls > 0 || playerResources >= 2) && !disabled ? '#fff' : '#555',
-                        cursor: disabled || (freeRerolls <= 0 && playerResources < 1) ? 'not-allowed' : 'pointer',
+                        color: playerResources >= 2 && !disabled ? '#fff' : '#555',
+                        cursor: disabled || playerResources < 1 ? 'not-allowed' : 'pointer',
                         whiteSpace: 'nowrap',
-                        ...(freeRerolls > 0 && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
+                        flexShrink: 0,
                       }}
                     >
-                      {freeRerolls > 0 ? `Re-roll (${freeRerolls} free)` : 'Re-roll · 1 💰'}
+                      Re-roll · 1 💰
                     </button>
-                  </Tooltip>
+                  )}
                 </div>
+                <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
+                  Cards given from a re-roll are guaranteed to be different from existing cards.
+                </span>
               </div>
             </div>
 
