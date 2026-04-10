@@ -126,6 +126,14 @@ interface HexGridProps {
   buildProgress?: number;
   /** Grid rotation in radians. Animated smoothly via Pixi ticker. */
   gridRotation?: number;
+  /**
+   * When true, stop the Pixi ticker (pauses VP pulse, highlight pulse,
+   * rotation lerp, cursor-fade, and review-pulse animations). Used to
+   * relieve iOS Safari memory/GPU pressure while a full-screen DOM
+   * overlay (shop, card browser, deck viewer, upgrade preview) is
+   * compositing on top of the WebGL canvas.
+   */
+  paused?: boolean;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -375,7 +383,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused }: HexGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -425,6 +433,10 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
   const gridRotationRef = useRef(gridRotation ?? 0);
   gridRotationRef.current = gridRotation ?? 0;
   const currentRotationRef = useRef(gridRotation ?? 0);
+  // Mirror the `paused` prop so the async Pixi init path can honor it
+  // if the prop was already `true` before init finished.
+  const pausedRef = useRef(!!paused);
+  pausedRef.current = !!paused;
   const gridMidRef = useRef({ x: 0, y: 0 });
   // Track all Text/Container children for counter-rotation during animation
   const textChildrenRef = useRef<(Text | Container)[]>([]);
@@ -1957,6 +1969,13 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
 
       // Re-fit whenever the canvas is resized
       app.renderer.on('resize', fitGrid);
+
+      // If a full-screen overlay was opened before init finished, honor it
+      // now so the ticker doesn't start running behind the overlay on iOS.
+      if (pausedRef.current) {
+        try { app.renderer.render(app.stage); } catch { /* noop */ }
+        app.ticker.stop();
+      }
     });
 
     return () => {
@@ -1969,6 +1988,23 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
       vpPathGraphicsRef.current = null;
     };
   }, []);
+
+  // Pause/resume the Pixi ticker in response to the `paused` prop.
+  // Pausing relieves iOS Safari memory/GPU pressure when a full-screen DOM
+  // overlay (shop, card browser, deck viewer, upgrade preview) is
+  // compositing on top of the WebGL canvas. We do a single render before
+  // stopping so the board's last frame is visible behind the overlay backdrop.
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    if (paused) {
+      // Render one final frame with current state, then stop the ticker
+      try { app.renderer.render(app.stage); } catch { /* renderer may be tearing down */ }
+      app.ticker.stop();
+    } else {
+      app.ticker.start();
+    }
+  }, [paused]);
 
   // Re-render tiles when data changes
   useEffect(() => {
