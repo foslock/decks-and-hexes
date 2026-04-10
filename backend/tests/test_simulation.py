@@ -55,6 +55,84 @@ class TestCPUPlayer:
         for arch in [Archetype.VANGUARD, Archetype.SWARM, Archetype.FORTRESS]:
             assert arch in ARCHETYPE_WEIGHTS
 
+    def _make_game(self, card_registry, archetypes):
+        from app.game_engine.game_state import create_game
+        player_configs = [
+            {"id": f"cpu_{i}", "name": f"CPU_{a.value}_{i}", "archetype": a.value}
+            for i, a in enumerate(archetypes)
+        ]
+        return create_game(
+            GridSize.SMALL, player_configs, card_registry,
+            seed=1, vp_target=10, max_rounds=20,
+        )
+
+    def test_is_vp_leader_strict_rejects_ties(self, card_registry):
+        """_is_vp_leader(strict=True) must return False when tied with an opponent.
+
+        Regression: early-game every player is tied at 0 VP. With strict=False
+        the check returned True for everyone, letting CPUs play Diplomat
+        ("grant_land_grants") freely from the first round. This test locks
+        in the strict behaviour.
+        """
+        from app.game_engine.cpu_player import _is_vp_leader
+
+        game = self._make_game(
+            card_registry,
+            [Archetype.VANGUARD, Archetype.SWARM, Archetype.FORTRESS],
+        )
+
+        # Every player starts at 0 VP — none should be considered a strict leader.
+        for pid in game.players:
+            assert not _is_vp_leader(game, pid, strict=True), (
+                f"{pid} is tied at 0 VP but _is_vp_leader(strict=True) returned True"
+            )
+            # Non-strict treats ties as leading — all three return True.
+            assert _is_vp_leader(game, pid, strict=False)
+
+        # Give the first player a VP bump and re-check: only they should be
+        # the strict leader now.
+        first = next(iter(game.players))
+        game.players[first].vp = 3
+        for pid in game.players:
+            expected = (pid == first)
+            assert _is_vp_leader(game, pid, strict=True) is expected
+
+    def test_diplomat_veto_skips_card_when_not_leading(self, card_registry):
+        """The Diplomat / grant_land_grants veto must drop the card from the
+        scored pool entirely when the CPU isn't a strict VP leader."""
+        import dataclasses
+        from app.game_engine.cpu_player import CPUPlayer, ARCHETYPE_WEIGHTS, StrategyWeights
+
+        game = self._make_game(card_registry, [Archetype.VANGUARD, Archetype.SWARM])
+
+        # Find the Diplomat template card in the registry and put a copy
+        # into the first player's hand.
+        diplomat_tpl = card_registry.get("neutral_diplomat")
+        assert diplomat_tpl is not None, "Diplomat card missing from registry"
+
+        first_pid = next(iter(game.players))
+        player = game.players[first_pid]
+        diplomat = dataclasses.replace(diplomat_tpl)
+        player.hand = [diplomat]
+        player.actions_used = 0
+        player.actions_available = 3
+
+        cpu = CPUPlayer(first_pid, noise=0.0)
+        weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
+
+        # Tied at 0 VP — Diplomat must NOT be scored.
+        result = cpu._score_engine(game, player, diplomat, 0, weights)
+        assert result is None, (
+            "Diplomat was scored despite CPU being tied (not strictly leading)"
+        )
+
+        # Now give the CPU a clear VP lead — Diplomat should be scorable.
+        player.vp = 5
+        result2 = cpu._score_engine(game, player, diplomat, 0, weights)
+        assert result2 is not None, (
+            "Diplomat was vetoed even though CPU is the strict VP leader"
+        )
+
 
 # ── Single Game Tests ─────────────────────────────────────────────
 
