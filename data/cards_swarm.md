@@ -19,6 +19,7 @@ cards:
     action_return: 0
     power: 0
     unplayable: true
+    unique: true
     vp_formula: disconnected_groups_3
     effect: "+1 VP for each group of 3+ tiles you own that is disconnected from your base."
     effect_upgraded: "+1 VP for each group of 2+ tiles you own that is disconnected from your base."
@@ -359,6 +360,7 @@ cards:
     action_return: 0
     power: 0
     unplayable: true
+    unique: true
     vp_formula: trash_div_5
     effect: "+1 VP for every 5 cards in your trash pile."
     effect_upgraded: "+1 VP for every 4 cards in your trash pile."

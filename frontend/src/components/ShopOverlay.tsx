@@ -51,6 +51,8 @@ interface ShopOverlayProps {
   players?: Record<string, { name: string }>;
   /** Number of free re-rolls remaining (from Surveyor) */
   freeRerolls?: number;
+  /** Names of Unique cards the player already owns (draw pile + hand + discard). */
+  ownedUniqueCardNames?: Set<string>;
 }
 
 interface HoverState {
@@ -215,6 +217,7 @@ export default function ShopOverlay({
   buyPhasePurchases,
   players,
   freeRerolls = 0,
+  ownedUniqueCardNames,
 }: ShopOverlayProps) {
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
   const [hoverVisible, setHoverVisible] = useState(false);
@@ -573,6 +576,7 @@ export default function ShopOverlay({
                     }
                     const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
                     const canAfford = effCost !== null && playerResources >= (effCost ?? 0);
+                    const alreadyOwnsUnique = !!card.unique && !!ownedUniqueCardNames?.has(card.name);
                     return (
                       <CompactShopCard
                         key={card.id}
@@ -583,8 +587,12 @@ export default function ShopOverlay({
                         onBuy={() => buyArchetypeWithSound(card.id)}
                         onHover={handleCardHover}
                         onLeave={handleCardLeave}
-                        disabled={disabled || !!buyLocked}
-                        disabledTooltip={buyLocked ? 'Cannot buy — Grand Strategy was played this round.' : undefined}
+                        disabled={disabled || !!buyLocked || alreadyOwnsUnique}
+                        disabledTooltip={
+                          buyLocked ? 'Cannot buy — Grand Strategy was played this round.'
+                          : alreadyOwnsUnique ? 'You already own a copy of this Unique card.'
+                          : undefined
+                        }
                       />
                     );
                   })}
@@ -633,6 +641,7 @@ export default function ShopOverlay({
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
                   const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
                   const alreadyBoughtThisRound = myNeutralPurchasesThisRound.has(stack.card.id);
+                  const alreadyOwnsUnique = !!stack.card.unique && !!ownedUniqueCardNames?.has(stack.card.name);
                   return (
                     <CompactShopCard
                       key={stack.card.id}
@@ -643,9 +652,10 @@ export default function ShopOverlay({
                       onBuy={() => buyNeutralWithSound(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled || !!buyLocked || alreadyBoughtThisRound}
+                      disabled={disabled || !!buyLocked || alreadyBoughtThisRound || alreadyOwnsUnique}
                       disabledTooltip={
                         buyLocked ? 'Cannot buy — Grand Strategy was played this round.'
+                        : alreadyOwnsUnique ? 'You already own a copy of this Unique card.'
                         : alreadyBoughtThisRound ? 'Already purchased this round (limit 1 copy per round).'
                         : undefined
                       }

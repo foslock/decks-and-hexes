@@ -19,6 +19,7 @@ cards:
     action_return: 0
     power: 0
     unplayable: true
+    unique: true
     vp_formula: uncaptured_tiles_4
     effect: "+1 VP for every 4 tiles you own that have never changed hands since you claimed them."
     effect_upgraded: "+1 VP for every 3 tiles you own that have never changed hands since you claimed them."
@@ -332,6 +333,7 @@ cards:
     action_return: 0
     power: 0
     unplayable: true
+    unique: true
     vp_formula: fortified_tiles_3
     effect: "+1 VP for every non-base tile you own with a permanent defense bonus of 3 or higher."
     effect_upgraded: "+1 VP for every non-base tile you own with a permanent defense bonus of 2 or higher."

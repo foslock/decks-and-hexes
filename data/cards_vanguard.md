@@ -303,6 +303,7 @@ cards:
     action_return: 0
     power: 0
     unplayable: true
+    unique: true
     vp_formula: contested_wins
     effect: "Passive: While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +1 VP."
     effect_upgraded: "Passive: While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +2 VP."
@@ -367,6 +368,7 @@ cards:
     action_return: 0
     power: 0
     unplayable: true
+    unique: true
     vp_formula: deck_div_10
     effect: "+1 VP for every 10 cards in your deck."
     effect_upgraded: "+1 VP for every 8 cards in your deck."

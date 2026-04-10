@@ -104,16 +104,6 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
               }
             }}>
               {displayCard.name}
-              {displayCard.current_vp !== undefined && (
-                <span style={{
-                  fontSize: 14,
-                  fontWeight: 'bold',
-                  color: displayCard.current_vp > 0 ? '#ffd700' : displayCard.current_vp < 0 ? '#ff6666' : '#888',
-                  marginLeft: 4,
-                }}>
-                  {displayCard.current_vp > 0 ? '+' : ''}{displayCard.current_vp}★
-                </span>
-              )}
             </span>
           </div>
           <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : '—'}</span>

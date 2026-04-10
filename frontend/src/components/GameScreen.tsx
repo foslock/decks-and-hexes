@@ -711,6 +711,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+  // Names of Unique cards the active player currently owns (draw pile + hand + discard).
+  // Trashed cards do NOT count, so they can be re-purchased after trashing.
+  const ownedUniqueCardNames = useMemo(() => {
+    const s = new Set<string>();
+    if (!activePlayer) return s;
+    for (const c of activePlayer.hand) if (c.unique) s.add(c.name);
+    for (const c of activePlayer.deck_cards) if (c.unique) s.add(c.name);
+    for (const c of activePlayer.discard) if (c.unique) s.add(c.name);
+    return s;
+  }, [activePlayer]);
   // True when the player has submitted (server-side) or exit animations are pending/playing
   const playSubmitted = !!(activePlayer?.has_submitted_play || inPlayExitAnims.length > 0);
 
@@ -4235,6 +4246,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               currentPlayerId={activePlayerId}
               buyPhasePurchases={gameState.buy_phase_purchases}
               players={gameState.players}
+              ownedUniqueCardNames={ownedUniqueCardNames}
             />
           )}
 

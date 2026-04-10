@@ -1972,6 +1972,23 @@ def _transition_to_buy(game: GameState) -> None:
     game._log("=== Buy Phase ===")
 
 
+def player_owns_card_by_name(player: "Player", card_name: str) -> bool:
+    """Return True if the player's deck (draw + hand + discard) already contains
+    a card with the given name. Trashed cards are excluded — they have been
+    removed from the deck.
+    """
+    for c in player.deck.cards:
+        if c.name == card_name:
+            return True
+    for c in player.hand:
+        if c.name == card_name:
+            return True
+    for c in player.deck.discard:
+        if c.name == card_name:
+            return True
+    return False
+
+
 def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tuple[bool, str]:
     """Buy a card during Buy phase.
 
@@ -2018,6 +2035,10 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 break
         if not target:
             return False, "Card not in archetype market"
+        # Unique cards: cannot be purchased if already in the player's deck
+        # (draw pile, hand, or discard). Trashed copies don't count.
+        if target.unique and player_owns_card_by_name(player, target.name):
+            return False, f"You already own a copy of {target.name} (Unique)"
         if not free:
             dynamic_cost = calculate_dynamic_buy_cost(game, player, target)
             effective_cost = _apply_cost_reductions(player, target, base_cost_override=dynamic_cost)
@@ -2042,6 +2063,17 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         already_bought = game.buy_phase_purchases.get(player_id, [])
         if any(p["source"] == "neutral" and p["card_id"] == card_id for p in already_bought):
             return False, "Already purchased this card this round (limit 1 per round)"
+
+        # Peek at the card before committing the purchase so we can enforce
+        # Unique without mutating the market on failure. Mirrors the base-id
+        # resolution used by NeutralMarket.purchase().
+        peek_card: Optional[Card] = None
+        for base_id, copies in game.neutral_market.stacks.items():
+            if copies and (base_id == card_id or card_id.startswith(base_id)):
+                peek_card = copies[0]
+                break
+        if peek_card is not None and peek_card.unique and player_owns_card_by_name(player, peek_card.name):
+            return False, f"You already own a copy of {peek_card.name} (Unique)"
 
         result = game.neutral_market.purchase(card_id)
         if not result:

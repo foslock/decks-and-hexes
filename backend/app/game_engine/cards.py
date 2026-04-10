@@ -78,6 +78,7 @@ class Card:
     trash_immune: bool = False  # Cannot be targeted by other cards' trash effects
     passive_vp: int = 0  # VP awarded on purchase (card stays in deck)
     vp_formula: str = ""  # Dynamic VP formula: "trash_div_5", "fortified_tiles_3", "deck_div_10"
+    unique: bool = False  # If true, player may only own one copy in their deck (draw + hand + discard)
     description: str = ""
     upgrade_description: str = ""
     # Structured effects list (parsed from YAML)
@@ -180,6 +181,7 @@ class Card:
             "trash_immune": self.trash_immune,
             "passive_vp": self.passive_vp,
             "vp_formula": self.vp_formula,
+            "unique": self.unique,
             "description": self.description,
             "upgrade_description": self.upgrade_description,
             "name_upgraded": self.name_upgraded,

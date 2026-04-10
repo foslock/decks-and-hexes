@@ -1092,12 +1092,15 @@ class CPUPlayer:
     def _pick_best_purchase(self, game: Any, player: Any,
                             weights: StrategyWeights) -> Optional[dict[str, Any]]:
         """Score all available purchases and pick one."""
-        from .game_state import calculate_dynamic_buy_cost, UPGRADE_CREDIT_COST
+        from .game_state import calculate_dynamic_buy_cost, UPGRADE_CREDIT_COST, player_owns_card_by_name
 
         scored: list[tuple[float, dict[str, Any]]] = []
 
         # Score archetype market cards
         for card in player.archetype_market:
+            # Skip Unique cards the player already owns — buy_card() would reject them.
+            if card.unique and player_owns_card_by_name(player, card.name):
+                continue
             cost = calculate_dynamic_buy_cost(game, player, card)
             if cost > player.resources:
                 continue
@@ -1115,6 +1118,8 @@ class CPUPlayer:
             if base_id in already_bought_neutral:
                 continue
             card_obj = copies[0]
+            if card_obj.unique and player_owns_card_by_name(player, card_obj.name):
+                continue
             cost = calculate_dynamic_buy_cost(game, player, card_obj)
             if cost > player.resources:
                 continue

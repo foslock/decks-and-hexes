@@ -42,6 +42,7 @@ export interface Card {
   target_own_tile: boolean;
   passive_vp: number;
   vp_formula?: string;
+  unique?: boolean;
   current_vp?: number;
   description: string;
   upgrade_description?: string;

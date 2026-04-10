@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
-import { renderWithKeywords, extractKeywordsFromText } from './Keywords';
+import { renderWithKeywords, extractKeywordsFromText, KEYWORDS } from './Keywords';
 import { useTooltips } from './SettingsContext';
 import { CARD_TYPE_COLORS, getCardDisplayColor, getCardDisplayType } from '../constants/cardColors';
 
@@ -158,9 +158,32 @@ interface CardFullProps {
  * Matches the CardDetail modal design: title top-center, cost top-right,
  * art placeholder, archetype-type line, abilities box.
  */
-/** Extract unique keywords present in a card's description text. */
+/** Build the list of stat-note pills shown under a card's description. */
+function buildStatNotes(card: Card): string[] {
+  const statNotes: string[] = [];
+  if (card.trash_on_use) statNotes.push('Trashed after use.');
+  if (card.stackable) statNotes.push('Stackable');
+  if (!card.adjacency_required) statNotes.push('No adjacency required.');
+  if (card.unique) statNotes.push('Unique');
+  return statNotes;
+}
+
+/** Tooltip text for each stat-note pill. Keyword-backed pills reuse the
+ *  canonical keyword definition so they stay in sync with the rest of the UI. */
+const STAT_NOTE_TOOLTIPS: Record<string, string> = {
+  'Stackable': KEYWORDS.Stackable,
+  'Unique': KEYWORDS.Unique,
+  'Trashed after use.': 'This card is removed from your deck permanently after it is played.',
+  'No adjacency required.': 'This card can target any tile — it does not need to be next to a tile you already own.',
+};
+
+/**
+ * Extract unique keywords present anywhere on the card — description text
+ * and the stat-note pills (Unique, Stackable, etc.) that live below it.
+ */
 function extractKeywords(card: Card): { keyword: string; definition: string }[] {
-  return extractKeywordsFromText(card.description || '');
+  const combined = [card.description || '', ...buildStatNotes(card)].join(' ');
+  return extractKeywordsFromText(combined);
 }
 
 export default function CardFull({ card, effectiveCost, remaining, style, showKeywordHints }: CardFullProps) {
@@ -198,10 +221,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
   const abilityParts: string[] = [];
   if (card.description) abilityParts.push(card.description);
 
-  const statNotes: string[] = [];
-  if (card.trash_on_use) statNotes.push('Trashed after use.');
-  if (card.stackable) statNotes.push('Stackable');
-  if (!card.adjacency_required) statNotes.push('No adjacency required.');
+  const statNotes = buildStatNotes(card);
 
   return (
     <div ref={cardRef} style={{
@@ -218,76 +238,76 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
       boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
       ...style,
     }}>
-      {/* Top row: VP badge top-left, title left-aligned, cost top-right */}
+      {/* Top row: title left-aligned, VP badge + cost badge top-right */}
       <div style={{ position: 'relative', textAlign: 'left', minHeight: 22 }}>
-        {card.current_vp !== undefined && (
-          <Tooltip content={
-            card.current_vp >= 0
-              ? `This card is currently worth ${card.current_vp} VP`
-              : `This card costs you ${Math.abs(card.current_vp)} VP`
-          }>
-            <div style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              cursor: 'help',
-              fontSize: 12,
-              fontWeight: 'bold',
-              color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
-              background: '#2a2a4e',
-              borderRadius: 5,
-              padding: '1px 6px',
-              border: `1px solid ${card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#555'}`,
-              lineHeight: 1.3,
-            }}>
-              {card.current_vp > 0 ? '+' : ''}{card.current_vp} ★
-            </div>
-          </Tooltip>
-        )}
-        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingLeft: card.current_vp !== undefined ? 36 : 0, paddingRight: 36 }}>
+        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingRight: card.current_vp !== undefined ? 78 : 36 }}>
           {card.name}
           {card.is_upgraded && !card.name.endsWith('+') && <span style={{ color: '#ffd700' }}> +</span>}
         </div>
-        {hasCost ? (
-          <Tooltip content={
-            isDiscounted
-              ? `Cost: ${displayCost} (reduced from ${card.buy_cost})`
-              : `Cost to purchase: ${displayCost} resources`
-          }>
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          display: 'flex',
+          gap: 4,
+          alignItems: 'center',
+        }}>
+          {card.current_vp !== undefined && (
+            <Tooltip content={
+              card.current_vp >= 0
+                ? `This card is currently worth ${card.current_vp} VP`
+                : `This card costs you ${Math.abs(card.current_vp)} VP`
+            }>
+              <div style={{
+                cursor: 'help',
+                fontSize: 12,
+                fontWeight: 'bold',
+                color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
+                background: '#2a2a4e',
+                borderRadius: 5,
+                padding: '1px 6px',
+                border: `1px solid ${card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#555'}`,
+                lineHeight: 1.3,
+              }}>
+                {card.current_vp > 0 ? '+' : ''}{card.current_vp} ★
+              </div>
+            </Tooltip>
+          )}
+          {hasCost ? (
+            <Tooltip content={
+              isDiscounted
+                ? `Cost: ${displayCost} (reduced from ${card.buy_cost})`
+                : `Cost to purchase: ${displayCost} resources`
+            }>
+              <div style={{
+                cursor: 'help',
+                fontSize: 12,
+                fontWeight: 'bold',
+                color: isDiscounted ? '#4aff6a' : '#ffd700',
+                background: '#2a2a4e',
+                borderRadius: 5,
+                padding: '1px 6px',
+                border: '1px solid #555',
+                lineHeight: 1.3,
+              }}>
+                {isDiscounted ? `${displayCost}*` : displayCost}💰
+              </div>
+            </Tooltip>
+          ) : (
             <div style={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              cursor: 'help',
               fontSize: 12,
               fontWeight: 'bold',
-              color: isDiscounted ? '#4aff6a' : '#ffd700',
+              color: '#555',
               background: '#2a2a4e',
               borderRadius: 5,
               padding: '1px 6px',
-              border: '1px solid #555',
+              border: '1px solid #444',
               lineHeight: 1.3,
             }}>
-              {isDiscounted ? `${displayCost}*` : displayCost}💰
+              —
             </div>
-          </Tooltip>
-        ) : (
-          <div style={{
-            position: 'absolute',
-            top: 0,
-            right: 0,
-            fontSize: 12,
-            fontWeight: 'bold',
-            color: '#555',
-            background: '#2a2a4e',
-            borderRadius: 5,
-            padding: '1px 6px',
-            border: '1px solid #444',
-            lineHeight: 1.3,
-          }}>
-            —
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Art placeholder */}
@@ -356,17 +376,28 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
             flexWrap: 'wrap',
             gap: 4,
           }}>
-            {statNotes.map((note, i) => (
-              <span key={i} style={{
-                fontSize: 9,
-                padding: '1px 6px',
-                borderRadius: 8,
-                border: '1px solid #555',
-                color: '#aaa',
-              }}>
-                {note}
-              </span>
-            ))}
+            {statNotes.map((note, i) => {
+              const isUnique = note === 'Unique';
+              const tooltipText = STAT_NOTE_TOOLTIPS[note];
+              const pill = (
+                <span style={{
+                  fontSize: 9,
+                  padding: '1px 6px',
+                  borderRadius: 8,
+                  border: `1px solid ${isUnique ? '#ffd700' : '#555'}`,
+                  color: isUnique ? '#ffd700' : '#aaa',
+                  fontWeight: isUnique ? 'bold' : undefined,
+                  cursor: tooltipText ? 'help' : undefined,
+                }}>
+                  {note}
+                </span>
+              );
+              return tooltipText ? (
+                <Tooltip key={i} content={tooltipText}>{pill}</Tooltip>
+              ) : (
+                <span key={i}>{pill}</span>
+              );
+            })}
           </div>
         )}
       </div>

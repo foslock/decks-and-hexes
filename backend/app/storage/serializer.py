@@ -151,6 +151,7 @@ def _serialize_card_inline(card: Card) -> dict[str, Any]:
         "unplayable": card.unplayable,
         "passive_vp": card.passive_vp,
         "vp_formula": card.vp_formula,
+        "unique": card.unique,
         "description": card.description,
         "effects": [_serialize_effect(e) for e in card.effects],
     }
@@ -219,6 +220,7 @@ def _deserialize_card_inline(ref: dict[str, Any]) -> Card:
         unplayable=ref.get("unplayable", False),
         passive_vp=ref.get("passive_vp", 0),
         vp_formula=ref.get("vp_formula", ""),
+        unique=ref.get("unique", False),
         description=ref.get("description", ""),
         effects=effects,
     )

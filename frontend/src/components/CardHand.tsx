@@ -161,16 +161,6 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
       Upgraded
     </div>
   ) : null;
-  const vpBadge = displayCard.current_vp !== undefined ? (
-    <span style={{
-      fontSize: 14,
-      fontWeight: 'bold',
-      color: displayCard.current_vp > 0 ? '#ffd700' : displayCard.current_vp < 0 ? '#ff6666' : '#888',
-      marginLeft: 4,
-    }}>
-      {displayCard.current_vp > 0 ? '+' : ''}{displayCard.current_vp}★
-    </span>
-  ) : null;
   if (!full) {
     return (
       <div
@@ -195,7 +185,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
                   el.style.setProperty('--title-scale', String(scale));
                 }
               }}>
-                {displayCard.name}{vpBadge}
+                {displayCard.name}
               </span>
             </div>
             <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : '—'}</span>
@@ -245,16 +235,6 @@ function CompactCardContent({ card, titleSize = 14, subtitleSize = 13, subtitleC
       <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
         <div style={{ fontWeight: 'bold', fontSize: titleSize, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
           {card.name}
-          {card.current_vp !== undefined && (
-            <span style={{
-              fontSize: 11,
-              fontWeight: 'bold',
-              color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
-              marginLeft: 4,
-            }}>
-              {card.current_vp > 0 ? '+' : ''}{card.current_vp}★
-            </span>
-          )}
         </div>
         <span style={{ fontSize: subtitleSize - 1, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>
       </div>
@@ -1666,16 +1646,6 @@ export default function CardHand({
                       }
                     }}>
                       {card.name}
-                      {card.current_vp !== undefined && (
-                        <span style={{
-                          fontSize: 11,
-                          fontWeight: 'bold',
-                          color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
-                          marginLeft: 4,
-                        }}>
-                          {card.current_vp > 0 ? '+' : ''}{card.current_vp}★
-                        </span>
-                      )}
                     </span>
                   </div>
                   <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>

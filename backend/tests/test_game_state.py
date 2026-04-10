@@ -452,6 +452,57 @@ class TestBuyPhase:
         ok, msg = buy_card(small_2p_game, "p0", "neutral", "some_card")
         assert not ok
 
+    def test_unique_card_blocked_when_already_owned(
+        self, small_2p_game: GameState, card_registry: dict[str, Card]
+    ) -> None:
+        """A Unique card cannot be purchased if the player already has a copy
+        in their draw pile, hand, or discard."""
+        from app.game_engine.cards import _copy_card
+
+        game = small_2p_game
+        self._advance_to_buy(game)
+        p0 = game.players["p0"]
+        p0.resources = 20
+
+        # Inject a copy of Arsenal (Unique) into p0's archetype market and make
+        # sure p0 already has a copy in their discard pile.
+        arsenal_template = card_registry["vanguard_arsenal"]
+        assert arsenal_template.unique, "Arsenal should be marked Unique"
+
+        market_copy = _copy_card(arsenal_template, "market_test")
+        p0.archetype_market.append(market_copy)
+        p0.archetype_deck.append(market_copy)
+
+        owned_copy = _copy_card(arsenal_template, "owned_test")
+        p0.deck.discard.append(owned_copy)
+
+        ok, msg = buy_card(game, "p0", "archetype", market_copy.id)
+        assert not ok
+        assert "Unique" in msg or "already own" in msg.lower()
+
+    def test_unique_card_repurchasable_after_trash(
+        self, small_2p_game: GameState, card_registry: dict[str, Card]
+    ) -> None:
+        """A Unique card can be purchased again if the previous copy was trashed."""
+        from app.game_engine.cards import _copy_card
+
+        game = small_2p_game
+        self._advance_to_buy(game)
+        p0 = game.players["p0"]
+        p0.resources = 20
+
+        arsenal_template = card_registry["vanguard_arsenal"]
+        market_copy = _copy_card(arsenal_template, "market_test2")
+        p0.archetype_market.append(market_copy)
+        p0.archetype_deck.append(market_copy)
+
+        # Previously-owned copy is in the trash pile (not in the deck).
+        trashed_copy = _copy_card(arsenal_template, "trashed_test")
+        p0.trash.append(trashed_copy)
+
+        ok, msg = buy_card(game, "p0", "archetype", market_copy.id)
+        assert ok, msg
+
 
 class TestEndOfTurn:
     def test_end_turn_advances_round(self, small_2p_game: GameState) -> None:

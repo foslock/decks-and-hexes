@@ -70,12 +70,18 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
   if (card.passive_vp !== undefined && card.passive_vp !== 0) {
     parts.push(p(`${card.passive_vp > 0 ? '+' : ''}${card.passive_vp}★`));
   } else if (card.vp_formula) {
-    // Try to resolve dynamic VP from context
-    const resolvedVP = ctx ? _resolveVPFormula(card, ctx) : undefined;
-    if (resolvedVP !== undefined && resolvedVP > 0) {
-      parts.push(p(`${resolvedVP}★`, true));
+    // Prefer authoritative backend-computed current_vp (glowing yellow);
+    // fall back to client-side resolution, then generic placeholder.
+    if (card.current_vp !== undefined) {
+      const sign = card.current_vp > 0 ? '+' : '';
+      parts.push({ text: `${sign}${card.current_vp}★`, glow: true });
     } else {
-      parts.push(p('+★'));
+      const resolvedVP = ctx ? _resolveVPFormula(card, ctx) : undefined;
+      if (resolvedVP !== undefined && resolvedVP > 0) {
+        parts.push(p(`${resolvedVP}★`, true));
+      } else {
+        parts.push(p('+★'));
+      }
     }
   }
 
