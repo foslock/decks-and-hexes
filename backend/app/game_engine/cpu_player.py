@@ -719,6 +719,15 @@ class CPUPlayer:
             else:
                 return None  # Can't afford — skip
 
+        # Hard veto: never play a Land-Grant-granting card (Diplomat / Diplomacy)
+        # unless we are currently the VP leader. Handing free VP to opponents from
+        # behind just helps them catch up. We skip the card entirely here rather
+        # than penalising its score, because _pick() shifts negative scores back
+        # into the positive range and would still let noise pick it.
+        if any(e.type == EffectType.GRANT_LAND_GRANTS for e in card.effects):
+            if not _is_vp_leader(game, self.player_id, strict=False):
+                return None
+
         # Resource gain
         if card.effective_resource_gain > 0:
             score += card.effective_resource_gain * 1.5 * weights.resource_value
@@ -753,12 +762,10 @@ class CPUPlayer:
                         score -= 5.0  # can't use it — no valid targets
 
             elif effect.type == EffectType.GRANT_LAND_GRANTS:
-                # Granting Land Grants (Diplomat / Diplomacy) hands free VP to
-                # opponents. Only worthwhile when we are already ahead — playing
-                # it from behind just helps the leaderboard catch up to us.
-                if not _is_vp_leader(game, self.player_id, strict=False):
-                    score -= 50.0  # effectively veto playing Diplomat when not leading
-                elif effect.target == "chosen_player":
+                # We only get here when _is_vp_leader is True (see the hard veto
+                # at the top of this function). Score the grant based on its
+                # net VP advantage to us vs opponents.
+                if effect.target == "chosen_player":
                     # Fortress Diplomacy: you get 1/2, target opponent gets 1
                     self_grants = 2 if card.is_upgraded else 1
                     net_advantage = self_grants - 1  # 0 base, +1 upgraded
