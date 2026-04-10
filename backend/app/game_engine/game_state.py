@@ -1072,23 +1072,43 @@ def play_card(game: GameState, player_id: str, card_index: int,
             if card.effective_unoccupied_only and tile.owner is not None:
                 return False, f"{card.name} can only target unoccupied tiles"
 
-            # Prevent claiming neutral tiles with defense higher than card power
-            # Use calculate_effective_power for cards with dynamic power modifiers
-            # (e.g. Strength in Numbers, Locust Swarm) so validation reflects actual power
-            check_power = card.effective_power
-            if card.effects:
-                _check_action = PlannedAction(card=card, target_q=target_q, target_r=target_r)
-                check_power = calculate_effective_power(game, player, card, _check_action)
-            if not tile.owner and tile.defense_power > check_power:
-                return False, f"Card power ({check_power}) too low to overcome tile defense ({tile.defense_power})"
+            # Prevent claiming tiles with defense too high to overcome.
+            # Neutral tiles: power must be >= defense (ties allowed since no defender).
+            # Occupied tiles owned by opponents: power must be strictly greater than
+            # defense (defender wins ties).
+            # Own tiles are valid defensive placements and skip the check entirely.
+            # Siege Engine and other ignore_defense cards bypass this check.
+            has_ignore_defense = any(
+                e.type == EffectType.IGNORE_DEFENSE for e in card.effects
+            )
+            if not has_ignore_defense and tile.owner != player_id:
+                # Use calculate_effective_power for cards with dynamic power modifiers
+                # (e.g. Strength in Numbers, Locust Swarm, Mob Rule).
+                check_power = card.effective_power
+                if card.effects:
+                    _check_action = PlannedAction(card=card, target_q=target_q, target_r=target_r)
+                    check_power = calculate_effective_power(game, player, card, _check_action)
+                if tile.owner is None:
+                    if tile.defense_power > check_power:
+                        return False, f"Card power ({check_power}) too low to overcome tile defense ({tile.defense_power})"
+                else:
+                    if tile.defense_power >= check_power:
+                        return False, f"Card power ({check_power}) too low to overcome occupied tile defense ({tile.defense_power})"
 
-            # Check stacking (only one claim per tile unless exception)
-            existing_claims = [
-                a for a in player.planned_actions
-                if a.target_q == target_q and a.target_r == target_r
-                and a.card.card_type == CardType.CLAIM
-            ]
-            if existing_claims and not card.stackable:
+            # Check stacking (only one claim per tile unless exception).
+            # Multi-target claims (Surge) lock their extra targets too, so a
+            # subsequent non-stackable claim on any of them is rejected.
+            def _tile_is_claimed(q: int, r: int) -> bool:
+                for a in player.planned_actions:
+                    if a.card.card_type != CardType.CLAIM:
+                        continue
+                    if a.target_q == q and a.target_r == r:
+                        return True
+                    if a.extra_targets and (q, r) in a.extra_targets:
+                        return True
+                return False
+
+            if not card.stackable and _tile_is_claimed(target_q, target_r):
                 return False, "This card is not Stackable"
 
             # Adjacency bridge: target must connect two disconnected territory groups
@@ -1143,7 +1163,29 @@ def play_card(game: GameState, player_id: str, card_index: int,
                     continue
             if card.effective_unoccupied_only and et_tile.owner is not None:
                 continue
+            # Non-stackable claims can't land on a tile any prior planned
+            # claim (primary or extra) already targets this round.
+            if not card.stackable and _tile_is_claimed(et_q, et_r):
+                continue
             validated_extra.append((et_q, et_r))
+
+        # All targets (primary + extras) must form a connected subgraph via
+        # direct hex adjacency — e.g. Surge targets "adjacent tiles".
+        if validated_extra:
+            all_targets: set[tuple[int, int]] = {(target_q, target_r), *validated_extra}
+            # BFS from primary through hex-neighbors restricted to target set
+            reached: set[tuple[int, int]] = {(target_q, target_r)}
+            frontier: list[tuple[int, int]] = [(target_q, target_r)]
+            hex_dirs = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
+            while frontier:
+                cq, cr = frontier.pop()
+                for dq, dr in hex_dirs:
+                    nb = (cq + dq, cr + dr)
+                    if nb in all_targets and nb not in reached:
+                        reached.add(nb)
+                        frontier.append(nb)
+            if reached != all_targets:
+                return False, f"{card.name} targets must be adjacent to each other"
 
     # Validate extra targets for multi-tile defense cards (Bulwark, etc.)
     if card.card_type == CardType.DEFENSE and card.effective_defense_target_count > 1 and extra_targets:

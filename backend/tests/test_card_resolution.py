@@ -944,6 +944,71 @@ class TestSwarmSurge:
         assert t1.owner == "p1"
         assert t2.owner == "p1"
 
+    def test_surge_rejects_non_adjacent_targets(self, card_registry):
+        """Surge: targets must be adjacent to each other (connected subgraph)."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p1"]
+        surge = _copy_card(card_registry["swarm_surge"], "test_surge_nonadj")
+        player.hand = [surge] + player.hand[1:]
+
+        # Find two neutral tiles adjacent to p1 that are NOT adjacent to each other.
+        assert game.grid is not None
+        candidates = _find_n_adjacent_neutrals(game, "p1", 10)
+        pair: tuple[tuple[int, int], tuple[int, int]] | None = None
+        for i, a in enumerate(candidates):
+            for b in candidates[i + 1:]:
+                ta = game.grid.get_tile(*a)
+                tb = game.grid.get_tile(*b)
+                assert ta is not None and tb is not None
+                if ta.distance_to(tb) > 1:
+                    pair = (a, b)
+                    break
+            if pair:
+                break
+        if pair is None:
+            pytest.skip("Need two non-adjacent neutral tiles adjacent to p1")
+
+        (q1, r1), (q2, r2) = pair
+        success, msg = play_card(
+            game, "p1", 0,
+            target_q=q1, target_r=r1,
+            extra_targets=[(q2, r2)],
+        )
+        assert not success
+        assert "adjacent" in (msg or "").lower()
+
+        # Neither tile should have been claimed
+        assert game.grid.get_tile(q1, r1).owner is None
+        assert game.grid.get_tile(q2, r2).owner is None
+
+    def test_surge_extra_target_blocks_later_claim(self, card_registry):
+        """A Surge extra target is locked against later non-stackable claims."""
+        game = _make_2p_game(card_registry)
+        player = game.players["p1"]
+        surge = _copy_card(card_registry["swarm_surge"], "test_surge_lock")
+        explore = _copy_card(card_registry["neutral_explore"], "test_explore_lock")
+        player.hand = [surge, explore] + player.hand[2:]
+
+        targets = _find_n_adjacent_neutrals(game, "p1", 2)
+        if len(targets) < 2:
+            pytest.skip("Need 2 adjacent neutral tiles")
+        (q1, r1), (q2, r2) = targets[0], targets[1]
+        # Make sure they're directly adjacent (Surge requires it)
+        assert game.grid.get_tile(q1, r1).distance_to(game.grid.get_tile(q2, r2)) == 1
+
+        # Play Surge on (q1,r1) with (q2,r2) as extra
+        ok, msg = play_card(
+            game, "p1", 0,
+            target_q=q1, target_r=r1,
+            extra_targets=[(q2, r2)],
+        )
+        assert ok, msg
+
+        # Now try to play Explore (non-stackable) on the extra target — should fail.
+        ok, msg = play_card(game, "p1", 0, target_q=q2, target_r=r2)
+        assert not ok
+        assert "stackable" in (msg or "").lower()
+
 
 class TestSwarmOverwhelm:
     def test_overwhelm_power_scales_with_adjacent(self, card_registry):

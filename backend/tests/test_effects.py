@@ -666,9 +666,13 @@ class TestOnResolutionEffects:
         defender = game.players["f0"]
         assert game.grid is not None
 
-        # Find a tile owned by Fort
+        # Find a tile owned by Fort and force it to low defense so the
+        # power-2 War of Attrition can legally target it under the new
+        # validation rule (power > defense on occupied tiles).
         fort_tiles = game.grid.get_player_tiles("f0")
         target = fort_tiles[0]
+        target.base_defense = 1
+        target.defense_power = 1
 
         # Give attacker War of Attrition with no adjacency requirement
         woa = _copy_card(card_registry["fortress_war_of_attrition"], "test_woa")
@@ -677,6 +681,10 @@ class TestOnResolutionEffects:
 
         success, msg = play_card(game, "a0", 0, target_q=target.q, target_r=target.r)
         assert success, msg
+
+        # Now boost defense above the attacker's power so the defender holds
+        # at resolution time and the hold-trigger effect fires.
+        target.defense_power = 5
 
         submit_play(game, "a0")
         submit_play(game, "f0")

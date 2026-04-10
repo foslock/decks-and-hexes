@@ -56,6 +56,70 @@ function withEffectivePower(card: Card, handSize: number, tileCount: number): Ca
   return card;
 }
 
+/**
+ * Compute the effective claim power for a card targeting a specific tile.
+ * Handles all dynamic power sources used by the validation paths:
+ *   - power_per_tiles_owned (Mob Rule, Power in Numbers)
+ *   - power_modifier with condition cards_in_hand (Strength in Numbers)
+ *   - power_modifier with condition if_target_neutral (Pioneer, etc.)
+ *   - power_modifier with condition if_adjacent_owned_gte (Encirclement, etc.)
+ * Mirrors the backend `effects.compute_effective_power` for the conditions
+ * the frontend can determine before play.  Pass the player's current hand
+ * size and owned-tile count to drive scaling effects.
+ */
+function computeClaimPowerOnTile(
+  card: Card,
+  tile: import('../types/game').HexTile,
+  tiles: Record<string, import('../types/game').HexTile>,
+  activePlayerId: string,
+  handSize: number,
+  ownedTileCount: number,
+): number {
+  // Start from base power, then apply tile-count / hand-size scaling that
+  // doesn't depend on the target tile.
+  let power = withEffectivePower(card, handSize, ownedTileCount).power;
+  if (!card.effects) return power;
+  const isUpgraded = card.is_upgraded;
+  for (const eff of card.effects) {
+    if (eff.type !== 'power_modifier') continue;
+    const mod = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
+    if (eff.condition === 'if_target_neutral' && !tile.owner) power += mod;
+    if (eff.condition === 'if_adjacent_owned_gte') {
+      const threshold = eff.condition_threshold ?? 3;
+      let adjOwned = 0;
+      for (const [dq, dr] of HEX_DIRS) {
+        const nk = `${tile.q + dq},${tile.r + dr}`;
+        if (tiles[nk]?.owner === activePlayerId) adjOwned++;
+      }
+      if (eff.metadata?.per_tile) {
+        power += mod * adjOwned;
+      } else if (adjOwned >= threshold) {
+        power += mod;
+      }
+    }
+  }
+  return power;
+}
+
+/**
+ * Returns true if a claim card with the given effective power can capture the
+ * target tile under the validation rules:
+ *   - Siege Engine (`ignore_defense` effect): always allowed regardless of defense.
+ *   - Neutral tiles: power must be >= the tile's effective defense.
+ *   - Other-player tiles: power must be STRICTLY GREATER than the tile's
+ *     effective defense (defender wins ties at resolution).
+ * Uses `defense_power`, the live total of base + permanent + temporary defense.
+ */
+function canClaimCaptureTile(
+  card: Card,
+  tile: import('../types/game').HexTile,
+  effectivePower: number,
+): boolean {
+  if (card.effects?.some(e => e.type === 'ignore_defense')) return true;
+  if (!tile.owner) return effectivePower >= tile.defense_power;
+  return effectivePower > tile.defense_power;
+}
+
 // Hex geometry constants (must match HexGrid.tsx)
 const HEX_SIZE = 32;
 
@@ -1534,10 +1598,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setError(`${card.name} can only target unoccupied tiles`);
         return;
       }
-      // Check duplicate claim (non-stackable)
-      if (!card.stackable && activePlayer.planned_actions?.some(
-        a => a.card.card_type === 'claim' && a.target_q === q && a.target_r === r
-      )) {
+      // Check duplicate claim (non-stackable) — multi-target claims lock
+      // their extra targets too.
+      if (!card.stackable && activePlayer.planned_actions?.some(a => {
+        if (a.card.card_type !== 'claim') return false;
+        if (a.target_q === q && a.target_r === r) return true;
+        return a.extra_targets?.some(([eq, er]) => eq === q && er === r) ?? false;
+      })) {
         setError(`You already have a claim on that tile this round`);
         return;
       }
@@ -1678,30 +1745,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (card.card_type === 'claim' && !card.target_own_tile) {
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
-      if (tile) {
-        let claimPower = card.power;
-        if (card.effects) {
-          for (const eff of card.effects) {
-            if (eff.type !== 'power_modifier') continue;
-            const mod = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
-            if (eff.condition === 'if_target_neutral' && !tile.owner) claimPower += mod;
-            if (eff.condition === 'if_adjacent_owned_gte') {
-              const threshold = eff.condition_threshold ?? 3;
-              let adjOwned = 0;
-              for (const [dq, dr] of HEX_DIRS) {
-                const nk = `${tile.q + dq},${tile.r + dr}`;
-                if (gameState.grid?.tiles[nk]?.owner === activePlayerId) adjOwned++;
-              }
-              if (eff.metadata?.per_tile) {
-                claimPower += mod * adjOwned;
-              } else if (adjOwned >= threshold) {
-                claimPower += mod;
-              }
-            }
-          }
-        }
-        if (tile.base_defense > claimPower) {
-          setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.base_defense})`);
+      // Skip the defense check entirely on the player's own tiles —
+      // those are valid defensive placements.
+      if (tile && tile.owner !== activePlayerId) {
+        const claimPower = computeClaimPowerOnTile(
+          card, tile, gameState.grid.tiles, activePlayerId,
+          activePlayer.hand.length, playerTileCount,
+        );
+        if (!canClaimCaptureTile(card, tile, claimPower)) {
+          setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.defense_power})`);
           return;
         }
       }
@@ -1713,6 +1765,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
     // Multi-target card (Surge): enter multi-target selection mode on drag
     if (card.multi_target_count > 0) {
+      // Reject primary tile if it isn't a legal claim target — same rules
+      // the player sees as the highlighted set on the grid.
+      if (!getValidClaimTiles(card).has(resolvedKey)) {
+        setError(`${card.name} cannot target this tile`);
+        return;
+      }
       setMultiTileCardIndex(cardIndex);
       setMultiTilePrimaryTarget([q, r]);
       setMultiTileTargets([]);
@@ -1819,9 +1877,31 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || tile.is_blocked) return;
 
+      // Reject any tile that isn't actually a legal target for this card —
+      // matches the highlighted set the player can see on the grid.
       if (isDefenseMulti) {
-        // Defense multi-target: must select own tiles
+        // Defense multi-target: must select own non-blocked tiles
         if (tile.owner !== activePlayerId) return;
+      } else {
+        // Claim multi-target (Surge): must satisfy all claim restrictions
+        // (adjacency, defense, immunity, occupancy, etc.)
+        if (multiTileCard && !getValidClaimTiles(multiTileCard).has(tileKey)) return;
+        // Every target must be adjacent to at least one already-selected target.
+        const selectedKeys = new Set<string>();
+        if (multiTilePrimaryTarget) {
+          selectedKeys.add(`${multiTilePrimaryTarget[0]},${multiTilePrimaryTarget[1]}`);
+        }
+        for (const [tq, tr] of multiTileTargets) selectedKeys.add(`${tq},${tr}`);
+        if (selectedKeys.size > 0) {
+          const isAdj = HEX_DIRS.some(([dq, dr]) => selectedKeys.has(`${q + dq},${r + dr}`));
+          if (!isAdj) {
+            setError(`${multiTileCard?.name ?? 'Card'} targets must be adjacent to each other`);
+            return;
+          }
+        }
+      }
+
+      if (isDefenseMulti) {
         const maxExtra = (multiTileCard?.defense_target_count ?? 1) - 1;
         if (multiTileTargets.length >= maxExtra) {
           // At max: drop oldest, add new
@@ -1830,8 +1910,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           return;
         }
       } else {
-        // Claim multi-target (Surge): must select non-own tiles
-        if (tile.owner === activePlayerId) return;
         const maxExtra = multiTileCard?.multi_target_count ?? 0;
         if (multiTileTargets.length >= maxExtra) {
           setMultiTileTargets(prev => [...prev.slice(1), [q, r]]);
@@ -1909,30 +1987,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Validate claim card restrictions
       if (card.card_type === 'claim') {
         if (!card.target_own_tile) {
-          if (tile) {
-            let claimPower = card.power;
-            if (card.effects) {
-              for (const eff of card.effects) {
-                if (eff.type !== 'power_modifier') continue;
-                const mod = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
-                if (eff.condition === 'if_target_neutral' && !tile.owner) claimPower += mod;
-                if (eff.condition === 'if_adjacent_owned_gte') {
-                  const threshold = eff.condition_threshold ?? 3;
-                  let adjOwned = 0;
-                  for (const [dq, dr] of HEX_DIRS) {
-                    const nk = `${tile.q + dq},${tile.r + dr}`;
-                    if (gameState.grid?.tiles[nk]?.owner === activePlayerId) adjOwned++;
-                  }
-                  if (eff.metadata?.per_tile) {
-                    claimPower += mod * adjOwned;
-                  } else if (adjOwned >= threshold) {
-                    claimPower += mod;
-                  }
-                }
-              }
-            }
-            if (tile.base_defense > claimPower) {
-              setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.base_defense})`);
+          // Skip the defense check entirely on the player's own tiles —
+          // those are valid defensive placements.
+          if (tile && tile.owner !== activePlayerId) {
+            const claimPower = computeClaimPowerOnTile(
+              card, tile, gameState.grid.tiles, activePlayerId,
+              activePlayer.hand.length, playerTileCount,
+            );
+            if (!canClaimCaptureTile(card, tile, claimPower)) {
+              setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.defense_power})`);
               return;
             }
           }
@@ -1944,6 +2007,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         // Multi-target card (Surge): enter multi-target selection mode
         if (card.multi_target_count > 0) {
+          if (!getValidClaimTiles(card).has(tileKey)) {
+            setError(`${card.name} cannot target this tile`);
+            return;
+          }
           setMultiTileCardIndex(selectedCardIndex);
           setMultiTilePrimaryTarget([q, r]);
           setMultiTileTargets([]);
@@ -3127,12 +3194,19 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return valid;
     }
 
-    // Tiles where the player already has a non-stacking claim this turn
+    // Tiles where the player already has a non-stacking claim this turn.
+    // Multi-target claims (Surge) also lock their extra targets.
     const alreadyClaimed = new Set<string>();
     if (!card.stackable && activePlayer?.planned_actions) {
       for (const action of activePlayer.planned_actions) {
-        if (action.card.card_type === 'claim' && action.target_q != null) {
+        if (action.card.card_type !== 'claim') continue;
+        if (action.target_q != null) {
           alreadyClaimed.add(`${action.target_q},${action.target_r}`);
+        }
+        if (action.extra_targets) {
+          for (const [eq, er] of action.extra_targets) {
+            alreadyClaimed.add(`${eq},${er}`);
+          }
         }
       }
     }
@@ -3174,30 +3248,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (tile.owner === activePlayerId) continue;
       // Skip immune tiles (Iron Wall / Stronghold)
       if (tile.immune) continue;
-      // Exclude tiles too weak to capture (account for conditional power bonuses)
+      // Exclude tiles too weak to capture (account for all dynamic power sources)
       {
-        let effectivePower = card.power;
-        if (card.effects) {
-          for (const eff of card.effects) {
-            if (eff.type !== 'power_modifier') continue;
-            const mod = card.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
-            if (eff.condition === 'if_target_neutral' && !tile.owner) effectivePower += mod;
-            if (eff.condition === 'if_adjacent_owned_gte') {
-              const threshold = eff.condition_threshold ?? 3;
-              let adjOwned = 0;
-              for (const [dq, dr] of HEX_DIRS) {
-                const nk = `${tile.q + dq},${tile.r + dr}`;
-                if (tiles[nk]?.owner === activePlayerId) adjOwned++;
-              }
-              if (eff.metadata?.per_tile) {
-                effectivePower += mod * adjOwned;
-              } else if (adjOwned >= threshold) {
-                effectivePower += mod;
-              }
-            }
-          }
-        }
-        if (tile.base_defense > effectivePower) continue;
+        const effectivePower = computeClaimPowerOnTile(
+          card, tile, tiles, activePlayerId,
+          activePlayer?.hand.length ?? 0, playerTileCount,
+        );
+        if (!canClaimCaptureTile(card, tile, effectivePower)) continue;
       }
       // Exclude occupied tiles for unoccupied_only cards
       if (tile.owner && card.unoccupied_only) continue;
@@ -3238,6 +3295,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       }
       valid.add(key);
     }
+
+    // Own tiles are valid defensive placements for Claim cards (the claim
+    // power adds to the tile's defense at resolution time). Skip this for
+    // unoccupied_only cards (e.g. Proliferate) and adjacency-bridge cards
+    // (Road Builder) which can't meaningfully target a tile already owned.
+    if (!card.unoccupied_only && !needsBridge) {
+      for (const [key, tile] of Object.entries(tiles)) {
+        if (!tile || tile.is_blocked) continue;
+        if (tile.owner !== activePlayerId) continue;
+        if (alreadyClaimed.has(key)) continue;
+        valid.add(key);
+      }
+    }
+
     return valid;
   }, [adjacentTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId, hexDistance]);
 
@@ -3295,8 +3366,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const alreadyClaimed = new Set<string>();
         if (!card.stackable && activePlayer?.planned_actions) {
           for (const action of activePlayer.planned_actions) {
-            if (action.card.card_type === 'claim' && action.target_q != null) {
+            if (action.card.card_type !== 'claim') continue;
+            if (action.target_q != null) {
               alreadyClaimed.add(`${action.target_q},${action.target_r}`);
+            }
+            if (action.extra_targets) {
+              for (const [eq, er] of action.extra_targets) {
+                alreadyClaimed.add(`${eq},${er}`);
+              }
             }
           }
         }
@@ -3524,14 +3601,47 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 if (multiTileCardIndex !== null) {
                   const multiTileCard = activePlayer?.hand[multiTileCardIndex];
                   const isDefenseMulti = multiTileCard?.card_type === 'defense' && (multiTileCard?.defense_target_count ?? 1) > 1;
+                  // Build the set of tiles already chosen in this multi-tile selection.
+                  // Non-stackable cards remove these from the highlighted valid set so
+                  // the player can't visually pick the same tile twice.
+                  const selected = new Set<string>();
+                  if (multiTilePrimaryTarget) {
+                    selected.add(`${multiTilePrimaryTarget[0]},${multiTilePrimaryTarget[1]}`);
+                  }
+                  for (const [tq, tr] of multiTileTargets) {
+                    selected.add(`${tq},${tr}`);
+                  }
+                  const filterSelected = (set: Set<string>): Set<string> => {
+                    if (multiTileCard?.stackable) return set;
+                    const out = new Set<string>();
+                    for (const k of set) {
+                      if (!selected.has(k)) out.add(k);
+                    }
+                    return out;
+                  };
                   if (isDefenseMulti) {
                     const ownTiles = new Set<string>();
                     for (const [k, t] of Object.entries(displayState.grid.tiles)) {
                       if (t.owner === activePlayerId) ownTiles.add(k);
                     }
-                    return ownTiles;
+                    return filterSelected(ownTiles);
                   }
-                  return getValidClaimTiles(multiTileCard);
+                  // Multi-target claim (Surge): every target must be adjacent to
+                  // at least one already-selected target (connected subgraph).
+                  const claimValid = filterSelected(getValidClaimTiles(multiTileCard));
+                  if (selected.size === 0) return claimValid;
+                  const adjacentToSelected = new Set<string>();
+                  for (const k of selected) {
+                    const [sq, sr] = k.split(',').map(Number);
+                    for (const [dq, dr] of HEX_DIRS) {
+                      adjacentToSelected.add(`${sq + dq},${sr + dr}`);
+                    }
+                  }
+                  const out = new Set<string>();
+                  for (const k of claimValid) {
+                    if (adjacentToSelected.has(k)) out.add(k);
+                  }
+                  return out;
                 }
                 const card = highlightCard?.card_type === 'claim' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
@@ -4431,9 +4541,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               return (
                 <>
                   <span style={{ fontSize: 12, color: '#aaa' }}>
-                    {label}: {1 + multiTileTargets.length}/{maxTotal} tiles selected
+                    Tiles selected: {1 + multiTileTargets.length}/{maxTotal}
                   </span>
                   <button
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={handleCancelMultiTile}
                     style={{
                       padding: '6px 16px',
@@ -4451,22 +4562,23 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     Cancel
                   </button>
                   <IrreversibleButton
+                    onPointerDown={(e) => e.stopPropagation()}
                     onClick={handleConfirmMultiTile}
                     tooltip={`Confirm all selected tiles for this ${label} card.`}
                     style={{
-                      padding: '6px 16px',
+                      padding: '10px 24px',
                       background: '#4a9eff',
                       border: 'none',
-                      borderRadius: 6,
+                      borderRadius: 8,
                       color: '#fff',
                       fontWeight: 'bold',
                       cursor: 'pointer',
-                      fontSize: 13,
+                      fontSize: 18,
                       lineHeight: '1.2',
                       boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                     }}
                   >
-                    Confirm {label}
+                    Confirm Tiles
                   </IrreversibleButton>
                 </>
               );
@@ -4507,14 +4619,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     disabled={!canConfirm}
                     tooltip={`Confirm ${trashMode.label.toLowerCase()} selection for ${card?.name ?? 'card'}.`}
                     style={{
-                      padding: '6px 16px',
-                      background: canConfirm ? '#ff4444' : '#555',
+                      padding: '10px 24px',
+                      background: canConfirm ? (trashMode.label === 'Discard' ? '#888' : '#ff4444') : '#555',
                       border: 'none',
-                      borderRadius: 6,
+                      borderRadius: 8,
                       color: '#fff',
                       fontWeight: 'bold',
                       cursor: canConfirm ? 'pointer' : 'not-allowed',
-                      fontSize: 13,
+                      fontSize: 18,
                       lineHeight: '1.2',
                       boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                       opacity: canConfirm ? 1 : 0.5,
