@@ -243,9 +243,9 @@ cards:
         timing: on_resolution
         metadata: {upgraded_value: 3}
 
-  - id: neutral_trench
-    name: Trench
-    name_upgraded: Trench+
+  - id: neutral_palisade
+    name: Palisade
+    name_upgraded: Palisade+
     type: Defense
     buy_cost: 2
 
@@ -261,7 +261,7 @@ cards:
     name: Moat
     name_upgraded: Moat+
     type: Defense
-    buy_cost: 5
+    buy_cost: 6
 
     action_return: 1
     power: 0
@@ -392,6 +392,25 @@ cards:
     effect: "Claim: Power 6. Costs 2 actions to play."
     effect_upgraded: "Claim: Power 8. Costs 2 actions to play."
     trash_on_use: false
+
+  - id: neutral_conqueror
+    name: Conqueror
+    name_upgraded: Conqueror+
+    type: Claim
+    buy_cost: 7
+
+    action_return: 0
+    action_cost: 2
+    power: 5
+    upgraded_power: 6
+    effect: "Claim: Power 5. Ignores temporary defense bonuses on targeted tile. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 6. Ignores temporary defense bonuses on targeted tile. Costs 2 actions to play."
+    trash_on_use: false
+    note: "Premium anti-defense finisher. Bypasses round-based defense cards (Fortify, Watchtower, Moat, etc.) but still respects intrinsic terrain defense and permanent fortifications (Entrench, Barricade, Twin Cities)."
+
+    effects:
+      - type: ignore_defense
+        timing: on_resolution
 
   - id: neutral_reclaim
     name: Reclaim

@@ -58,9 +58,11 @@ cards:
     type: Claim
     buy_cost: 7
     action_return: 0
+    action_cost: 2
     power: 4
-    effect: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own."
-    effect_upgraded: "Claim: Power 6. May target a tile up to 2 steps away from any tile you own."
+    claim_range: 2
+    effect: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 6. May target a tile up to 2 steps away from any tile you own. Costs 2 actions to play."
     secondary_effect: null
     secondary_timing: null
 
@@ -232,10 +234,11 @@ cards:
     type: Claim
     buy_cost: 6
     action_return: 0
-    power: 3
+    power: 2
+    upgraded_power: 3
     claim_range: 2
-    effect: "Claim: Power 3. May target a tile up to 2 steps away from any tile you own."
-    effect_upgraded: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own."
+    effect: "Claim: Power 2. May target a tile up to 2 steps away from any tile you own."
+    effect_upgraded: "Claim: Power 3. May target a tile up to 2 steps away from any tile you own."
     secondary_effect: null
     secondary_timing: null
 
@@ -382,7 +385,7 @@ cards:
     name: Demon Pact
     name_upgraded: Demon Pact+
     type: Claim
-    buy_cost: 7
+    buy_cost: 8
     action_return: 0
     power: 10
     upgraded_power: 12

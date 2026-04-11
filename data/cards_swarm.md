@@ -300,18 +300,19 @@ cards:
     name: Mob Rule
     name_upgraded: Mob Rule+
     type: Claim
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
+    action_cost: 2
     power: 2
-    effect: "Claim: Power 2. +1 power for every 3 tiles you own (rounded down)."
-    effect_upgraded: "Claim: Power 3. +1 power for every 2 tiles you own (rounded down)."
+    effect: "Claim: Power 2. +1 power for every 4 tiles you own (rounded down). Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 3. +1 power for every 3 tiles you own (rounded down). Costs 2 actions to play."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: power_per_tiles_owned
-        value: 3
-        upgraded_value: 2
+        value: 4
+        upgraded_value: 3
         timing: on_resolution
         metadata: {divisor_based: true}
 

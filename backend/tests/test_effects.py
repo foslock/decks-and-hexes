@@ -779,7 +779,9 @@ class TestIgnoreDefense:
         attacker = game.players["a0"]
         assert game.grid is not None
         fort_tiles = game.grid.get_player_tiles("f0")
-        target = fort_tiles[0]
+        # Pick a non-base tile so we don't have to fight intrinsic base defense.
+        # Siege Engine ignores temporary bonuses but still respects base + permanent.
+        target = next((t for t in fort_tiles if not t.is_base), fort_tiles[0])
 
         siege = _copy_card(card_registry["fortress_siege_engine"], "test_siege")
         siege.adjacency_required = False
