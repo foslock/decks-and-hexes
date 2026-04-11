@@ -98,6 +98,42 @@ def _find_n_adjacent_neutrals(game: GameState, player_id: str, n: int):
     return found
 
 
+def _find_connected_adjacent_neutrals(game: GameState, player_id: str, n: int):
+    """Find up to n neutral tiles that are each adjacent to the player's
+    territory AND together form a connected hex subgraph (primary + extras
+    reachable from each other via direct neighbours).
+
+    Returns a list of (q, r) tuples. If the grid doesn't admit a large-enough
+    cluster, returns the best one found (caller may pytest.skip on short).
+    """
+    assert game.grid is not None
+    pool = set(_find_n_adjacent_neutrals(game, player_id, 32))
+    best: list[tuple[int, int]] = []
+    for start in pool:
+        # BFS over pool, stop when we've collected n tiles.
+        order: list[tuple[int, int]] = [start]
+        visited: set[tuple[int, int]] = {start}
+        frontier = [start]
+        while frontier and len(order) < n:
+            q, r = frontier.pop(0)
+            tile = game.grid.get_tile(q, r)
+            if tile is None:
+                continue
+            for adj in game.grid.get_adjacent(q, r):
+                coord = (adj.q, adj.r)
+                if coord in pool and coord not in visited:
+                    visited.add(coord)
+                    order.append(coord)
+                    frontier.append(coord)
+                    if len(order) >= n:
+                        break
+        if len(order) > len(best):
+            best = order
+        if len(best) >= n:
+            return best
+    return best
+
+
 def _ensure_adjacent_enemy_tile(game: GameState, player_id: str, enemy_id: str):
     """Find or create an enemy-owned tile adjacent to player_id's territory.
 
@@ -2126,6 +2162,134 @@ class TestSwarmHiveMind:
         assert card.buy_cost == 6
         assert card.trash_on_use is True
         assert card.power == 1
+
+    def test_hive_mind_multi_target_count(self, card_registry):
+        """Hive Mind: up to 4 tiles total (3 extras + primary); 5 when upgraded."""
+        card = card_registry["swarm_hive_mind"]
+        assert card.multi_target_count == 3
+        assert card.upgraded_multi_target_count == 4
+
+    def test_hive_mind_claims_four_connected_tiles(self, card_registry):
+        """Hive Mind: claims primary + 3 extras forming a connected subgraph."""
+        game = _make_2p_game(card_registry)
+        assert game.grid is not None
+        player = game.players["p1"]
+        hive = _copy_card(card_registry["swarm_hive_mind"], "test_hive_four")
+        player.hand = [hive] + player.hand[1:]
+
+        cluster = _find_connected_adjacent_neutrals(game, "p1", 4)
+        if len(cluster) < 4:
+            pytest.skip("Need a connected cluster of 4 adjacent neutral tiles")
+
+        primary, *extras = cluster
+        q1, r1 = primary
+        success, msg = play_card(
+            game, "p1", 0,
+            target_q=q1, target_r=r1,
+            extra_targets=extras,
+        )
+        assert success, msg
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        for q, r in cluster:
+            tile = game.grid.get_tile(q, r)
+            assert tile is not None
+            assert tile.owner == "p1", f"tile ({q},{r}) not claimed"
+
+    def test_hive_mind_rejects_non_adjacent_targets(self, card_registry):
+        """Hive Mind: extras disconnected from the target set are rejected."""
+        game = _make_2p_game(card_registry)
+        assert game.grid is not None
+        player = game.players["p1"]
+        hive = _copy_card(card_registry["swarm_hive_mind"], "test_hive_nonadj")
+        player.hand = [hive] + player.hand[1:]
+
+        candidates = _find_n_adjacent_neutrals(game, "p1", 10)
+        pair: tuple[tuple[int, int], tuple[int, int]] | None = None
+        for i, a in enumerate(candidates):
+            for b in candidates[i + 1:]:
+                ta = game.grid.get_tile(*a)
+                tb = game.grid.get_tile(*b)
+                assert ta is not None and tb is not None
+                if ta.distance_to(tb) > 1:
+                    pair = (a, b)
+                    break
+            if pair:
+                break
+        if pair is None:
+            pytest.skip("Need two non-adjacent neutral tiles adjacent to p1")
+
+        (q1, r1), (q2, r2) = pair
+        success, msg = play_card(
+            game, "p1", 0,
+            target_q=q1, target_r=r1,
+            extra_targets=[(q2, r2)],
+        )
+        assert not success
+        assert "adjacent" in (msg or "").lower()
+        assert game.grid.get_tile(q1, r1).owner is None
+        assert game.grid.get_tile(q2, r2).owner is None
+
+    def test_hive_mind_caps_extras_at_three(self, card_registry):
+        """Hive Mind: passing more than 3 extras silently drops the overflow."""
+        game = _make_2p_game(card_registry)
+        assert game.grid is not None
+        player = game.players["p1"]
+        hive = _copy_card(card_registry["swarm_hive_mind"], "test_hive_cap")
+        player.hand = [hive] + player.hand[1:]
+
+        cluster = _find_connected_adjacent_neutrals(game, "p1", 5)
+        if len(cluster) < 5:
+            pytest.skip("Need a connected cluster of 5 adjacent neutral tiles")
+
+        primary, *rest = cluster
+        # Pass 4 extras: only the first 3 should be accepted, the 5th dropped.
+        success, msg = play_card(
+            game, "p1", 0,
+            target_q=primary[0], target_r=primary[1],
+            extra_targets=rest,
+        )
+        assert success, msg
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        claimed = [c for c in cluster if game.grid.get_tile(*c).owner == "p1"]
+        assert len(claimed) == 4, f"expected 4 claims, got {len(claimed)}"
+        # The overflow tile (the 4th extra) should remain unclaimed.
+        overflow = rest[3]
+        assert game.grid.get_tile(*overflow).owner is None
+
+    def test_hive_mind_upgraded_claims_five_connected_tiles(self, card_registry):
+        """Hive Mind+: claims primary + 4 extras forming a connected subgraph."""
+        game = _make_2p_game(card_registry)
+        assert game.grid is not None
+        player = game.players["p1"]
+        hive = _copy_card(card_registry["swarm_hive_mind"], "test_hive_up")
+        hive.is_upgraded = True
+        player.hand = [hive] + player.hand[1:]
+
+        cluster = _find_connected_adjacent_neutrals(game, "p1", 5)
+        if len(cluster) < 5:
+            pytest.skip("Need a connected cluster of 5 adjacent neutral tiles")
+
+        primary, *extras = cluster
+        success, msg = play_card(
+            game, "p1", 0,
+            target_q=primary[0], target_r=primary[1],
+            extra_targets=extras,
+        )
+        assert success, msg
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        for q, r in cluster:
+            tile = game.grid.get_tile(q, r)
+            assert tile is not None
+            assert tile.owner == "p1", f"tile ({q},{r}) not claimed"
 
 
 class TestSwarmLocustSwarm:
