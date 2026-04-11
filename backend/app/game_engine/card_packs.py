@@ -79,14 +79,14 @@ CARD_PACKS: dict[str, CardPack] = {
         #   2. Diplomat + Land Grant → flood VP passives; Swarm Colony rewards disconnected groups
         #   3. Cease Fire + Fortress defensive play → draw cards while turtling
         #   4. Surveyor + archetype market → find key archetype cards faster
-        #   5. Trench + Barricade → cheap action-neutral defense to hold newly bridged tiles
-        #   6. Trench (action chain) → set up bigger plays while still fortifying
+        #   5. Palisade + Barricade → cheap action-neutral defense to hold newly bridged tiles
+        #   6. Palisade (action chain) → set up bigger plays while still fortifying
         #   7. Supply Depot + Cease Fire → stack next-turn value while playing defensively
         neutral_card_ids=[
             "neutral_reduce",          # Cull: deck thinning (2💰)
             "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
             "neutral_road_builder",    # Road Builder: bridge territory (2💰)
-            "neutral_trench",          # Trench: +1 def + 1 action (2💰)
+            "neutral_palisade",        # Palisade: +1 def + 1 action (2💰)
             "neutral_cease_fire",      # Cease Fire: draw if peaceful (3💰)
             "neutral_fortified_post",  # Barricade: +2 permanent defense (5💰)
             "neutral_diplomat",        # Diplomat: land grants for all (3💰)
@@ -105,16 +105,17 @@ CARD_PACKS: dict[str, CardPack] = {
         #   2. Ambush + aggressive claiming → punish contested tiles with bonus power
         #   3. Sabotage + Swarm Infestation/Plague → multi-axis opponent disruption
         #   4. Forced March + Militia → actions for big territorial claims
-        #   5. Vanguard Spoils of War + aggression → trash opponent cards while claiming
-        #   6. Spyglass + action-hungry archetypes → cheap draw when hand is low
+        #   5. Conqueror + Siege Tower → two finisher options: anti-defense vs raw power
+        #   6. Forced March / Mobilize → fuel the 2-action cost of Conqueror / Siege Tower
+        #   7. Spyglass + action-hungry archetypes → cheap draw when hand is low
         neutral_card_ids=[
-            "neutral_reduce",          # Cull: deck thinning (1💰)
+            "neutral_reduce",          # Cull: deck thinning (2💰)
             "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
             "neutral_recruit",         # Levy: cheap claim + action (2💰)
             "neutral_militia",         # Militia: territorial power claim (3💰)
             "neutral_forced_march",    # Forced March: 2 actions (3💰)
             "neutral_ambush",          # Ambush: contested power boost (4💰)
-            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
+            "neutral_conqueror",       # Conqueror: P5 anti-defense, 2 actions (7💰)
             "neutral_rally_cry",       # Rally Cry: all claims stackable (5💰)
             "neutral_sabotage",        # Sabotage: opponent draws fewer (5💰)
             "neutral_siege_tower",     # Siege Tower: power 6 finisher (8💰)
@@ -129,7 +130,7 @@ CARD_PACKS: dict[str, CardPack] = {
         # No neutral Claim cards: rely on Explore (starter) and your archetype's claims to expand,
         # while the neutral market is dedicated to keeping what you take.
         # Synergies:
-        #   1. Trench + Watchtower + Moat → layered defense across multiple tiles, action-neutral
+        #   1. Palisade + Watchtower + Moat → layered defense across multiple tiles, action-neutral
         #   2. Barricade (permanent) + Watchtower / Moat (round) → temporary stacks on top of permanent
         #   3. Cease Fire + defensive play → constant card draw without ever attacking
         #   4. Tax Collector + holding VP tiles → snowball economy from territory you defend
@@ -139,14 +140,14 @@ CARD_PACKS: dict[str, CardPack] = {
         #   8. Cull → thin starter Explores for tighter draws of defense cards
         neutral_card_ids=[
             "neutral_reduce",          # Cull: deck thinning (2💰)
-            "neutral_trench",          # Trench: +1 defense + 1 action (2💰)
+            "neutral_palisade",        # Palisade: +1 defense + 1 action (2💰)
             "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
             "neutral_watchtower",      # Watchtower: +2 defense + draw (3💰)
             "neutral_cease_fire",      # Cease Fire: draw if peaceful (3💰)
             "neutral_diplomat",        # Diplomat: land grants for all (3💰)
             "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
             "neutral_fortified_post",  # Barricade: +2 permanent defense (5💰)
-            "neutral_moat",            # Moat: +2 defense on 3 tiles + 1 action (5💰)
+            "neutral_moat",            # Moat: +2 defense on 3 tiles + 1 action (6💰)
             "neutral_supply_depot",    # Supply Depot: next-turn draw + resource (6💰)
         ],
         archetype_card_ids=None,  # all archetype cards

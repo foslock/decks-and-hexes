@@ -803,7 +803,8 @@ class TestVanguardFlanking:
         """Flanking Strike: can target tiles up to 2 steps away."""
         card = card_registry["vanguard_flanking_strike"]
         assert card.claim_range == 2
-        assert card.power == 3
+        assert card.power == 2
+        assert card.upgraded_power == 3
 
 
 class TestVanguardSurgeProtocol:
@@ -2135,7 +2136,7 @@ class TestSwarmSafetyInNumbers:
 
 class TestSwarmMobRule:
     def test_mob_rule_power_scaling(self, card_registry):
-        """Mob Rule: base power 2, +1 per 3 tiles owned."""
+        """Mob Rule: base power 2, +1 per 4 tiles owned."""
         game = _make_2p_game(card_registry, arch0="swarm")
         player = game.players["p0"]
         mob = _copy_card(card_registry["swarm_mob_rule"], "test_mob")
@@ -2153,8 +2154,8 @@ class TestSwarmMobRule:
         assert q is not None
         action = PlannedAction(card=mob, target_q=q, target_r=r)
         power = calculate_effective_power(game, player, mob, action)
-        # base 2 + (total_tiles // 3)
-        expected = 2 + (total_tiles // 3)
+        # base 2 + (total_tiles // 4)
+        expected = 2 + (total_tiles // 4)
         assert power == expected
 
 
@@ -3893,12 +3894,12 @@ class TestSwarmExodus:
 
 class TestVanguardDemonPact:
     def test_demon_pact_properties(self, card_registry):
-        """Demon Pact: claim, cost 6, power 10, mandatory_self_trash effect."""
+        """Demon Pact: claim, cost 8, power 10, mandatory_self_trash effect."""
         card = card_registry.get("vanguard_demon_pact")
         if not card:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.CLAIM
-        assert card.buy_cost == 7
+        assert card.buy_cost == 8
         assert card.power == 10
         assert card.upgraded_power == 12
         assert card.archetype == Archetype.VANGUARD

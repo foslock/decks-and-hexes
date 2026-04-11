@@ -128,12 +128,15 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
     const stackIcon = (card.stackable && !card.granted_stackable) ? '↑' : '';
     // "Target-any-tile" cards (Eminent Domain, Proliferate) skip adjacency — mark with 🎯
     const targetAnyIcon = card.adjacency_required === false ? '🎯' : '';
+    // Ranged claims (Overrun, Flanking Strike): can target tiles claim_range > 1 hex steps
+    // away from any owned tile. Mark with " · 🏹N" where N is the range.
+    const rangedIcon = (card.claim_range && card.claim_range > 1) ? ` · 🏹${card.claim_range}` : '';
     // Flood cards (e.g. Flood): claim all tiles adjacent to a tile you own
     const isFlood = card.flood === true;
 
     if (ctx?.powerFrozen) {
       // Power already overridden with effective value — show as-is
-      parts.push(p(`⚔️${card.power}${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
+      parts.push(p(`⚔️${card.power}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
     } else if (hasTileScaling && ctx?.tileCount !== undefined) {
       // Resolve tile-scaling power (Mob Rule, Locust Swarm)
       const tileEff = card.effects?.find(e => e.type === 'power_per_tiles_owned');
@@ -142,9 +145,9 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const replaces = tileEff.metadata?.replaces_base_power;
         const scaledPow = Math.floor(ctx.tileCount / divisor);
         const totalPow = replaces ? scaledPow : card.power + scaledPow;
-        parts.push(p(`⚔️${totalPow}${stackIcon}${targetAnyIcon}${claimTileSuffix}`, totalPow > 0));
+        parts.push(p(`⚔️${totalPow}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`, totalPow > 0));
       } else {
-        parts.push(p(`⚔️${card.power}+${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
+        parts.push(p(`⚔️${card.power}+${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
       }
     } else if (isUnbounded) {
       if (powerMods.some(e => e.condition === 'cards_in_hand') && ctx?.handSize !== undefined) {
@@ -152,19 +155,19 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
         const bonus = isUpgraded ? (handMod?.upgraded_value ?? handMod?.value ?? 0) : (handMod?.value ?? 0);
         const handPow = Math.max(0, ctx.handSize - 1) + bonus;
-        parts.push(p(`⚔️${handPow}${stackIcon}${targetAnyIcon}${claimTileSuffix}`, handPow > 0));
+        parts.push(p(`⚔️${handPow}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`, handPow > 0));
       } else {
         const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
         const minPow = handMod
           ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
           : card.power;
-        parts.push(p(`⚔️${minPow}+${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
+        parts.push(p(`⚔️${minPow}+${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
       }
     } else if (fixedBonus) {
       const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
-      parts.push(p(`⚔️${card.power}/${card.power + bonusVal}${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
+      parts.push(p(`⚔️${card.power}/${card.power + bonusVal}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
     } else {
-      parts.push(p(`⚔️${card.power}${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
+      parts.push(p(`⚔️${card.power}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
     }
 
     // Granted stackable indicator (Rally Cry) — shown as a separate glowing part

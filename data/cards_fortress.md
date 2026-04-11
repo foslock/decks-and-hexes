@@ -74,8 +74,8 @@ cards:
     action_return: 0
     power: 3
     upgraded_power: 4
-    effect: "Claim: Power 3. Ignores all defense bonuses on targeted tile."
-    effect_upgraded: "Claim: Power 4. Ignores all defense bonuses on targeted tile."
+    effect: "Claim: Power 3. Ignores temporary defense bonuses on targeted tile."
+    effect_upgraded: "Claim: Power 4. Ignores temporary defense bonuses on targeted tile."
     secondary_effect: null
     secondary_timing: null
 
@@ -87,7 +87,7 @@ cards:
     name: Iron Wall
     name_upgraded: Iron Wall+
     type: Defense
-    buy_cost: 2
+    buy_cost: 4
     action_return: 0
     power: 0
     defense_target_count: 1
@@ -202,7 +202,7 @@ cards:
     name: Stronghold
     name_upgraded: Stronghold+
     type: Defense
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
     power: 0
     defense_target_count: 1

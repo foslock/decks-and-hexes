@@ -1077,23 +1077,28 @@ def play_card(game: GameState, player_id: str, card_index: int,
             # Occupied tiles owned by opponents: power must be strictly greater than
             # defense (defender wins ties).
             # Own tiles are valid defensive placements and skip the check entirely.
-            # Siege Engine and other ignore_defense cards bypass this check.
+            # Siege Engine / Conqueror (ignore_defense) only strip temporary round
+            # bonuses, so the check still respects base + permanent defense.
             has_ignore_defense = any(
                 e.type == EffectType.IGNORE_DEFENSE for e in card.effects
             )
-            if not has_ignore_defense and tile.owner != player_id:
+            if tile.owner != player_id:
                 # Use calculate_effective_power for cards with dynamic power modifiers
                 # (e.g. Strength in Numbers, Locust Swarm, Mob Rule).
                 check_power = card.effective_power
                 if card.effects:
                     _check_action = PlannedAction(card=card, target_q=target_q, target_r=target_r)
                     check_power = calculate_effective_power(game, player, card, _check_action)
-                if tile.owner is None:
-                    if tile.defense_power > check_power:
-                        return False, f"Card power ({check_power}) too low to overcome tile defense ({tile.defense_power})"
+                if has_ignore_defense:
+                    effective_defense = tile.base_defense + tile.permanent_defense_bonus
                 else:
-                    if tile.defense_power >= check_power:
-                        return False, f"Card power ({check_power}) too low to overcome occupied tile defense ({tile.defense_power})"
+                    effective_defense = tile.defense_power
+                if tile.owner is None:
+                    if effective_defense > check_power:
+                        return False, f"Card power ({check_power}) too low to overcome tile defense ({effective_defense})"
+                else:
+                    if effective_defense >= check_power:
+                        return False, f"Card power ({check_power}) too low to overcome occupied tile defense ({effective_defense})"
 
             # Check stacking (only one claim per tile unless exception).
             # Multi-target claims (Surge) lock their extra targets too, so a
@@ -1643,11 +1648,13 @@ def execute_reveal(game: GameState) -> GameState:
 
         # Add existing defense (owned tile: credited to owner; unowned tile with intrinsic
         # defense: modeled as a neutral blocker that real players must beat)
-        # Skip defense if ignore_defense is active for this tile
+        # ignore_defense (Siege Engine, Conqueror) only strips temporary round bonuses;
+        # intrinsic terrain defense AND permanent defense (Entrench/Barricade/Twin Cities)
+        # still count.
         if tile_key not in ignore_defense_tiles:
             current_defense = tile.defense_power
         else:
-            current_defense = tile.base_defense  # only base, not bonus from defense cards
+            current_defense = tile.base_defense + tile.permanent_defense_bonus
         if tile.owner:
             power_by_player.setdefault(tile.owner, 0)
             power_by_player[tile.owner] += current_defense

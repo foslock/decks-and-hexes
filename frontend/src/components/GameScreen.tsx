@@ -110,7 +110,8 @@ function computeClaimPowerOnTile(
 /**
  * Returns true if a claim card with the given effective power can capture the
  * target tile under the validation rules:
- *   - Siege Engine (`ignore_defense` effect): always allowed regardless of defense.
+ *   - Siege Engine / Conqueror (`ignore_defense` effect): only strips temporary
+ *     round bonuses; base + permanent defense still count.
  *   - Neutral tiles: power must be >= the tile's effective defense.
  *   - Other-player tiles: power must be STRICTLY GREATER than the tile's
  *     effective defense (defender wins ties at resolution).
@@ -121,9 +122,12 @@ function canClaimCaptureTile(
   tile: import('../types/game').HexTile,
   effectivePower: number,
 ): boolean {
-  if (card.effects?.some(e => e.type === 'ignore_defense')) return true;
-  if (!tile.owner) return effectivePower >= tile.defense_power;
-  return effectivePower > tile.defense_power;
+  const ignoresDefense = card.effects?.some(e => e.type === 'ignore_defense');
+  const effectiveDefense = ignoresDefense
+    ? tile.base_defense + tile.permanent_defense_bonus
+    : tile.defense_power;
+  if (!tile.owner) return effectivePower >= effectiveDefense;
+  return effectivePower > effectiveDefense;
 }
 
 // Hex geometry constants (must match HexGrid.tsx)
