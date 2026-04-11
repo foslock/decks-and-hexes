@@ -304,8 +304,15 @@ function PlannedCardTooltip({ card, x, y, totalPower, displayName }: { card: Car
         </span>
       </div>
       {parts.length > 0 && (
-        <div style={{ fontSize: 10, color: '#aaa', marginBottom: card.description ? 5 : 0 }}>
-          {parts.join(' · ')}
+        <div style={{ fontSize: 10, color: '#aaa', marginBottom: card.description ? 5 : 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
+            if (el) {
+              const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
+              el.style.setProperty('--sub-scale', String(scale));
+            }
+          }}>
+            {parts.join(' · ')}
+          </span>
         </div>
       )}
       {card.description && (

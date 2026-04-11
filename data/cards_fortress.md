@@ -137,6 +137,7 @@ cards:
     effects:
       - type: power_modifier
         value: 2
+        upgraded_value: 0
         timing: on_resolution
         condition: if_target_neutral
 
@@ -147,8 +148,8 @@ cards:
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Gain 2 resources. Your next purchase this round costs 1 less. Gain 1 action."
-    effect_upgraded: "Gain 3 resources. Your next purchase this round costs 1 less. Gain 1 action."
+    effect: "Gain 2 resources. Gain 1 action. Your next purchase this round costs 1 less."
+    effect_upgraded: "Gain 3 resources. Gain 1 action. Your next purchase this round costs 1 less."
     secondary_effect: null
     secondary_timing: null
 
@@ -166,8 +167,8 @@ cards:
     action_return: 0
     power: 0
     defense_bonus: 0
-    effect: "Target tile you own permanently gains +1 defense until it is captured."
-    effect_upgraded: "Target tile you own permanently gains +2 defense until it is captured."
+    effect: "One tile you own permanently gains +1 defense until it is captured."
+    effect_upgraded: "One tile you own permanently gains +2 defense until it is captured."
     secondary_effect: null
     secondary_timing: null
 
@@ -231,6 +232,7 @@ cards:
     effects:
       - type: resource_refund_if_neutral
         value: 2
+        upgraded_value: 3
         timing: on_resolution
         condition: if_target_neutral
 
@@ -283,8 +285,8 @@ cards:
     defense_target_count: 2
     upgraded_defense_target_count: 2
     trash_on_use: true
-    effect: "Two tiles you own each get +3 permanent defense. Trash this card."
-    effect_upgraded: "Two tiles you own each get +5 permanent defense. Trash this card."
+    effect: "Two tiles you own each get +3 permanent defense until captured. Trash this card."
+    effect_upgraded: "Two tiles you own each get +5 permanent defense until captured. Trash this card."
     secondary_effect: null
     secondary_timing: null
 
@@ -433,6 +435,8 @@ cards:
 
     effects:
       - type: abandon_and_block
+        value: 3
+        upgraded_value: 4
         timing: on_resolution
 
   - id: fortress_snowy_holiday

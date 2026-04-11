@@ -385,16 +385,19 @@ class TestNeutralEminentDomain:
 
 
 class TestNeutralFortifiedPost:
-    def test_fortified_post_adds_defense(self, card_registry):
-        """Fortified Post: +4 defense on owned tile."""
+    def test_fortified_post_adds_permanent_defense(self, card_registry):
+        """Barricade: target tile gains +2 permanent defense."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         fp = _copy_card(card_registry["neutral_fortified_post"], "test_fp")
-        assert fp.defense_bonus == 4
+        assert fp.buy_cost == 5
+        # Permanent defense lives on the effect, not the round-only defense_bonus field
+        assert fp.defense_bonus == 0
+        assert any(e.type.value == "permanent_defense" for e in fp.effects)
         player.hand = [fp] + player.hand[1:]
 
         tile = game.grid.get_player_tiles("p0")[0]
-        initial_defense = tile.defense_power
+        initial_perm = tile.permanent_defense_bonus
         success, _ = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
         assert success
 
@@ -402,7 +405,7 @@ class TestNeutralFortifiedPost:
         submit_play(game, "p1")
 
         updated = game.grid.get_tile(tile.q, tile.r)
-        assert updated.defense_power >= initial_defense + 4
+        assert updated.permanent_defense_bonus == initial_perm + 2
 
 
 class TestNeutralWarBonds:
@@ -571,9 +574,9 @@ class TestNeutralConscription:
 
 class TestNeutralWatchtower:
     def test_watchtower_defense_and_cost(self, card_registry):
-        """Watchtower: +3 defense, draw 1."""
+        """Watchtower: +2 defense, draw 1."""
         card = card_registry["neutral_watchtower"]
-        assert card.defense_bonus == 3
+        assert card.defense_bonus == 2
         assert card.buy_cost == 3
 
 
@@ -587,9 +590,9 @@ class TestNeutralSiegeTower:
 
 class TestNeutralReclaim:
     def test_consolidate_stats(self, card_registry):
-        """Consolidate: cost 2."""
+        """Consolidate: cost 3."""
         card = card_registry["neutral_reclaim"]
-        assert card.buy_cost == 2
+        assert card.buy_cost == 3
 
     def test_consolidate_trash_for_resources(self, card_registry):
         """Consolidate: trash a card and gain half its buy cost (rounded down)."""
@@ -3496,7 +3499,7 @@ class TestFortressScorchedRetreat:
         # Now tile should be blocked with no owner
         assert target.is_blocked is True
         assert target.owner is None
-        assert player.resources == initial_resources + 2
+        assert player.resources == initial_resources + 3
 
     def test_scorched_retreat_cannot_target_base(self, card_registry):
         """Scorched Retreat cannot target a base tile."""

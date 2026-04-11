@@ -24,9 +24,15 @@ import { useSound } from '../audio/useSound';
 
 /** Check if an engine card needs an opponent target (forced discard or inject rubble). */
 function needsOpponentTarget(card: Card): boolean {
+  const isUpgraded = card.is_upgraded;
+  const grantsActionsToOpponent = card.effects?.some(e => {
+    if (e.type !== 'grant_actions_next_turn' || e.target !== 'chosen_player') return false;
+    const val = isUpgraded && e.upgraded_value != null ? e.upgraded_value : e.value;
+    return val > 0;
+  }) ?? false;
   return (card.forced_discard > 0) ||
     (card.effects?.some(e => e.type === 'inject_rubble') ?? false) ||
-    (card.effects?.some(e => e.type === 'grant_actions_next_turn' && e.target === 'chosen_player') ?? false);
+    grantsActionsToOpponent;
 }
 
 /**

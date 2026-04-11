@@ -291,8 +291,8 @@ cards:
     upgraded_defense_target_count: 2
     defense_bonus: 1
     upgraded_defense_bonus: 2
-    effect: "Choose up to 2 tiles you own. Each gains +1 defense this round."
-    effect_upgraded: "Choose up to 2 tiles. Each gains +2 defense this round."
+    effect: "Two tiles you own gain +1 defense this round."
+    effect_upgraded: "Two tiles you own gain +2 defense this round."
     secondary_effect: null
     secondary_timing: null
 

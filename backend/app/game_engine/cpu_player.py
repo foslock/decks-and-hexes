@@ -119,7 +119,9 @@ def _deck_composition(player: Any) -> dict[str, float]:
         }
     high_power_claims = sum(
         1 for c in cards
-        if c.card_type == CardType.CLAIM and c.effective_power >= 3
+        if c.card_type == CardType.CLAIM
+        and c.effective_power >= 3
+        and not _is_limited_use_claim(c)
     )
     resource_gain = sum(
         1 for c in cards if c.effective_resource_gain > 0
@@ -131,6 +133,19 @@ def _deck_composition(player: Any) -> dict[str, float]:
         "resource_gain_ratio": resource_gain / total,
         "claim_count": claim_count,
     }
+
+
+def _is_limited_use_claim(card: Card) -> bool:
+    """True if a claim card has a targeting constraint so narrow that its
+    raw power overstates its real value.
+
+    Currently flags adjacency-bridge claims (Road Builder): the card can only
+    target tiles that connect two disconnected territory groups, so it is
+    unplayable most turns regardless of its printed power.
+    """
+    if card.card_type != CardType.CLAIM:
+        return False
+    return any(e.type == EffectType.ADJACENCY_BRIDGE for e in card.effects)
 
 
 def _owns_passive_vp(player: Any) -> bool:
@@ -1340,10 +1355,15 @@ class CPUPlayer:
                 elif effect.type == EffectType.POWER_MODIFIER:
                     # Assume conditional power fires ~50% of the time
                     base_power += effect.effective_value(card.is_upgraded) * 0.5
-            score += base_power * 1.5
+            # Limited-use claims (Road Builder's adjacency-bridge constraint)
+            # are rarely playable on any given turn, so their printed power
+            # overstates their real contribution. Treat them as low-power for
+            # scoring purposes.
+            effective_base_power = 1.0 if _is_limited_use_claim(card) else base_power
+            score += effective_base_power * 1.5
             if card.archetype == player.archetype:
                 score += 3.0  # synergy bonus
-            score *= weights.aggression if base_power >= 3 else weights.expansion
+            score *= weights.aggression if effective_base_power >= 3 else weights.expansion
         elif card.card_type == CardType.DEFENSE:
             defense_val = card.effective_defense_bonus
             # Account for dynamic defense (Nest)
@@ -1475,7 +1495,9 @@ class CPUPlayer:
             # Keep at least ~10% of the deck as high-power claim cards. When
             # under that floor, strongly favor buying high-power claims.
             is_high_power_claim = (
-                card.card_type == CardType.CLAIM and card.effective_power >= 3
+                card.card_type == CardType.CLAIM
+                and card.effective_power >= 3
+                and not _is_limited_use_claim(card)
             )
             if is_high_power_claim and composition["high_power_claim_ratio"] < 0.10:
                 score *= 1.7
