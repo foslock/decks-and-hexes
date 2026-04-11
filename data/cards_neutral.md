@@ -229,14 +229,48 @@ cards:
     name: Barricade
     name_upgraded: Barricade+
     type: Defense
-    buy_cost: 3
+    buy_cost: 5
 
     action_return: 0
     power: 0
-    defense_bonus: 4
-    upgraded_defense_bonus: 5
-    effect: "Any one tile you own gains +4 defense this round."
-    effect_upgraded: "Any one tile you own gains +5 defense this round."
+    defense_bonus: 0
+    effect: "One tile you own permanently gains +2 defense until captured."
+    effect_upgraded: "One tile you own permanently gains +3 defense until captured."
+    trash_on_use: false
+    effects:
+      - type: permanent_defense
+        value: 2
+        timing: on_resolution
+        metadata: {upgraded_value: 3}
+
+  - id: neutral_trench
+    name: Trench
+    name_upgraded: Trench+
+    type: Defense
+    buy_cost: 2
+
+    action_return: 1
+    power: 0
+    defense_bonus: 1
+    upgraded_defense_bonus: 3
+    effect: "One tile you own gains +1 defense this round. Gain 1 action."
+    effect_upgraded: "One tile you own gains +3 defense this round. Gain 1 action."
+    trash_on_use: false
+
+  - id: neutral_moat
+    name: Moat
+    name_upgraded: Moat+
+    type: Defense
+    buy_cost: 5
+
+    action_return: 1
+    power: 0
+    defense_bonus: 2
+    upgraded_defense_bonus: 3
+    defense_target_count: 3
+    upgraded_defense_target_count: 3
+    effect: "Three tiles you own gain +2 defense this round. Gain 1 action."
+    effect_upgraded: "Three tiles you own gain +3 defense this round. Gain 1 action."
     trash_on_use: false
 
   - id: neutral_forced_march
@@ -289,7 +323,7 @@ cards:
     name: Cull
     name_upgraded: Cull+
     type: Engine
-    buy_cost: 1
+    buy_cost: 2
 
     action_return: 0
     power: 0
@@ -338,12 +372,12 @@ cards:
 
     action_return: 0
     power: 0
-    defense_bonus: 3
-    upgraded_defense_bonus: 4
+    defense_bonus: 2
+    upgraded_defense_bonus: 3
     draw_cards: 1
     upgraded_draw_cards: 1
-    effect: "One tile you own gains +3 defense this round. Draw 1 card."
-    effect_upgraded: "One tile you own gains +4 defense this round. Draw 1 card."
+    effect: "One tile you own gains +2 defense this round. Draw 1 card."
+    effect_upgraded: "One tile you own gains +3 defense this round. Draw 1 card."
     trash_on_use: false
 
   - id: neutral_siege_tower
@@ -363,7 +397,7 @@ cards:
     name: Reclaim
     name_upgraded: Reclaim+
     type: Engine
-    buy_cost: 2
+    buy_cost: 3
 
     action_return: 0
     power: 0

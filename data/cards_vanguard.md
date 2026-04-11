@@ -246,15 +246,17 @@ cards:
     type: Engine
     buy_cost: 4
     action_return: 2
+    upgraded_action_return: 3
     power: 0
-    effect: "Target opponent gains 1 extra action next round. Gain 2 actions."
-    effect_upgraded: "Two target opponents gain 1 extra action next round. Gain 2 actions."
+    effect: "Gain 2 actions. Target opponent gains 1 extra action next round."
+    effect_upgraded: "Gain 3 actions."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: grant_actions_next_turn
         value: 1
+        upgraded_value: 0
         timing: on_resolution
         target: chosen_player
 

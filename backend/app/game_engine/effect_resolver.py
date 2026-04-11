@@ -669,9 +669,10 @@ def _handle_immediate_resolve(effect: Effect, ctx: EffectContext) -> None:
 
 def _handle_resource_refund_if_neutral(effect: Effect, ctx: EffectContext) -> None:
     """Overwhelming Force: gain resource refund if target tile was neutral."""
-    ctx.player.resources += effect.value
+    ev = effect.effective_value(ctx.card.is_upgraded)
+    ctx.player.resources += ev
     ctx.game._log(
-        f"{ctx.player.name} gains {effect.value} resource refund (neutral tile)",
+        f"{ctx.player.name} gains {ev} resource refund (neutral tile)",
         visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
@@ -1515,8 +1516,8 @@ def _handle_abandon_and_block(effect: Effect, ctx: EffectContext) -> None:
     tile.permanent_defense_bonus = 0
     tile.is_vp = False  # VP hexes lose their status when blocked
     tile.vp_value = 0
-    # Gain resources (2 base, 3 upgraded)
-    gained = 3 if ctx.card.is_upgraded else 2
+    # Gain resources (value/upgraded_value from effect entry — see card YAML)
+    gained = effect.effective_value(ctx.card.is_upgraded)
     ctx.player.resources += gained
     ctx.game._log(
         f"{ctx.player.name} scorches tile {ctx.action.target_q},{target_r} "

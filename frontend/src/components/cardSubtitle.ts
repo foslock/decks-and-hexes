@@ -62,7 +62,7 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
 
   // Special case: Debt card
   if (card.name === 'Debt') {
-    parts.push(p('3💰 → 🗑️'));
+    parts.push(p('-3💰 → 🗑️'));
     return parts;
   }
 
@@ -96,17 +96,21 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
     if (hasImmunity) {
       parts.push(p('Immune'));
     } else if (hasPerAdj) {
-      const mod = card.effects?.find(e => e.type === 'defense_per_adjacent');
-      const perVal = mod ? (isUpgraded ? (mod.upgraded_value ?? mod.value) : mod.value) : 1;
-      parts.push(p(`🛡️${perVal}+${tileSuffix}`));
+      // Nest: +X defense per adjacent owned tile — scaling is unknown at
+      // preview time, so just show "+" to signal "gains defense".
+      parts.push(p(`🛡️+${tileSuffix}`));
     } else if (hasPermanent) {
+      // Permanent defense (Entrench, Twin Cities) — ↑ marker signals the
+      // bonus persists across rounds.
       const mod = card.effects?.find(e => e.type === 'permanent_defense');
       const permVal = mod
         ? (isUpgraded ? ((mod.metadata?.upgraded_value as number) ?? mod.value) : mod.value)
         : defBase;
-      parts.push(p(`🛡️${permVal}${tileSuffix}`));
+      parts.push(p(`🛡️↑${permVal}${tileSuffix}`));
     } else if (defBase > 0) {
-      parts.push(p(`🛡️${defBase}${tileSuffix}`));
+      // Round-only defense bonus (Fortify, Bulwark, Barricade, etc.) —
+      // + marker signals "this round only".
+      parts.push(p(`🛡️+${defBase}${tileSuffix}`));
     }
   } else if (card.power > 0 || card.card_type === 'claim') {
     // Claim / power cards
@@ -122,10 +126,14 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
     const claimTileSuffix = mtc >= 2 ? ` · ${mtc}🔷` : '';
     // Natively stackable cards show ↑ inline; granted stackable shows it as a separate glowing part
     const stackIcon = (card.stackable && !card.granted_stackable) ? '↑' : '';
+    // "Target-any-tile" cards (Eminent Domain, Proliferate) skip adjacency — mark with 🎯
+    const targetAnyIcon = card.adjacency_required === false ? '🎯' : '';
+    // Flood cards (e.g. Flood): claim all tiles adjacent to a tile you own
+    const isFlood = card.flood === true;
 
     if (ctx?.powerFrozen) {
       // Power already overridden with effective value — show as-is
-      parts.push(p(`⚔️${card.power}${stackIcon}${claimTileSuffix}`));
+      parts.push(p(`⚔️${card.power}${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
     } else if (hasTileScaling && ctx?.tileCount !== undefined) {
       // Resolve tile-scaling power (Mob Rule, Locust Swarm)
       const tileEff = card.effects?.find(e => e.type === 'power_per_tiles_owned');
@@ -134,9 +142,9 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const replaces = tileEff.metadata?.replaces_base_power;
         const scaledPow = Math.floor(ctx.tileCount / divisor);
         const totalPow = replaces ? scaledPow : card.power + scaledPow;
-        parts.push(p(`⚔️${totalPow}${stackIcon}${claimTileSuffix}`, totalPow > 0));
+        parts.push(p(`⚔️${totalPow}${stackIcon}${targetAnyIcon}${claimTileSuffix}`, totalPow > 0));
       } else {
-        parts.push(p(`⚔️${card.power}+${stackIcon}${claimTileSuffix}`));
+        parts.push(p(`⚔️${card.power}+${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
       }
     } else if (isUnbounded) {
       if (powerMods.some(e => e.condition === 'cards_in_hand') && ctx?.handSize !== undefined) {
@@ -144,24 +152,29 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
         const bonus = isUpgraded ? (handMod?.upgraded_value ?? handMod?.value ?? 0) : (handMod?.value ?? 0);
         const handPow = Math.max(0, ctx.handSize - 1) + bonus;
-        parts.push(p(`⚔️${handPow}${stackIcon}${claimTileSuffix}`, handPow > 0));
+        parts.push(p(`⚔️${handPow}${stackIcon}${targetAnyIcon}${claimTileSuffix}`, handPow > 0));
       } else {
         const handMod = powerMods.find(e => e.condition === 'cards_in_hand');
         const minPow = handMod
           ? (isUpgraded ? (handMod.upgraded_value ?? handMod.value) : handMod.value)
           : card.power;
-        parts.push(p(`⚔️${minPow}+${stackIcon}${claimTileSuffix}`));
+        parts.push(p(`⚔️${minPow}+${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
       }
     } else if (fixedBonus) {
       const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
-      parts.push(p(`⚔️${card.power}/${card.power + bonusVal}${stackIcon}${claimTileSuffix}`));
+      parts.push(p(`⚔️${card.power}/${card.power + bonusVal}${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
     } else {
-      parts.push(p(`⚔️${card.power}${stackIcon}${claimTileSuffix}`));
+      parts.push(p(`⚔️${card.power}${stackIcon}${targetAnyIcon}${claimTileSuffix}`));
     }
 
     // Granted stackable indicator (Rally Cry) — shown as a separate glowing part
     if (card.granted_stackable) {
       parts.push({ text: '↑', glow: true });
+    }
+
+    // Flood claims hit every adjacent tile — show the bonus-tile indicator
+    if (isFlood) {
+      parts.push(p('+🔷'));
     }
   }
 
@@ -176,7 +189,10 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
 
   // Stat icons (defer resource_gain for self_discard cards — shown after discard+action)
   const hasSelfDiscard = card.effects?.some(e => e.type === 'self_discard');
-  if (card.resource_gain > 0 && !hasSelfDiscard) parts.push(p(`+${card.resource_gain}💰`));
+  // Juggernaut's "gain 2 resources if neutral" is auto-extracted to resource_gain by the loader;
+  // the resource_refund_if_neutral handler below emits "(+X💰)" — skip the flat render to avoid duplication.
+  const hasResourceRefund = card.effects?.some(e => e.type === 'resource_refund_if_neutral');
+  if (card.resource_gain > 0 && !hasSelfDiscard && !hasResourceRefund) parts.push(p(`+${card.resource_gain}💰`));
 
   // Dynamic resource gain (War Tithe: resources per claims last round)
   if (card.effects) {
@@ -216,8 +232,12 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
   const hasDelayedDraw = card.effects?.some(e => e.type === 'draw_next_turn' || e.type === 'cease_fire');
   const hasMulligan = card.effects?.some(e => e.type === 'mulligan');
   const hasActionsPerCards = card.effects?.some(e => e.type === 'actions_per_cards_played');
-  const deferAction = hasDelayedDraw || hasSelfDiscard || hasMulligan || hasActionsPerCards;
-  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan) parts.push(p(`+${card.draw_cards}🃏`));
+  // Exodus: abandon_tile is described first ("Abandon a tile..."), so defer
+  // both draw and action so they render after the 🔷↘ icon.
+  const hasAbandonTile = card.effects?.some(e => e.type === 'abandon_tile');
+  const deferAction = hasDelayedDraw || hasSelfDiscard || hasMulligan || hasActionsPerCards || hasAbandonTile;
+  const deferDraw = hasAbandonTile;
+  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan && !deferDraw) parts.push(p(`+${card.draw_cards}🃏`));
   if (card.action_return > 0 && !hasTrashConditional && !deferAction) parts.push(p(`+${card.action_return}⚡`));
   if (card.forced_discard > 0) parts.push(p(`🎯-${card.forced_discard}🃏`));
 
@@ -251,13 +271,19 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
           parts.push(p(`+${card.resource_gain}💰`));
         }
       }
-      if (eff.type === 'gain_resources' && eff.condition) {
+      if (eff.type === 'gain_resources' && eff.condition && eff.condition !== 'always') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        if (val > 0) parts.push(p(`+${val}💰`));
+        // Conditional gains (Resilience: "If you control the fewest tiles...")
+        // are shown in parentheses to signal the condition.
+        if (val > 0) parts.push(p(`(+${val}💰)`));
       }
       if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        parts.push(p(`+${val}⏰🃏`));
+        // Conditional delayed draws (e.g. Counterattack: "If an opponent's claim
+        // on this tile fails, draw 1 card next round.") render in parens.
+        const isConditional = eff.condition && eff.condition !== 'always';
+        const text = isConditional ? `(+${val}⏰🃏)` : `+${val}⏰🃏`;
+        parts.push(p(text));
         // Emit deferred action icon after delayed draw (e.g. Plunder: +3💰 · +1⏰🃏 · +1⚡)
         if (hasDelayedDraw && card.action_return > 0 && !hasTrashConditional) {
           parts.push(p(`+${card.action_return}⚡`));
@@ -338,10 +364,57 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         const baseName = card.name.replace(/\+$/, '');
         const met = ctx?.playedCardNames?.some(n => n.replace(/\+$/, '') === baseName) ?? false;
-        if (met) {
-          // In hand: glow yellow; in-play (powerFrozen): static resolved
-          parts.push({ text: `+${val}⚡`, glow: !ctx?.powerFrozen });
+        // Always show the conditional bonus in parens (e.g. Rabble "(+1⚡)");
+        // glow yellow when the condition is active but not frozen.
+        const text = `(+${val}⚡)`;
+        if (met && !ctx?.powerFrozen) {
+          parts.push({ text, glow: true });
+        } else {
+          parts.push(p(text));
         }
+      }
+      if (eff.type === 'grant_actions_next_turn') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) {
+          // Forced March: all others → ↑⏰⚡👥; Battle Cry: chosen player → ↑⏰⚡
+          const peopleIcon = eff.target === 'all_others' ? '👥' : '';
+          parts.push(p(`↑⏰⚡${peopleIcon}`));
+        }
+      }
+      if (eff.type === 'resource_drain') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(p(`(🎯-${val}💰)`));
+      }
+      if (eff.type === 'auto_claim_adjacent_neutral') {
+        parts.push(p('(+🔷)'));
+      }
+      if (eff.type === 'trash_opponent_card') {
+        parts.push(p('(🎯✂️)'));
+      }
+      if (eff.type === 'grant_actions' && eff.condition === 'zero_actions') {
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(p(`(+${val}⚡)`));
+      }
+      if (eff.type === 'buy_restriction') {
+        parts.push(p('🚫🛒'));
+      }
+      if (eff.type === 'stacking_power_bonus') {
+        // Dog Pile: each other claim you stack here gains +1 power
+        parts.push(p('⚔️+'));
+      }
+      if (eff.type === 'on_defend_forced_discard') {
+        // Attrition: if defender holds, they draw 1 fewer card next round
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(p(`(-${val}⏰🃏)`));
+      }
+      if (eff.type === 'resource_refund_if_neutral') {
+        // Juggernaut: refund N resources if target tile was neutral
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(p(`(+${val}💰)`));
+      }
+      if (eff.type === 'ignore_defense') {
+        // Siege Engine: bypass all defense bonuses on the target tile
+        parts.push(p('🚫🛡️'));
       }
       if (eff.type === 'grant_land_grants') {
         parts.push(p(isUpgraded ? '↓2🃏' : '↓🃏'));
@@ -386,14 +459,27 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       }
       if (eff.type === 'abandon_tile') {
         parts.push(p('🔷↘'));
+        // Exodus: emit deferred action + draw after the abandon icon to match
+        // description order ("Abandon. Gain 2 actions. Draw 2 cards.")
+        if (card.action_return > 0) parts.push(p(`+${card.action_return}⚡`));
+        if (card.draw_cards > 0) parts.push(p(`+${card.draw_cards}🃏`));
       }
       if (eff.type === 'abandon_and_block') {
-        const gained = isUpgraded ? 3 : 2;
+        const gained = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`🔷↘🚧 · +${gained}💰`));
       }
       if (eff.type === 'mandatory_self_trash') {
         const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`✂️${count}`));
+      }
+      if (eff.type === 'adjacency_bridge') {
+        // Road Builder: must connect two of your disconnected territory groups
+        parts.push(p('🔷→🔷'));
+      }
+      if (eff.type === 'cost_reduction') {
+        // Supply Line: next purchase this round costs N less
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(p(`🛒+${val}💰`));
       }
       if (eff.type === 'play_resource_cost') {
         const cost = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;

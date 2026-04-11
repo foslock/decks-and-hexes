@@ -94,13 +94,23 @@ export function renderWithKeywords(text: string): ReactNode {
     const canonical = SURFACE_TO_CANONICAL[matched.toLowerCase()] || matched;
     const definition = KEYWORDS[canonical];
 
+    // Pull trailing punctuation into the span so the browser can't break
+    // between the keyword and its closing punctuation (e.g. "action" + ".").
+    let endIdx = KEYWORD_PATTERN.lastIndex;
+    let trailing = '';
+    while (endIdx < text.length && /[.,;:!?)\]]/.test(text[endIdx])) {
+      trailing += text[endIdx];
+      endIdx++;
+    }
+
     parts.push(
       <Tooltip key={`${match.index}-${matched}`} content={definition}>
-        <span style={KEYWORD_STYLE}>{matched}</span>
+        <span style={KEYWORD_STYLE}>{matched + trailing}</span>
       </Tooltip>
     );
 
-    lastIndex = KEYWORD_PATTERN.lastIndex;
+    lastIndex = endIdx;
+    KEYWORD_PATTERN.lastIndex = endIdx;
   }
 
   // Remaining text after last match
