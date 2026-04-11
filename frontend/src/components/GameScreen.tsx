@@ -1763,7 +1763,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       }
     }
 
-    // Multi-target card (Surge): enter multi-target selection mode on drag
+    // Multi-target card (Surge, Hive Mind, etc.): enter multi-target selection mode on drag
     if (card.multi_target_count > 0) {
       // Reject primary tile if it isn't a legal claim target — same rules
       // the player sees as the highlighted set on the grid.
@@ -1847,7 +1847,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
     if (phase !== 'play' || !activePlayer) return;
 
-    // Multi-target mode (Surge or multi-tile Defense): adding extra targets
+    // Multi-target mode (Surge, Hive Mind, or multi-tile Defense): adding extra targets
     if (multiTileCardIndex !== null && multiTilePrimaryTarget) {
       const tileKey = `${q},${r}`;
       // Clicking primary target: deselect it by shifting the first extra target to primary
@@ -1883,7 +1883,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         // Defense multi-target: must select own non-blocked tiles
         if (tile.owner !== activePlayerId) return;
       } else {
-        // Claim multi-target (Surge): must satisfy all claim restrictions
+        // Claim multi-target (Surge, Hive Mind): must satisfy all claim restrictions
         // (adjacency, defense, immunity, occupancy, etc.)
         if (multiTileCard && !getValidClaimTiles(multiTileCard).has(tileKey)) return;
         // Every target must be adjacent to at least one already-selected target.
@@ -2005,7 +2005,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           }
         }
 
-        // Multi-target card (Surge): enter multi-target selection mode
+        // Multi-target card (Surge, Hive Mind, etc.): enter multi-target selection mode
         if (card.multi_target_count > 0) {
           if (!getValidClaimTiles(card).has(tileKey)) {
             setError(`${card.name} cannot target this tile`);
@@ -4551,14 +4551,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </div>
             )}
-            {/* Multi-tile confirm/cancel (Surge card or multi-target Defense) */}
+            {/* Multi-tile confirm/cancel (Surge, Hive Mind, multi-target Defense, etc.) */}
             {phase === 'play' && multiTileCardIndex !== null && multiTilePrimaryTarget && (() => {
               const multiTileCard = activePlayer?.hand[multiTileCardIndex];
               const isDefenseMulti = multiTileCard?.card_type === 'defense' && (multiTileCard?.defense_target_count ?? 1) > 1;
               const maxTotal = isDefenseMulti
                 ? (multiTileCard?.defense_target_count ?? 1)
                 : 1 + (multiTileCard?.multi_target_count ?? 0);
-              const label = isDefenseMulti ? 'Defend' : 'Surge';
+              const label = multiTileCard?.name ?? (isDefenseMulti ? 'Defend' : 'Claim');
               return (
                 <>
                   <span style={{ fontSize: 12, color: '#aaa' }}>

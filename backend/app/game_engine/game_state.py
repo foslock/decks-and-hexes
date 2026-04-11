@@ -1108,7 +1108,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
                         return True
                 return False
 
-            if not card.stackable and _tile_is_claimed(target_q, target_r):
+            if not card.stackable and _tile_is_claimed(target_q, _target_r):
                 return False, "This card is not Stackable"
 
             # Adjacency bridge: target must connect two disconnected territory groups
@@ -1148,9 +1148,15 @@ def play_card(game: GameState, player_id: str, card_index: int,
             if (tile.q, tile.r) not in connected:
                 return False, f"{card.name} must target a VP tile connected to your base"
 
-    # Validate extra targets for multi-target cards (Surge)
+    # Validate extra targets for multi-target cards (Surge, Hive Mind)
     validated_extra: list[tuple[int, int]] = []
-    if card.card_type == CardType.CLAIM and card.effective_multi_target_count > 0 and extra_targets:
+    if (
+        card.card_type == CardType.CLAIM
+        and card.effective_multi_target_count > 0
+        and extra_targets
+        and target_q is not None
+        and target_r is not None
+    ):
         assert game.grid is not None
         max_extra = card.effective_multi_target_count
         player_tiles = game.grid.get_player_tiles(player_id)
@@ -1170,12 +1176,13 @@ def play_card(game: GameState, player_id: str, card_index: int,
             validated_extra.append((et_q, et_r))
 
         # All targets (primary + extras) must form a connected subgraph via
-        # direct hex adjacency — e.g. Surge targets "adjacent tiles".
+        # direct hex adjacency — e.g. Surge/Hive Mind target "adjacent tiles".
         if validated_extra:
-            all_targets: set[tuple[int, int]] = {(target_q, target_r), *validated_extra}
+            primary: tuple[int, int] = (target_q, target_r)
+            all_targets: set[tuple[int, int]] = {primary, *validated_extra}
             # BFS from primary through hex-neighbors restricted to target set
-            reached: set[tuple[int, int]] = {(target_q, target_r)}
-            frontier: list[tuple[int, int]] = [(target_q, target_r)]
+            reached: set[tuple[int, int]] = {primary}
+            frontier: list[tuple[int, int]] = [primary]
             hex_dirs = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
             while frontier:
                 cq, cr = frontier.pop()

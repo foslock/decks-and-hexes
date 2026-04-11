@@ -70,7 +70,7 @@ class Card:
     adjacency_required: bool = True
     claim_range: int = 1  # max hex distance from owned tiles (1=adjacent, 2=two steps, etc.)
     unoccupied_only: bool = False
-    multi_target_count: int = 0  # Surge: max extra targets (0=single, 1=up to 2 total, 2=up to 3)
+    multi_target_count: int = 0  # Surge/Hive Mind: max extra targets (0=single, 1=up to 2 total, 2=up to 3, 3=up to 4)
     defense_target_count: int = 1  # Defense: number of tiles to apply defense to (default 1)
     flood: bool = False  # Flood: target own tile, claim all adjacent at resolution
     target_own_tile: bool = False  # Must target a tile you own (Flood)
