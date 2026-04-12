@@ -931,26 +931,25 @@ export default function LobbyScreen({
               </div>
               <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
                 {GRID_SIZES.map((size) => (
-                  <div key={size.id} style={{ flex: '1 1 0', minWidth: 0 }}>
-                    <Tooltip content={`${size.name}: ${size.tiles} tiles, ${size.players} players`}>
-                      <button
-                        onClick={() => isHost && handleConfigChange('grid_size', size.id)}
-                        style={{
-                          padding: '0 4px', height: 26, width: '100%',
-                          fontSize: 13,
-                          background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
-                          border: '1px solid #555',
-                          borderRadius: 4,
-                          color: '#fff',
-                          cursor: isHost ? 'pointer' : 'default',
-                          fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {isNarrow ? size.short : size.name}
-                      </button>
-                    </Tooltip>
-                  </div>
+                  <Tooltip key={size.id} content={`${size.name}: ${size.tiles} tiles, ${size.players} players`}
+                    wrapperStyle={{ display: 'block', flex: '1 1 0', minWidth: 0 }}>
+                    <button
+                      onClick={() => isHost && handleConfigChange('grid_size', size.id)}
+                      style={{
+                        padding: '0 4px', height: 26, width: '100%',
+                        fontSize: 13,
+                        background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
+                        border: '1px solid #555',
+                        borderRadius: 4,
+                        color: '#fff',
+                        cursor: isHost ? 'pointer' : 'default',
+                        fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {isNarrow ? size.short : size.name}
+                    </button>
+                  </Tooltip>
                 ))}
               </div>
             </div>

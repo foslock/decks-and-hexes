@@ -7,10 +7,12 @@ interface TooltipProps {
   delay?: number;
   /** Position relative to trigger. Default 'above'. */
   position?: 'above' | 'below';
+  /** Extra styles for the wrapper div around children. */
+  wrapperStyle?: React.CSSProperties;
   children: ReactNode;
 }
 
-export default function Tooltip({ content, delay = 0, position: placement = 'above', children }: TooltipProps) {
+export default function Tooltip({ content, delay = 0, position: placement = 'above', wrapperStyle, children }: TooltipProps) {
   const [visible, setVisible] = useState(false);
   const [coords, setCoords] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -50,7 +52,7 @@ export default function Tooltip({ content, delay = 0, position: placement = 'abo
         ref={triggerRef}
         onPointerEnter={show}
         onPointerLeave={hide}
-        style={{ display: 'inline-block' }}
+        style={{ display: 'inline-block', ...wrapperStyle }}
       >
         {children}
       </div>
