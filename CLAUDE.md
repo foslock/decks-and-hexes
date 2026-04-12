@@ -120,9 +120,11 @@ Bump frontend version when frontend files change, backend version when backend f
 ### Grid Sizes
 | Size | Tiles | VP Hexes | Blocked Terrain | Players |
 |---|---|---|---|---|
-| Small | 61 | 6 | 5–7 | 2–3 |
-| Medium | 91 | 8 | 8–10 | 3–4 |
-| Large | 127 | 12 | 10–14 | 4–6 |
+| Small | 61 | 5 | 5–7 | 2–3 |
+| Medium | 91 | 6 | 8–10 | 3–4 |
+| Large | 127 | 9 | 10–14 | 4–6 |
+| Mega | 169 | 12 | 14–18 | 5–8 |
+| Ultra | 217 | 15 | 18–22 | 6–10 |
 
 - VP hexes distributed evenly (not center-clustered)
 - Blocked terrain placed randomly at setup
@@ -187,4 +189,4 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Starting resources: **0**
 - Action slot hard cap: **6**
 - Objective VP reward: **2**
-- Objective reveal rounds: **3 / 4 / 5** (Small / Medium / Large)
+- Objective reveal rounds: **3 / 4 / 5 / 6 / 7** (Small / Medium / Large / Mega / Ultra)

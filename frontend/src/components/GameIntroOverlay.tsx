@@ -14,9 +14,11 @@ const ARCHETYPE_LABELS: Record<string, string> = {
 };
 
 const GRID_SIZE_LABELS: Record<string, string> = {
-  small: 'Small (61 tiles)',
-  medium: 'Medium (91 tiles)',
-  large: 'Large (127 tiles)',
+  small: 'Small (61 tiles, 5 VP)',
+  medium: 'Medium (91 tiles, 6 VP)',
+  large: 'Large (127 tiles, 9 VP)',
+  mega: 'Mega (169 tiles, 12 VP)',
+  ultra: 'Ultra (217 tiles, 15 VP)',
 };
 
 /**

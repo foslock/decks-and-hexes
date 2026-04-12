@@ -37,10 +37,12 @@ const GRID_SIZES = [
   { id: 'small', name: 'Small', players: '2-3', tiles: 61, radius: 4 },
   { id: 'medium', name: 'Medium', players: '3-4', tiles: 91, radius: 5 },
   { id: 'large', name: 'Large', players: '4-6', tiles: 127, radius: 6 },
+  { id: 'mega', name: 'Mega', players: '5-8', tiles: 169, radius: 7 },
+  { id: 'ultra', name: 'Ultra', players: '6-10', tiles: 217, radius: 8 },
 ];
 
 // Base VP targets for 2 players; subtract 1 VP per extra player
-const BASE_VP: Record<string, number> = { small: 10, medium: 14, large: 18 };
+const BASE_VP: Record<string, number> = { small: 10, medium: 14, large: 18, mega: 22, ultra: 26 };
 
 function computeRecommendedVp(gridSizeId: string, playerCount: number = 2): number {
   const base = BASE_VP[gridSizeId] ?? 10;

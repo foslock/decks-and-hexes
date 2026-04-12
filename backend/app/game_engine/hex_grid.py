@@ -1,7 +1,7 @@
 """Hex grid generation using axial coordinates (q, r).
 
 Flat-top hexagons with the center hex at (0, 0).
-Grid sizes: Small (61 tiles), Medium (91 tiles), Large (127 tiles).
+Grid sizes: Small (61 tiles), Medium (91 tiles), Large (127 tiles), Mega (169 tiles), Ultra (217 tiles).
 """
 
 from __future__ import annotations
@@ -18,6 +18,8 @@ class GridSize(str, Enum):
     SMALL = "small"
     MEDIUM = "medium"
     LARGE = "large"
+    MEGA = "mega"
+    ULTRA = "ultra"
 
 
 # Base tile defense per archetype (used when assigning starting tiles)
@@ -29,9 +31,11 @@ BASE_DEFENSE: dict[str, int] = {
 
 # radius = number of rings around center (0-indexed)
 GRID_CONFIG: dict[GridSize, dict[str, Any]] = {
-    GridSize.SMALL: {"radius": 4, "tiles": 61, "vp_hexes": 6, "blocked": (5, 7), "players": (2, 3)},
-    GridSize.MEDIUM: {"radius": 5, "tiles": 91, "vp_hexes": 8, "blocked": (8, 10), "players": (3, 4)},
-    GridSize.LARGE: {"radius": 6, "tiles": 127, "vp_hexes": 12, "blocked": (10, 14), "players": (4, 6)},
+    GridSize.SMALL: {"radius": 4, "tiles": 61, "vp_hexes": 5, "blocked": (5, 7), "players": (2, 3)},
+    GridSize.MEDIUM: {"radius": 5, "tiles": 91, "vp_hexes": 6, "blocked": (8, 10), "players": (3, 4)},
+    GridSize.LARGE: {"radius": 6, "tiles": 127, "vp_hexes": 9, "blocked": (10, 14), "players": (4, 6)},
+    GridSize.MEGA: {"radius": 7, "tiles": 169, "vp_hexes": 12, "blocked": (14, 18), "players": (5, 8)},
+    GridSize.ULTRA: {"radius": 8, "tiles": 217, "vp_hexes": 15, "blocked": (18, 22), "players": (6, 10)},
 }
 
 

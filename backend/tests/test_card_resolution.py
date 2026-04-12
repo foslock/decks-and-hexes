@@ -2548,16 +2548,16 @@ class TestFortressWarden:
         assert card.buy_cost == 4
         assert card.archetype == Archetype.FORTRESS
         assert card.unplayable is True
-        assert card.vp_formula == "uncaptured_tiles_4"
+        assert card.vp_formula == "uncaptured_tiles_8"
 
     def test_warden_has_effect(self, card_registry):
         """Warden: has VP_FROM_UNCAPTURED_TILES effect."""
         card = card_registry["fortress_warden"]
         matching = [e for e in card.effects if e.type.value == "vp_from_uncaptured_tiles"]
         assert len(matching) >= 1
-        assert matching[0].value == 4  # divisor base
-        assert matching[0].upgraded_value == 3  # divisor upgraded
-        assert matching[0].metadata.get("divisor") == 4
+        assert matching[0].value == 8  # divisor base
+        assert matching[0].upgraded_value == 6  # divisor upgraded
+        assert matching[0].metadata.get("divisor") == 8
 
     def test_warden_is_unplayable(self, card_registry):
         """Warden: cannot be played as an action."""

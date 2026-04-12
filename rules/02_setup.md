@@ -1,7 +1,7 @@
 # Card Clash – Game Setup
 
 ## Step 1: Choose Grid Size
-Players collectively agree on a grid size (Small / Medium / Large). This determines:
+Players collectively agree on a grid size (Small / Medium / Large / Mega / Ultra). This determines:
 - Total hex count
 - Number of VP hexes
 - Number of starting tiles per player corner
@@ -13,6 +13,8 @@ Players collectively agree on a grid size (Small / Medium / Large). This determi
    - Small: 3–4 blocked tiles
    - Medium: 5–7 blocked tiles
    - Large: 8–10 blocked tiles
+   - Mega: 11–14 blocked tiles
+   - Ultra: 14–18 blocked tiles
 4. Randomly distribute **VP Hex** markers evenly across the remaining tiles.
 
 ## Step 3: Determine Initial Turn Order

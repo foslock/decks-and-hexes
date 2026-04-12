@@ -48,9 +48,11 @@ Each archetype is defined by two of three traits: **Fast**, **Cheap**, **Strong*
 
 | Size | Hex Count | VP Hexes | Recommended Players | Target Length |
 |---|---|---|---|---|
-| Small | 61 | 6 | 2–3 | 20–30 min |
-| Medium | 91 | 8 | 3–4 | 30–45 min |
-| Large | 127 | 12 | 4–6 | 45–60 min |
+| Small | 61 | 5 | 2–3 | 20–30 min |
+| Medium | 91 | 6 | 3–4 | 30–45 min |
+| Large | 127 | 9 | 4–6 | 45–60 min |
+| Mega | 169 | 12 | 5–8 | 60–90 min |
+| Ultra | 217 | 15 | 6–10 | 90–120 min |
 
 VP hexes are distributed evenly across the board (not clustered at center), similar to double-word-score tiles in Scrabble.
 

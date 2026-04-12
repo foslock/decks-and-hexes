@@ -20,19 +20,19 @@ cards:
     power: 0
     unplayable: true
     unique: true
-    vp_formula: uncaptured_tiles_4
-    effect: "+1 VP for every 4 tiles you own that have never changed hands since you claimed them."
-    effect_upgraded: "+1 VP for every 3 tiles you own that have never changed hands since you claimed them."
+    vp_formula: uncaptured_tiles_8
+    effect: "+1 VP for every 8 tiles you own that have never changed hands since you claimed them."
+    effect_upgraded: "+1 VP for every 6 tiles you own that have never changed hands since you claimed them."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards holding ground permanently. Tiles lost and recaptured don't count. Takes up a hand slot when drawn."
 
     effects:
       - type: vp_from_uncaptured_tiles
-        value: 4
-        upgraded_value: 3
+        value: 8
+        upgraded_value: 6
         timing: on_resolution
-        metadata: {divisor: 4, upgraded_divisor: 3}
+        metadata: {divisor: 8, upgraded_divisor: 6}
 
   - id: fortress_fortify
     name: Fortify
