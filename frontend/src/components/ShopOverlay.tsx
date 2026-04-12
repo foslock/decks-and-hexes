@@ -669,7 +669,7 @@ export default function ShopOverlay({
               </div>
             </div>
 
-            {/* Neutral Market */}
+            {/* Shared Market */}
             <div>
               <div style={{ textAlign: 'center', marginBottom: 12 }}>
                 <Tooltip content="Purchases from the shared market are visible to all players. Each card has limited copies — once they're gone, they're gone for the game.">
