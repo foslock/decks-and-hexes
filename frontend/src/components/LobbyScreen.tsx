@@ -37,8 +37,8 @@ const GRID_SIZES = [
   { id: 'small', name: 'Small', players: '2-3', tiles: 61, radius: 4 },
   { id: 'medium', name: 'Medium', players: '3-4', tiles: 91, radius: 5 },
   { id: 'large', name: 'Large', players: '4-6', tiles: 127, radius: 6 },
-  { id: 'mega', name: 'Mega', players: '5-8', tiles: 169, radius: 7 },
-  { id: 'ultra', name: 'Ultra', players: '6-10', tiles: 217, radius: 8 },
+  { id: 'mega', name: 'Mega', players: '5-6', tiles: 169, radius: 7 },
+  { id: 'ultra', name: 'Ultra', players: '6', tiles: 217, radius: 8 },
 ];
 
 // Base VP targets for 2 players; subtract 1 VP per extra player
@@ -924,24 +924,25 @@ export default function LobbyScreen({
               </div>
               <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
                 {GRID_SIZES.map((size) => (
-                  <button
-                    key={size.id}
-                    onClick={() => isHost && handleConfigChange('grid_size', size.id)}
-                    style={{
-                      padding: '0 10px', height: 26,
-                      fontSize: 13,
-                      background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
-                      border: '1px solid #555',
-                      borderRadius: 4,
-                      color: '#fff',
-                      cursor: isHost ? 'pointer' : 'default',
-                      fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      flex: 1, minWidth: 0,
-                    }}
-                  >
-                    {size.name}
-                  </button>
+                  <Tooltip key={size.id} content={`${size.tiles} tiles, ${size.players} players`}>
+                    <button
+                      onClick={() => isHost && handleConfigChange('grid_size', size.id)}
+                      style={{
+                        padding: '0 10px', height: 26,
+                        fontSize: 13,
+                        background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
+                        border: '1px solid #555',
+                        borderRadius: 4,
+                        color: '#fff',
+                        cursor: isHost ? 'pointer' : 'default',
+                        fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        flex: 1, minWidth: 0,
+                      }}
+                    >
+                      {size.name}
+                    </button>
+                  </Tooltip>
                 ))}
               </div>
             </div>

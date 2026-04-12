@@ -34,8 +34,8 @@ GRID_CONFIG: dict[GridSize, dict[str, Any]] = {
     GridSize.SMALL: {"radius": 4, "tiles": 61, "vp_hexes": 5, "blocked": (5, 7), "players": (2, 3)},
     GridSize.MEDIUM: {"radius": 5, "tiles": 91, "vp_hexes": 6, "blocked": (8, 10), "players": (3, 4)},
     GridSize.LARGE: {"radius": 6, "tiles": 127, "vp_hexes": 9, "blocked": (10, 14), "players": (4, 6)},
-    GridSize.MEGA: {"radius": 7, "tiles": 169, "vp_hexes": 12, "blocked": (14, 18), "players": (5, 8)},
-    GridSize.ULTRA: {"radius": 8, "tiles": 217, "vp_hexes": 15, "blocked": (18, 22), "players": (6, 10)},
+    GridSize.MEGA: {"radius": 7, "tiles": 169, "vp_hexes": 12, "blocked": (14, 18), "players": (5, 6)},
+    GridSize.ULTRA: {"radius": 8, "tiles": 217, "vp_hexes": 15, "blocked": (18, 22), "players": (6, 6)},
 }
 
 

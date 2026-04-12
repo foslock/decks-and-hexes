@@ -123,8 +123,8 @@ Bump frontend version when frontend files change, backend version when backend f
 | Small | 61 | 5 | 5–7 | 2–3 |
 | Medium | 91 | 6 | 8–10 | 3–4 |
 | Large | 127 | 9 | 10–14 | 4–6 |
-| Mega | 169 | 12 | 14–18 | 5–8 |
-| Ultra | 217 | 15 | 18–22 | 6–10 |
+| Mega | 169 | 12 | 14–18 | 5–6 |
+| Ultra | 217 | 15 | 18–22 | 6 |
 
 - VP hexes distributed evenly (not center-clustered)
 - Blocked terrain placed randomly at setup
