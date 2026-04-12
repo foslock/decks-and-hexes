@@ -39,15 +39,15 @@ class StrategyWeights:
 ARCHETYPE_WEIGHTS: dict[Archetype, StrategyWeights] = {
     Archetype.VANGUARD: StrategyWeights(
         aggression=2.0, expansion=1.2, defense=0.5,
-        vp_hex_priority=2.0, card_draw_value=1.0, resource_value=0.8,
+        vp_hex_priority=3.0, card_draw_value=1.0, resource_value=0.8,
     ),
     Archetype.SWARM: StrategyWeights(
         aggression=1.0, expansion=2.0, defense=0.3,
-        vp_hex_priority=1.0, card_draw_value=1.5, resource_value=0.8,
+        vp_hex_priority=1.5, card_draw_value=1.5, resource_value=0.8,
     ),
     Archetype.FORTRESS: StrategyWeights(
         aggression=0.5, expansion=0.8, defense=2.5,
-        vp_hex_priority=1.5, card_draw_value=1.0, resource_value=1.5,
+        vp_hex_priority=2.25, card_draw_value=1.0, resource_value=1.5,
     ),
 }
 

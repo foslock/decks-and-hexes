@@ -34,13 +34,15 @@ const ARCHETYPES = [
 ];
 
 const GRID_SIZES = [
-  { id: 'small', name: 'Small', players: '2-3', tiles: 61, radius: 4 },
-  { id: 'medium', name: 'Medium', players: '3-4', tiles: 91, radius: 5 },
-  { id: 'large', name: 'Large', players: '4-6', tiles: 127, radius: 6 },
+  { id: 'small', name: 'Small', short: 'S', players: '2-3', tiles: 61, radius: 4 },
+  { id: 'medium', name: 'Medium', short: 'M', players: '3-4', tiles: 91, radius: 5 },
+  { id: 'large', name: 'Large', short: 'L', players: '4-6', tiles: 127, radius: 6 },
+  { id: 'mega', name: 'Mega', short: 'Mg', players: '5-6', tiles: 169, radius: 7 },
+  { id: 'ultra', name: 'Ultra', short: 'U', players: '6', tiles: 217, radius: 8 },
 ];
 
 // Base VP targets for 2 players; subtract 1 VP per extra player
-const BASE_VP: Record<string, number> = { small: 10, medium: 14, large: 18 };
+const BASE_VP: Record<string, number> = { small: 10, medium: 14, large: 18, mega: 22, ultra: 26 };
 
 function computeRecommendedVp(gridSizeId: string, playerCount: number = 2): number {
   const base = BASE_VP[gridSizeId] ?? 10;
@@ -125,6 +127,13 @@ export default function LobbyScreen({
   const [showSeedHistory, setShowSeedHistory] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const seedHistoryRef = useRef<HTMLDivElement>(null);
+  const [isNarrow, setIsNarrow] = useState(() => window.matchMedia('(max-width: 480px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 480px)');
+    const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   // Close seed history dropdown on outside click
   useEffect(() => {
@@ -922,24 +931,25 @@ export default function LobbyScreen({
               </div>
               <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
                 {GRID_SIZES.map((size) => (
-                  <button
-                    key={size.id}
-                    onClick={() => isHost && handleConfigChange('grid_size', size.id)}
-                    style={{
-                      padding: '0 10px', height: 26,
-                      fontSize: 13,
-                      background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
-                      border: '1px solid #555',
-                      borderRadius: 4,
-                      color: '#fff',
-                      cursor: isHost ? 'pointer' : 'default',
-                      fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      flex: 1, minWidth: 0,
-                    }}
-                  >
-                    {size.name}
-                  </button>
+                  <Tooltip key={size.id} content={`${size.name}: ${size.tiles} tiles, ${size.players} players`}
+                    wrapperStyle={{ display: 'block', flex: '1 1 0', minWidth: 0 }}>
+                    <button
+                      onClick={() => isHost && handleConfigChange('grid_size', size.id)}
+                      style={{
+                        padding: '0 4px', height: 26, width: '100%',
+                        fontSize: 13,
+                        background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
+                        border: '1px solid #555',
+                        borderRadius: 4,
+                        color: '#fff',
+                        cursor: isHost ? 'pointer' : 'default',
+                        fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {isNarrow ? size.short : size.name}
+                    </button>
+                  </Tooltip>
                 ))}
               </div>
             </div>

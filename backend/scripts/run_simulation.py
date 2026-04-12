@@ -51,6 +51,8 @@ GRID_MAP = {
     "small": GridSize.SMALL,
     "medium": GridSize.MEDIUM,
     "large": GridSize.LARGE,
+    "mega": GridSize.MEGA,
+    "ultra": GridSize.ULTRA,
 }
 
 
@@ -62,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--games", type=int, default=100,
                         help="Number of games per configuration (default: 100)")
-    parser.add_argument("--grid", choices=["small", "medium", "large", "all"],
+    parser.add_argument("--grid", choices=["small", "medium", "large", "mega", "ultra", "all"],
                         default="small", help="Grid size (default: small)")
     parser.add_argument("--players", type=int, default=None,
                         help="Number of players (default: from archetype count)")

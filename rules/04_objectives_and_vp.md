@@ -92,6 +92,8 @@ Suggested thresholds by grid size:
 | Small | Round 3 |
 | Medium | Round 4 |
 | Large | Round 5 |
+| Mega | Round 6 |
+| Ultra | Round 7 |
 
 ### Selection Logic
 Objectives are chosen based on which archetypes are active in the game:
