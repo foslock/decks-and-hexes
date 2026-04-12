@@ -75,13 +75,15 @@ def tiles_per_vp(grid_size: GridSize) -> int:
 def compute_vp_target(grid_size: GridSize, player_count: int = 2, speed: str = "normal") -> int:
     """Compute the recommended VP target based on grid size and player count.
 
-    Base targets for 2 players: Small=10, Medium=14, Large=18.
+    Base targets for 2 players: Small=10, Medium=14, Large=18, Mega=22, Ultra=26.
     Subtract 1 VP per additional player beyond 2. Minimum 4.
     """
     _BASE: dict[GridSize, int] = {
         GridSize.SMALL: 10,
         GridSize.MEDIUM: 14,
         GridSize.LARGE: 18,
+        GridSize.MEGA: 22,
+        GridSize.ULTRA: 26,
     }
     base = _BASE.get(grid_size, 10)
     return max(4, base - max(0, player_count - 2))
@@ -2160,7 +2162,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
 
         result = game.neutral_market.purchase(card_id)
         if not result:
-            return False, "Card not available in neutral market"
+            return False, "Card not available in shared market"
         purchased, base_card_id = result
         if not free:
             dynamic_cost = calculate_dynamic_buy_cost(game, player, purchased)
@@ -2184,7 +2186,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             "round": game.current_round,
         })
         # Note: passive_vp cards (e.g. Land Grant) contribute to derived VP automatically
-        game._log(f"{player.name} buys {purchased.name} from neutral market")
+        game._log(f"{player.name} buys {purchased.name} from shared market")
         return True, f"Bought {purchased.name}"
 
     return False, "Invalid source"

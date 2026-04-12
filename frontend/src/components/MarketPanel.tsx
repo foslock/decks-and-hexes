@@ -65,10 +65,10 @@ export default function MarketPanel({
         </div>
       </div>
 
-      {/* Neutral Market */}
+      {/* Shared Market */}
       <div>
         <h4 style={{ margin: '0 0 6px', color: '#aaa' }}>
-          Neutral Market
+          Shared Market
           <IrreversibleButton
             onClick={onBuyUpgrade}
             disabled={disabled || playerResources < 4}

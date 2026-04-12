@@ -873,7 +873,7 @@ export default function LobbyScreen({
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
                 <Tooltip content={(lobby.config.card_pack || '').startsWith('daily_')
-                  ? "This pack changes every day — a fresh selection of 10 neutral market cards generated from today's date."
+                  ? "This pack changes every day — a fresh selection of 10 shared market cards generated from today's date."
                   : "Decides which cards will be available in the game."}>
                   <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Card Pack</span>
                 </Tooltip>
