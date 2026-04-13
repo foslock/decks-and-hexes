@@ -168,7 +168,7 @@ def _assert_games_equal(a: GameState, b: GameState) -> None:
     assert a.granted_actions == b.granted_actions
     assert a.host_id == b.host_id
     assert a.lobby_code == b.lobby_code
-    assert a.current_buyer_index == b.current_buyer_index
+    assert a.players_done_buying == b.players_done_buying
     assert a.card_pack == b.card_pack
     assert a.map_seed == b.map_seed
     assert a.test_mode == b.test_mode
@@ -555,9 +555,9 @@ def _play_engine_cards_and_submit(game: GameState) -> None:
     for pid in game.player_order:
         advance_resolve(game, pid)
 
-    for _ in game.player_order:
-        buyer = game.player_order[game.current_buyer_index]
-        end_buy_phase(game, buyer)
+    for pid in game.player_order:
+        if pid not in game.players_done_buying:
+            end_buy_phase(game, pid)
 
 
 def _advance_to_play_phase(game: GameState) -> None:

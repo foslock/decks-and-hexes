@@ -1,11 +1,11 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { GameState, Card, ResolutionStep, PlayerEffect } from '../types/game';
+import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, NeutralPurchaseEvent } from '../types/game';
 import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardBrowser from './CardBrowser';
-import ShopOverlay from './ShopOverlay';
+import ShopOverlay, { PurchaseFlyAnimation } from './ShopOverlay';
 import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import PhaseBanner from './PhaseBanner';
@@ -17,6 +17,7 @@ import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } fro
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
+import CompactCard from './CompactCard';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
@@ -141,11 +142,12 @@ interface GameScreenProps {
   playerId?: string;       // multiplayer: this player's ID
   token?: string;          // multiplayer: auth token
   isMultiplayer?: boolean;
-  localPlayerIds?: string[];  // IDs of players controlled by this browser (host + locals)
   isHost?: boolean;
   onLeaveGame?: () => void;
   skipIntro?: boolean;     // skip intro overlay + draw animation (e.g. reconnection)
   removedFromLobby?: boolean;  // player was kicked from lobby while viewing game over
+  wsSend?: (data: object) => void;  // WebSocket send for cursor broadcasting
+  wsMessage?: { type: string; [key: string]: unknown } | null;  // WS messages for cursor/purchase events
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -593,7 +595,7 @@ function DebtCardFlyAnimation({
   );
 }
 
-export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, localPlayerIds: localPlayerIdsProp, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby }: GameScreenProps) {
+export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby, wsSend, wsMessage }: GameScreenProps) {
   // Sync player colors from game state into the shared PLAYER_COLORS map
   syncPlayerColors(gameState.players);
   const animated = useAnimated();
@@ -602,18 +604,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const animSpeed = useAnimationSpeed();
   const sound = useSound();
   const { showZoom } = useCardZoom();
-  // Local player IDs this browser controls (for hotseat cycling)
-  const localPlayerIds = localPlayerIdsProp ?? [];
-  const shouldCycle = localPlayerIds.length > 1;
   // Helper: find the first human player index
   const firstHumanIndex = gameState.player_order.findIndex(
     pid => !gameState.players[pid]?.is_cpu,
   );
   // In multiplayer, active player is always the local player
   const mpPlayerIndex = mpPlayerId ? gameState.player_order.indexOf(mpPlayerId) : -1;
-  // The "home" player index: in multiplayer it's always the local player; in hotseat it's the first human
-  const homePlayerIndex = isMultiplayer && mpPlayerIndex >= 0 ? mpPlayerIndex : Math.max(0, firstHumanIndex);
-  const [activePlayerIndex, setActivePlayerIndex] = useState(homePlayerIndex);
+  const activePlayerIndex = isMultiplayer && mpPlayerIndex >= 0 ? mpPlayerIndex : Math.max(0, firstHumanIndex);
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
   const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
@@ -622,6 +619,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [showFullLog, setShowFullLog] = useState(false);
   const [showDeckViewer, setShowDeckViewer] = useState(false);
   const [showShopOverlay, setShowShopOverlay] = useState(false);
+  const [otherCursors, setOtherCursors] = useState<Record<string, CursorPosition>>({});
+  const [neutralPurchaseEvents, setNeutralPurchaseEvents] = useState<NeutralPurchaseEvent[]>([]);
+  const [cursorClicks, setCursorClicks] = useState<Record<string, number>>({}); // player_id -> timestamp
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [cardPackDefs, setCardPackDefs] = useState<{ id: string; name: string; neutral_card_ids: string[] | null; archetype_card_ids: Record<string, string[]> | null }[]>([]);
   const [discardingAll, setDiscardingAll] = useState(false);
@@ -629,6 +629,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   /** Temporarily stores drag release position/velocity so executePlayCard can include it in lastPlayedTarget */
   const dragReleaseRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [trashedCardIds, setTrashedCardIds] = useState<Set<string>>(new Set());
+  // Floating action icons that animate on card play
+  const [floatingActions, setFloatingActions] = useState<{ id: number; offsetX: number; offsetY: number; type: 'spend' | 'gain' }[]>([]);
+  const floatingActionIdRef = useRef(0);
   // Test mode state
   const [showTestPanel, setShowTestPanel] = useState(false);
   const [testShuffleAnim, setTestShuffleAnim] = useState(false);
@@ -744,6 +747,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Review phase state (between resolve animations and buy phase)
   const handleDoneReviewingRef = useRef<(() => void) | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [reviewButtonVisible, setReviewButtonVisible] = useState(false);
   const [reviewCountdown, setReviewCountdown] = useState<number | null>(null);
   const revealedActionsRef = useRef<Record<string, import('../types/game').PlannedAction[]> | null>(null);
   const [reviewHoveredTile, setReviewHoveredTile] = useState<string | null>(null);
@@ -753,6 +757,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const playerRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // Resolve animation state
   const [resolving, setResolving] = useState(false);
+  // Delay showing the Done Reviewing button until after resolve animations settle
+  useEffect(() => {
+    if (reviewing && !resolving) {
+      const t = setTimeout(() => setReviewButtonVisible(true), 600);
+      return () => clearTimeout(t);
+    }
+    setReviewButtonVisible(false);
+  }, [reviewing, resolving]);
   const [resolutionSteps, setResolutionSteps] = useState<ResolutionStep[]>([]);
   const [resolveDisplayState, setResolveDisplayState] = useState<GameState | null>(null);
   // (resolveFinishedStateRef removed — server holds state at REVEAL, client calls advanceResolve when done)
@@ -968,6 +980,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return () => clearTimeout(timer);
   }, [purchaseHover]);
 
+  // Clear purchase hover when leaving buy phase
+  useEffect(() => {
+    if (phase !== 'buy') {
+      setPurchaseHover(null);
+      setPurchaseHoverVisible(false);
+    }
+  }, [phase]);
+
 
   // Close settings dropdown on outside click
   useEffect(() => {
@@ -1033,7 +1053,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     prevPhaseRef.current = phase;
     prevTilesRef.current = gameState.grid.tiles;
 
-    // play → reveal: set up resolve animation (works for both hotseat and multiplayer)
+    // play → reveal: set up resolve animation
     if (prev === 'play' && phase === 'reveal') {
       // Immediately freeze the grid at pre-resolve state so it doesn't flash post-resolve tiles
       const preResolveState: GameState = {
@@ -1146,7 +1166,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       setPhaseBanner(phase);
       setInteractionBlocked(true);
     }
-  }, [phase, animationOff, resolving, phaseBanner, gameState, showIntro, introSequence, activePlayerId, homePlayerIndex, onStateUpdate]);
+  }, [phase, animationOff, resolving, phaseBanner, gameState, showIntro, introSequence, activePlayerId, onStateUpdate]);
 
   // Submit button fade-in: hide when phase changes, fade in after banner clears
   useEffect(() => {
@@ -1370,20 +1390,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Auto-open shop when entering buy phase (only for reconnection or animations-off).
   // During normal flow, shop opening is handled by handleBannerComplete or the buyer-change effect.
   // Use a ref to skip the first render after a phase change (the banner effect needs time to set up).
+  // shopAutoOpenedRef prevents re-opening the shop on subsequent state updates (e.g. other players finishing).
   const buyPhaseStableRef = useRef(phase === 'buy');
+  const shopAutoOpenedRef = useRef(false);
   useEffect(() => {
     if (phase === 'buy') {
-      if (buyPhaseStableRef.current && !resolving && !phaseBanner && !interactionBlocked && activePlayerEffects.length === 0
-          && activePlayerId === gameState.current_buyer_id) {
+      if (buyPhaseStableRef.current && !shopAutoOpenedRef.current && !resolving && !phaseBanner && !interactionBlocked && activePlayerEffects.length === 0
+          && !gameState.players_done_buying.includes(activePlayerId)) {
         setShowShopOverlay(true);
+        shopAutoOpenedRef.current = true;
       }
       // Mark as stable on next tick so subsequent renders can open the shop
       const timer = setTimeout(() => { buyPhaseStableRef.current = true; }, 0);
       return () => clearTimeout(timer);
     } else {
       buyPhaseStableRef.current = false;
+      shopAutoOpenedRef.current = false;
     }
-  }, [phase, resolving, phaseBanner, interactionBlocked, activePlayerEffects, activePlayerId, gameState.current_buyer_id]);
+  }, [phase, resolving, phaseBanner, interactionBlocked, activePlayerEffects, activePlayerId, gameState.players_done_buying]);
 
   // Auto-enter review mode when reconnecting into REVEAL phase (resolve animations already happened)
   const revealStableRef = useRef(phase === 'reveal');
@@ -1494,6 +1518,26 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         q, r, targetPlayerId, extraTargets,
         trashIndices, discardIndices,
       );
+      // Spawn floating action icon — card costs 1 action
+      {
+        const id = ++floatingActionIdRef.current;
+        const offsetX = (Math.random() - 0.5) * 24;
+        const offsetY = (Math.random() - 0.5) * 8;
+        setFloatingActions(prev => [...prev, { id, offsetX, offsetY, type: 'spend' as const }]);
+        setTimeout(() => setFloatingActions(prev => prev.filter(a => a.id !== id)), 900);
+      }
+      // Spawn floating "+action" icons if the card grants actions back
+      const actionsGained = card.action_return ?? 0;
+      for (let i = 0; i < actionsGained; i++) {
+        const id = ++floatingActionIdRef.current;
+        const offsetX = (Math.random() - 0.5) * 24;
+        const offsetY = (Math.random() - 0.5) * 8;
+        const delay = 250 + i * 150;
+        setTimeout(() => {
+          setFloatingActions(prev => [...prev, { id, offsetX, offsetY, type: 'gain' as const }]);
+          setTimeout(() => setFloatingActions(prev => prev.filter(a => a.id !== id)), 900);
+        }, delay);
+      }
       onStateUpdate(result.state);
       // Check for deferred discard (e.g. Regroup: draw first, then pick discard)
       const updatedPlayer = result.state.players[activePlayerId];
@@ -1762,18 +1806,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (card.card_type === 'claim' && !card.target_own_tile) {
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
-      // Skip the defense check entirely on the player's own tiles —
-      // those are valid defensive placements.
-      if (tile && tile.owner !== activePlayerId) {
-        const claimPower = computeClaimPowerOnTile(
-          card, tile, gameState.grid.tiles, activePlayerId,
-          activePlayer.hand.length, playerTileCount,
-        );
-        if (!canClaimCaptureTile(card, tile, claimPower)) {
-          setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.defense_power})`);
-          return;
-        }
-      }
       if (tile && tile.owner && card.unoccupied_only) {
         setError(`${card.name} can only target unoccupied tiles`);
         return;
@@ -1784,10 +1816,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (card.multi_target_count > 0) {
       // Reject primary tile if it isn't a legal claim target — same rules
       // the player sees as the highlighted set on the grid.
-      if (!getValidClaimTiles(card).has(resolvedKey)) {
+      { const { strong, weak } = getValidClaimTiles(card);
+      if (!strong.has(resolvedKey) && !weak.has(resolvedKey)) {
         setError(`${card.name} cannot target this tile`);
         return;
-      }
+      } }
       setMultiTileCardIndex(cardIndex);
       setMultiTilePrimaryTarget([q, r]);
       setMultiTileTargets([]);
@@ -1905,7 +1938,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       } else {
         // Claim multi-target (Surge, Hive Mind): must satisfy all claim restrictions
         // (adjacency, defense, immunity, occupancy, etc.)
-        if (multiTileCard && !getValidClaimTiles(multiTileCard).has(tileKey)) return;
+        if (multiTileCard) { const { strong, weak } = getValidClaimTiles(multiTileCard); if (!strong.has(tileKey) && !weak.has(tileKey)) return; }
         // Every target must be adjacent to at least one already-selected target.
         const selectedKeys = new Set<string>();
         if (multiTilePrimaryTarget) {
@@ -2007,18 +2040,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Validate claim card restrictions
       if (card.card_type === 'claim') {
         if (!card.target_own_tile) {
-          // Skip the defense check entirely on the player's own tiles —
-          // those are valid defensive placements.
-          if (tile && tile.owner !== activePlayerId) {
-            const claimPower = computeClaimPowerOnTile(
-              card, tile, gameState.grid.tiles, activePlayerId,
-              activePlayer.hand.length, playerTileCount,
-            );
-            if (!canClaimCaptureTile(card, tile, claimPower)) {
-              setError(`${card.name} (power ${claimPower}) is too weak to capture this tile (defense ${tile.defense_power})`);
-              return;
-            }
-          }
           if (tile && tile.owner && card.unoccupied_only) {
             setError(`${card.name} can only target unoccupied tiles`);
             return;
@@ -2027,10 +2048,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         // Multi-target card (Surge, Hive Mind, etc.): enter multi-target selection mode
         if (card.multi_target_count > 0) {
-          if (!getValidClaimTiles(card).has(tileKey)) {
+          { const { strong, weak } = getValidClaimTiles(card);
+          if (!strong.has(tileKey) && !weak.has(tileKey)) {
             setError(`${card.name} cannot target this tile`);
             return;
-          }
+          } }
           setMultiTileCardIndex(selectedCardIndex);
           setMultiTilePrimaryTarget([q, r]);
           setMultiTileTargets([]);
@@ -2213,17 +2235,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Apply state immediately — useLayoutEffect handles play→reveal transition
       onStateUpdate(result.state);
 
-      if (result.state.current_phase !== 'reveal' && shouldCycle) {
-        const nextIndex = gameState.player_order.findIndex(
-          (pid, i) => i !== activePlayerIndex && localPlayerIds.includes(pid) && !gameState.players[pid].has_submitted_play && !gameState.players[pid].is_cpu,
-        );
-        if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
-      }
       setSelectedCardIndex(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, activePlayer, onStateUpdate, homePlayerIndex, shouldCycle, localPlayerIds, animated, animSpeed, sound, startExitAnims]);
+  }, [gameState, activePlayerId, activePlayerIndex, activePlayer, onStateUpdate, animated, animSpeed, sound, startExitAnims]);
 
   const handleBuyArchetype = useCallback(async (cardId: string) => {
     try {
@@ -2294,79 +2310,144 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           setDiscardingAll(true);
         } else {
           onStateUpdate(result.state);
-          setActivePlayerIndex(homePlayerIndex);
           setSelectedCardIndex(null);
         }
       } else {
-        // Not all players done
+        // Not all players done — stay on local player (waiting for others)
         onStateUpdate(result.state);
-        if (shouldCycle) {
-          // Cycle to next unfinished local player
-          const nextIndex = gameState.player_order.findIndex(
-            (pid, i) => i !== activePlayerIndex && localPlayerIds.includes(pid) && !result.state.players[pid].has_ended_turn && !result.state.players[pid].is_cpu,
-          );
-          if (nextIndex >= 0) setActivePlayerIndex(nextIndex);
-        }
-        // In multiplayer without cycling: stay on local player (waiting for others)
         setSelectedCardIndex(null);
       }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer, homePlayerIndex, shouldCycle, localPlayerIds]);
+  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer]);
 
-  // Hot-seat auto-switch: when the current buyer changes MID-BUY-PHASE (e.g. after
-  // a CPU buys or another player ends their buy turn), switch to the new buyer if
-  // they are a local player controlled by this browser. Also auto-open the shop.
-  //
-  // We intentionally skip the FIRST buyer assignment of each buy phase — that is
-  // the reveal→buy transition, which is owned by handleBannerComplete (it opens
-  // the shop after the "Grow Your Deck" banner animation). If we opened it here
-  // as well, the shop would mount while the banner was still playing, which on
-  // iPhone caused two heavy layout bursts back-to-back over the active PIXI
-  // canvas and was a likely contributor to the iOS Safari tab crash.
-  const prevBuyerIdRef = useRef<string | null>(null);
+  // Concurrent buy phase: trigger CPU buys once when buy phase starts.
+  // Uses a ref for the timer so dependency-array re-runs don't cancel it.
+  const cpuBuyTriggeredRef = useRef(false);
+  const cpuBuyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (gameState.current_phase !== 'buy') {
-      // Reset so the next buy phase's first buyer is treated as the initial.
-      prevBuyerIdRef.current = null;
+      cpuBuyTriggeredRef.current = false;
+      if (cpuBuyTimerRef.current) { clearTimeout(cpuBuyTimerRef.current); cpuBuyTimerRef.current = null; }
       return;
     }
-    const buyerId = gameState.current_buyer_id;
-    const isInitialBuyer = prevBuyerIdRef.current === null;
-    prevBuyerIdRef.current = buyerId;
-    if (isInitialBuyer) return; // handleBannerComplete owns the initial open
-    if (!buyerId) return;
-    if (localPlayerIds.includes(buyerId) && !gameState.players[buyerId]?.is_cpu) {
-      const buyerIndex = gameState.player_order.indexOf(buyerId);
-      if (buyerIndex >= 0) {
-        setActivePlayerIndex(buyerIndex);
-        setSelectedCardIndex(null);
-      }
-      setShowShopOverlay(true);
-    }
-  }, [gameState.current_buyer_id, gameState.current_phase, gameState.player_order, gameState.players, localPlayerIds]);
-
-  // CPU buying delay: when the current buyer is a CPU, wait 1.5s so the user
-  // can see the "Buying..." indicator, then trigger the backend to process
-  // CPU purchases.
-  useEffect(() => {
-    const buyerId = gameState.current_buyer_id;
-    if (!buyerId || gameState.current_phase !== 'buy') return;
-    const buyer = gameState.players[buyerId];
-    if (!buyer?.is_cpu) return;
-
-    const timer = setTimeout(async () => {
+    if (cpuBuyTriggeredRef.current) return;
+    // Check if any CPU players need to buy
+    const hasPendingCpu = gameState.player_order.some(pid => {
+      const p = gameState.players[pid];
+      return p?.is_cpu && !p.has_left && !gameState.players_done_buying.includes(pid);
+    });
+    if (!hasPendingCpu) return;
+    cpuBuyTriggeredRef.current = true;
+    cpuBuyTimerRef.current = setTimeout(async () => {
+      cpuBuyTimerRef.current = null;
       try {
         const result = await api.processCpuBuys(gameState.id);
         onStateUpdate(result.state);
-      } catch {
-        // CPU buy failed — ignore (state will be stale until next action)
+      } catch (err) {
+        console.warn('CPU buy trigger failed, will retry on next state update', err);
+        // Allow retry on next state update (e.g. after human buys)
+        cpuBuyTriggeredRef.current = false;
       }
-    }, 1500);
+    }, 500);
+  }, [gameState.current_phase, gameState.id, gameState.players, gameState.player_order, gameState.players_done_buying, onStateUpdate]);
 
-    return () => clearTimeout(timer);
-  }, [gameState.current_buyer_id, gameState.current_phase, gameState.id, gameState.players, onStateUpdate]);
+  // Handle WebSocket cursor and click events from other players
+  useEffect(() => {
+    if (!wsMessage || !isMultiplayer) return;
+    if (wsMessage.type === 'cursor_update') {
+      const pid = wsMessage.player_id as string;
+      setOtherCursors(prev => ({
+        ...prev,
+        [pid]: {
+          player_id: pid,
+          player_name: wsMessage.player_name as string,
+          player_color: wsMessage.player_color as string,
+          hovered_card_id: wsMessage.hovered_card_id as string | null,
+          source: wsMessage.source as string | null,
+        },
+      }));
+    } else if (wsMessage.type === 'cursor_click') {
+      const pid = wsMessage.player_id as string;
+      setCursorClicks(prev => ({ ...prev, [pid]: Date.now() }));
+    }
+  }, [wsMessage, isMultiplayer]);
+
+  // Detect purchases via buy_phase_purchases state diff
+  const prevBuyPhasePurchasesRef = useRef<Record<string, Array<{ card_id: string; card_name: string; source: string; cost: number }>>>({});
+  const prevArchMarketRef = useRef<Card[] | null>(null);
+  useEffect(() => {
+    if (gameState.current_phase !== 'buy') {
+      prevBuyPhasePurchasesRef.current = {};
+      prevArchMarketRef.current = null;
+      return;
+    }
+    // Initialize archetype market snapshot on first run
+    if (!prevArchMarketRef.current) {
+      const ap = gameState.players[activePlayerId];
+      if (ap) prevArchMarketRef.current = ap.archetype_market;
+    }
+    const prev = prevBuyPhasePurchasesRef.current;
+    const current = gameState.buy_phase_purchases;
+    // Find new purchases: neutral for all players, archetype for self
+    for (const [pid, purchases] of Object.entries(current)) {
+      const prevCount = prev[pid]?.length ?? 0;
+      const newPurchases = purchases.slice(prevCount);
+      const isSelf = pid === activePlayerId;
+      for (const p of newPurchases) {
+        if (p.source === 'neutral') {
+          const player = gameState.players[pid];
+          const stack = gameState.neutral_market.find(s => s.card.id === p.card_id || s.card.name === p.card_name);
+          if (!stack) continue;
+          setNeutralPurchaseEvents(evts => [...evts, {
+            player_id: pid,
+            player_name: player?.name ?? pid,
+            player_color: player?.color ?? '#666',
+            card_id: p.card_id,
+            card_name: p.card_name,
+            card: stack.card,
+            isSelf,
+          }]);
+        } else if (p.source === 'archetype' && isSelf) {
+          const player = gameState.players[pid];
+          // Find the card in the previous archetype market (it's been removed after purchase)
+          const card = prevArchMarketRef.current?.find(c => c.id === p.card_id || c.name === p.card_name);
+          if (!card) continue;
+          setNeutralPurchaseEvents(evts => [...evts, {
+            player_id: pid,
+            player_name: player?.name ?? pid,
+            player_color: player?.color ?? '#666',
+            card_id: p.card_id,
+            card_name: p.card_name,
+            card,
+            isSelf: true,
+          }]);
+        }
+      }
+    }
+    prevBuyPhasePurchasesRef.current = current;
+    // Snapshot archetype market for next diff (card is removed after purchase)
+    const ap = gameState.players[activePlayerId];
+    if (ap) prevArchMarketRef.current = ap.archetype_market;
+  }, [gameState.buy_phase_purchases, gameState.current_phase, gameState.players, activePlayerId]);
+
+  // Clear cursors when leaving buy phase
+  useEffect(() => {
+    if (gameState.current_phase !== 'buy') {
+      setOtherCursors({});
+      setNeutralPurchaseEvents([]);
+      setCursorClicks({});
+    }
+  }, [gameState.current_phase]);
+
+  // Callback for ShopOverlay to broadcast hover changes
+  const handleShopCardHoverChange = useCallback((cardId: string | null, source: string | null) => {
+    if (wsSend && isMultiplayer && gameState.current_phase === 'buy') {
+      wsSend({ type: 'cursor_update', hovered_card_id: cardId, source });
+    }
+  }, [wsSend, isMultiplayer, gameState.current_phase]);
+
 
   // Submit Play button state
   const submitHasCardsLeft = activePlayer ? activePlayer.hand.length > 0 : false;
@@ -2445,7 +2526,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (showUpgradePreview) setShowUpgradePreview(false);
 
         // Priority 0: Done reviewing
-        if (reviewing && !resolving) {
+        if (reviewButtonVisible) {
           handleDoneReviewingRef.current?.();
           return;
         }
@@ -2521,7 +2602,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, resolving, reviewing, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
+  }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, resolving, reviewing, reviewButtonVisible, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -2529,9 +2610,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       onStateUpdate(pendingStateRef.current);
       pendingStateRef.current = null;
     }
-    setActivePlayerIndex(homePlayerIndex);
     setSelectedCardIndex(null);
-  }, [onStateUpdate, homePlayerIndex]);
+  }, [onStateUpdate]);
 
   // Intro overlay dismissed — start shuffle → draw → play banner sequence
   const handleIntroReady = useCallback(() => {
@@ -2636,69 +2716,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     });
   }, [gameState.id, activePlayerId, animationOff, onStateUpdate]);
 
-  // "Done Reviewing" clicked — acknowledge this player's resolve, then cycle or finish
+  // "Done Reviewing" clicked — acknowledge this player's resolve, then advance to buy
   const handleDoneReviewing = useCallback(() => {
     setReviewHoveredTile(null);
     setReviewHoveredPlayer(null);
-
-    // In local multiplayer, cycle to next local player who hasn't acknowledged yet
-    if (shouldCycle) {
-      // Acknowledge this player's resolve without clearing review mode
-      api.advanceResolve(gameState.id, activePlayerId).then(result => {
-        onStateUpdate(result.state);
-        prevPhaseRef.current = result.state.current_phase;
-
-        if (result.state.current_phase === 'buy') {
-          // All players acknowledged — exit review and show buy banner
-          setReviewing(false);
-          revealedActionsRef.current = null;
-          setActivePlayerIndex(homePlayerIndex);
-          setBannerSubtitle('Grow Your Deck');
-          setPhaseBanner('buy');
-          setBannerKey(k => k + 1);
-          setInteractionBlocked(true);
-          return;
-        }
-
-        // Find next local player who hasn't acknowledged
-        const nextIndex = gameState.player_order.findIndex(
-          (pid, i) => i !== activePlayerIndex && localPlayerIds.includes(pid) &&
-            !result.state.players[pid].has_acknowledged_resolve && !result.state.players[pid].is_cpu,
-        );
-        if (nextIndex >= 0) {
-          setActivePlayerIndex(nextIndex);
-          // Stay in review mode for the next player
-        } else {
-          // All local players done — exit review, wait for remote players
-          setReviewing(false);
-          revealedActionsRef.current = null;
-          setActivePlayerIndex(homePlayerIndex);
-          setPhaseBanner(null);
-          setInteractionBlocked(false);
-        }
-      }).catch(() => {
-        setPhaseBanner(null);
-        setInteractionBlocked(false);
-      });
-      return;
-    }
-
-    // Single player or non-cycling: original behavior
     setReviewing(false);
     revealedActionsRef.current = null;
     advanceAndShowBuy();
-  }, [advanceAndShowBuy, shouldCycle, gameState, activePlayerId, activePlayerIndex, homePlayerIndex, localPlayerIds, onStateUpdate]);
+  }, [advanceAndShowBuy]);
   handleDoneReviewingRef.current = handleDoneReviewing;
 
   // Review countdown: 30s auto-accept timer when "Done Reviewing" button is visible
-  const reviewButtonVisible = reviewing && !resolving && !activePlayer?.has_acknowledged_resolve;
+  const reviewButtonActive = reviewButtonVisible && !activePlayer?.has_acknowledged_resolve;
   useEffect(() => {
-    if (reviewButtonVisible) {
+    if (reviewButtonActive) {
       setReviewCountdown(30);
     } else {
       setReviewCountdown(null);
     }
-  }, [reviewButtonVisible]);
+  }, [reviewButtonActive]);
 
   useEffect(() => {
     if (reviewCountdown === null || reviewCountdown <= 0) return;
@@ -2748,7 +2784,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (bannerPhase === 'reveal' && !resolving) {
       // Reveal banner finished but no resolution steps to animate —
       // show player effects if any, then enter review mode.
-      setActivePlayerIndex(homePlayerIndex);
 
       // Show player effect popups if any (e.g. Sabotage forced discards)
       const effects = gameState.player_effects;
@@ -2794,12 +2829,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // If resolving, don't unblock interactions yet — resolve overlay will do that
     if (!resolving) {
       setInteractionBlocked(false);
-      // Auto-open shop after buy banner completes only if active player is the current buyer
-      if (bannerPhase === 'buy' && activePlayerId === gameState.current_buyer_id) {
+      // Auto-open shop after buy banner completes if active player hasn't finished buying
+      if (bannerPhase === 'buy' && !gameState.players_done_buying.includes(activePlayerId)) {
         setShowShopOverlay(true);
       }
     }
-  }, [resolving, phaseBanner, phase, onStateUpdate, animationOff, enterReviewMode, homePlayerIndex, gameState, activePlayerId]);
+  }, [resolving, phaseBanner, phase, onStateUpdate, animationOff, enterReviewMode, gameState, activePlayerId]);
 
   // Debt fly animation complete — release banner hold, collapse panel after short delay
   const handleDebtFlyComplete = useCallback(() => {
@@ -2872,7 +2907,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setResolvedUpToStep(-1);
     setCurrentStepFade(1);
     resolveChevronCacheRef.current = [];
-    setActivePlayerIndex(homePlayerIndex);
     // Recompute VP paths for all players after resolve and clear resolve log
     const postResolveTiles = gameState.grid?.tiles;
     if (postResolveTiles) {
@@ -2908,7 +2942,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // No effects — enter review mode
       enterReviewMode();
     }
-  }, [animationOff, vpPaths, enterReviewMode, homePlayerIndex, gameState]);
+  }, [animationOff, vpPaths, enterReviewMode, gameState]);
 
   // Called by ResolveOverlay as each step begins — update the displayed tile state & fade chevrons
   const applyResolveStep = useCallback((stepIdx: number) => {
@@ -3121,18 +3155,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [gameState.id, activePlayerId, onStateUpdate]);
 
-  const handleSwitchPlayer = useCallback((index: number) => {
-    const pid = gameState.player_order[index];
-    if (!pid) return;
-    // Don't allow switching to CPU players
-    if (gameState.players[pid]?.is_cpu) return;
-    // Only allow switching to local players (host + locals controlled by this browser)
-    if (localPlayerIds.length > 0 && !localPlayerIds.includes(pid)) return;
-    setActivePlayerIndex(index);
-    setSelectedCardIndex(null);
-    setError(null);
-  }, [gameState.player_order, gameState.players]);
-
   // ── Game Over handlers ─────────────────────────────────────
 
   const handleReturnToLobby = useCallback(async () => {
@@ -3225,21 +3247,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, []);
 
   // Filter tiles to only those a given claim card can actually be played on
-  const getValidClaimTiles = useCallback((card: Card | null | undefined): Set<string> => {
-    if (!card || card.card_type !== 'claim') return adjacentTiles;
-    const valid = new Set<string>();
+  const getValidClaimTiles = useCallback((card: Card | null | undefined): { strong: Set<string>; weak: Set<string> } => {
+    const empty = { strong: new Set<string>(), weak: new Set<string>() };
+    if (!card || card.card_type !== 'claim') return { strong: adjacentTiles, weak: new Set() };
     const tiles = gameState.grid?.tiles;
-    if (!tiles) return valid;
+    if (!tiles) return empty;
 
     // Flood / target_own_tile: highlight player's own tiles as valid targets
     if (card.target_own_tile) {
+      const strong = new Set<string>();
       for (const [key, tile] of Object.entries(tiles)) {
         if (tile.owner === activePlayerId) {
-          valid.add(key);
+          strong.add(key);
         }
       }
-      return valid;
+      return { strong, weak: new Set() };
     }
+
+    const strong = new Set<string>();
+    const weak = new Set<string>();
 
     // Tiles where the player already has a non-stacking claim this turn.
     // Multi-target claims (Surge) also lock their extra targets.
@@ -3288,6 +3314,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       ? new Set<string>(Object.keys(tiles).filter(k => tiles[k].owner === activePlayerId))
       : null;
 
+    const handSize = activePlayer?.hand.length ?? 0;
+
     for (const key of candidates) {
       const tile = tiles[key];
       if (!tile || tile.is_blocked) continue;
@@ -3295,14 +3323,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (tile.owner === activePlayerId) continue;
       // Skip immune tiles (Iron Wall / Stronghold)
       if (tile.immune) continue;
-      // Exclude tiles too weak to capture (account for all dynamic power sources)
-      {
-        const effectivePower = computeClaimPowerOnTile(
-          card, tile, tiles, activePlayerId,
-          activePlayer?.hand.length ?? 0, playerTileCount,
-        );
-        if (!canClaimCaptureTile(card, tile, effectivePower)) continue;
-      }
       // Exclude occupied tiles for unoccupied_only cards
       if (tile.owner && card.unoccupied_only) continue;
       // Exclude tiles already claimed this turn (no stacking)
@@ -3340,7 +3360,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         }
         if (groups < 2) continue;
       }
-      valid.add(key);
+      // Classify: strong (power sufficient) vs weak (power insufficient)
+      let effectivePower = computeClaimPowerOnTile(card, tile, tiles, activePlayerId, handSize, playerTileCount);
+      // For stackable cards, add power from existing planned claims on this tile
+      if (card.stackable && activePlayer?.planned_actions) {
+        for (const action of activePlayer.planned_actions) {
+          if (action.card.card_type !== 'claim') continue;
+          if (`${action.target_q},${action.target_r}` === key) {
+            effectivePower += computeClaimPowerOnTile(action.card, tile, tiles, activePlayerId, handSize, playerTileCount);
+          }
+        }
+      }
+      if (canClaimCaptureTile(card, tile, effectivePower)) {
+        strong.add(key);
+      } else {
+        weak.add(key);
+      }
     }
 
     // Own tiles are valid defensive placements for Claim cards (the claim
@@ -3352,11 +3387,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (!tile || tile.is_blocked) continue;
         if (tile.owner !== activePlayerId) continue;
         if (alreadyClaimed.has(key)) continue;
-        valid.add(key);
+        strong.add(key);
       }
     }
 
-    return valid;
+    return { strong, weak };
   }, [adjacentTiles, gameState.grid?.tiles, activePlayer?.planned_actions, activePlayerId, hexDistance]);
 
   // All tiles a card can legally be played on (includes own tiles for defensive claims)
@@ -3402,8 +3437,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return valid;
     }
 
-    // Start with the highlighted expansion targets for claim cards
-    const valid = new Set(getValidClaimTiles(card));
+    // Start with the highlighted expansion targets for claim cards (union strong + weak)
+    const { strong, weak } = getValidClaimTiles(card);
+    const valid = new Set([...strong, ...weak]);
     // For claim cards (not unoccupied_only, not target_own_tile which is already handled),
     // also include own tiles as valid defensive placements
     const isBridge = card.effects?.some(e => e.type === 'adjacency_bridge') ?? false;
@@ -3624,6 +3660,94 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [activePlayer, inPlayCards]);
 
 
+  // Pre-compute weak highlight tiles for claim cards (orange outline = power insufficient)
+  const weakHighlightTiles = useMemo((): Set<string> | undefined => {
+    if (phase !== 'play') return undefined;
+    // Determine active claim card (same logic as highlightTiles prop)
+    let card: Card | null = null;
+    if (multiTileCardIndex !== null) {
+      const mtc = activePlayer?.hand[multiTileCardIndex];
+      if (mtc?.card_type === 'claim') card = mtc;
+    } else {
+      card = highlightCard?.card_type === 'claim' ? highlightCard
+        : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
+          ? activePlayer?.hand[draggingCardIndex] ?? null : null;
+    }
+    if (!card) return undefined;
+    const { weak } = getValidClaimTiles(card);
+    return weak.size > 0 ? weak : undefined;
+  }, [phase, multiTileCardIndex, activePlayer, highlightCard, draggingCardIndex, getValidClaimTiles]);
+
+  // Undoable tiles: map tile key → planned action index for reversible cards
+  const undoableTiles = useMemo(() => {
+    if (phase !== 'play' || !activePlayer?.planned_actions || playSubmitted) return undefined;
+    const map = new Map<string, number>();
+    activePlayer.planned_actions.forEach((action, idx) => {
+      if (!action.card.reversible) return;
+      if (action.target_q != null && action.target_r != null) {
+        const key = `${action.target_q},${action.target_r}`;
+        map.set(key, idx); // LIFO: later index overwrites earlier
+      }
+      if (action.extra_targets) {
+        for (const [eq, er] of action.extra_targets) {
+          map.set(`${eq},${er}`, idx);
+        }
+      }
+    });
+    return map.size > 0 ? map : undefined;
+  }, [phase, activePlayer?.planned_actions, playSubmitted]);
+
+  const undoableTileSet = useMemo(() => {
+    if (!undoableTiles) return undefined;
+    return new Set(undoableTiles.keys());
+  }, [undoableTiles]);
+
+  // Undo fly animation: compact card flying from tile back to hand
+  const [undoFlyAnims, setUndoFlyAnims] = useState<{ id: number; card: Card; startX: number; startY: number; active: boolean }[]>([]);
+  const undoFlyIdRef = useRef(0);
+
+  const handleTileLongPress = useCallback(async (q: number, r: number) => {
+    if (phase !== 'play' || !activePlayer || !undoableTiles) return;
+    const key = `${q},${r}`;
+    const actionIndex = undoableTiles.get(key);
+    if (actionIndex === undefined) return;
+
+    // Capture the card before undo (for the animation)
+    const action = activePlayer.planned_actions?.[actionIndex];
+    const undoCard = action?.card;
+
+    // Compute tile screen position for animation start
+    let tileScreenX = 0, tileScreenY = 0;
+    const transform = gridTransformRef.current;
+    const gRect = gridContainerRef.current?.getBoundingClientRect();
+    if (transform && gRect) {
+      const local = axialToPixel(q, r);
+      const screen = localToScreen(local.x, local.y, transform, gRect.width, gRect.height, gRect);
+      tileScreenX = screen.x;
+      tileScreenY = screen.y;
+    }
+
+    try {
+      const resp = await api.undoCard(gameState.id, activePlayer.id, actionIndex);
+      onStateUpdate(resp.state);
+      // Spawn floating "+1 action" icon
+      const id = ++floatingActionIdRef.current;
+      setFloatingActions(prev => [...prev, { id, offsetX: -20, offsetY: 0, type: 'gain' }]);
+      setTimeout(() => setFloatingActions(prev => prev.filter(a => a.id !== id)), 900);
+      // Spawn undo fly animation
+      if (undoCard) {
+        const flyId = ++undoFlyIdRef.current;
+        setUndoFlyAnims(prev => [...prev, { id: flyId, card: undoCard, startX: tileScreenX, startY: tileScreenY, active: false }]);
+        requestAnimationFrame(() => {
+          setUndoFlyAnims(prev => prev.map(a => a.id === flyId ? { ...a, active: true } : a));
+        });
+        setTimeout(() => setUndoFlyAnims(prev => prev.filter(a => a.id !== flyId)), 600);
+      }
+    } catch (err) {
+      console.warn('Undo failed', err);
+    }
+  }, [phase, activePlayer, undoableTiles, gameState.id, onStateUpdate]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', background: '#1a1a2e', color: '#fff' }}>
       {/* Full-width grid area */}
@@ -3675,7 +3799,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   }
                   // Multi-target claim (Surge): every target must be adjacent to
                   // at least one already-selected target (connected subgraph).
-                  const claimValid = filterSelected(getValidClaimTiles(multiTileCard));
+                  // Only show strong (yellow) tiles here; weak tiles go to weakHighlightTiles
+                  const { strong: mtStrong } = getValidClaimTiles(multiTileCard);
+                  const claimValid = filterSelected(mtStrong);
                   if (selected.size === 0) return claimValid;
                   const adjacentToSelected = new Set<string>();
                   for (const k of selected) {
@@ -3693,7 +3819,26 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 const card = highlightCard?.card_type === 'claim' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'claim'
                     ? activePlayer?.hand[draggingCardIndex] : null;
-                if (card) return getAllValidPlayTiles(card);
+                if (card) {
+                  // Use only strong tiles for yellow highlight; weak tiles go to weakHighlightTiles (orange)
+                  const { strong } = getValidClaimTiles(card);
+                  // Add own tiles as valid defensive placements (always strong/yellow)
+                  const isBridge = card.effects?.some(e => e.type === 'adjacency_bridge') ?? false;
+                  if (!card.unoccupied_only && !card.target_own_tile && !isBridge) {
+                    const alreadyClaimed = new Set<string>();
+                    if (!card.stackable && activePlayer?.planned_actions) {
+                      for (const action of activePlayer.planned_actions) {
+                        if (action.card.card_type !== 'claim') continue;
+                        if (action.target_q != null) alreadyClaimed.add(`${action.target_q},${action.target_r}`);
+                        if (action.extra_targets) for (const [eq, er] of action.extra_targets) alreadyClaimed.add(`${eq},${er}`);
+                      }
+                    }
+                    for (const [k, t] of Object.entries(displayState.grid.tiles)) {
+                      if (t.owner === activePlayerId && !t.is_blocked && !alreadyClaimed.has(k)) strong.add(k);
+                    }
+                  }
+                  return strong;
+                }
                 // Defense card: highlight own tiles
                 const defCard = highlightCard?.card_type === 'defense' ? highlightCard
                   : draggingCardIndex !== null && activePlayer?.hand[draggingCardIndex]?.card_type === 'defense'
@@ -3740,6 +3885,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 }
                 return undefined;
               })()}
+              weakHighlightTiles={weakHighlightTiles}
               multiTileTargets={multiTileCardIndex !== null ? [
                 ...(multiTilePrimaryTarget ? [multiTilePrimaryTarget] : []),
                 ...multiTileTargets,
@@ -3787,6 +3933,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               } : undefined}
               onTileHoverEnd={reviewing ? () => setReviewHoveredTile(null) : undefined}
               paused={showShopOverlay || showCardBrowser || showDeckViewer || showUpgradePreview || showGameOver}
+              onLongPress={handleTileLongPress}
+              undoableTiles={undoableTileSet}
             />
           )}
 
@@ -3865,7 +4013,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
                     const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
                     const isCpu = p.is_cpu;
-                    const isClickable = !isCpu && (localPlayerIds.length === 0 || localPlayerIds.includes(pid));
                     return (
                       <div
                         key={pid}
@@ -3880,20 +4027,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                             } else {
                               setReviewFullCards(actions.map(a => ({ playerId: pid, playerName: name, card: a.card })));
                             }
-                          } else if (isClickable) {
-                            handleSwitchPlayer(i);
                           }
                         }}
                         onPointerEnter={reviewing ? () => setReviewHoveredPlayer(pid) : undefined}
                         onPointerLeave={reviewing ? () => setReviewHoveredPlayer(null) : undefined}
-                        style={{ cursor: isClickable ? 'pointer' : 'default', marginBottom: i < gameState.player_order.length - 1 ? 4 : 0, opacity: isCpu ? 0.8 : 1, position: 'relative' }}
+                        style={{ cursor: reviewing ? 'pointer' : 'default', marginBottom: i < gameState.player_order.length - 1 ? 4 : 0, opacity: isCpu ? 0.8 : 1, position: 'relative' }}
                       >
                         <PlayerHud
                           player={p}
                           isActive={i === activePlayerIndex}
                           isCurrent={i === activePlayerIndex}
                           isFirstPlayer={i === gameState.first_player_index}
-                          isCurrentBuyer={phase === 'buy' && pid === gameState.current_buyer_id}
+                          isCurrentBuyer={phase === 'buy' && !gameState.players_done_buying.includes(pid)}
                           phase={phase}
                           totalCards={pTotal}
                           tileCount={pTiles}
@@ -3919,7 +4064,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         isActive={true}
                         isCurrent={true}
                         isFirstPlayer={activePlayerIndex === gameState.first_player_index}
-                        isCurrentBuyer={phase === 'buy' && activePlayerId === gameState.current_buyer_id}
+                        isCurrentBuyer={phase === 'buy' && !gameState.players_done_buying.includes(activePlayerId)}
                         phase={phase}
                         totalCards={pTotal}
                         tileCount={playerTileCount}
@@ -4150,6 +4295,37 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               document.body
             )}
           </div>
+
+          {/* Undo fly animation: compact card flying from tile back to hand */}
+          {undoFlyAnims.length > 0 && createPortal(
+            <>
+              {undoFlyAnims.map(anim => {
+                const destX = window.innerWidth / 2;
+                const destY = window.innerHeight - 40;
+                const dx = destX - anim.startX;
+                const dy = destY - anim.startY;
+                return (
+                  <div key={anim.id} style={{
+                    position: 'fixed',
+                    left: anim.startX,
+                    top: anim.startY,
+                    transform: anim.active
+                      ? `translate(calc(${dx}px - 50%), calc(${dy}px - 50%)) scale(1)`
+                      : 'translate(-50%, -50%) scale(0.6)',
+                    opacity: anim.active ? 0 : 1,
+                    transition: anim.active
+                      ? 'transform 500ms ease-in, opacity 200ms ease-in 300ms'
+                      : 'none',
+                    pointerEvents: 'none',
+                    zIndex: 16000,
+                  }}>
+                    <CompactCard card={anim.card} />
+                  </div>
+                );
+              })}
+            </>,
+            document.body
+          )}
 
           {/* Purchase pill hover preview (fixed, portal) */}
           {purchaseHover && createPortal(
@@ -4436,7 +4612,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onBuyNeutral={handleBuyNeutral}
               onBuyUpgrade={handleBuyUpgrade}
               onReroll={handleReroll}
-              disabled={phase !== 'buy' || activePlayerId !== gameState.current_buyer_id}
+              disabled={phase !== 'buy' || gameState.players_done_buying.includes(activePlayerId)}
               buyLocked={!!activePlayer.buy_locked}
               onClose={() => setShowShopOverlay(false)}
               testMode={!!gameState.test_mode}
@@ -4446,8 +4622,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               buyPhasePurchases={gameState.buy_phase_purchases}
               players={gameState.players}
               ownedUniqueCardNames={ownedUniqueCardNames}
+              otherPlayerCursors={otherCursors}
+              cursorClicks={cursorClicks}
+              onCardHoverChange={handleShopCardHoverChange}
             />
           )}
+
+          {/* Purchase fly animations — rendered above shop overlay (z > 5000) */}
+          {neutralPurchaseEvents.map((evt, idx) => (
+            <PurchaseFlyAnimation
+              key={`${evt.player_id}-${evt.card_id}-${idx}`}
+              event={evt}
+              onDone={() => setNeutralPurchaseEvents(prev => prev.filter((_, i) => i !== idx))}
+            />
+          ))}
 
           {/* Toasts — floating above the hand panel */}
           <div style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, zIndex: 20, pointerEvents: 'none' }}>
@@ -4492,11 +4680,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 Waiting for other players...
               </div>
             )}
-            {/* Sequential buy: waiting for current buyer */}
-            {phase === 'buy' && activePlayer && activePlayerId !== gameState.current_buyer_id && !phaseBanner && (() => {
-              const buyerId = gameState.current_buyer_id;
-              const buyerName = buyerId ? gameState.players[buyerId]?.name : null;
-              return buyerName ? (
+            {/* Concurrent buy: show who's still shopping */}
+            {phase === 'buy' && activePlayer && gameState.players_done_buying.includes(activePlayerId) && !phaseBanner && (() => {
+              const stillShopping = gameState.player_order
+                .filter(pid => !gameState.players_done_buying.includes(pid) && !gameState.players[pid]?.has_left)
+                .map(pid => gameState.players[pid]?.name)
+                .filter(Boolean);
+              return stillShopping.length > 0 ? (
                 <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
                   <div style={{
                     padding: '4px 12px',
@@ -4508,7 +4698,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     fontWeight: 'bold',
                     animation: 'pulse 2s ease-in-out infinite',
                   }}>
-                    Waiting for {buyerName} to buy...
+                    Waiting for {stillShopping.join(', ')} to finish...
                   </div>
                 </div>
               ) : null;
@@ -4764,7 +4954,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 Resolving...
               </button>
             )}
-            {reviewing && !resolving && !activePlayer?.has_acknowledged_resolve && (
+            {reviewButtonVisible && !activePlayer?.has_acknowledged_resolve && (
               <button
                 onClick={handleDoneReviewing}
                 style={{
@@ -4777,19 +4967,19 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   cursor: 'pointer',
                   fontSize: 18,
                   lineHeight: '1.2',
-                  animation: 'pulseGlowGreen 2s ease-in-out infinite',
+                  animation: 'reviewBtnFadeIn 0.4s ease-out forwards, pulseGlowGreen 2s ease-in-out 0.4s infinite',
                 }}
               >
                 Done Reviewing{reviewCountdown !== null && reviewCountdown > 0 ? ` (${reviewCountdown}s)` : ''} ✓
               </button>
             )}
-            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayerId === gameState.current_buyer_id && !activePlayer.has_ended_turn && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !gameState.players_done_buying.includes(activePlayerId) && !activePlayer.has_ended_turn && (
               <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
                 <HoldToSubmitButton
                   ref={endTurnRef}
                   onConfirm={handleEndTurn}
                   requireHold={true}
-                  warning="Done buying passes the shop to the next player. Any unspent resources carry over."
+                  warning="Done buying ends your shopping. Any unspent resources carry over."
                   style={{
                     padding: '10px 24px',
                     background: '#ff8844',
@@ -4807,7 +4997,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </HoldToSubmitButton>
               </div>
             )}
-            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && activePlayerId === gameState.current_buyer_id && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && gameState.players_done_buying.includes(activePlayerId) && (
               <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
                 <button
                   disabled
@@ -4876,8 +5066,27 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 fontSize: 22, fontWeight: 'bold',
                 color: submitActionsLeft > 0 ? '#fff' : '#555',
                 textShadow: submitActionsLeft > 0 ? '0 0 8px rgba(74, 158, 255, 0.4)' : 'none',
+                position: 'relative',
               }}>
                 ⚡ {submitActionsLeft}
+                {floatingActions.map(fa => (
+                  <span
+                    key={fa.id}
+                    style={{
+                      position: 'absolute',
+                      left: fa.offsetX,
+                      top: fa.offsetY,
+                      fontSize: 18,
+                      fontWeight: 'bold',
+                      color: fa.type === 'gain' ? '#4ade80' : '#ff6b6b',
+                      pointerEvents: 'none',
+                      whiteSpace: 'nowrap',
+                      animation: 'actionFloat 850ms ease-out forwards',
+                    }}
+                  >
+                    {fa.type === 'gain' ? '+1 ⚡' : '−1 ⚡'}
+                  </span>
+                ))}
               </span>
               <span style={{ fontSize: 13, color: submitActionsLeft > 0 ? '#aaa' : '#555' }}>
                 action{submitActionsLeft !== 1 ? 's' : ''} left
@@ -5443,6 +5652,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           20% { transform: translateX(-50%) translateY(0) scale(1); }
           80% { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
           100% { opacity: 0; transform: translateX(-50%) translateY(-20px) scale(0.9); }
+        }
+        @keyframes reviewBtnFadeIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes actionFloat {
+          0% { opacity: 1; transform: translateY(0) scale(1); }
+          30% { opacity: 1; transform: translateY(-14px) scale(1.05); }
+          100% { opacity: 0; transform: translateY(-48px) scale(0.7); }
         }
       `}</style>
     </div>

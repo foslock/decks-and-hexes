@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Card } from '../types/game';
-import { getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useCardZoom } from './CardZoomContext';
@@ -37,11 +37,11 @@ export default function CompactCard({ card, subtitleContext, effectiveResourceGa
       cursor: 'pointer',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-        <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ fontWeight: 'bold', fontSize: 14, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {card.name}
         </div>
       </div>
-      <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <div style={{ fontSize: 11, lineHeight: '13px', color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
         <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
           if (el) {
             const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);

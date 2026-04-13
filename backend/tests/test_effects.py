@@ -403,13 +403,7 @@ class TestBuyRestriction:
             advance_resolve(game, pid)
         assert game.current_phase == Phase.BUY
 
-        # Advance to p1's buy turn (p0 may be the current buyer first)
-        current_buyer = game.player_order[game.current_buyer_index]
-        if current_buyer != "p1":
-            end_buy_phase(game, current_buyer)
-        assert game.player_order[game.current_buyer_index] == "p1"
-
-        # Try to buy — should be blocked
+        # Try to buy — should be blocked (concurrent mode, p1 can buy directly)
         player.resources = 100  # plenty of resources
         success, msg = buy_card(game, "p1", "upgrade", "")
         assert not success

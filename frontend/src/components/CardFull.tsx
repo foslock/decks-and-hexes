@@ -3,7 +3,7 @@ import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
 import { renderWithKeywords, extractKeywordsFromText, KEYWORDS } from './Keywords';
 import { useTooltips } from './SettingsContext';
-import { CARD_TYPE_COLORS, getCardDisplayColor, getCardDisplayType } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor, getCardDisplayType } from '../constants/cardColors';
 
 /** Fallback emoji per card type (used when no per-card art is defined) */
 const TYPE_EMOJI: Record<string, string> = {
@@ -242,17 +242,23 @@ const STAT_NOTE_TOOLTIPS: Record<string, string> = {
  * and the stat-note pills (Unique, Stackable, etc.) that live below it.
  */
 function extractKeywords(card: Card): { keyword: string; definition: string }[] {
-  const combined = [card.description || '', ...buildStatNotes(card)].join(' ');
+  const desc = card.is_upgraded && card.upgrade_description ? card.upgrade_description : card.description;
+  const combined = [desc || '', ...buildStatNotes(card)].join(' ');
   return extractKeywordsFromText(combined);
 }
 
 /** Art slot that tries to load a card image, falling back to emoji on error.
  *  Just drop a .png in public/cards/ named by base card ID — no config needed. */
+// Module-level caches: once an image URL succeeds or fails, remember it permanently.
+const imgOk = new Set<string>();
+const imgBad = new Set<string>();
+
 function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
   cardId: string; cardName: string; cardType: string; typeColor: string;
 }) {
-  const [imgFailed, setImgFailed] = useState(false);
   const imgUrl = getCardImageUrl(cardId);
+  // Start with cached knowledge; fall back to "try loading"
+  const [imgFailed, setImgFailed] = useState(() => imgBad.has(imgUrl));
 
   const hasImage = !imgFailed;
 
@@ -275,7 +281,14 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
         <img
           src={imgUrl}
           alt={cardName}
-          onError={() => setImgFailed(true)}
+          onLoad={() => { imgOk.add(imgUrl); }}
+          onError={() => {
+            // Only mark as failed if this URL has never loaded successfully
+            if (!imgOk.has(imgUrl)) {
+              imgBad.add(imgUrl);
+              setImgFailed(true);
+            }
+          }}
           style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
         />
       ) : (
@@ -316,9 +329,10 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
   const hasCost = displayCost !== null && displayCost !== undefined;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
 
-  // Build abilities text
+  // Build abilities text — use upgrade description for upgraded cards
   const abilityParts: string[] = [];
-  if (card.description) abilityParts.push(card.description);
+  const displayDescription = card.is_upgraded && card.upgrade_description ? card.upgrade_description : card.description;
+  if (displayDescription) abilityParts.push(displayDescription);
 
   const statNotes = buildStatNotes(card);
 
@@ -339,9 +353,9 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
     }}>
       {/* Top row: title left-aligned, VP badge + cost badge top-right */}
       <div style={{ position: 'relative', textAlign: 'left', minHeight: 22 }}>
-        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingRight: card.current_vp !== undefined ? 78 : 36 }}>
-          {card.name}
-          {card.is_upgraded && !card.name.endsWith('+') && <span style={{ color: '#ffd700' }}> +</span>}
+        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingRight: card.current_vp !== undefined ? 78 : 36, fontFamily: CARD_TITLE_FONT }}>
+          {card.is_upgraded && card.name_upgraded ? card.name_upgraded : card.name}
+          {card.is_upgraded && !card.name.endsWith('+') && !(card.name_upgraded?.endsWith('+')) && <span style={{ color: '#ffd700' }}> +</span>}
         </div>
         <div style={{
           position: 'absolute',
@@ -410,7 +424,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
       </div>
 
       {/* Card art — tries image file, falls back to emoji */}
-      <CardArtSlot cardId={card.id} cardName={card.name} cardType={card.card_type} typeColor={typeColor} />
+      <CardArtSlot key={getCardImageUrl(card.id)} cardId={card.id} cardName={card.name} cardType={card.card_type} typeColor={typeColor} />
 
       {/* Archetype — Type line */}
       <div style={{

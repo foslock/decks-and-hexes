@@ -1,4 +1,5 @@
 import type { Card, MarketStack } from '../types/game';
+import { CARD_TITLE_FONT } from '../constants/cardColors';
 import { IrreversibleButton } from './Tooltip';
 import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitleText } from './SubtitlePartRenderer';
@@ -130,7 +131,7 @@ function MarketCard({
       }}
     >
       <div>
-        <div style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 2 }}>{card.name}</div>
+        <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT, marginBottom: 2 }}>{card.name}</div>
         <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
           <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
             if (el) {

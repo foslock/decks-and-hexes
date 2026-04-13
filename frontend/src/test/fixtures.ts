@@ -137,8 +137,7 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
     current_phase: 'play',
     current_round: 1,
     first_player_index: 0,
-    current_buyer_index: 0,
-    current_buyer_id: null,
+    players_done_buying: [],
     buy_phase_purchases: {},
     neutral_market: [
       { card: makeCard({ id: 'neutral_mercenary', name: 'Mercenary', buy_cost: 3, power: 3 }), remaining: 5 },

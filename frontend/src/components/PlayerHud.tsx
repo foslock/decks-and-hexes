@@ -129,9 +129,9 @@ function VpStatTip({ breakdown, children }: { breakdown: VpBreakdown; children: 
           boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
         }}>
           <div style={{ fontWeight: 'bold', color: '#ffd700', marginBottom: 4, fontSize: 11 }}>VP Breakdown</div>
-          <div>🔷 Tiles: {breakdown.tileCount}</div>
-          <div>★ VP Hexes: {breakdown.bonusTiles}</div>
-          <div>🃏 Cards: {breakdown.cards}</div>
+          <div>Tiles: {breakdown.tileCount}</div>
+          <div>VP Hexes: {breakdown.bonusTiles}</div>
+          <div>Cards: {breakdown.cards}</div>
         </div>,
         document.body
       )}

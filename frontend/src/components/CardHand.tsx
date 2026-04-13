@@ -81,7 +81,7 @@ interface CardHandProps {
   onCardHover?: (index: number | null) => void;
 }
 
-import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -182,7 +182,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
       >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-            <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+            <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
               <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
                 if (el) {
                   const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -237,7 +237,7 @@ function CompactCardContent({ card, titleSize = 14, subtitleSize = 13, subtitleC
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-        <div style={{ fontWeight: 'bold', fontSize: titleSize, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+        <div style={{ fontWeight: 'bold', fontSize: titleSize, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
           {card.name}
         </div>
         <span style={{ fontSize: subtitleSize - 1, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>
@@ -455,6 +455,7 @@ export default function CardHand({
   const animMode = useAnimationMode();
   const animSpeed = useAnimationSpeed();
   const sound = useSound();
+  const shiftHeld = useShiftKey();
   const soundRef = useRef(sound);
   soundRef.current = sound;
 
@@ -521,7 +522,8 @@ export default function CardHand({
     }
     if (isHoveringPreview && hoveredIndex !== null && hoveredRect && cards[localOrder[hoveredIndex]]) {
       setPreviewExiting(false);
-      setDisplayedPreview({ card: cards[localOrder[hoveredIndex]], rect: hoveredRect });
+      const rawCard = cards[localOrder[hoveredIndex]];
+      setDisplayedPreview({ card: shiftHeld ? getUpgradedPreview(rawCard) : rawCard, rect: hoveredRect });
     } else if (displayedPreview) {
       setPreviewExiting(true);
       const duration = animMode === 'off' ? 0 : animMode === 'fast' ? 60 : 120;
@@ -531,7 +533,7 @@ export default function CardHand({
       }, duration);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHoveringPreview, hoveredIndex, hoveredRect, cards]);
+  }, [isHoveringPreview, hoveredIndex, hoveredRect, cards, shiftHeld]);
 
   // Card reflow animation is handled via direct DOM manipulation — see useLayoutEffect blocks.
 
@@ -625,6 +627,11 @@ export default function CardHand({
   const [phase2Trigger, setPhase2Trigger] = useState(0);
   // Separate prev-cards tracking for shuffle detection (useLayoutEffect updates prevCardsRef before useEffect)
   const prevCardsForShuffleRef = useRef(cards);
+  // Track in-play card IDs so undo (card moving from in-play → hand) skips draw animation.
+  // `inPlayIdsRef` is updated every render; `prevInPlayIdsRef` is consumed + updated in the layout effect.
+  const inPlayIdsRef = useRef<Set<string>>(new Set(inPlayCards?.map(c => c.id) ?? []));
+  inPlayIdsRef.current = new Set(inPlayCards?.map(c => c.id) ?? []);
+  const prevInPlayIdsRef = useRef<Set<string>>(new Set(inPlayCards?.map(c => c.id) ?? []));
 
   // Force shuffle animation from parent (intro sequence)
   useEffect(() => {
@@ -728,9 +735,14 @@ export default function CardHand({
     }
 
     const prev = prevCardsRef.current;
+    const prevInPlayIds = prevInPlayIdsRef.current;
     prevCardsRef.current = cards;
+    prevInPlayIdsRef.current = inPlayIdsRef.current;
 
+    // Include previous in-play card IDs so undo (card returning from planned actions
+    // to hand) isn't detected as a "new" card and doesn't trigger draw animation.
     const prevIds = new Set(prev.map(c => c.id));
+    for (const id of prevInPlayIds) prevIds.add(id);
     const currIds = new Set(cards.map(c => c.id));
     const newCards = cards.filter(c => !prevIds.has(c.id));
     const removedCards = prev.filter(c => !currIds.has(c.id));
@@ -746,7 +758,7 @@ export default function CardHand({
     // Skip cards that are deferred (waiting for shuffle animation to complete)
     if (newCards.length > 0) {
       const deferred = deferredDrawnCardsRef.current;
-      const immediateCards = deferred.size > 0 ? newCards.filter(c => !deferred.has(c.id)) : newCards;
+      let immediateCards = deferred.size > 0 ? newCards.filter(c => !deferred.has(c.id)) : newCards;
       if (immediateCards.length > 0) {
         const entries = new Map<string, EnteringAnim>();
         immediateCards.forEach((card, i) => {
@@ -1628,7 +1640,7 @@ export default function CardHand({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                  <div style={{ fontWeight: 'bold', fontSize: 14, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+                  <div style={{ fontWeight: 'bold', fontSize: 14, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                     <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
                       if (el) {
                         const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);

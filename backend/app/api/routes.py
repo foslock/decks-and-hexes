@@ -1,4 +1,4 @@
-"""REST API routes for hot-seat and multiplayer play."""
+"""REST API routes for multiplayer play."""
 
 from __future__ import annotations
 
@@ -30,6 +30,7 @@ from app.game_engine.game_state import (
     reroll_market,
     spend_upgrade_credit,
     submit_pending_discard,
+    undo_planned_action,
     submit_play,
 )
 from app.game_engine.hex_grid import GridSize
@@ -232,6 +233,30 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
 
 
+class UndoCardRequest(BaseModel):
+    player_id: str
+    action_index: int
+
+
+@router.post("/games/{game_id}/undo-card")
+async def undo_card_route(game_id: str, req: UndoCardRequest) -> dict[str, Any]:
+    """Undo a reversible planned action during Play phase."""
+    store = _get_store()
+    game = await store.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    success, msg = undo_planned_action(game, req.player_id, req.action_index)
+    if not success:
+        raise HTTPException(400, msg)
+
+    await store.save(game)
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
+
+
 @router.post("/games/{game_id}/submit-discard")
 async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[str, Any]:
     """Submit deferred discard choices (e.g. Regroup: draw first, then discard)."""
@@ -317,6 +342,22 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
         )
 
     if _is_multiplayer(game):
+        # Broadcast a lightweight purchase event before the full state update
+        # so other players can trigger fly animations immediately
+        if req.source == "neutral":
+            await manager.send_to_others(game_id, req.player_id, {
+                "type": "neutral_purchase",
+                "player_id": req.player_id,
+                "player_name": game.players[req.player_id].name,
+                "player_color": game.players[req.player_id].color,
+                "card_id": req.card_id or "",
+                "card_name": msg.replace("Bought ", ""),
+            })
+        # Broadcast cursor_click so other players see the click pulse
+        await manager.send_to_others(game_id, req.player_id, {
+            "type": "cursor_click",
+            "player_id": req.player_id,
+        })
         await _broadcast_state(game_id, game)
 
     return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
@@ -381,10 +422,10 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
 
 @router.post("/games/{game_id}/process-cpu-buys")
 async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
-    """Process consecutive CPU buyers during the buy phase.
+    """Process CPU buyers during the buy phase.
 
-    Called by the frontend after a brief delay so the user can see
-    the 'Buying...' indicator on CPU players before their purchases appear.
+    For multiplayer games, launches async cursor simulation so CPU cursors
+    animate realistically.
     """
     store = _get_store()
     game = await store.get(game_id)
@@ -394,19 +435,184 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
     if game.current_phase != Phase.BUY:
         raise HTTPException(400, f"Not in Buy phase (current: {game.current_phase.value})")
 
-    # Check that the current buyer is actually a CPU
-    pid = game.player_order[game.current_buyer_index]
-    player = game.players[pid]
-    if not player.is_cpu:
-        raise HTTPException(400, "Current buyer is not a CPU player")
+    # Check that at least one CPU player has not yet finished buying
+    has_pending_cpu = any(
+        game.players[pid].is_cpu and pid not in game.players_done_buying
+        for pid in game.player_order
+        if not game.players[pid].has_left
+    )
+    if not has_pending_cpu:
+        raise HTTPException(400, "No CPU players pending")
 
-    auto_play_cpu_buys(game)
-
-    await store.save(game)
     if _is_multiplayer(game):
-        await _broadcast_state(game_id, game)
+        # Launch async cursor simulation as a background task
+        import asyncio
+        asyncio.create_task(_process_cpu_buys_with_cursors(game_id))
+        return {"message": "CPU buys started (async)", "state": game.to_dict()}
 
+    # Hot-seat: process instantly
+    auto_play_cpu_buys(game)
+    await store.save(game)
     return {"message": "CPU buys processed", "state": game.to_dict()}
+
+
+async def _process_cpu_buys_with_cursors(game_id: str) -> None:
+    """Process CPU buys with simulated cursor movement broadcast via WebSocket."""
+    import asyncio
+    import random
+    from app.game_engine.cpu_player import CPUPlayer
+
+    store = _get_store()
+    game = await store.get(game_id)
+    if not game or game.current_phase != Phase.BUY:
+        return
+
+    def _all_humans_done(g: GameState) -> bool:
+        """True when every non-CPU, non-left player has finished buying."""
+        for p_id in g.player_order:
+            p = g.players[p_id]
+            if p.is_cpu or p.has_left:
+                continue
+            if p_id not in g.players_done_buying:
+                return False
+        return True
+
+    async def _cpu_sleep(g: GameState, seconds: float) -> None:
+        """Sleep only if humans are still shopping; skip delay otherwise."""
+        if not _all_humans_done(g):
+            await asyncio.sleep(seconds)
+
+    for pid in game.player_order:
+        player = game.players[pid]
+        if not player.is_cpu or player.has_left or pid in game.players_done_buying:
+            continue
+
+        cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
+
+        # Reroll market if desirable
+        if cpu.should_reroll_market(game):
+            reroll_market(game, pid)
+            await store.save(game)
+            await _broadcast_state(game_id, game)
+            await _cpu_sleep(game, 0.5)
+
+        # Plan all purchases
+        purchases: list[dict[str, Any]] = []
+        for _ in range(10):
+            purchase = cpu.pick_next_purchase(game)
+            if purchase is None:
+                break
+            purchases.append(purchase)
+
+        # Simulate browsing for each purchase
+        for purchase in purchases:
+            # Re-fetch to check if humans finished while we were sleeping
+            game = await store.get(game_id)
+            if not game or game.current_phase != Phase.BUY:
+                return
+            humans_waiting = not _all_humans_done(game)
+
+            # Hover over 1-2 decoy cards before buying (skip if humans done)
+            if humans_waiting:
+                decoys = _pick_cpu_decoy_hovers(game, pid, purchase)
+                for decoy in decoys:
+                    await manager.send_to_others(game_id, pid, {
+                        "type": "cursor_update",
+                        "player_id": pid,
+                        "player_name": player.name,
+                        "player_color": player.color,
+                        "hovered_card_id": decoy.get("card_id"),
+                        "source": decoy.get("source"),
+                    })
+                    await asyncio.sleep(0.6 + random.random() * 0.8)
+
+                # Hover on actual target
+                await manager.send_to_others(game_id, pid, {
+                    "type": "cursor_update",
+                    "player_id": pid,
+                    "player_name": player.name,
+                    "player_color": player.color,
+                    "hovered_card_id": purchase.get("card_id"),
+                    "source": purchase["source"],
+                })
+                await asyncio.sleep(0.3 + random.random() * 0.4)
+
+            # Execute purchase
+            # Re-fetch game to avoid stale state issues
+            game = await store.get(game_id)
+            if not game or game.current_phase != Phase.BUY:
+                return
+            success, _msg = buy_card(
+                game, pid, purchase["source"], purchase.get("card_id", ""),
+            )
+            if success:
+                # Broadcast purchase events
+                if purchase["source"] == "neutral":
+                    await manager.send_to_others(game_id, pid, {
+                        "type": "neutral_purchase",
+                        "player_id": pid,
+                        "player_name": player.name,
+                        "player_color": player.color,
+                        "card_id": purchase.get("card_id", ""),
+                        "card_name": _msg.replace("Bought ", ""),
+                    })
+                await manager.send_to_others(game_id, pid, {
+                    "type": "cursor_click",
+                    "player_id": pid,
+                })
+                await store.save(game)
+                await _broadcast_state(game_id, game)
+            await _cpu_sleep(game, 0.5)
+
+        # Clear cursor and signal done
+        await manager.send_to_others(game_id, pid, {
+            "type": "cursor_update",
+            "player_id": pid,
+            "player_name": player.name,
+            "player_color": player.color,
+            "hovered_card_id": None,
+            "source": None,
+        })
+
+        # Re-fetch before ending
+        game = await store.get(game_id)
+        if not game or game.current_phase != Phase.BUY:
+            return
+        end_buy_phase(game, pid)
+        await store.save(game)
+        await _broadcast_state(game_id, game)
+        await _cpu_sleep(game, 0.3)
+
+
+def _pick_cpu_decoy_hovers(
+    game: GameState, cpu_pid: str, actual_purchase: dict[str, Any],
+) -> list[dict[str, str]]:
+    """Pick 1-2 random market cards for CPU to 'consider' before buying."""
+    import random
+
+    decoys: list[dict[str, str]] = []
+    # Gather available neutral cards as potential decoys
+    available = game.neutral_market.get_available()
+    neutral_ids = [
+        s["card"]["id"] for s in available
+        if s["remaining"] > 0 or s.get("selling_out")
+    ]
+    # Gather archetype market cards
+    cpu_player = game.players.get(cpu_pid)
+    arch_ids = [c.id for c in (cpu_player.archetype_market if cpu_player else [])]
+
+    all_candidates = (
+        [{"card_id": cid, "source": "neutral"} for cid in neutral_ids]
+        + [{"card_id": cid, "source": "archetype"} for cid in arch_ids]
+    )
+    # Exclude the actual target
+    actual_id = actual_purchase.get("card_id", "")
+    all_candidates = [c for c in all_candidates if c["card_id"] != actual_id]
+
+    if all_candidates:
+        count = min(len(all_candidates), random.randint(1, 2))
+        decoys = random.sample(all_candidates, count)
+    return decoys
 
 
 @router.post("/games/{game_id}/advance-upkeep")

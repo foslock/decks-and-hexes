@@ -23,6 +23,7 @@ cards:
 
     starter: true
     action_return: 0
+    reversible: true
     power: 0
     unoccupied_only: true
     upgraded_unoccupied_only: false
@@ -155,6 +156,7 @@ cards:
     buy_cost: 2
 
     action_return: 0
+    reversible: true
     power: 5
     effect: "Claim: Power 5. Must target a tile that would connect two of your disconnected territory groups."
     effect_upgraded: "Claim: Power 6. Must target a tile that would connect two of your disconnected territory groups."
@@ -199,6 +201,7 @@ cards:
     buy_cost: 3
 
     action_return: 0
+    reversible: true
     power: 2
     effect: "Claim: Power 2. If you own 3 or more tiles adjacent to the target tile, power is 4 instead."
     effect_upgraded: "Claim: Power 2. If you own 3 or more tiles adjacent to the target tile, power is 5 instead."
@@ -218,6 +221,7 @@ cards:
     buy_cost: 5
 
     action_return: 0
+    reversible: true
     power: 3
     adjacency_required: false
     unoccupied_only: true
@@ -232,6 +236,7 @@ cards:
     buy_cost: 5
 
     action_return: 0
+    reversible: true
     power: 0
     defense_bonus: 0
     effect: "One tile you own permanently gains +2 defense until captured."
@@ -388,6 +393,7 @@ cards:
 
     action_return: 0
     action_cost: 2
+    reversible: true
     power: 6
     effect: "Claim: Power 6. Costs 2 actions to play."
     effect_upgraded: "Claim: Power 8. Costs 2 actions to play."
@@ -401,6 +407,7 @@ cards:
 
     action_return: 0
     action_cost: 2
+    reversible: true
     power: 5
     upgraded_power: 6
     effect: "Claim: Power 5. Ignores temporary defense bonuses on targeted tile. Costs 2 actions to play."
@@ -548,6 +555,7 @@ cards:
     buy_cost: 4
 
     action_return: 0
+    reversible: true
     power: 2
     effect: "Claim: Power 2. If the target tile was also claimed by an opponent this round, power is 4 instead."
     effect_upgraded: "Claim: Power 2. If the target tile was also claimed by an opponent this round, power is 5 instead. Gain 1 resource."

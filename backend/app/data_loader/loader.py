@@ -243,6 +243,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         starter=starter,
         trash_on_use=bool(entry.get("trash_on_use", False)),
         stackable=bool(entry.get("stackable", False)),
+        reversible=bool(entry.get("reversible", False)),
         forced_discard=forced_discard,
         draw_cards=draw_cards,
         defense_bonus=defense_bonus,

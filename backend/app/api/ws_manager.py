@@ -93,6 +93,22 @@ class ConnectionManager:
         """Get all connected player IDs in a group."""
         return list(self.connections.get(group_id, {}).keys())
 
+    async def send_to_others(
+        self, group_id: str, exclude_pid: str, message: dict[str, Any],
+    ) -> None:
+        """Send a message to all members of a group except the specified player."""
+        group = self.connections.get(group_id, {})
+        dead: list[str] = []
+        for pid, ws in group.items():
+            if pid == exclude_pid:
+                continue
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.append(pid)
+        for pid in dead:
+            self.disconnect(group_id, pid)
+
 
 # Singleton instance
 manager = ConnectionManager()

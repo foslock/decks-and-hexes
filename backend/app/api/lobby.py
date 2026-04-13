@@ -62,7 +62,6 @@ class LobbyPlayer:
     is_cpu: bool = False
     cpu_noise: float = 0.15
     is_host: bool = False
-    is_local: bool = False  # local human player (controlled by host's browser)
     has_returned: bool = True  # True by default; False when returning from a game
     token: str = ""
 
@@ -74,7 +73,6 @@ class LobbyPlayer:
             "color": self.color,
             "is_cpu": self.is_cpu,
             "is_host": self.is_host,
-            "is_local": self.is_local,
             "has_returned": self.has_returned,
             "cpu_difficulty": (
                 "easy" if self.cpu_noise >= 0.25 else
@@ -193,23 +191,13 @@ def validate_token(player_id: str, token: str) -> bool:
 def get_visible_player_ids(game_id: str, player_id: str) -> set[str] | None:
     """Get the set of player IDs whose hands should be visible to the given player.
 
-    Returns None if no lobby is associated (legacy hotseat — show all hands).
-    For the host, returns host + all local players.
-    For remote players, returns just their own ID.
+    Returns None if no lobby is associated (show all hands).
+    Otherwise returns just the requesting player's own ID.
     """
     lobby = get_lobby_for_game(game_id)
     if not lobby:
-        return None  # No lobby — hotseat/legacy, show all
+        return None
 
-    # Host sees self + all local players
-    if player_id == lobby.host_id:
-        visible = {player_id}
-        for pid, p in lobby.players.items():
-            if p.is_local:
-                visible.add(pid)
-        return visible
-
-    # Remote player sees only self
     return {player_id}
 
 
@@ -302,12 +290,6 @@ class AddCpuRequest(BaseModel):
 
 
 class RemovePlayerRequest(BaseModel):
-    token: str
-
-
-class AddLocalPlayerRequest(BaseModel):
-    name: str
-    archetype: str
     token: str
 
 
@@ -549,7 +531,7 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
     if not player:
         raise HTTPException(404, "Player not found")
 
-    if not is_self and not (is_host and (player.is_local or player.is_cpu)):
+    if not is_self and not (is_host and player.is_cpu):
         raise HTTPException(403, "Not authorized to edit this player")
 
     if req.name is not None:
@@ -619,43 +601,6 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
         cpu_noise=noise,
     )
     lobby.players[player_id] = cpu
-    if lobby.player_order:
-        lobby.player_order.append(player_id)
-    lobby.touch()
-    await manager.broadcast_lobby(code, lobby.to_dict())
-
-    return {"lobby": lobby.to_dict()}
-
-
-@lobby_router.post("/{code}/local-player")
-async def add_local_player(code: str, req: AddLocalPlayerRequest) -> dict[str, Any]:
-    """Add a local human player to the lobby (host only). Controlled by host's browser."""
-    lobby = _require_lobby(code)
-    _require_token(lobby.host_id, req.token)
-
-    try:
-        Archetype(req.archetype)
-    except ValueError:
-        raise HTTPException(400, f"Invalid archetype: {req.archetype}")
-
-    if len(lobby.players) >= 6:
-        raise HTTPException(400, "Lobby is full (max 6 players)")
-
-    # Assign next player_id
-    existing_ids = {int(p.id.split("_")[1]) for p in lobby.players.values() if p.id.startswith("player_")}
-    next_idx = 0
-    while next_idx in existing_ids:
-        next_idx += 1
-    player_id = f"player_{next_idx}"
-
-    local_player = LobbyPlayer(
-        id=player_id,
-        name=req.name[:12],
-        archetype=req.archetype,
-        color=_next_available_color(lobby),
-        is_local=True,
-    )
-    lobby.players[player_id] = local_player
     if lobby.player_order:
         lobby.player_order.append(player_id)
     lobby.touch()
@@ -817,7 +762,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
         except Exception:
             manager.disconnect(game.id, pid)
 
-    # Host response: include hands for host + all local players
+    # Host response: include only host's own hand
     host_visible = get_visible_player_ids(game.id, lobby.host_id)
     return {
         "game_id": game.id,
@@ -861,10 +806,32 @@ async def lobby_websocket(ws: WebSocket, code: str, player_id: str, token: str) 
         else:
             await ws.send_json({"type": "lobby_update", "lobby": lobby.to_dict()})
 
-        # Keep connection alive — just read and discard client messages
+        # Keep connection alive — parse incoming messages for cursor updates
         while True:
-            await ws.receive_text()
+            raw = await ws.receive_text()
             lobby.touch()
+            try:
+                import json as _json
+                msg = _json.loads(raw)
+                msg_type = msg.get("type")
+                if msg_type == "cursor_update" and lobby.game_id:
+                    # Look up player color from the game state
+                    game = await _get_store().get(lobby.game_id)
+                    player_color = "#666"
+                    player_name = player_id
+                    if game and player_id in game.players:
+                        player_color = game.players[player_id].color
+                        player_name = game.players[player_id].name
+                    await manager.send_to_others(group_id, player_id, {
+                        "type": "cursor_update",
+                        "player_id": player_id,
+                        "player_name": player_name,
+                        "player_color": player_color,
+                        "hovered_card_id": msg.get("hovered_card_id"),
+                        "source": msg.get("source"),
+                    })
+            except Exception:
+                pass  # Non-JSON or malformed — ignore
     except WebSocketDisconnect:
         manager.disconnect(group_id, player_id)
     except Exception:
@@ -904,7 +871,6 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
 
     from app.game_engine.game_state import (
         Phase,
-        _advance_buyer,
         _transition_to_buy,
         compute_player_vp,
         end_buy_phase,
@@ -966,11 +932,10 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
             ):
                 _transition_to_buy(game)
         elif game.current_phase == Phase.BUY:
-            # If the leaving player was the current buyer, advance to next
-            if game.player_order[game.current_buyer_index] == player_id:
-                if not _advance_buyer(game):
-                    execute_end_of_turn(game)
-            elif all(p.has_ended_turn or p.has_left for p in game.players.values()):
+            # Mark leaving player as done buying
+            game.players_done_buying.add(player_id)
+            if all(pid in game.players_done_buying for pid in game.player_order):
+                game.neutral_market.finalize_selling_out()
                 execute_end_of_turn(game)
 
     # Persist state before broadcasting
