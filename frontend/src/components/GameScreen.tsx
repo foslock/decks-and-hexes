@@ -630,7 +630,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const dragReleaseRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   const [trashedCardIds, setTrashedCardIds] = useState<Set<string>>(new Set());
   // Floating action icons that animate on card play
-  const [floatingActions, setFloatingActions] = useState<{ id: number; offsetX: number; offsetY: number; type: 'spend' | 'gain' }[]>([]);
+  const [floatingActions, setFloatingActions] = useState<{ id: number; offsetX: number; offsetY: number; type: 'spend' | 'gain'; amount: number }[]>([]);
   const floatingActionIdRef = useRef(0);
   // Test mode state
   const [showTestPanel, setShowTestPanel] = useState(false);
@@ -1518,12 +1518,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         q, r, targetPlayerId, extraTargets,
         trashIndices, discardIndices,
       );
-      // Spawn floating action icon — card costs 1 action
+      // Spawn floating action icon — card costs N actions
       {
         const id = ++floatingActionIdRef.current;
         const offsetX = (Math.random() - 0.5) * 24;
         const offsetY = (Math.random() - 0.5) * 8;
-        setFloatingActions(prev => [...prev, { id, offsetX, offsetY, type: 'spend' as const }]);
+        setFloatingActions(prev => [...prev, { id, offsetX, offsetY, type: 'spend' as const, amount: card.action_cost }]);
         setTimeout(() => setFloatingActions(prev => prev.filter(a => a.id !== id)), 900);
       }
       // Spawn floating "+action" icons if the card grants actions back
@@ -1534,7 +1534,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const offsetY = (Math.random() - 0.5) * 8;
         const delay = 250 + i * 150;
         setTimeout(() => {
-          setFloatingActions(prev => [...prev, { id, offsetX, offsetY, type: 'gain' as const }]);
+          setFloatingActions(prev => [...prev, { id, offsetX, offsetY, type: 'gain' as const, amount: 1 }]);
           setTimeout(() => setFloatingActions(prev => prev.filter(a => a.id !== id)), 900);
         }, delay);
       }
@@ -3730,9 +3730,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     try {
       const resp = await api.undoCard(gameState.id, activePlayer.id, actionIndex);
       onStateUpdate(resp.state);
-      // Spawn floating "+1 action" icon
+      // Spawn floating "+N action" icon
       const id = ++floatingActionIdRef.current;
-      setFloatingActions(prev => [...prev, { id, offsetX: -20, offsetY: 0, type: 'gain' }]);
+      const undoAmount = undoCard?.action_cost ?? 1;
+      setFloatingActions(prev => [...prev, { id, offsetX: -20, offsetY: 0, type: 'gain', amount: undoAmount }]);
       setTimeout(() => setFloatingActions(prev => prev.filter(a => a.id !== id)), 900);
       // Spawn undo fly animation
       if (undoCard) {
@@ -5084,7 +5085,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       animation: 'actionFloat 850ms ease-out forwards',
                     }}
                   >
-                    {fa.type === 'gain' ? '+1 ⚡' : '−1 ⚡'}
+                    {fa.type === 'gain' ? `+${fa.amount} ⚡` : `−${fa.amount} ⚡`}
                   </span>
                 ))}
               </span>
