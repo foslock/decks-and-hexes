@@ -626,9 +626,9 @@ class TestNeutralReclaim:
 
 class TestNeutralDiplomat:
     def test_diplomat_stats(self, card_registry):
-        """Diplomat: cost 3, trash on use."""
+        """Diplomat: cost 5, trash on use."""
         card = card_registry["neutral_diplomat"]
-        assert card.buy_cost == 3
+        assert card.buy_cost == 5
         assert card.trash_on_use is True
 
 

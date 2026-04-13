@@ -1,7 +1,7 @@
 {
   "name": "card-clash-frontend",
   "private": true,
-  "version": "0.1.99",
+  "version": "0.1.104",
   "type": "module",
   "scripts": {
     "dev": "vite",

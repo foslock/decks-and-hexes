@@ -8,6 +8,7 @@ import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
+import { useCardZoom } from './CardZoomContext';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -70,6 +71,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
   const color = getCardDisplayColor(displayCard);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const [flashAdded, setFlashAdded] = useState(false);
+  const { showZoom } = useCardZoom();
   return (
     <div
       onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
@@ -80,6 +82,8 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
           onShiftClick(card.id);
           setFlashAdded(true);
           setTimeout(() => setFlashAdded(false), 400);
+        } else {
+          showZoom(displayCard);
         }
       }}
       style={{
@@ -90,7 +94,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
         borderRadius: 6,
         color: '#fff',
         flexShrink: 0,
-        cursor: onShiftClick ? 'pointer' : undefined,
+        cursor: 'pointer',
         transition: 'background 0.2s, border-color 0.2s',
       }}
     >
@@ -140,6 +144,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
 function BrowserCardFull({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const [flashAdded, setFlashAdded] = useState(false);
+  const { showZoom } = useCardZoom();
   return (
     <div
       onClick={(e) => {
@@ -148,11 +153,13 @@ function BrowserCardFull({ card, shiftHeld, onShiftClick }: { card: Card; shiftH
           onShiftClick(card.id);
           setFlashAdded(true);
           setTimeout(() => setFlashAdded(false), 400);
+        } else {
+          showZoom(displayCard);
         }
       }}
       style={{
         flexShrink: 0,
-        cursor: onShiftClick ? 'pointer' : undefined,
+        cursor: 'pointer',
         borderRadius: 8,
         outline: flashAdded ? '2px solid #4a4' : 'none',
         transition: 'outline 0.2s',
@@ -345,20 +352,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
                 Type
               </button>
             </div>
-            <div className="cb-hide-narrow" style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
-              <button
-                onClick={() => setFullView(false)}
-                style={{ padding: '3px 10px', background: !fullView ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
-              >
-                Compact
-              </button>
-              <button
-                onClick={() => setFullView(true)}
-                style={{ padding: '3px 10px', background: fullView ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
-              >
-                Full
-              </button>
-            </div>
+            {/* Click any card to view full details */}
             <button
               onClick={onClose}
               style={{ padding: '4px 10px', background: '#2a2a3e', border: '1px solid #555', borderRadius: 5, color: '#aaa', fontSize: 13, cursor: 'pointer' }}
@@ -414,9 +408,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
               {!collapsed[group.archetype] && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
                   {group.cards.map((card) => (
-                    fullView
-                      ? <BrowserCardFull key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} />
-                      : <BrowserCardCompact key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} />
+                    <BrowserCardCompact key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} />
                   ))}
                 </div>
               )}

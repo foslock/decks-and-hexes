@@ -458,3 +458,22 @@ cards:
         timing: on_resolution
         duration: 1
 
+  - id: fortress_aegis
+    name: Aegis
+    name_upgraded: Aegis+
+    type: Defense
+    buy_cost: 10
+    action_return: 0
+    action_cost: 3
+    power: 0
+    defense_bonus: 5
+    upgraded_defense_bonus: 6
+    defense_target_count: 4
+    upgraded_defense_target_count: 5
+    unique: true
+    effect: "Four tiles you own gain +5 defense this round. Costs 3 actions to play."
+    effect_upgraded: "Five tiles you own gain +6 defense this round. Costs 3 actions to play."
+    secondary_effect: null
+    secondary_timing: null
+    note: "The ultimate defensive play. Locks down a huge swath of territory for one round. Unique — only one copy allowed per deck."
+

@@ -10,6 +10,7 @@ import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
 import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
+import { useCardZoom } from './CardZoomContext';
 
 const CARD_EMOJI: Record<string, string> = {
   claim: '⚔️',
@@ -106,6 +107,7 @@ function CompactShopCard({
   /** Tooltip text for current-turn purchases by other players */
   currentTurnPurchaseInfo?: Array<{ playerName: string; count: number }>;
 }) {
+  const { showZoom } = useCardZoom();
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
   const typeColor = getCardDisplayColor(card);
@@ -154,6 +156,7 @@ function CompactShopCard({
       data-card-id={card.id}
       onMouseEnter={(e) => onHover(e, card, effectiveCost)}
       onMouseLeave={onLeave}
+      onClick={() => showZoom(card)}
       style={{
         display: 'flex',
         flexDirection: 'column',

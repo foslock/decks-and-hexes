@@ -225,6 +225,7 @@ export interface LobbyConfig {
   card_pack: string;
   max_rounds: number;
   map_seed: string;
+  archetype_market_size: number;
 }
 
 export interface LobbyState {

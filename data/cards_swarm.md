@@ -443,3 +443,22 @@ cards:
     effects:
       - type: abandon_tile
         timing: on_resolution
+
+  - id: swarm_el_dorado
+    name: El Dorado
+    name_upgraded: El Dorado+
+    type: Engine
+    buy_cost: 10
+    action_return: 0
+    action_cost: 3
+    power: 0
+    resource_gain: 5
+    upgraded_resource_gain: 7
+    draw_cards: 5
+    upgraded_draw_cards: 7
+    unique: true
+    effect: "Gain 5 resources. Draw 5 cards. Costs 3 actions to play."
+    effect_upgraded: "Gain 7 resources. Draw 7 cards. Costs 3 actions to play."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Massive single-turn refuel. Burns nearly your entire turn but floods your hand and economy. Unique — only one copy allowed per deck."

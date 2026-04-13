@@ -7,6 +7,7 @@ import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
 import { useWebSocket } from './hooks/useWebSocket';
 import * as api from './api/client';
+import { CardZoomProvider } from './components/CardZoomContext';
 
 /** Catches render-time crashes so the whole app doesn't white-screen. */
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -69,7 +70,9 @@ function saveSession(screen: AppScreen | null) {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppInner />
+      <CardZoomProvider>
+        <AppInner />
+      </CardZoomProvider>
     </ErrorBoundary>
   );
 }

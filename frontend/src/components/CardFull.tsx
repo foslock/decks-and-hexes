@@ -40,6 +40,11 @@ const CARD_ART: Record<string, string> = {
   vanguard_counterattack: '↩️',
   vanguard_rearguard: '🛡️',
   vanguard_financier: '🏦',
+  vanguard_arms_dealer: '🏪',
+  vanguard_demon_pact: '😈',
+  vanguard_ultimatum: '⚠️',
+  vanguard_war_economy: '🏭',
+  vanguard_war_tithe: '💸',
 
   // ── Swarm ──
   swarm_scout: '👁️',
@@ -62,6 +67,12 @@ const CARD_ART: Record<string, string> = {
   swarm_locust_swarm: '🦗',
   swarm_consecrate: '⛪',
   swarm_war_trophies: '🏅',
+  swarm_colony: '🏘️',
+  swarm_el_dorado: '🌟',
+  swarm_exodus: '🚶',
+  swarm_heady_brew: '🍺',
+  swarm_infestation: '🪲',
+  swarm_plague: '☠️',
 
   // ── Fortress ──
   fortress_fortify: '🧱',
@@ -82,6 +93,14 @@ const CARD_ART: Record<string, string> = {
   fortress_iron_discipline: '⚖️',
   fortress_fortified_position: '🏅',
   fortress_diplomacy: '🕊️',
+  fortress_aegis: '🔰',
+  fortress_catch_up: '🏃',
+  fortress_mulligan: '🔄',
+  fortress_robin_hood: '🏹',
+  fortress_scorched_retreat: '🔥',
+  fortress_snowy_holiday: '❄️',
+  fortress_toll_road: '🛤️',
+  fortress_warden: '💂',
 
   // ── Neutral ──
   neutral_explore: '🧭',
@@ -106,7 +125,21 @@ const CARD_ART: Record<string, string> = {
   neutral_siege_tower: '🏗️',
   neutral_reclaim: '💱',
   neutral_diplomat: '🤝',
-  fortress_catch_up: '🏃',
+  neutral_ambush: '🗡️',
+  neutral_cartographer: '🗺️',
+  neutral_conqueror: '⚔️',
+  neutral_dividends: '💰',
+  neutral_moat: '🏊',
+  neutral_mobilize: '🎺',
+  neutral_palisade: '🪵',
+  neutral_spyglass: '🔍',
+  neutral_supply_depot: '📦',
+  neutral_tax_collector: '🪙',
+
+  // ── Special ──
+  debt: '⛓️',
+  rubble: '🪨',
+  spoils: '💎',
 };
 
 const ARCHETYPE_LABEL: Record<string, string> = {
@@ -133,6 +166,33 @@ function getCardArt(id: string, cardType: string): string {
     if (CARD_ART[key]) return CARD_ART[key];
   }
   return TYPE_EMOJI[cardType] || '📄';
+}
+
+/** Resolve the image URL for a card, stripping instance suffixes.
+ *  Images are auto-detected: just drop a .png in /public/cards/ named by base card ID. */
+function getCardImageUrl(id: string): string {
+  // Strip instance suffixes to get the base card ID
+  let key = id;
+  // Try exact ID first, then progressively shorter prefixes
+  // The <img> onError handler falls back to emoji if the file doesn't exist
+  while (key.includes('_')) {
+    key = key.substring(0, key.lastIndexOf('_'));
+  }
+  // Use the longest matching prefix that looks like a card ID
+  // For cards like "neutral_explore_start_adv_0", we want "neutral_explore"
+  // For cards like "debt", we want "debt"
+  return `/cards/${getBaseCardId(id)}.png`;
+}
+
+/** Strip instance suffixes to get the base card ID (e.g. "neutral_explore_start_adv_0" → "neutral_explore") */
+function getBaseCardId(id: string): string {
+  if (CARD_ART[id]) return id;
+  let key = id;
+  while (key.includes('_')) {
+    key = key.substring(0, key.lastIndexOf('_'));
+    if (CARD_ART[key]) return key;
+  }
+  return id;
 }
 
 /** Standard card width for all full card views */
@@ -184,6 +244,45 @@ const STAT_NOTE_TOOLTIPS: Record<string, string> = {
 function extractKeywords(card: Card): { keyword: string; definition: string }[] {
   const combined = [card.description || '', ...buildStatNotes(card)].join(' ');
   return extractKeywordsFromText(combined);
+}
+
+/** Art slot that tries to load a card image, falling back to emoji on error.
+ *  Just drop a .png in public/cards/ named by base card ID — no config needed. */
+function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
+  cardId: string; cardName: string; cardType: string; typeColor: string;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const imgUrl = getCardImageUrl(cardId);
+
+  const hasImage = !imgFailed;
+
+  return (
+    <div style={{
+      width: '100%',
+      height: 100,
+      borderRadius: 8,
+      border: `1px solid ${hasImage ? typeColor + '66' : typeColor + '44'}`,
+      background: '#151530',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 52,
+      userSelect: 'none',
+      flexShrink: 0,
+      overflow: 'hidden',
+    }}>
+      {hasImage ? (
+        <img
+          src={imgUrl}
+          alt={cardName}
+          onError={() => setImgFailed(true)}
+          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      ) : (
+        getCardArt(cardId, cardType)
+      )}
+    </div>
+  );
 }
 
 export default function CardFull({ card, effectiveCost, remaining, style, showKeywordHints }: CardFullProps) {
@@ -310,22 +409,8 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
         </div>
       </div>
 
-      {/* Art placeholder */}
-      <div style={{
-        width: '100%',
-        height: 100,
-        borderRadius: 8,
-        border: `2px solid ${typeColor}44`,
-        background: '#151530',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 52,
-        userSelect: 'none',
-        flexShrink: 0,
-      }}>
-        {getCardArt(card.id, card.card_type)}
-      </div>
+      {/* Card art — tries image file, falls back to emoji */}
+      <CardArtSlot cardId={card.id} cardName={card.name} cardType={card.card_type} typeColor={typeColor} />
 
       {/* Archetype — Type line */}
       <div style={{

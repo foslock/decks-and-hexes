@@ -105,7 +105,7 @@ cards:
     name: Land Grant
     name_upgraded: Land Grant+
     type: Passive
-    buy_cost: 5
+    buy_cost: 7
 
     action_return: 0
     power: 0
@@ -434,7 +434,7 @@ cards:
     name: Diplomat
     name_upgraded: Diplomat+
     type: Engine
-    buy_cost: 3
+    buy_cost: 5
 
     action_return: 0
     power: 0

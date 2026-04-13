@@ -1555,3 +1555,76 @@ register_handler(EffectType.SWAP_DRAW_DISCARD, _handle_swap_draw_discard)
 register_handler(EffectType.ABANDON_TILE, _handle_abandon_tile)
 register_handler(EffectType.ABANDON_AND_BLOCK, _handle_abandon_and_block)
 register_handler(EffectType.MANDATORY_SELF_TRASH, _handle_mandatory_self_trash)
+
+
+def _handle_trash_gain_power(effect: Effect, ctx: EffectContext) -> None:
+    """Arms Dealer: trash 1 card from hand. If it was a Claim card, gain
+    resources equal to double its effective power and gain action(s)."""
+    if not ctx.player.hand:
+        ctx.game._log(f"{ctx.player.name}: no cards to trash, skipping",
+                      visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+
+    indices = ctx.trash_card_indices[:1]
+    if not indices:
+        if ctx.player.hand:
+            ctx.game._log(
+                f"{ctx.player.name}: no trash choice provided for {ctx.card.name}, skipping",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+        return
+
+    idx = indices[0]
+    if 0 <= idx < len(ctx.player.hand):
+        trashed_card = ctx.player.hand[idx]
+        if trashed_card.trash_immune:
+            ctx.game._log(
+                f"{ctx.player.name}: {trashed_card.name} is immune to trashing, skipping",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+            return
+        trashed_card = ctx.player.hand.pop(idx)
+        ctx.player.trash.append(trashed_card)
+
+        if trashed_card.card_type == CardType.CLAIM:
+            # Use effective power (includes upgrades and printed modifiers)
+            power = trashed_card.effective_power
+            multiplier = int(effect.metadata.get("multiplier", 2))
+            resources_gained = power * multiplier
+            ctx.player.resources += resources_gained
+
+            action_key = "upgraded_claim_action_return" if ctx.card.is_upgraded else "claim_action_return"
+            actions_gained = int(effect.metadata.get(action_key, 1))
+            ctx.player.actions_available += actions_gained
+
+            ctx.game._log(
+                f"{ctx.player.name} trashes {trashed_card.name} (Claim, power {power}) "
+                f"and gains {resources_gained} resources and {actions_gained} action(s)",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+        else:
+            ctx.game._log(
+                f"{ctx.player.name} trashes {trashed_card.name} (not a Claim card — no bonus)",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+register_handler(EffectType.TRASH_GAIN_POWER, _handle_trash_gain_power)
+
+
+def _handle_resources_per_tiles_owned(effect: Effect, ctx: EffectContext) -> None:
+    """War Economy: gain 1 resource per N tiles owned."""
+    if not ctx.game.grid:
+        return
+    tile_count = sum(
+        1 for tile in ctx.game.grid.tiles.values()
+        if tile.owner == ctx.player.id
+    )
+    divisor = effect.effective_value(ctx.card.is_upgraded)
+    if divisor <= 0:
+        divisor = 4
+    gained = tile_count // divisor
+    ctx.player.resources += gained
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} gains {gained} resources "
+        f"({tile_count} tiles / {divisor})",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+register_handler(EffectType.RESOURCES_PER_TILES_OWNED, _handle_resources_per_tiles_owned)

@@ -8,6 +8,7 @@ import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
+import { useCardZoom } from './CardZoomContext';
 
 export interface PlayTarget {
   cardId: string;
@@ -156,6 +157,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = getCardDisplayColor(displayCard);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
+  const { showZoom } = useCardZoom();
   const upgradeLabel = shiftHeld && hasUpgradePreview(card) ? (
     <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 4 }}>
       Upgraded
@@ -166,6 +168,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
       <div
         onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
         onPointerLeave={() => setHoverRect(null)}
+        onClick={() => showZoom(displayCard)}
         style={{
           width: 154,
           padding: 6,
@@ -174,6 +177,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
           borderRadius: 6,
           color: '#fff',
           flexShrink: 0,
+          cursor: 'pointer',
         }}
       >
         <div>
@@ -221,7 +225,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
     );
   }
   return (
-    <div style={{ flexShrink: 0 }}>
+    <div style={{ flexShrink: 0, cursor: 'pointer' }} onClick={() => showZoom(displayCard)}>
       <CardFull card={displayCard} style={{ flexShrink: 0 }} />
       {upgradeLabel}
     </div>
@@ -342,20 +346,6 @@ export function CardViewPopup({
           </span>
           {note && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>{note}</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
-              <button
-                onClick={() => toggleView(false)}
-                style={{ padding: '3px 10px', background: !fullView ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
-              >
-                Compact
-              </button>
-              <button
-                onClick={() => toggleView(true)}
-                style={{ padding: '3px 10px', background: fullView ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
-              >
-                Full
-              </button>
-            </div>
             <button
               onClick={onClose}
               style={{ padding: '4px 10px', background: '#2a2a3e', border: '1px solid #555', borderRadius: 5, color: '#aaa', fontSize: 13, cursor: 'pointer' }}
@@ -387,7 +377,7 @@ export function CardViewPopup({
                     ? group.items
                     : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name))
                   ).map((card, i) => (
-                    <CardPopupItem key={`${card.id}-${i}`} card={card} full={fullView} shiftHeld={shiftHeld} />
+                    <CardPopupItem key={`${card.id}-${i}`} card={card} full={false} shiftHeld={shiftHeld} />
                   ))}
                 </div>
               )}
