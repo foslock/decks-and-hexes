@@ -13,7 +13,7 @@ import ResolveOverlay from './ResolveOverlay';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
 import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
-import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } from './SettingsContext';
+import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed, useBackgroundImages } from './SettingsContext';
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
@@ -602,6 +602,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const animationMode = useAnimationMode();
   const animationOff = useAnimationOff();
   const animSpeed = useAnimationSpeed();
+  const bgEnabled = useBackgroundImages();
+  // Pick one of 4 game background images based on map seed
+  const gameBgIndex = useMemo(() => {
+    const seed = gameState.map_seed || '';
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
+    return (Math.abs(hash) % 4) + 1;
+  }, [gameState.map_seed]);
   const sound = useSound();
   const { showZoom } = useCardZoom();
   // Helper: find the first human player index
@@ -3750,7 +3758,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [phase, activePlayer, undoableTiles, gameState.id, onStateUpdate]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', background: '#1a1a2e', color: '#fff' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', background: '#1a1a2e', color: '#fff', ...(bgEnabled ? { backgroundImage: `url(/backgrounds/bg-game-${gameBgIndex}.png)`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}) }}>
       {/* Full-width grid area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div
