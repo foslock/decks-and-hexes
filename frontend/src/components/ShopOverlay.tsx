@@ -193,7 +193,7 @@ function CompactShopCard({
       </div>
       {/* Buy button below card */}
       <IrreversibleButton
-        onClick={onBuy}
+        onClick={(e) => { e.stopPropagation(); onBuy(); }}
         disabled={disabled || !canAfford || soldOut}
         tooltip={buyTooltip}
         tooltipDelay={undefined}
