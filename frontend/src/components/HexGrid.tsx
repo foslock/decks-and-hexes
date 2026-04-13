@@ -2345,7 +2345,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
     if (pulseG && hexContainerRef.current) {
       hexContainerRef.current.addChild(pulseG);
     }
-  }, [tiles, highlightTiles, weakHighlightTiles, activePlayerId, plannedActions, multiTileTargets, claimChevrons, connectedVpTiles, buildProgress, renderTiles]);
+  }, [tiles, highlightTiles, weakHighlightTiles, activePlayerId, plannedActions, multiTileTargets, claimChevrons, connectedVpTiles, buildProgress, bgEnabled, renderTiles]);
 
   // Refresh tooltip when planned actions change (e.g. after undo)
   useEffect(() => {
