@@ -22,6 +22,7 @@ import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from '
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
 import { useCardZoom } from './CardZoomContext';
+import { computeVpBreakdown } from '../utils/vpBreakdown';
 
 /** Check if an engine card needs an opponent target (forced discard or inject rubble). */
 function needsOpponentTarget(card: Card): boolean {
@@ -743,6 +744,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Review phase state (between resolve animations and buy phase)
   const handleDoneReviewingRef = useRef<(() => void) | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [reviewCountdown, setReviewCountdown] = useState<number | null>(null);
   const revealedActionsRef = useRef<Record<string, import('../types/game').PlannedAction[]> | null>(null);
   const [reviewHoveredTile, setReviewHoveredTile] = useState<string | null>(null);
   const [reviewTilePopupPos, setReviewTilePopupPos] = useState<{ x: number; y: number } | null>(null);
@@ -2688,6 +2690,28 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [advanceAndShowBuy, shouldCycle, gameState, activePlayerId, activePlayerIndex, homePlayerIndex, localPlayerIds, onStateUpdate]);
   handleDoneReviewingRef.current = handleDoneReviewing;
 
+  // Review countdown: 30s auto-accept timer when "Done Reviewing" button is visible
+  const reviewButtonVisible = reviewing && !resolving && !activePlayer?.has_acknowledged_resolve;
+  useEffect(() => {
+    if (reviewButtonVisible) {
+      setReviewCountdown(30);
+    } else {
+      setReviewCountdown(null);
+    }
+  }, [reviewButtonVisible]);
+
+  useEffect(() => {
+    if (reviewCountdown === null || reviewCountdown <= 0) return;
+    const timer = setTimeout(() => setReviewCountdown(c => c !== null ? c - 1 : null), 1000);
+    return () => clearTimeout(timer);
+  }, [reviewCountdown]);
+
+  useEffect(() => {
+    if (reviewCountdown === 0) {
+      handleDoneReviewingRef.current?.();
+    }
+  }, [reviewCountdown]);
+
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
     setBannerLabelOverride(null);
@@ -3877,6 +3901,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                           onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                           vpTarget={gameState.vp_target}
+                          vpBreakdown={computeVpBreakdown(gameState, pid)}
                         />
                       </div>
                     );
@@ -3902,6 +3927,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                         onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                         vpTarget={gameState.vp_target}
+                        vpBreakdown={computeVpBreakdown(gameState, activePlayerId)}
                       />
                     );
                   })()}
@@ -4754,7 +4780,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   animation: 'pulseGlowGreen 2s ease-in-out infinite',
                 }}
               >
-                Done Reviewing ✓
+                Done Reviewing{reviewCountdown !== null && reviewCountdown > 0 ? ` (${reviewCountdown}s)` : ''} ✓
               </button>
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayerId === gameState.current_buyer_id && !activePlayer.has_ended_turn && (
