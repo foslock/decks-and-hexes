@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import type { HexTile, Card } from '../types/game';
-import { useTooltips } from './SettingsContext';
+import { useTooltips, useBackgroundImages } from './SettingsContext';
 import CompactCard, { COMPACT_CARD_WIDTH } from './CompactCard';
 
 // Flat-top hex geometry
@@ -425,6 +425,9 @@ function lightenColor(color: number, amount: number): number {
 }
 
 export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles }: HexGridProps) {
+  const bgEnabled = useBackgroundImages();
+  const bgEnabledRef = useRef(bgEnabled);
+  bgEnabledRef.current = bgEnabled;
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
@@ -1764,7 +1767,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
         textChildrenRef.current.push(group);
       }
 
-      if (tile.is_blocked) {
+      if (tile.is_blocked && !bgEnabledRef.current) {
         // Deterministic pseudo-random flip based on tile coords for visual variety
         const flipHash = ((tile.q * 7 + tile.r * 13) & 1) === 0;
         // Wrap in a Container at the tile center so counter-rotation keeps it centered
