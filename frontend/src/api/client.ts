@@ -70,6 +70,17 @@ export async function playCard(
   });
 }
 
+export async function undoCard(
+  gameId: string,
+  playerId: string,
+  actionIndex: number,
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/undo-card`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, action_index: actionIndex }),
+  });
+}
+
 export async function submitDiscard(
   gameId: string,
   playerId: string,
@@ -224,18 +235,6 @@ export async function updateLobbyPlayer(
   return request(`/lobby/${code}/player/${playerId}`, {
     method: 'PATCH',
     body: JSON.stringify({ ...updates, token }),
-  });
-}
-
-export async function addLocalPlayer(
-  code: string,
-  token: string,
-  name: string,
-  archetype: string,
-): Promise<{ lobby: LobbyState }> {
-  return request(`/lobby/${code}/local-player`, {
-    method: 'POST',
-    body: JSON.stringify({ name, archetype, token }),
   });
 }
 

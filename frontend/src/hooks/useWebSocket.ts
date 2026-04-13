@@ -12,6 +12,7 @@ interface UseWebSocketResult {
   lastMessage: WsMessage | null;
   status: WsStatus;
   reconnect: () => void;
+  send: (data: object) => void;
 }
 
 const MAX_RETRIES = 5;
@@ -135,6 +136,12 @@ export function useWebSocket(
     };
   }, [code, playerId, onTokenRefresh]);
 
+  const send = useCallback((data: object) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(data));
+    }
+  }, []);
+
   const reconnect = useCallback(() => {
     retriesRef.current = 0;
     rejoinAttemptedRef.current = false;
@@ -159,5 +166,5 @@ export function useWebSocket(
     };
   }, [connect, clearReconnectTimer]);
 
-  return { lastMessage, status, reconnect };
+  return { lastMessage, status, reconnect, send };
 }

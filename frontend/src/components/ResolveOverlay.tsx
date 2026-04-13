@@ -95,19 +95,29 @@ export default function ResolveOverlay({ steps, gridTransform, gridRect, gridCon
   if (step && gridTransform && gridRect) {
     const target = toScreen(step.q, step.r);
 
+    // Group claimants by player — stacked claims render one combined power number.
+    // power_by_player is already the combined total, so we just deduplicate.
+    const grouped = new Map<string, { power: number; sourceQ: number; sourceR: number }>();
     for (const claimant of step.claimants) {
-      const srcQ = claimant.source_q ?? step.q;
-      const srcR = claimant.source_r ?? step.r;
-      const src = toScreen(srcQ, srcR);
+      if (!grouped.has(claimant.player_id)) {
+        grouped.set(claimant.player_id, {
+          power: claimant.power,
+          sourceQ: claimant.source_q ?? step.q,
+          sourceR: claimant.source_r ?? step.r,
+        });
+      }
+    }
+    for (const [playerId, info] of grouped) {
+      const src = toScreen(info.sourceQ, info.sourceR);
       numbers.push({
-        playerId: claimant.player_id,
-        power: claimant.power,
+        playerId,
+        power: info.power,
         startX: src.x,
         startY: src.y,
         endX: target.x,
         endY: target.y,
-        isWinner: claimant.player_id === step.winner_id,
-        isDefender: claimant.player_id === step.defender_id,
+        isWinner: playerId === step.winner_id,
+        isDefender: playerId === step.defender_id,
       });
     }
     // If there's a defender who wasn't in claimants, add their number

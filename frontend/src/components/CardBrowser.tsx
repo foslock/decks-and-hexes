@@ -7,7 +7,7 @@ import { getUpgradedPreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useShiftKey } from '../hooks/useShiftKey';
-import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 import { useCardZoom } from './CardZoomContext';
 
 const CARD_EMOJI: Record<string, string> = {
@@ -100,7 +100,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
     >
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+          <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
             <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
               if (el) {
                 const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);

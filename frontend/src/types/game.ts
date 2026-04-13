@@ -30,6 +30,7 @@ export interface Card {
   trash_immune?: boolean;
   stackable: boolean;
   granted_stackable?: boolean;
+  reversible?: boolean;
   forced_discard: number;
   draw_cards: number;
   defense_bonus: number;
@@ -114,6 +115,26 @@ export interface Player {
 export interface MarketStack {
   card: Card;
   remaining: number;
+  selling_out?: boolean;
+  selling_out_bought_by?: string[];
+}
+
+export interface CursorPosition {
+  player_id: string;
+  player_name: string;
+  player_color: string;
+  hovered_card_id: string | null;
+  source: string | null;
+}
+
+export interface NeutralPurchaseEvent {
+  player_id: string;
+  player_name: string;
+  player_color: string;
+  card_id: string;
+  card_name: string;
+  card: Card;
+  isSelf?: boolean;
 }
 
 export interface ResolutionClaimant {
@@ -186,8 +207,7 @@ export interface GameState {
   test_mode?: boolean;
   neutral_purchases_last_round?: NeutralPurchaseRecord[];
   revealed_actions?: Record<string, PlannedAction[]>;
-  current_buyer_index: number;
-  current_buyer_id: string | null;
+  players_done_buying: string[];
   buy_phase_purchases: Record<string, Array<{
     card_id: string;
     card_name: string;
@@ -210,7 +230,6 @@ export interface LobbyPlayer {
   color: string;
   is_cpu: boolean;
   is_host: boolean;
-  is_local: boolean;
   has_returned: boolean;
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
 }

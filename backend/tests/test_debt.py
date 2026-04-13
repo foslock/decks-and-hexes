@@ -72,9 +72,9 @@ def _skip_to_end_of_turn(game):
         submit_play(game, pid)
     for pid in game.player_order:
         advance_resolve(game, pid)
-    for _ in game.player_order:
-        buyer = game.player_order[game.current_buyer_index]
-        end_buy_phase(game, buyer)
+    for pid in game.player_order:
+        if pid not in game.players_done_buying:
+            end_buy_phase(game, pid)
 
 
 # ── Debt Card Properties ─────────────────────────────────────────────

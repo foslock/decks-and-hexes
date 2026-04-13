@@ -106,7 +106,7 @@ interface LobbyScreenProps {
   token: string;
   isHost: boolean;
   initialLobby: LobbyState;
-  onGameStart: (gameId: string, state: GameState, localPlayerIds?: string[]) => void;
+  onGameStart: (gameId: string, state: GameState) => void;
   onLeave: () => void;
   onTokenRefresh?: (newToken: string) => void;
 }
@@ -129,6 +129,22 @@ export default function LobbyScreen({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const seedHistoryRef = useRef<HTMLDivElement>(null);
   const [isNarrow, setIsNarrow] = useState(() => window.matchMedia('(max-width: 480px)').matches);
+
+  // Local name state for responsive typing — debounces API calls
+  const selfPlayer = lobby.players[playerId];
+  const [localName, setLocalName] = useState(selfPlayer?.name ?? '');
+  const localNameRef = useRef(localName);
+  localNameRef.current = localName;
+  const nameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Sync from server when name changes externally (e.g. another tab)
+  useEffect(() => {
+    if (selfPlayer && selfPlayer.name !== localNameRef.current) {
+      // Only sync if we don't have a pending debounce (user isn't actively typing)
+      if (!nameDebounceRef.current) {
+        setLocalName(selfPlayer.name);
+      }
+    }
+  }, [selfPlayer?.name]);
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 480px)');
     const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches);
@@ -176,11 +192,6 @@ export default function LobbyScreen({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [settingsOpen]);
   const gameStartRef = useRef(false);
-
-  // For "Add Local Player" inline form
-  const [showAddLocal, setShowAddLocal] = useState(false);
-  const [localName, setLocalName] = useState('');
-  const [localArchetype, setLocalArchetype] = useState('swarm');
 
   // Color picker state
   const [colorPickerFor, setColorPickerFor] = useState<string | null>(null);
@@ -233,13 +244,10 @@ export default function LobbyScreen({
         if (lobby.config.map_seed) {
           addRecentSeed(lobby.config.map_seed, lobby.config.grid_size);
         }
-        // Compute local player IDs from lobby state
-        const localIds = computeLocalPlayerIds(lobby, playerId, isHost);
         console.log('[Lobby] calling onGameStart with gameId:', lastMessage.game_id);
         onGameStart(
           lastMessage.game_id as string,
           lastMessage.state as unknown as GameState,
-          localIds,
         );
       }
     } else if (lastMessage.type === 'lobby_closed') {
@@ -278,18 +286,6 @@ export default function LobbyScreen({
     }
   }, [lobbyCode, token]);
 
-  const handleAddLocal = useCallback(async () => {
-    const name = localName.trim() || `Player ${players.length + 1}`;
-    try {
-      setError(null);
-      await api.addLocalPlayer(lobbyCode, token, name, localArchetype);
-      setShowAddLocal(false);
-      setLocalName('');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, [lobbyCode, token, localName, localArchetype, players.length]);
-
   const handleRemovePlayer = useCallback(async (targetId: string) => {
     try {
       setError(null);
@@ -309,9 +305,8 @@ export default function LobbyScreen({
       // Host also gets the response directly
       if (!gameStartRef.current) {
         gameStartRef.current = true;
-        const localIds = computeLocalPlayerIds(lobby, playerId, isHost);
         console.log('[Lobby] handleStart: calling onGameStart (HTTP path)');
-        onGameStart(result.game_id, result.state, localIds);
+        onGameStart(result.game_id, result.state);
       } else {
         console.log('[Lobby] handleStart: skipped — WS already handled game_start');
       }
@@ -529,8 +524,8 @@ export default function LobbyScreen({
           <h3 style={{ marginBottom: 8 }}>Players ({players.length})</h3>
           {players.map((p, playerIdx) => {
             const isSelf = p.id === playerId;
-            const canEditArchetype = isSelf || (isHost && (p.is_cpu || p.is_local));
-            const canEditColor = isSelf || (isHost && (p.is_cpu || p.is_local));
+            const canEditArchetype = isSelf || (isHost && p.is_cpu);
+            const canEditColor = isSelf || (isHost && p.is_cpu);
             const playerColor = p.color || '#888';
             const usedColors = new Set(players.map(pl => pl.color));
             const isDragging = dragIdx === playerIdx;
@@ -647,13 +642,26 @@ export default function LobbyScreen({
                     </div>
                   )}
                 </span>
-                {(isSelf || (isHost && p.is_local)) && !p.is_cpu ? (
+                {isSelf && !p.is_cpu ? (
                   <input
-                    value={p.name}
+                    value={localName}
                     maxLength={12}
                     onChange={(e) => {
-                      if (isSelf) handleUpdateSelf({ name: e.target.value });
-                      else if (isHost && p.is_local) handleUpdatePlayer(p.id, { name: e.target.value });
+                      const val = e.target.value;
+                      setLocalName(val);
+                      if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current);
+                      nameDebounceRef.current = setTimeout(() => {
+                        nameDebounceRef.current = null;
+                        handleUpdateSelf({ name: val });
+                      }, 300);
+                    }}
+                    onBlur={() => {
+                      // Flush immediately on blur so the name is saved when clicking away
+                      if (nameDebounceRef.current) {
+                        clearTimeout(nameDebounceRef.current);
+                        nameDebounceRef.current = null;
+                        handleUpdateSelf({ name: localNameRef.current });
+                      }
                     }}
                     style={{
                       flex: 1, minWidth: 0, padding: '6px 10px',
@@ -698,7 +706,7 @@ export default function LobbyScreen({
                         <button
                           onClick={() => {
                             if (isSelf) handleUpdateSelf({ archetype: arch.id });
-                            else if (isHost && (p.is_local || p.is_cpu)) handleUpdatePlayer(p.id, { archetype: arch.id });
+                            else if (isHost && p.is_cpu) handleUpdatePlayer(p.id, { archetype: arch.id });
                           }}
                           style={{
                             padding: '4px 8px',
@@ -735,14 +743,6 @@ export default function LobbyScreen({
                     HOST
                   </span>
                 )}
-                {p.is_local && (
-                  <span style={{
-                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
-                    background: '#4a9eff', color: '#fff', fontWeight: 'bold',
-                  }}>
-                    LOCAL
-                  </span>
-                )}
                 {!p.has_returned && !p.is_cpu && (
                   <span style={{
                     fontSize: 9, padding: '2px 6px', borderRadius: 6,
@@ -769,80 +769,6 @@ export default function LobbyScreen({
           })}
           {isHost && players.length < 6 && (
             <div style={{ marginTop: 8 }}>
-              {lobby.config.test_mode && (!showAddLocal ? (
-                <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                  <button
-                    onClick={() => setShowAddLocal(true)}
-                    style={{
-                      flex: 1, padding: '8px', fontSize: 12,
-                      background: '#2a3a4e', border: '1px solid #4a6a8e',
-                      borderRadius: 6, color: '#8ab4ff', cursor: 'pointer',
-                    }}
-                  >
-                    + Local Player
-                  </button>
-                </div>
-              ) : (
-                <div style={{
-                  display: 'flex', gap: 4, marginBottom: 8,
-                  padding: '8px', background: '#2a3a4e', border: '1px solid #4a6a8e', borderRadius: 6,
-                  alignItems: 'center',
-                }}>
-                  <input
-                    value={localName}
-                    maxLength={12}
-                    onChange={(e) => setLocalName(e.target.value)}
-                    placeholder={`Player ${players.length + 1}`}
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAddLocal();
-                      if (e.key === 'Escape') { setShowAddLocal(false); setLocalName(''); }
-                    }}
-                    style={{
-                      flex: 1, padding: '6px 8px', fontSize: 12,
-                      background: '#1a2a3e', border: '1px solid #444',
-                      borderRadius: 4, color: '#fff',
-                    }}
-                  />
-                  <div style={{ display: 'flex', gap: 2 }}>
-                    {ARCHETYPES.map((arch) => (
-                      <button
-                        key={arch.id}
-                        onClick={() => setLocalArchetype(arch.id)}
-                        title={arch.name}
-                        style={{
-                          padding: '3px 6px', fontSize: 13,
-                          background: localArchetype === arch.id ? '#3a3a6e' : '#2a2a3e',
-                          border: localArchetype === arch.id ? '1px solid #4a9eff' : '1px solid #444',
-                          borderRadius: 4, color: '#fff', cursor: 'pointer',
-                        }}
-                      >
-                        {arch.icon}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    onClick={handleAddLocal}
-                    style={{
-                      padding: '6px 10px', fontSize: 12,
-                      background: '#4a9eff', border: 'none',
-                      borderRadius: 4, color: '#fff', cursor: 'pointer',
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    Add
-                  </button>
-                  <button
-                    onClick={() => { setShowAddLocal(false); setLocalName(''); }}
-                    style={{
-                      padding: '6px', background: 'transparent',
-                      border: 'none', color: '#888', cursor: 'pointer', fontSize: 12,
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
               <button
                 onClick={() => handleAddCpu('vanguard')}
                 style={{
@@ -1410,14 +1336,3 @@ export default function LobbyScreen({
 
 // ── Helpers ─────────────────────────────────────────────────
 
-function computeLocalPlayerIds(lobby: LobbyState, playerId: string, isHost: boolean): string[] {
-  if (!isHost) return [playerId];
-  // Host controls themselves + all local players
-  const ids = [playerId];
-  for (const p of Object.values(lobby.players)) {
-    if (p.is_local && p.id !== playerId) {
-      ids.push(p.id);
-    }
-  }
-  return ids;
-}

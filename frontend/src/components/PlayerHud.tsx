@@ -1,6 +1,7 @@
 import { useRef, useLayoutEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Player } from '../types/game';
+import type { VpBreakdown } from '../utils/vpBreakdown';
 
 /** Renders text that shrinks (via transform scaleX) to fit a fixed max width. */
 function ShrinkText({ text, maxWidth, style }: { text: string; maxWidth: number; style?: React.CSSProperties }) {
@@ -81,6 +82,63 @@ function StatTip({ label, children, color }: { label: string; children: ReactNod
   );
 }
 
+/** VP stat with detailed breakdown tooltip (Tiles / VP Hexes / Cards). */
+function VpStatTip({ breakdown, children }: { breakdown: VpBreakdown; children: ReactNode }) {
+  const [show, setShow] = useState(false);
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!show || !anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setPos({
+      left: rect.left + rect.width / 2,
+      top: rect.top,
+    });
+  }, [show]);
+
+  return (
+    <span
+      ref={anchorRef}
+      style={{ position: 'relative', cursor: 'default' }}
+      onPointerEnter={() => setShow(true)}
+      onPointerLeave={() => { setShow(false); setPos(null); }}
+    >
+      {children}
+      {show && pos && createPortal(
+        <div ref={(el) => {
+          // Clamp to viewport after first render
+          if (el) {
+            const r = el.getBoundingClientRect();
+            if (r.left < 4) el.style.left = `${pos.left - r.left + 4}px`;
+          }
+        }} style={{
+          position: 'fixed',
+          left: pos.left,
+          top: pos.top,
+          transform: 'translate(-50%, calc(-100% - 6px))',
+          background: '#1a1a3a',
+          border: '1px solid #4a4a6a',
+          borderRadius: 8,
+          padding: '8px 12px',
+          fontSize: 12,
+          color: '#ccc',
+          pointerEvents: 'none',
+          zIndex: 20000,
+          whiteSpace: 'nowrap',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+        }}>
+          <div style={{ fontWeight: 'bold', color: '#ffd700', marginBottom: 4, fontSize: 11 }}>VP Breakdown</div>
+          <div>Tiles: {breakdown.tileCount}</div>
+          <div>VP Hexes: {breakdown.bonusTiles}</div>
+          <div>Cards: {breakdown.cards}</div>
+        </div>,
+        document.body
+      )}
+    </span>
+  );
+}
+
 interface BuyPurchase {
   card_id: string;
   card_name: string;
@@ -104,6 +162,7 @@ interface PlayerHudProps {
   onPurchaseHover?: (e: React.MouseEvent, cardId: string, cardName?: string) => void;
   onPurchaseLeave?: () => void;
   vpTarget?: number;
+  vpBreakdown?: VpBreakdown;
 }
 
 const ARCHETYPE_ICONS: Record<string, string> = {
@@ -130,7 +189,7 @@ function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { l
   return { label: raw.charAt(0).toUpperCase() + raw.slice(1), color: '#888' };
 }
 
-export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, isCurrentBuyer, phase, totalCards, tileCount, purchases, onPurchaseHover, onPurchaseLeave, vpTarget }: PlayerHudProps) {
+export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, isCurrentBuyer, phase, totalCards, tileCount, purchases, onPurchaseHover, onPurchaseLeave, vpTarget, vpBreakdown }: PlayerHudProps) {
   const status = getStatus(player, phase, isCurrentBuyer);
   const hasReachedVpTarget = vpTarget != null && player.vp >= vpTarget;
   const [showVpTooltip, setShowVpTooltip] = useState(false);
@@ -266,13 +325,23 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
 
       {/* Stats row */}
       <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', color: '#bbb' }}>
-        <StatTip label="Victory Points">
-          <span style={hasReachedVpTarget ? {
-            color: '#ffd700',
-            fontWeight: 'bold',
-            textShadow: '0 0 6px rgba(255, 255, 255, 0.6)',
-          } : undefined}>★ {player.vp}</span>
-        </StatTip>
+        {vpBreakdown ? (
+          <VpStatTip breakdown={vpBreakdown}>
+            <span style={hasReachedVpTarget ? {
+              color: '#ffd700',
+              fontWeight: 'bold',
+              textShadow: '0 0 6px rgba(255, 255, 255, 0.6)',
+            } : undefined}>★ {player.vp}</span>
+          </VpStatTip>
+        ) : (
+          <StatTip label="Victory Points">
+            <span style={hasReachedVpTarget ? {
+              color: '#ffd700',
+              fontWeight: 'bold',
+              textShadow: '0 0 6px rgba(255, 255, 255, 0.6)',
+            } : undefined}>★ {player.vp}</span>
+          </StatTip>
+        )}
         <StatTip label="Resources">💰 {player.resources}</StatTip>
         <StatTip label="Tiles Occupied">🔷 {tileCount}</StatTip>
         <StatTip label="Total Deck Size">🃏 {totalCards}</StatTip>

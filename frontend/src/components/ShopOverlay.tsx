@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import type { Card, MarketStack } from '../types/game';
+import type { Card, MarketStack, CursorPosition, NeutralPurchaseEvent } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
 import { useAnimationMode } from './SettingsContext';
@@ -9,7 +9,7 @@ import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
-import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 import { useCardZoom } from './CardZoomContext';
 
 const CARD_EMOJI: Record<string, string> = {
@@ -54,6 +54,12 @@ interface ShopOverlayProps {
   freeRerolls?: number;
   /** Names of Unique cards the player already owns (draw pile + hand + discard). */
   ownedUniqueCardNames?: Set<string>;
+  /** Other players' cursor positions (for live hover indicators) */
+  otherPlayerCursors?: Record<string, CursorPosition>;
+  /** Timestamps of cursor clicks (for pulse animation) */
+  cursorClicks?: Record<string, number>;
+  /** Called when the player hovers/leaves a card (for cursor broadcasting) */
+  onCardHoverChange?: (cardId: string | null, source: string | null) => void;
 }
 
 interface HoverState {
@@ -93,6 +99,10 @@ function CompactShopCard({
   disabledTooltip,
   purchaseHighlight,
   currentTurnPurchaseInfo,
+  sellingOut,
+  cursors,
+  cursorClicks,
+  onCardHoverChange,
 }: {
   card: Card;
   remaining: number | null;
@@ -106,6 +116,14 @@ function CompactShopCard({
   purchaseHighlight?: boolean;
   /** Tooltip text for current-turn purchases by other players */
   currentTurnPurchaseInfo?: Array<{ playerName: string; count: number }>;
+  /** Whether this stack is in selling-out state */
+  sellingOut?: boolean;
+  /** Other players' cursors hovering on this card */
+  cursors?: CursorPosition[];
+  /** Click timestamps for cursor pulse animation */
+  cursorClicks?: Record<string, number>;
+  /** Called when hover state changes for cursor broadcasting */
+  onCardHoverChange?: (hovering: boolean) => void;
 }) {
   const { showZoom } = useCardZoom();
   const displayCost = effectiveCost ?? card.buy_cost;
@@ -138,32 +156,67 @@ function CompactShopCard({
     // per slot so this effectively runs once on mount; including name and
     // current_vp guards against in-place mutations (e.g. VP updates).
   }, [card.id, card.name, card.current_vp, card.description]);
-  const buyColor = soldOut || !canAfford || disabled ? '#333' : '#4a9eff';
+  const isTrulySoldOut = soldOut && !sellingOut;
+  const buyColor = (isTrulySoldOut || !canAfford || disabled) ? '#333' : sellingOut ? '#cc8833' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase
     ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this round`).join('\n')
     : '';
-  const buyTooltip = soldOut
+  const buyTooltip = isTrulySoldOut
     ? 'Sold out'
+    : sellingOut
+    ? 'Last copy was bought! Still available to all players this round only.'
     : disabledTooltip
     ? disabledTooltip
     : [
         `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
         purchaseLines,
       ].filter(Boolean).join('\n');
-  const buyLabel = soldOut ? 'Sold Out' : remaining !== null ? `Buy (${remaining} left)` : 'Buy';
+  const buyLabel = isTrulySoldOut ? 'Sold Out' : sellingOut ? 'Selling Out!' : remaining !== null ? `Buy (${remaining} left)` : 'Buy';
   return (
     <div
       data-card-id={card.id}
-      onMouseEnter={(e) => onHover(e, card, effectiveCost)}
-      onMouseLeave={onLeave}
+      onMouseEnter={(e) => { onHover(e, card, effectiveCost); onCardHoverChange?.(true); }}
+      onMouseLeave={() => { onLeave(); onCardHoverChange?.(false); }}
       onClick={() => showZoom(card)}
       style={{
         display: 'flex',
         flexDirection: 'column',
         gap: 4,
-        opacity: soldOut ? 0.35 : disabled || !canAfford ? 0.5 : 1,
+        opacity: isTrulySoldOut ? 0.35 : disabled || !canAfford ? 0.5 : 1,
+        position: 'relative',
       }}
     >
+      {/* Other players' cursor indicators */}
+      {cursors && cursors.length > 0 && (
+        <div style={{ display: 'flex', gap: 3, position: 'absolute', top: -14, left: 4, zIndex: 5 }}>
+          {cursors.map(c => {
+            const isClicking = cursorClicks?.[c.player_id] && (Date.now() - cursorClicks[c.player_id]) < 600;
+            return (
+              <Tooltip key={c.player_id} content={c.player_name}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: c.player_color,
+                  color: '#fff',
+                  fontSize: 9,
+                  fontWeight: 'bold',
+                  boxShadow: isClicking
+                    ? `0 0 0 4px ${c.player_color}40, 0 0 12px ${c.player_color}80`
+                    : `0 0 4px ${c.player_color}60`,
+                  transition: 'box-shadow 0.3s ease',
+                  animation: isClicking ? undefined : 'cursorPulse 2s ease-in-out infinite',
+                }}>
+                  {(c.player_name.match(/[a-zA-Z]/)?.[0] ?? c.player_name.charAt(0)).toUpperCase()}
+                </span>
+              </Tooltip>
+            );
+          })}
+        </div>
+      )}
       {/* Card element — same dimensions as CardHand compact cards */}
       <div style={{
         width: COMPACT_CARD_WIDTH,
@@ -176,7 +229,7 @@ function CompactShopCard({
         overflow: 'hidden',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+          <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
             <span ref={titleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }}>
               {card.name}
             </span>
@@ -191,10 +244,29 @@ function CompactShopCard({
           </span>
         </div>
       </div>
+      {/* Selling Out badge */}
+      {sellingOut && (
+        <div style={{
+          position: 'absolute',
+          top: 2,
+          right: 2,
+          background: '#cc8833',
+          color: '#fff',
+          fontSize: 9,
+          fontWeight: 'bold',
+          padding: '1px 5px',
+          borderRadius: 4,
+          zIndex: 5,
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
+        }}>
+          Selling Out
+        </div>
+      )}
       {/* Buy button below card */}
       <IrreversibleButton
         onClick={(e) => { e.stopPropagation(); onBuy(); }}
-        disabled={disabled || !canAfford || soldOut}
+        disabled={disabled || !canAfford || isTrulySoldOut}
         tooltip={buyTooltip}
         tooltipDelay={undefined}
         style={{
@@ -206,12 +278,81 @@ function CompactShopCard({
           color: '#fff',
           fontSize: 11,
           fontWeight: 'bold',
-          cursor: disabled || !canAfford || soldOut ? 'not-allowed' : 'pointer',
+          cursor: disabled || !canAfford || isTrulySoldOut ? 'not-allowed' : 'pointer',
           ...(purchaseHighlight || hasCurrentTurnPurchase ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
         }}
       >
         {buyLabel}
       </IrreversibleButton>
+    </div>
+  );
+}
+
+/** Animated card that flies from a neutral market card to a player's HUD. */
+export function PurchaseFlyAnimation({ event, onDone }: { event: NeutralPurchaseEvent; onDone: () => void }) {
+  const [style, setStyle] = useState<React.CSSProperties>({ display: 'none' });
+
+  const typeColor = getCardDisplayColor(event.card);
+  const subtitle = buildCardSubtitle(event.card);
+  const displayCost = event.card.buy_cost;
+
+  useEffect(() => {
+    // Find source card element in the shop
+    const sourceEl = document.querySelector(`[data-card-id="${event.card_id}"]`);
+    // Self-purchases fly to discard pile; others fly to player hud
+    const destEl = event.isSelf
+      ? document.querySelector('[data-discard-pile]')
+      : document.querySelector(`[data-player-hud="${event.player_id}"]`);
+    if (!sourceEl || !destEl) {
+      onDone();
+      return;
+    }
+    const sr = sourceEl.getBoundingClientRect();
+    const dr = destEl.getBoundingClientRect();
+    const dx = (dr.left + dr.width / 2) - (sr.left + sr.width / 2);
+    const dy = (dr.top + dr.height / 2) - (sr.top + sr.height / 2);
+
+    setStyle({
+      position: 'fixed',
+      left: sr.left,
+      top: sr.top,
+      width: sr.width,
+      zIndex: 9999,
+      pointerEvents: 'none' as const,
+      ['--fly-dx' as string]: `${dx}px`,
+      ['--fly-dy' as string]: `${dy}px`,
+      animation: 'purchaseFly 800ms ease-in forwards',
+    });
+
+    const timer = setTimeout(onDone, 810);
+    return () => clearTimeout(timer);
+  }, [event, onDone]);
+
+  return (
+    <div style={style}>
+      <div style={{
+        width: COMPACT_CARD_WIDTH,
+        padding: 6,
+        background: '#2a2a3e',
+        border: `2px solid ${typeColor}`,
+        borderRadius: 6,
+        color: '#fff',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        boxShadow: `0 0 12px ${event.player_color}80, 0 2px 8px rgba(0,0,0,0.5)`,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
+          <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+            {event.card.name}
+          </div>
+          <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>
+            {displayCost != null ? `${displayCost} 💰` : '—'}
+          </span>
+        </div>
+        <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          {subtitle.map((part, i) => renderSubtitlePart(part, i, { passiveVp: event.card.passive_vp }))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -236,6 +377,9 @@ export default function ShopOverlay({
   players,
   freeRerolls = 0,
   ownedUniqueCardNames,
+  otherPlayerCursors,
+  cursorClicks,
+  onCardHoverChange,
 }: ShopOverlayProps) {
   const [hoverState, setHoverState] = useState<HoverState | null>(null);
   const [hoverVisible, setHoverVisible] = useState(false);
@@ -444,6 +588,16 @@ export default function ShopOverlay({
           0%, 100% { box-shadow: 0 0 4px rgba(255, 170, 74, 0.3); outline: 2px solid rgba(255, 170, 74, 0.3); outline-offset: -1px; }
           50% { box-shadow: 0 0 12px rgba(255, 170, 74, 0.7), 0 0 4px rgba(255, 170, 74, 0.4); outline: 2px solid rgba(255, 170, 74, 0.85); outline-offset: -1px; }
         }
+        @keyframes cursorPulse {
+          0%, 100% { transform: scale(1); opacity: 0.85; }
+          50% { transform: scale(1.15); opacity: 1; }
+        }
+        @keyframes purchaseFly {
+          0% { transform: translate(0, 0) scale(1); opacity: 1; }
+          20% { transform: translate(0, -12px) scale(1.1); opacity: 1; }
+          90% { transform: translate(calc(var(--fly-dx) * 0.95), calc(var(--fly-dy) * 0.95)) scale(0.35); opacity: 1; }
+          100% { transform: translate(var(--fly-dx), var(--fly-dy)) scale(0.3); opacity: 0; }
+        }
       `}</style>
       {/* Shop panel — centered over the entire window with backdrop */}
       <div
@@ -539,7 +693,7 @@ export default function ShopOverlay({
                       // with a "Purchased!" overlay on top
                       const cardW = COMPACT_CARD_WIDTH;
                       return (
-                        <div key={card.id} style={{
+                        <div key={card.id} data-card-id={card.id} style={{
                           width: cardW,
                           display: 'flex',
                           flexDirection: 'column',
@@ -558,7 +712,7 @@ export default function ShopOverlay({
                                     overflow: 'hidden',
                                   }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-                                      <div style={{ fontWeight: 'bold', fontSize: 16 }}>{card.name}</div>
+                                      <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT }}>{card.name}</div>
                                     </div>
                                     <div style={{ fontSize: 15, color: '#aaa' }}>&nbsp;</div>
                                   </div>
@@ -687,7 +841,14 @@ export default function ShopOverlay({
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
                   const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
                   const alreadyBoughtThisRound = myNeutralPurchasesThisRound.has(stack.card.id);
+                  const sellingOutBoughtByMe = stack.selling_out && stack.selling_out_bought_by?.includes(currentPlayerId ?? '');
                   const alreadyOwnsUnique = !!stack.card.unique && !!ownedUniqueCardNames?.has(stack.card.name);
+                  // Gather cursors hovering on this card
+                  const cardCursors = otherPlayerCursors
+                    ? Object.values(otherPlayerCursors).filter(
+                        c => c.hovered_card_id === stack.card.id && c.source === 'neutral'
+                      )
+                    : [];
                   return (
                     <CompactShopCard
                       key={stack.card.id}
@@ -698,15 +859,20 @@ export default function ShopOverlay({
                       onBuy={() => buyNeutralWithSound(stack.card.id)}
                       onHover={handleCardHover}
                       onLeave={handleCardLeave}
-                      disabled={disabled || !!buyLocked || alreadyBoughtThisRound || alreadyOwnsUnique}
+                      disabled={disabled || !!buyLocked || alreadyBoughtThisRound || !!sellingOutBoughtByMe || alreadyOwnsUnique}
                       disabledTooltip={
                         buyLocked ? 'Cannot buy — Grand Strategy was played this round.'
                         : alreadyOwnsUnique ? 'You already own a copy of this Unique card.'
+                        : sellingOutBoughtByMe ? 'Already purchased (Selling Out).'
                         : alreadyBoughtThisRound ? 'Already purchased this round (limit 1 copy per round).'
                         : undefined
                       }
                       purchaseHighlight={!!purchasedBy}
                       currentTurnPurchaseInfo={turnPurchases}
+                      sellingOut={stack.selling_out}
+                      cursors={cardCursors}
+                      cursorClicks={cursorClicks}
+                      onCardHoverChange={onCardHoverChange ? (hovering) => onCardHoverChange(hovering ? stack.card.id : null, hovering ? 'neutral' : null) : undefined}
                     />
                   );
                 })}
@@ -715,7 +881,47 @@ export default function ShopOverlay({
 
             {/* Upgrade Credit — below shared market */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-              <div style={{ position: 'relative', flexShrink: 0 }}>
+              <div
+                style={{ position: 'relative', flexShrink: 0 }}
+                onMouseEnter={() => onCardHoverChange?.('__upgrade_credit', 'neutral')}
+                onMouseLeave={() => onCardHoverChange?.(null, null)}
+              >
+                {/* Other players' cursor indicators */}
+                {otherPlayerCursors && (() => {
+                  const upgCursors = Object.values(otherPlayerCursors).filter(
+                    c => c.hovered_card_id === '__upgrade_credit' && c.source === 'neutral'
+                  );
+                  return upgCursors.length > 0 ? (
+                    <div style={{ display: 'flex', gap: 3, position: 'absolute', top: -14, left: 4, zIndex: 5 }}>
+                      {upgCursors.map(c => {
+                        const isClicking = cursorClicks?.[c.player_id] && (Date.now() - cursorClicks[c.player_id]) < 600;
+                        return (
+                          <Tooltip key={c.player_id} content={c.player_name}>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              width: 16,
+                              height: 16,
+                              borderRadius: '50%',
+                              background: c.player_color,
+                              color: '#fff',
+                              fontSize: 9,
+                              fontWeight: 'bold',
+                              boxShadow: isClicking
+                                ? `0 0 0 4px ${c.player_color}40, 0 0 12px ${c.player_color}80`
+                                : `0 0 4px ${c.player_color}60`,
+                              transition: 'box-shadow 0.3s ease',
+                              animation: isClicking ? undefined : 'cursorPulse 2s ease-in-out infinite',
+                            }}>
+                              {(c.player_name.match(/[a-zA-Z]/)?.[0] ?? c.player_name.charAt(0)).toUpperCase()}
+                            </span>
+                          </Tooltip>
+                        );
+                      })}
+                    </div>
+                  ) : null;
+                })()}
                 {showCreditFloat && (
                   <>
                     <style>{`

@@ -56,6 +56,7 @@ cards:
     type: Defense
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 0
     defense_bonus: 2
     defense_target_count: 2
@@ -72,6 +73,7 @@ cards:
     type: Claim
     buy_cost: 4
     action_return: 0
+    reversible: true
     power: 3
     upgraded_power: 4
     effect: "Claim: Power 3. Ignores temporary defense bonuses on targeted tile."
@@ -89,6 +91,7 @@ cards:
     type: Defense
     buy_cost: 4
     action_return: 0
+    reversible: true
     power: 0
     defense_target_count: 1
     upgraded_defense_target_count: 2
@@ -108,6 +111,7 @@ cards:
     type: Claim
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 3
     effect: "Claim: Power 3. If defending an owned tile, power is 5 instead."
     effect_upgraded: "Claim: Power 4. If defending an owned tile, power is 7 instead."
@@ -127,6 +131,7 @@ cards:
     type: Claim
     buy_cost: 4
     action_return: 0
+    reversible: true
     power: 2
     upgraded_power: 4
     effect: "Claim: Power 2. If the targeted tile is neutral, Power 4."
@@ -165,6 +170,7 @@ cards:
     type: Defense
     buy_cost: 1
     action_return: 0
+    reversible: true
     power: 0
     defense_bonus: 0
     effect: "One tile you own permanently gains +1 defense until it is captured."
@@ -186,6 +192,7 @@ cards:
     type: Claim
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 2
     effect: "Claim: Power 2. If the defender holds, they draw 1 fewer card next round."
     effect_upgraded: "Claim: Power 3. If the defender holds, they draw 1 fewer card next round."
@@ -204,6 +211,7 @@ cards:
     type: Defense
     buy_cost: 6
     action_return: 0
+    reversible: true
     power: 0
     defense_target_count: 1
     upgraded_defense_target_count: 2
@@ -223,6 +231,7 @@ cards:
     type: Claim
     buy_cost: 4
     action_return: 0
+    reversible: true
     power: 3
     effect: "Claim: Power 3. Stackable. If the target tile is neutral, gain 2 resources."
     effect_upgraded: "Claim: Power 4. Stackable. If the target tile is neutral, gain 3 resources."
@@ -262,6 +271,7 @@ cards:
     buy_cost: 6
     action_return: 0
     action_cost: 2
+    reversible: true
     power: 5
     effect: "Claim: Power 5. If the target tile has any defense bonuses, gain +2 power. Costs 2 actions to play."
     effect_upgraded: "Claim: Power 7. If the target tile has any defense bonuses, gain +3 power. Costs 2 actions to play."
@@ -465,6 +475,7 @@ cards:
     buy_cost: 10
     action_return: 0
     action_cost: 3
+    reversible: true
     power: 0
     defense_bonus: 5
     upgraded_defense_bonus: 6

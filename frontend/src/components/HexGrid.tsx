@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Application, Graphics, Text, TextStyle, Container } from 'pixi.js';
 import type { HexTile, Card } from '../types/game';
-import { useTooltips } from './SettingsContext';
+import { useTooltips, useBackgroundImages } from './SettingsContext';
 import CompactCard, { COMPACT_CARD_WIDTH } from './CompactCard';
 
 // Flat-top hex geometry
@@ -98,6 +98,8 @@ interface HexGridProps {
   tiles: Record<string, HexTile>;
   onTileClick: (q: number, r: number, shiftKey?: boolean) => void;
   highlightTiles?: Set<string>;
+  /** Tiles where claim power is insufficient — shown with orange outline */
+  weakHighlightTiles?: Set<string>;
   multiTileTargets?: [number, number][];
   playerInfo?: Record<string, PlayerInfo>;
   transformRef?: React.MutableRefObject<GridTransform | null>;
@@ -134,6 +136,10 @@ interface HexGridProps {
    * compositing on top of the WebGL canvas.
    */
   paused?: boolean;
+  /** Called when a tile is long-pressed (~500ms hold) — used for undo */
+  onLongPress?: (q: number, r: number) => void;
+  /** Tile keys where long-press triggers undo (have reversible planned actions) */
+  undoableTiles?: Set<string>;
 }
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -252,7 +258,7 @@ const ARCHETYPE_LABELS: Record<string, string> = {
   fortress: 'Fortress',
 };
 
-import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 
 function PlannedCardTooltip({ card, x, y, totalPower, displayName }: { card: Card; x: number; y: number; totalPower?: number; displayName?: string }) {
   const typeColor = getCardDisplayColor(card);
@@ -293,7 +299,7 @@ function PlannedCardTooltip({ card, x, y, totalPower, displayName }: { card: Car
           </span>
         )}
       </div>
-      <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+      <div style={{ fontWeight: 'bold', fontSize: 13, fontFamily: CARD_TITLE_FONT, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden' }}>
         <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
           if (el) {
             const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
@@ -326,7 +332,7 @@ function PlannedCardTooltip({ card, x, y, totalPower, displayName }: { card: Car
  * Multi-card hover preview using CardFull, shown when hovering over tiles
  * with planned actions. Max 4 cards per column, overflow into additional columns.
  */
-function PlannedCardsPreview({ cards, x, y }: { cards: { card: Card; effectivePower?: number }[]; x: number; y: number }) {
+function PlannedCardsPreview({ cards, x, y, undoable }: { cards: { card: Card; effectivePower?: number }[]; x: number; y: number; undoable?: boolean }) {
   const maxPerCol = 4;
   const colGap = 6;
   const rowGap = 4;
@@ -334,8 +340,25 @@ function PlannedCardsPreview({ cards, x, y }: { cards: { card: Card; effectivePo
   const cardH = 42; // approximate compact card height
   const numCols = Math.ceil(cards.length / maxPerCol);
   const totalW = numCols * cardW + (numCols - 1) * colGap;
-  const rowsInFirstCol = Math.min(cards.length, maxPerCol);
-  const totalH = rowsInFirstCol * cardH + (rowsInFirstCol - 1) * rowGap;
+
+  // Find the last reversible card (the one that would be undone)
+  let undoTargetIdx = -1;
+  if (undoable) {
+    for (let i = cards.length - 1; i >= 0; i--) {
+      if (cards[i].card.reversible) { undoTargetIdx = i; break; }
+    }
+  }
+  // The hint goes in the column of the undo target card, adding height to that column
+  const undoTargetCol = undoTargetIdx >= 0 ? Math.floor(undoTargetIdx / maxPerCol) : -1;
+  const hintH = 18;
+
+  // Compute max column height for positioning
+  const colHeights = Array.from({ length: numCols }, (_, col) => {
+    const n = Math.min(cards.length - col * maxPerCol, maxPerCol);
+    const base = n * cardH + (n - 1) * rowGap;
+    return col === undoTargetCol ? base + hintH : base;
+  });
+  const totalH = Math.max(...colHeights);
 
   // Position to the right of cursor, clamped to viewport
   const margin = 14;
@@ -365,11 +388,22 @@ function PlannedCardsPreview({ cards, x, y }: { cards: { card: Card; effectivePo
     }}>
       {Array.from({ length: numCols }, (_, col) => {
         const colCards = cards.slice(col * maxPerCol, (col + 1) * maxPerCol);
+        // Index within colCards of the undo target (if in this column)
+        const undoRowIdx = col === undoTargetCol ? undoTargetIdx - col * maxPerCol : -1;
         return (
           <div key={col} style={{ display: 'flex', flexDirection: 'column', gap: rowGap }}>
             {colCards.map((entry, i) => {
               const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
-              return <CompactCard key={i} card={c} />;
+              return (
+                <React.Fragment key={i}>
+                  <CompactCard card={c} />
+                  {i === undoRowIdx && (
+                    <div style={{ fontSize: 10, color: '#aaa', textAlign: 'center', marginTop: -2 }}>
+                      Hold to undo
+                    </div>
+                  )}
+                </React.Fragment>
+              );
             })}
           </div>
         );
@@ -390,11 +424,15 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles }: HexGridProps) {
+  const bgEnabled = useBackgroundImages();
+  const bgEnabledRef = useRef(bgEnabled);
+  bgEnabledRef.current = bgEnabled;
   const containerRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const tilesRef = useRef(tiles);
   const highlightRef = useRef(highlightTiles);
+  const weakHighlightRef = useRef(weakHighlightTiles);
   const onClickRef = useRef(onTileClick);
   const playerInfoRef = useRef(playerInfo);
   const transformRefLocal = useRef(transformRef);
@@ -412,13 +450,15 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
   const vpInsertIndexRef = useRef<number>(0);
   const highlightGlowRef = useRef<Graphics | null>(null);
   const highlightEdgesRef = useRef<Graphics[]>([]);
+  const weakHighlightGlowRef = useRef<Graphics | null>(null);
+  const weakHighlightEdgesRef = useRef<Graphics[]>([]);
   const hoveredTileRef = useRef<string | null>(null);
   const hoverEdgeGraphicsRef = useRef<Graphics | null>(null);
   const previewLabelRef = useRef<Text | Container | null>(null);
   const tileLabelRef = useRef<Map<string, Text | Container>>(new Map());
   const hiddenLabelKeyRef = useRef<string | null>(null);
   const tileGraphicsRef = useRef<Map<string, { g: Graphics; baseColor: number; isBlocked: boolean; baseAlpha: number }>>(new Map());
-  const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card; totalPower?: number; displayName?: string; allCards?: { card: Card; effectivePower?: number }[] } | null>(null);
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; text?: string; card?: Card; totalPower?: number; displayName?: string; allCards?: { card: Card; effectivePower?: number }[]; undoable?: boolean } | null>(null);
   const tooltipsEnabled = useTooltips();
   const tooltipsEnabledRef = useRef(tooltipsEnabled);
   tooltipsEnabledRef.current = tooltipsEnabled;
@@ -453,9 +493,20 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
   const baseGroupsRef = useRef<Map<string, Container>>(new Map());
   // Whether the current preview label is inside a VP/base group (skip individual counter-rotation)
   const previewInGroupRef = useRef(false);
+  // Long-press undo state
+  const onLongPressRef = useRef(onLongPress);
+  onLongPressRef.current = onLongPress;
+  const undoableTilesRef = useRef(undoableTiles);
+  undoableTilesRef.current = undoableTiles;
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTileRef = useRef<string | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const longPressAnimRef = useRef<(() => void) | null>(null);
+  const longPressFiredRef = useRef(false);
 
   tilesRef.current = tiles;
   highlightRef.current = highlightTiles;
+  weakHighlightRef.current = weakHighlightTiles;
   onClickRef.current = onTileClick;
   playerInfoRef.current = playerInfo;
   transformRefLocal.current = transformRef;
@@ -561,6 +612,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
 
     const tiles = tilesRef.current;
     const highlights = highlightRef.current;
+    const weakHighlights = weakHighlightRef.current;
     const borders = borderTilesRef.current;
     const activePlayer = activePlayerIdRef.current;
     const planned = plannedActionsRef.current;
@@ -611,6 +663,21 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
       hexContainer.addChild(glowG);
       highlightGlowRef.current = glowG;
     }
+    // Orange glow for weak highlights (power insufficient)
+    weakHighlightGlowRef.current = null;
+    if (weakHighlights && weakHighlights.size > 0) {
+      const weakGlowG = new Graphics();
+      for (const key of weakHighlights) {
+        const tile = tiles[key];
+        if (!tile) continue;
+        const { x, y } = axialToPixel(tile.q, tile.r);
+        weakGlowG.fill({ color: 0xff8c00, alpha: 0.25 * buildAlpha(tile.q, tile.r) });
+        drawHexagon(weakGlowG, x, y, HEX_SIZE + 4);
+        weakGlowG.fill();
+      }
+      hexContainer.addChild(weakGlowG);
+      weakHighlightGlowRef.current = weakGlowG;
+    }
 
     // === PASS 2: Hex fills (no stroke) ===
     for (const [key, tile] of Object.entries(tiles)) {
@@ -641,7 +708,109 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         const dx = px - x; const dy = py - y;
         return Math.sqrt(dx * dx + dy * dy) < HEX_SIZE;
       }};
-      g.on('pointerdown', (e) => { onClickRef.current(tile.q, tile.r, e.shiftKey); });
+      g.on('pointerdown', (e) => {
+        const isUndoable = undoableTilesRef.current?.has(key);
+        if (!isUndoable) {
+          // No long-press behavior: fire click immediately
+          onClickRef.current(tile.q, tile.r, e.shiftKey);
+          return;
+        }
+        // Start long-press timer for undoable tiles
+        longPressFiredRef.current = false;
+        longPressTileRef.current = key;
+        longPressStartRef.current = { x: e.globalX, y: e.globalY };
+        const HOLD_DURATION = 500;
+        const startTime = performance.now();
+        // Animate shrinking hover edges during hold using Pixi ticker
+        // (ensures Graphics redraws are picked up by the renderer each frame)
+        const app = appRef.current;
+        const animateShrink = () => {
+          const hoverEdgeG = hoverEdgeGraphicsRef.current;
+          const elapsed = performance.now() - startTime;
+          const progress = Math.min(1, elapsed / HOLD_DURATION);
+          if (hoverEdgeG && !hoverEdgeG.destroyed) {
+            hoverEdgeG.clear();
+            if (progress < 1) {
+              const remaining = 1 - progress;
+              hoverEdgeG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.8 * remaining, cap: 'round' });
+              for (const [, , vA, vB] of DIRECTIONS_WITH_EDGES) {
+                const a = hexVertex(x, y, vA, HEX_SIZE);
+                const b = hexVertex(x, y, vB, HEX_SIZE);
+                const midX = (a.x + b.x) / 2;
+                const midY = (a.y + b.y) / 2;
+                const aX = midX + (a.x - midX) * remaining;
+                const aY = midY + (a.y - midY) * remaining;
+                const bX = midX + (b.x - midX) * remaining;
+                const bY = midY + (b.y - midY) * remaining;
+                hoverEdgeG.moveTo(aX, aY);
+                hoverEdgeG.lineTo(bX, bY);
+              }
+              hoverEdgeG.stroke();
+            }
+          }
+          if (progress >= 1) {
+            // Fire undo
+            if (app) app.ticker.remove(animateShrink);
+            longPressFiredRef.current = true;
+            longPressTileRef.current = null;
+            longPressStartRef.current = null;
+            longPressAnimRef.current = null;
+            onLongPressRef.current?.(tile.q, tile.r);
+          }
+        };
+        if (app) {
+          app.ticker.add(animateShrink);
+          longPressAnimRef.current = animateShrink;
+        }
+        // Also set a cleanup timer as fallback
+        longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null;
+        }, HOLD_DURATION + 50);
+      });
+      g.on('pointerup', () => {
+        if (longPressTileRef.current === key && !longPressFiredRef.current) {
+          // Short press: cancel animation and fire normal click
+          if (longPressAnimRef.current) { appRef.current?.ticker.remove(longPressAnimRef.current); longPressAnimRef.current = null; }
+          if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+          longPressTileRef.current = null;
+          longPressStartRef.current = null;
+          // Restore hover edges
+          const hoverEdgeG = hoverEdgeGraphicsRef.current;
+          if (hoverEdgeG && !hoverEdgeG.destroyed) {
+            hoverEdgeG.clear();
+            hoverEdgeG.setStrokeStyle({ width: 3, color: 0xffffff, alpha: 0.8, cap: 'round' });
+            for (const [, , vA, vB] of DIRECTIONS_WITH_EDGES) {
+              const a = hexVertex(x, y, vA, HEX_SIZE);
+              const b = hexVertex(x, y, vB, HEX_SIZE);
+              hoverEdgeG.moveTo(a.x, a.y); hoverEdgeG.lineTo(b.x, b.y);
+            }
+            hoverEdgeG.stroke();
+          }
+          onClickRef.current(tile.q, tile.r, false);
+        }
+        longPressFiredRef.current = false;
+      });
+      g.on('pointermove', (e) => {
+        if (longPressTileRef.current === key && longPressStartRef.current) {
+          const dx = e.globalX - longPressStartRef.current.x;
+          const dy = e.globalY - longPressStartRef.current.y;
+          if (dx * dx + dy * dy > 100) { // > 10px
+            // Cancel long press
+            if (longPressAnimRef.current) { appRef.current?.ticker.remove(longPressAnimRef.current); longPressAnimRef.current = null; }
+            if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+            longPressTileRef.current = null;
+            longPressStartRef.current = null;
+          }
+        }
+      });
+      g.on('pointerout', () => {
+        if (longPressTileRef.current === key) {
+          if (longPressAnimRef.current) { appRef.current?.ticker.remove(longPressAnimRef.current); longPressAnimRef.current = null; }
+          if (longPressTimerRef.current) { clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; }
+          longPressTileRef.current = null;
+          longPressStartRef.current = null;
+        }
+      });
       g.on('pointerover', (e) => {
         if (disableHoverRef.current) return;
         if (!tile.is_blocked) {
@@ -855,7 +1024,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         const multiTileCard = previewCardRef.current;
         const isMultiTileTarget = multiTileCard && multiTileTargetsRef.current?.some(([sq, sr]) => `${sq},${sr}` === key);
         if (plannedAction) {
-          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name, allCards: plannedAction.allCards });
+          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name, allCards: plannedAction.allCards, undoable: undoableTilesRef.current?.has(key) });
         } else if (isMultiTileTarget && multiTileCard) {
           const permDef = multiTileCard.effects?.find(e => e.type === 'permanent_defense');
           const defPow = permDef
@@ -1228,8 +1397,57 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
       }
     }
 
+    // Orange outline edges for weak highlights (power insufficient)
+    weakHighlightEdgesRef.current = [];
+    // Combined set: edges are omitted where a weak tile borders another highlighted tile (strong or weak)
+    const allHighlights = (highlights && weakHighlights)
+      ? new Set([...highlights, ...weakHighlights])
+      : highlights || weakHighlights;
+    if (weakHighlights && weakHighlights.size > 0) {
+      if (building) {
+        for (const key of weakHighlights) {
+          const tile = tiles[key];
+          if (!tile) continue;
+          const tAlpha = buildAlpha(tile.q, tile.r);
+          if (tAlpha <= 0) continue;
+          const g = new Graphics();
+          g.setStrokeStyle({ width: 2.5, color: 0xff8c00, cap: 'round' });
+          const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+          for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+            const neighborKey = `${tile.q + dq},${tile.r + dr}`;
+            if (allHighlights?.has(neighborKey)) continue;
+            const a = hexVertex(cx, cy, vA, HEX_SIZE);
+            const b = hexVertex(cx, cy, vB, HEX_SIZE);
+            g.moveTo(a.x, a.y); g.lineTo(b.x, b.y);
+          }
+          g.stroke();
+          g.alpha = tAlpha;
+          hexContainer.addChild(g);
+          weakHighlightEdgesRef.current.push(g);
+        }
+      } else {
+        const wkEdgeG = new Graphics();
+        wkEdgeG.setStrokeStyle({ width: 2.5, color: 0xff8c00, cap: 'round' });
+        for (const key of weakHighlights) {
+          const tile = tiles[key];
+          if (!tile) continue;
+          const { x: cx, y: cy } = axialToPixel(tile.q, tile.r);
+          for (const [dq, dr, vA, vB] of DIRECTIONS_WITH_EDGES) {
+            const neighborKey = `${tile.q + dq},${tile.r + dr}`;
+            if (allHighlights?.has(neighborKey)) continue;
+            const a = hexVertex(cx, cy, vA, HEX_SIZE);
+            const b = hexVertex(cx, cy, vB, HEX_SIZE);
+            wkEdgeG.moveTo(a.x, a.y); wkEdgeG.lineTo(b.x, b.y);
+          }
+        }
+        wkEdgeG.stroke();
+        hexContainer.addChild(wkEdgeG);
+        weakHighlightEdgesRef.current.push(wkEdgeG);
+      }
+    }
+
     // === PASS 5: Active player territory outline (hidden when target highlights active) ===
-    if (activePlayer && (!highlights || highlights.size === 0)) {
+    if (activePlayer && (!highlights || highlights.size === 0) && (!weakHighlights || weakHighlights.size === 0)) {
       if (!building) {
         // No build animation — single Graphics for efficiency
         const outlineG = new Graphics();
@@ -1549,7 +1767,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         textChildrenRef.current.push(group);
       }
 
-      if (tile.is_blocked) {
+      if (tile.is_blocked && !bgEnabledRef.current) {
         // Deterministic pseudo-random flip based on tile coords for visual variety
         const flipHash = ((tile.q * 7 + tile.r * 13) & 1) === 0;
         // Wrap in a Container at the tile center so counter-rotation keeps it centered
@@ -1855,7 +2073,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
     const resolution = isMobileUA ? Math.min(rawDpr, 2) : rawDpr;
 
     app.init({
-      background: '#1a1a2e',
+      backgroundAlpha: 0,
       resizeTo: containerRef.current,
       antialias: true,
       resolution,
@@ -1969,6 +2187,19 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
             edgeG.alpha = edgeBreathe;
           }
         }
+
+        // Weak (orange) highlights pulse
+        const weakGlowG = weakHighlightGlowRef.current;
+        if (weakGlowG) {
+          weakGlowG.alpha = 0.6 + 0.4 * Math.sin(t * 3);
+        }
+        const weakEdges = weakHighlightEdgesRef.current;
+        if (weakEdges.length > 0) {
+          const edgeBreathe = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(t * 4));
+          for (const edgeG of weakEdges) {
+            edgeG.alpha = edgeBreathe;
+          }
+        }
       };
       app.ticker.add(highlightPulseFn);
 
@@ -2035,25 +2266,27 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         for (const [key, entry] of tileMap) {
           // Only affect neutral (unowned, non-blocked) tiles
           if (entry.isBlocked || entry.baseColor !== TILE_COLORS.normal) {
-            entry.g.alpha = 1;
+            entry.g.tint = 0xffffff;
             continue;
           }
           if (fade <= 0 || !cursor) {
-            entry.g.alpha = 1;
+            entry.g.tint = 0xffffff;
             continue;
           }
           const tile = tilesRef.current[key];
-          if (!tile) { entry.g.alpha = 1; continue; }
+          if (!tile) { entry.g.tint = 0xffffff; continue; }
           const dist = hexDistance(cursor.q, cursor.r, tile.q, tile.r);
           if (dist >= FADE_MAX_DIST) {
-            entry.g.alpha = 1;
+            entry.g.tint = 0xffffff;
             continue;
           }
-          // Closer tiles get lower opacity: near-0 at cursor, 1 at max distance
-          const proximityAlpha = dist / FADE_MAX_DIST;
-          // Blend between normal (1) and proximity alpha based on fade multiplier
-          // Clamp to 0.01 minimum so PixiJS still delivers pointer events
-          entry.g.alpha = Math.max(0.01, 1 - fade * (1 - proximityAlpha));
+          // Closer tiles get darker: dim near cursor, normal at max distance
+          const proximityRatio = dist / FADE_MAX_DIST;
+          const fadeFactor = fade * (1 - proximityRatio);
+          // Tint darkens the fill color without changing alpha, so layers
+          // behind (highlight glow rings) don't bleed through
+          const brightness = Math.round(255 * (1 - fadeFactor * 0.45));
+          entry.g.tint = (brightness << 16) | (brightness << 8) | brightness;
         }
       };
       app.ticker.add(cursorFadeTickerFn);
@@ -2112,7 +2345,22 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
     if (pulseG && hexContainerRef.current) {
       hexContainerRef.current.addChild(pulseG);
     }
-  }, [tiles, highlightTiles, activePlayerId, plannedActions, multiTileTargets, claimChevrons, connectedVpTiles, buildProgress, renderTiles]);
+  }, [tiles, highlightTiles, weakHighlightTiles, activePlayerId, plannedActions, multiTileTargets, claimChevrons, connectedVpTiles, buildProgress, bgEnabled, renderTiles]);
+
+  // Refresh tooltip when planned actions change (e.g. after undo)
+  useEffect(() => {
+    if (!tooltip || !tooltip.allCards) return;
+    const key = hoveredTileRef.current;
+    if (!key) return;
+    const plannedAction = plannedActionsRef.current?.get(key);
+    if (plannedAction) {
+      // Update tooltip with current planned action data
+      setTooltip(prev => prev ? { ...prev, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name, allCards: plannedAction.allCards, undoable: undoableTilesRef.current?.has(key) } : null);
+    } else {
+      // No more planned actions on this tile — hide tooltip
+      setTooltip(null);
+    }
+  }, [plannedActions]);
 
   // Review mode: pulsing outlines on tiles that had cards played
   useEffect(() => {
@@ -2181,7 +2429,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, multiTileT
         style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
       />
       {tooltip && tooltip.allCards && tooltip.allCards.length > 0 && createPortal(
-        <PlannedCardsPreview cards={tooltip.allCards} x={tooltip.x} y={tooltip.y} />,
+        <PlannedCardsPreview cards={tooltip.allCards} x={tooltip.x} y={tooltip.y} undoable={tooltip.undoable} />,
         document.body,
       )}
       {tooltip && tooltip.text && (

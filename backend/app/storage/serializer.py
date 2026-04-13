@@ -539,7 +539,11 @@ def _serialize_neutral_market(
     templates: dict[str, dict[str, Any]] = {}
     for base_id, card in market.card_templates.items():
         templates[base_id] = _serialize_card_ref(card, registry)
-    return {"stacks": stacks, "card_templates": templates}
+    # Serialize selling-out state (sets → lists for JSON)
+    selling_out: dict[str, list[str]] = {
+        base_id: list(pids) for base_id, pids in market.selling_out.items()
+    }
+    return {"stacks": stacks, "card_templates": templates, "selling_out": selling_out}
 
 
 def _deserialize_neutral_market(
@@ -554,6 +558,9 @@ def _deserialize_neutral_market(
     for base_id, copies in market.stacks.items():
         if base_id not in market.card_templates and copies:
             market.card_templates[base_id] = copies[0]
+    # Restore selling-out state
+    for base_id, pids in data.get("selling_out", {}).items():
+        market.selling_out[base_id] = set(pids)
     return market
 
 
@@ -638,7 +645,7 @@ def serialize_game(game: GameState) -> str:
         "granted_actions": game.granted_actions,
         "host_id": game.host_id,
         "lobby_code": game.lobby_code,
-        "current_buyer_index": game.current_buyer_index,
+        "players_done_buying": list(game.players_done_buying),
         "card_pack": game.card_pack,
         "map_seed": game.map_seed,
         "claim_ban_rounds": game.claim_ban_rounds,
@@ -729,7 +736,7 @@ def deserialize_game(
         host_id=blob.get("host_id"),
         lobby_code=blob.get("lobby_code"),
         neutral_purchase_log=blob.get("neutral_purchase_log", []),
-        current_buyer_index=blob.get("current_buyer_index", 0),
+        players_done_buying=set(blob.get("players_done_buying", [])),
         buy_phase_purchases=blob.get("buy_phase_purchases", {}),
         card_pack=blob.get("card_pack", "everything"),
         map_seed=blob.get("map_seed", ""),

@@ -15,6 +15,9 @@ export const CARD_TYPE_COLORS: Record<string, string> = {
   passive: '#8868a8',
 };
 
+/** Font family for card titles (loaded via Google Fonts in index.html). */
+export const CARD_TITLE_FONT = "'Philosopher', serif";
+
 /** Burnt orange color for Debt cards. */
 export const DEBT_CARD_COLOR = '#9a5020';
 

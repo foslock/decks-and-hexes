@@ -40,6 +40,7 @@ cards:
     type: Claim
     buy_cost: 2
     action_return: 0
+    reversible: true
     power: 1
     multi_target_count: 1
     upgraded_multi_target_count: 2
@@ -56,6 +57,7 @@ cards:
     buy_cost: 5
     action_return: 0
     action_cost: 2
+    reversible: true
     power: 1
     effect: "Claim: Power 1. +1 power for each other tile you own adjacent to the target tile. Costs 2 actions to play."
     effect_upgraded: "Claim: Power 2. +1 power for each other tile you own adjacent to the target tile. Costs 2 actions to play."
@@ -92,6 +94,7 @@ cards:
     type: Claim
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 1
     adjacency_required: false
     unoccupied_only: true
@@ -145,6 +148,7 @@ cards:
     type: Claim
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 2
     effect: "Claim: Power 2. Stackable. Each other claim you play on the same tile this round gets +1 power."
     effect_upgraded: "Claim: Power 3. Stackable. Each other claim you play on the same tile this round gets +1 power."
@@ -181,6 +185,7 @@ cards:
     type: Claim
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 0
     effect: "Claim: Power equal to the number of other cards in your hand (not including this card)."
     effect_upgraded: "Claim: Power equal to the number of other cards in your hand +2 (not including this card)."
@@ -273,6 +278,7 @@ cards:
     type: Defense
     buy_cost: 2
     action_return: 0
+    reversible: true
     power: 0
     effect: "One tile you own gains +1 defense this round for each other tile you own adjacent to it."
     effect_upgraded: "One tile you own gains +2 defense per adjacent owned tile."
@@ -291,6 +297,7 @@ cards:
     type: Defense
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 0
     defense_target_count: 2
     upgraded_defense_target_count: 2
@@ -308,6 +315,7 @@ cards:
     buy_cost: 6
     action_return: 0
     action_cost: 2
+    reversible: true
     power: 2
     effect: "Claim: Power 2. +1 power for every 4 tiles you own (rounded down). Costs 2 actions to play."
     effect_upgraded: "Claim: Power 3. +1 power for every 3 tiles you own (rounded down). Costs 2 actions to play."

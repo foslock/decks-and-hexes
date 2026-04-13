@@ -387,8 +387,6 @@ class TestBuyPhase:
         for pid in game.player_order:
             advance_resolve(game, pid)
         assert game.current_phase == Phase.BUY
-        # Ensure p0 is the current buyer for test consistency
-        game.current_buyer_index = game.player_order.index("p0")
 
     def test_buy_neutral_card(self, small_2p_game: GameState) -> None:
         game = small_2p_game

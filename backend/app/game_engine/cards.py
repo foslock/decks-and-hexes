@@ -64,6 +64,7 @@ class Card:
     trash_on_use: bool = False
     stackable: bool = False
     granted_stackable: bool = False  # True when stackable was granted by Rally Cry (not native)
+    reversible: bool = False  # If true, planned action can be undone via long-press during play phase
     forced_discard: int = 0
     draw_cards: int = 0
     defense_bonus: int = 0
@@ -167,6 +168,7 @@ class Card:
             "trash_on_use": self.effective_trash_on_use,
             "stackable": self.stackable,
             "granted_stackable": self.granted_stackable,
+            "reversible": self.reversible,
             "forced_discard": self.forced_discard,
             "draw_cards": self.effective_draw_cards,
             "defense_bonus": self.effective_defense_bonus,

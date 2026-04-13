@@ -525,14 +525,24 @@ class CPUPlayer:
         passive_vp_mult = 1.3 if _owns_passive_vp(player) else 1.0
 
         # VP hex bonus — strongly prioritize claiming VP tiles.
+        # Pre-compute power vs defense for VP-specific bonuses.
+        effective_power = self._estimate_effective_power(game, player, tile, card)
+        can_win = effective_power > tile.defense_power
+
         if tile.is_vp:
             score += tile.vp_value * 12.0 * weights.vp_hex_priority * passive_vp_mult
+            # Massive bonus when we can actually capture this VP tile
+            if can_win:
+                score += tile.vp_value * 15.0 * weights.vp_hex_priority
 
         # VP denial: any opponent-held VP hex is a high-priority contest target,
         # regardless of how long they've held it. Even a freshly captured VP tile
         # will start scoring next round if left alone.
         if tile.is_vp and tile.owner is not None and tile.owner != self.player_id:
             score += tile.vp_value * 10.0 * weights.vp_hex_priority * passive_vp_mult
+            # Even higher bonus when we have the power to actually take it
+            if can_win:
+                score += tile.vp_value * 20.0 * weights.vp_hex_priority
             # Extra bonus when the tile is about to score (held since a prior round).
             held_since = getattr(tile, "held_since_turn", None)
             if held_since is not None and held_since < game.current_round:
@@ -544,8 +554,7 @@ class CPUPlayer:
         elif tile.owner != self.player_id:
             # Enemy tile — factor in defense
             defense = tile.defense_power
-            effective_power = self._estimate_effective_power(game, player, tile, card)
-            if effective_power > defense:
+            if can_win:
                 score += 5.0 * weights.aggression
                 # Base raid bonus: raiding generates Rubble (-1 VP each) in opponent's deck
                 if tile.is_base:
@@ -1072,7 +1081,10 @@ class CPUPlayer:
         scored = []
         for i, card in enumerate(player.hand):
             score = 0.0
-            if card.card_type == CardType.CLAIM:
+            # Debt and Rubble are always worst — discard first
+            if card.name in ("Debt", "Rubble"):
+                score = -10.0
+            elif card.card_type == CardType.CLAIM:
                 score = card.effective_power + 2.0
             elif card.card_type == CardType.DEFENSE:
                 score = card.effective_defense_bonus + 1.0
@@ -1107,7 +1119,7 @@ class CPUPlayer:
         """Pick cards to trash for resource value (Consolidate). Prefer
         starters and cheap cards. Explore is preferred over Gather as long as
         trashing it would leave at least _MIN_CLAIMS_TO_KEEP_EXPLORE claim
-        cards in the deck."""
+        cards in the deck. Debt and Rubble are always top priority."""
         total_claims = sum(
             1 for c in _iter_all_player_cards(player)
             if c.card_type == CardType.CLAIM
@@ -1118,11 +1130,15 @@ class CPUPlayer:
                 continue
             if card.buy_cost is None:
                 continue  # can't gain resources from cards with no buy cost
-            # Prefer trashing: Explore > Gather > rubble > cheap > expensive.
+            # Prefer trashing: Debt/Rubble > Explore > Gather > starters > cheap > expensive.
             score = 0.0
             is_explore = card.starter and card.name == "Explore"
             is_gather = card.starter and card.name == "Gather"
-            if is_explore:
+            if card.name == "Debt":
+                score += 20.0  # always trash Debt first — dead weight with -3 resources
+            elif card.name == "Rubble":
+                score += 18.0  # always trash Rubble — pure dead weight
+            elif is_explore:
                 # Only favor trashing Explore while we have a claim surplus.
                 if total_claims - 1 >= self._MIN_CLAIMS_TO_KEEP_EXPLORE:
                     score += 7.0 + (card.buy_cost or 0)
@@ -1133,7 +1149,7 @@ class CPUPlayer:
             elif card.starter:
                 score += 5.0 + (card.buy_cost or 0)
             elif card.unplayable and card.passive_vp <= 0:
-                score += 4.0 + (card.buy_cost or 0)  # dead weight like Rubble
+                score += 4.0 + (card.buy_cost or 0)  # dead weight
             else:
                 score += (card.buy_cost or 0) * 0.3  # low priority for good cards
             scored.append((score, i))
@@ -1145,8 +1161,9 @@ class CPUPlayer:
                              exclude_index: int) -> list[int]:
         """Pick the worst cards in hand to trash (permanent removal).
 
-        Prefers Explore over Gather so the CPU thins its starter claim cards
-        first, but only as long as the resulting deck still has at least
+        Debt and Rubble are always top priority for trashing. Then prefers
+        Explore over Gather so the CPU thins its starter claim cards first,
+        but only as long as the resulting deck still has at least
         _MIN_CLAIMS_TO_KEEP_EXPLORE claim cards — below that floor Gather
         (which is not a claim) is preferred instead."""
         total_claims = sum(
@@ -1158,21 +1175,26 @@ class CPUPlayer:
             if i == exclude_index:
                 continue
             score = 0.0
-            is_explore = card.starter and card.name == "Explore"
-            is_gather = card.starter and card.name == "Gather"
-            if is_explore:
-                if total_claims - 1 >= self._MIN_CLAIMS_TO_KEEP_EXPLORE:
-                    score -= 5.0  # strongly prefer trashing Explore
-                else:
-                    score += 1.0  # keep Explore to maintain claim pressure
-            elif is_gather:
-                score -= 3.5  # gather is the next best starter to trash
-            elif card.starter:
-                score -= 3.0  # any other starter
-            if card.buy_cost is not None:
-                score += card.buy_cost * 0.5  # expensive cards less trashable
+            if card.name == "Debt":
+                score -= 10.0  # always trash Debt first
+            elif card.name == "Rubble":
+                score -= 8.0  # always trash Rubble
             else:
-                score -= 1.0  # cards with no buy cost are fine to trash
+                is_explore = card.starter and card.name == "Explore"
+                is_gather = card.starter and card.name == "Gather"
+                if is_explore:
+                    if total_claims - 1 >= self._MIN_CLAIMS_TO_KEEP_EXPLORE:
+                        score -= 5.0  # strongly prefer trashing Explore
+                    else:
+                        score += 1.0  # keep Explore to maintain claim pressure
+                elif is_gather:
+                    score -= 3.5  # gather is the next best starter to trash
+                elif card.starter:
+                    score -= 3.0  # any other starter
+                if card.buy_cost is not None:
+                    score += card.buy_cost * 0.5  # expensive cards less trashable
+                else:
+                    score -= 1.0  # cards with no buy cost are fine to trash
             scored.append((score, i))
 
         scored.sort(key=lambda x: x[0])
@@ -1427,6 +1449,31 @@ class CPUPlayer:
                     score += 1.5  # niche but denial is good
                 elif effect.type == EffectType.MANDATORY_SELF_TRASH:
                     score += 3.0  # high power ceiling, conditional
+
+        # VP-tile awareness: boost claim cards whose power could capture
+        # adjacent VP hexes (especially enemy-owned ones).
+        if card.card_type == CardType.CLAIM and game and game.grid:
+            base_power = card.effective_power
+            # Rough estimate for scaling effects
+            for effect in card.effects:
+                if effect.type == EffectType.POWER_PER_TILES_OWNED:
+                    divisor = effect.effective_value(card.is_upgraded) or 3
+                    base_power += len(game.grid.get_player_tiles(self.player_id)) // divisor
+                elif effect.type == EffectType.POWER_MODIFIER:
+                    base_power += effect.effective_value(card.is_upgraded) * 0.5
+            player_tiles = game.grid.get_player_tiles(self.player_id)
+            has_adjacent_vp = False
+            has_adjacent_enemy_vp = False
+            for pt in player_tiles:
+                for adj in game.grid.get_adjacent(pt.q, pt.r):
+                    if adj.is_vp and adj.owner != self.player_id and base_power > adj.defense_power:
+                        has_adjacent_vp = True
+                        if adj.owner is not None:
+                            has_adjacent_enemy_vp = True
+            if has_adjacent_enemy_vp:
+                score += 8.0 * weights.vp_hex_priority
+            elif has_adjacent_vp:
+                score += 4.0 * weights.vp_hex_priority
 
         # Action return bonus
         if card.effective_action_return >= 1:

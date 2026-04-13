@@ -349,29 +349,92 @@ class NeutralMarket:
     stacks: dict[str, list[Card]] = field(default_factory=dict)
     # Template cards for each stack (so we can still serialize sold-out stacks)
     card_templates: dict[str, Card] = field(default_factory=dict)
+    # Selling-out stacks: base_card_id -> set of player_ids who already bought.
+    # When the last physical copy is purchased, the stack enters selling-out mode
+    # and remains available to other players for the rest of this buy phase.
+    selling_out: dict[str, set[str]] = field(default_factory=dict)
 
     def get_available(self) -> list[dict[str, Any]]:
         result = []
+        seen_ids: set[str] = set()
         for card_id, copies in self.stacks.items():
             template = copies[0] if copies else self.card_templates.get(card_id)
             if template:
                 card_dict = template.to_dict()
                 card_dict["id"] = card_id  # Use base card ID for stable matching
-                result.append({
+                entry: dict[str, Any] = {
                     "card": card_dict,
                     "remaining": len(copies),
-                })
+                }
+                if card_id in self.selling_out:
+                    entry["selling_out"] = True
+                    entry["selling_out_bought_by"] = list(self.selling_out[card_id])
+                result.append(entry)
+                seen_ids.add(card_id)
+        # Include selling-out stacks whose physical copies are gone
+        for card_id, bought_by in self.selling_out.items():
+            if card_id not in seen_ids:
+                template = self.card_templates.get(card_id)
+                if template:
+                    card_dict = template.to_dict()
+                    card_dict["id"] = card_id
+                    result.append({
+                        "card": card_dict,
+                        "remaining": 0,
+                        "selling_out": True,
+                        "selling_out_bought_by": list(bought_by),
+                    })
         return result
 
-    def purchase(self, card_id: str) -> Optional[tuple[Card, str]]:
-        """Purchase a card, returning (card, base_id) or None."""
-        # Match by base card ID (without instance suffix).
-        # The frontend may pass an instance ID like "card_id_neutral_0",
-        # so also try matching when card_id starts with the base ID.
-        for base_id, copies in self.stacks.items():
-            if copies and (base_id == card_id or card_id.startswith(base_id)):
-                return copies.pop(0), base_id
-        return None
+    def purchase(self, card_id: str, player_id: str) -> Optional[tuple[Card, str]]:
+        """Purchase a card, returning (card, base_id) or None.
+
+        When the last physical copy is bought, the stack enters selling-out
+        mode. Subsequent buyers during the same buy phase get a clone from
+        the template.
+        """
+        # Resolve base_id from the provided card_id
+        resolved_base: Optional[str] = None
+        for base_id in self.stacks:
+            if base_id == card_id or card_id.startswith(base_id):
+                resolved_base = base_id
+                break
+        if resolved_base is None:
+            # Also check selling_out keys
+            for base_id in self.selling_out:
+                if base_id == card_id or card_id.startswith(base_id):
+                    resolved_base = base_id
+                    break
+        if resolved_base is None:
+            return None
+
+        # Already in selling-out mode?
+        if resolved_base in self.selling_out:
+            if player_id in self.selling_out[resolved_base]:
+                return None  # This player already bought during selling-out
+            template = self.card_templates.get(resolved_base)
+            if not template:
+                return None
+            # Clone from template for this buyer
+            import copy as _copy
+            clone = _copy.deepcopy(template)
+            clone.id = f"{resolved_base}_sellingout_{player_id}"
+            self.selling_out[resolved_base].add(player_id)
+            return clone, resolved_base
+
+        # Normal purchase from physical copies
+        copies = self.stacks.get(resolved_base, [])
+        if not copies:
+            return None
+        card = copies.pop(0)
+        # If that was the last copy, enter selling-out mode
+        if not copies:
+            self.selling_out[resolved_base] = {player_id}
+        return card, resolved_base
+
+    def finalize_selling_out(self) -> None:
+        """Called at end of buy phase. Selling-out stacks become truly sold out."""
+        self.selling_out.clear()
 
 
 @dataclass
@@ -415,8 +478,8 @@ class GameState:
     lobby_code: Optional[str] = None
     # Tracks neutral market purchases: {card_id, card_name, player_id, player_name, round}
     neutral_purchase_log: list[dict[str, Any]] = field(default_factory=list)
-    # Sequential buy phase: index into player_order for whose turn it is to buy
-    current_buyer_index: int = 0
+    # Concurrent buy phase: tracks which players have signaled "done buying"
+    players_done_buying: set[str] = field(default_factory=set)
     # Cards purchased by each player this round: {player_id: [{card_id, card_name, source, cost}]}
     buy_phase_purchases: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     card_pack: str = "everything"
@@ -447,7 +510,7 @@ class GameState:
         ]
 
     def get_full_log(self) -> list[dict[str, Any]]:
-        """Return all log entries (for spectators or hot-seat)."""
+        """Return all log entries."""
         return [entry.to_dict() for entry in self.game_log]
 
     # Structured resolution data for frontend animations (populated by execute_reveal)
@@ -505,12 +568,7 @@ class GameState:
             "granted_actions": self.granted_actions,
             "log": self.log[-20:],  # last 20 for backward compat
             "test_mode": self.test_mode,
-            "current_buyer_index": self.current_buyer_index,
-            "current_buyer_id": (
-                self.player_order[self.current_buyer_index]
-                if self.current_phase == Phase.BUY and self.player_order
-                else None
-            ),
+            "players_done_buying": list(self.players_done_buying),
             "buy_phase_purchases": self.buy_phase_purchases,
             "card_pack": self.card_pack,
             "map_seed": self.map_seed,
@@ -1080,33 +1138,9 @@ def play_card(game: GameState, player_id: str, card_index: int,
             if card.effective_unoccupied_only and tile.owner is not None:
                 return False, f"{card.name} can only target unoccupied tiles"
 
-            # Prevent claiming tiles with defense too high to overcome.
-            # Neutral tiles: power must be >= defense (ties allowed since no defender).
-            # Occupied tiles owned by opponents: power must be strictly greater than
-            # defense (defender wins ties).
-            # Own tiles are valid defensive placements and skip the check entirely.
-            # Siege Engine / Conqueror (ignore_defense) only strip temporary round
-            # bonuses, so the check still respects base + permanent defense.
-            has_ignore_defense = any(
-                e.type == EffectType.IGNORE_DEFENSE for e in card.effects
-            )
-            if tile.owner != player_id:
-                # Use calculate_effective_power for cards with dynamic power modifiers
-                # (e.g. Strength in Numbers, Locust Swarm, Mob Rule).
-                check_power = card.effective_power
-                if card.effects:
-                    _check_action = PlannedAction(card=card, target_q=target_q, target_r=target_r)
-                    check_power = calculate_effective_power(game, player, card, _check_action)
-                if has_ignore_defense:
-                    effective_defense = tile.base_defense + tile.permanent_defense_bonus
-                else:
-                    effective_defense = tile.defense_power
-                if tile.owner is None:
-                    if effective_defense > check_power:
-                        return False, f"Card power ({check_power}) too low to overcome tile defense ({effective_defense})"
-                else:
-                    if effective_defense >= check_power:
-                        return False, f"Card power ({check_power}) too low to overcome occupied tile defense ({effective_defense})"
+            # Power-vs-defense is NOT checked here — players may target tiles
+            # with higher defense (e.g. to stack multiple claims). Insufficient
+            # power simply fails at resolution time.
 
             # Check stacking (only one claim per tile unless exception).
             # Multi-target claims (Surge) lock their extra targets too, so a
@@ -1389,6 +1423,46 @@ def play_card(game: GameState, player_id: str, card_index: int,
     game._log(f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})",
               visible_to=[player_id], actor=player_id)
     return True, f"Played {card.name}"
+
+
+def undo_planned_action(
+    game: GameState, player_id: str, action_index: int,
+) -> tuple[bool, str]:
+    """Undo a planned action during the play phase, returning the card to hand.
+
+    Only works for cards tagged ``reversible`` — those with no immediate side
+    effects beyond consuming an action slot.
+    """
+    if game.current_phase != Phase.PLAY:
+        return False, f"Not in Play phase (current: {game.current_phase.value})"
+
+    player = game.players.get(player_id)
+    if not player:
+        return False, "Player not found"
+    if player.has_submitted_play:
+        return False, "Already submitted play"
+
+    if action_index < 0 or action_index >= len(player.planned_actions):
+        return False, "Invalid action index"
+
+    action = player.planned_actions[action_index]
+    card = action.card
+
+    if not card.reversible:
+        return False, f"{card.name} cannot be undone"
+
+    # Reverse: give back the action cost
+    player.actions_used -= card.action_cost
+
+    # Return card to hand
+    player.hand.append(card)
+
+    # Remove planned action
+    player.planned_actions.pop(action_index)
+
+    game._log(f"{player.name} undoes {card.name} (actions: {player.actions_used}/{player.actions_available})",
+              visible_to=[player_id], actor=player_id)
+    return True, f"Undid {card.name}"
 
 
 def submit_pending_discard(
@@ -2023,8 +2097,7 @@ def execute_reveal(game: GameState) -> GameState:
 def advance_resolve(game: GameState, player_id: str) -> tuple[bool, str]:
     """Player acknowledges resolve phase is complete (animations done).
 
-    In hotseat: any call advances immediately to BUY.
-    In multiplayer: waits for all human players to acknowledge.
+    Waits for all human players to acknowledge before advancing to BUY.
     """
     if game.current_phase != Phase.REVEAL:
         return False, "Not in Reveal phase"
@@ -2048,17 +2121,14 @@ def advance_resolve(game: GameState, player_id: str) -> tuple[bool, str]:
 
 
 def _transition_to_buy(game: GameState) -> None:
-    """Transition from REVEAL to BUY phase."""
+    """Transition from REVEAL to BUY phase (concurrent — all players buy simultaneously)."""
     game.current_phase = Phase.BUY
     game.buy_phase_purchases = {}
-    # Start with first player, skip left players
-    game.current_buyer_index = game.first_player_index
-    n = len(game.player_order)
-    for _ in range(n):
-        pid = game.player_order[game.current_buyer_index]
-        if not game.players[pid].has_left:
-            break
-        game.current_buyer_index = (game.current_buyer_index + 1) % n
+    game.neutral_market.selling_out.clear()
+    # Mark left players as already done
+    game.players_done_buying = {
+        pid for pid in game.player_order if game.players[pid].has_left
+    }
     game._log("=== Buy Phase ===")
 
 
@@ -2091,12 +2161,8 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
     if not player:
         return False, "Player not found"
 
-    if player.has_ended_turn:
-        return False, "Already ended turn"
-
-    # Sequential buying: only current buyer can purchase
-    if game.player_order and player_id != game.player_order[game.current_buyer_index]:
-        return False, "Not your turn to buy"
+    if player.has_ended_turn or player_id in game.players_done_buying:
+        return False, "Already done buying"
 
     # Check buy restriction (Blitz Rush)
     if player.turn_modifiers.buy_locked:
@@ -2156,17 +2222,23 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             return False, "Already purchased this card this round (limit 1 per round)"
 
         # Peek at the card before committing the purchase so we can enforce
-        # Unique without mutating the market on failure. Mirrors the base-id
-        # resolution used by NeutralMarket.purchase().
+        # Unique without mutating the market on failure. Check both physical
+        # copies and selling-out templates.
         peek_card: Optional[Card] = None
         for base_id, copies in game.neutral_market.stacks.items():
             if copies and (base_id == card_id or card_id.startswith(base_id)):
                 peek_card = copies[0]
                 break
+        if peek_card is None:
+            # Check selling-out templates
+            for base_id in game.neutral_market.selling_out:
+                if base_id == card_id or card_id.startswith(base_id):
+                    peek_card = game.neutral_market.card_templates.get(base_id)
+                    break
         if peek_card is not None and peek_card.unique and player_owns_card_by_name(player, peek_card.name):
             return False, f"You already own a copy of {peek_card.name} (Unique)"
 
-        result = game.neutral_market.purchase(card_id)
+        result = game.neutral_market.purchase(card_id, player_id)
         if not result:
             return False, "Card not available in shared market"
         purchased, base_card_id = result
@@ -2174,8 +2246,13 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             dynamic_cost = calculate_dynamic_buy_cost(game, player, purchased)
             effective_cost = _apply_cost_reductions(player, purchased, base_cost_override=dynamic_cost)
             if effective_cost > 0 and player.resources < effective_cost:
-                # Put it back
-                game.neutral_market.stacks.setdefault(base_card_id, []).insert(0, purchased)
+                # Put it back (only if not selling-out — selling-out clones are ephemeral)
+                if base_card_id not in game.neutral_market.selling_out or \
+                        player_id not in game.neutral_market.selling_out[base_card_id]:
+                    game.neutral_market.stacks.setdefault(base_card_id, []).insert(0, purchased)
+                else:
+                    # Undo selling-out record for this player
+                    game.neutral_market.selling_out[base_card_id].discard(player_id)
                 return False, f"Need {effective_cost} resources"
             if effective_cost > 0:
                 player.resources -= effective_cost
@@ -2342,12 +2419,8 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
     if not player:
         return False, "Player not found"
 
-    if player.has_ended_turn:
-        return False, "Already ended turn"
-
-    # Sequential buying: only current buyer can reroll
-    if game.player_order and player_id != game.player_order[game.current_buyer_index]:
-        return False, "Not your turn to buy"
+    if player.has_ended_turn or player_id in game.players_done_buying:
+        return False, "Already done buying"
 
     # Use free rerolls first (from Surveyor), otherwise charge resources
     if player.turn_modifiers.free_rerolls > 0:
@@ -2370,40 +2443,27 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
     return True, "Market re-rolled"
 
 
-def _advance_buyer(game: GameState) -> bool:
-    """Advance current_buyer_index to next non-left, non-done player.
-
-    Returns True if a next buyer was found, False if all players are done.
-    """
-    n = len(game.player_order)
-    for _ in range(n):
-        game.current_buyer_index = (game.current_buyer_index + 1) % n
-        pid = game.player_order[game.current_buyer_index]
-        p = game.players[pid]
-        if not p.has_left and not p.has_ended_turn:
-            return True
-    return False
-
-
 def end_buy_phase(game: GameState, player_id: str) -> tuple[bool, str]:
-    """Player signals they're done buying (sequential)."""
+    """Player signals they're done buying (concurrent)."""
     if game.current_phase != Phase.BUY:
         return False, "Not in Buy phase"
     player = game.players.get(player_id)
     if not player:
         return False, "Player not found"
-    if player.has_ended_turn:
-        return False, "Already ended turn"
-
-    # Only the current buyer can end their buy turn
-    if game.player_order and player_id != game.player_order[game.current_buyer_index]:
-        return False, "Not your turn to buy"
+    if player.has_ended_turn or player_id in game.players_done_buying:
+        return False, "Already done buying"
 
     player.has_ended_turn = True
+    game.players_done_buying.add(player_id)
     game._log(f"{player.name} finishes buying", actor=player_id)
 
-    # Advance to next buyer, or end the turn if all done
-    if not _advance_buyer(game):
+    # Check if all players are done
+    all_done = all(
+        pid in game.players_done_buying
+        for pid in game.player_order
+    )
+    if all_done:
+        game.neutral_market.finalize_selling_out()
         execute_end_of_turn(game)
 
     return True, "Done buying"
@@ -2520,14 +2580,16 @@ def auto_play_cpu_plays(game: GameState) -> None:
 
 
 def auto_play_cpu_buys(game: GameState) -> None:
-    """Auto-play buy phase for consecutive CPU buyers (sequential buy order)."""
+    """Auto-play buy phase for all CPU players (concurrent buy mode)."""
     from .cpu_player import CPUPlayer
 
-    while game.current_phase == Phase.BUY:
-        pid = game.player_order[game.current_buyer_index]
+    if game.current_phase != Phase.BUY:
+        return
+
+    for pid in game.player_order:
         player = game.players[pid]
-        if not player.is_cpu or player.has_ended_turn or player.has_left:
-            break  # Current buyer is human (or already done) — stop
+        if not player.is_cpu or player.has_left or pid in game.players_done_buying:
+            continue
 
         cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
 

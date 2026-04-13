@@ -47,7 +47,7 @@ const SS_LOBBY = 'cardclash_lobby';
 type AppScreen =
   | { type: 'home' }
   | { type: 'lobby'; code: string; playerId: string; token: string; isHost: boolean; lobby: LobbyState }
-  | { type: 'game'; gameId: string; playerId: string; token: string; isMultiplayer: boolean; lobbyCode?: string; isHost?: boolean; localPlayerIds?: string[] };
+  | { type: 'game'; gameId: string; playerId: string; token: string; isMultiplayer: boolean; lobbyCode?: string; isHost?: boolean };
 
 function loadSession(): AppScreen | null {
   try {
@@ -115,7 +115,7 @@ function AppInner() {
     });
   }, []);
 
-  const { lastMessage: gameWsMessage } = useWebSocket(
+  const { lastMessage: gameWsMessage, send: gameWsSend } = useWebSocket(
     gameLobbyCode,
     wsPlayerId,
     wsToken,
@@ -236,7 +236,7 @@ function AppInner() {
     setScreen(lobbyScreen);
   }, []);
 
-  const handleGameStart = useCallback((gameId: string, state: GameState, localPlayerIds?: string[]) => {
+  const handleGameStart = useCallback((gameId: string, state: GameState) => {
     console.log('[App] handleGameStart called, screen.type:', screen.type, 'gameId:', gameId);
     if (screen.type !== 'lobby') {
       console.warn('[App] handleGameStart SKIPPED — screen is not lobby, it is:', screen.type);
@@ -252,7 +252,6 @@ function AppInner() {
       isMultiplayer: true,
       lobbyCode: screen.code,
       isHost: screen.isHost,
-      localPlayerIds,
     };
     setScreen(gameScreen);
   }, [screen]);
@@ -323,13 +322,14 @@ function AppInner() {
           playerId={screen.playerId}
           token={screen.token}
           isMultiplayer={true}
-          localPlayerIds={screen.localPlayerIds}
           isHost={
             (() => { try { const s = JSON.parse(sessionStorage.getItem(SS_LOBBY) || '{}'); return s.isHost; } catch { return false; } })()
           }
           onLeaveGame={handleLeaveGame}
           skipIntro={isReconnect}
           removedFromLobby={removedFromLobby}
+          wsSend={gameWsSend}
+          wsMessage={gameWsMessage}
         />
       </SettingsProvider>
     );

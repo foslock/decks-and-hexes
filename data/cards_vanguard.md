@@ -39,6 +39,7 @@ cards:
     type: Claim
     buy_cost: 4
     action_return: 0
+    reversible: true
     power: 2
     upgraded_power: 3
     effect: "Claim: Power 2."
@@ -59,6 +60,7 @@ cards:
     buy_cost: 7
     action_return: 0
     action_cost: 2
+    reversible: true
     power: 4
     claim_range: 2
     effect: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own. Costs 2 actions to play."
@@ -73,6 +75,7 @@ cards:
     type: Claim
     buy_cost: 5
     action_return: 0
+    reversible: true
     power: 3
     effect: "Claim: Power 3. If you played another Claim card this round, +2 power."
     effect_upgraded: "Claim: Power 3. If you played another Claim card this round, +3 power."
@@ -92,6 +95,7 @@ cards:
     type: Claim
     buy_cost: 6
     action_return: 0
+    reversible: true
     power: 3
     effect: "Claim: Power 3. If successful against an opponent's tile, they lose 1 resource."
     effect_upgraded: "Claim: Power 4. If successful against an opponent's tile, they lose 1 resource."
@@ -134,6 +138,7 @@ cards:
     type: Claim
     buy_cost: 6
     action_return: 0
+    reversible: true
     power: 3
     effect: "Claim: Power 3. Stackable."
     effect_upgraded: "Claim: Power 4. Stackable."
@@ -178,6 +183,7 @@ cards:
     type: Claim
     buy_cost: 2
     action_return: 0
+    reversible: true
     power: 1
     upgraded_power: 3
     unoccupied_only: true
@@ -234,6 +240,7 @@ cards:
     type: Claim
     buy_cost: 6
     action_return: 0
+    reversible: true
     power: 2
     upgraded_power: 3
     claim_range: 2
@@ -269,6 +276,7 @@ cards:
     type: Claim
     buy_cost: 7
     action_return: 0
+    reversible: true
     power: 3
     effect: "Claim: Power 3. If this claim wins a contested tile, the opponent's claim card is permanently trashed."
     effect_upgraded: "Claim: Power 4. If this claim wins a contested tile, the opponent's claim card is permanently trashed."
@@ -288,6 +296,7 @@ cards:
     buy_cost: 9
     action_return: 0
     action_cost: 2
+    reversible: true
     power: 6
     effect: "Claim: Power 6. Costs 1 less resource to purchase for each VP hex you currently control. Costs 2 actions to play."
     effect_upgraded: "Claim: Power 8. Costs 1 less resource to purchase for each VP hex you currently control. Costs 2 actions to play."
@@ -329,6 +338,7 @@ cards:
     type: Defense
     buy_cost: 3
     action_return: 0
+    reversible: true
     power: 0
     defense_bonus: 2
     upgraded_defense_bonus: 3
