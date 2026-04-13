@@ -46,7 +46,7 @@ from app.game_engine.hex_grid import GridSize, HexGrid, HexTile
 _SCHEMA_VERSION = 1
 
 # Cards that are generated at runtime (not in the card registry).
-_GENERATED_CARD_NAMES = frozenset({"Land Grant", "Rubble", "Spoils"})
+_GENERATED_CARD_NAMES = frozenset({"Land Grant", "Rubble", "Spoils", "Debt"})
 
 
 # ---------------------------------------------------------------------------

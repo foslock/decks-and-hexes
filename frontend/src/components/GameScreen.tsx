@@ -21,6 +21,7 @@ import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
+import { useCardZoom } from './CardZoomContext';
 
 /** Check if an engine card needs an opponent target (forced discard or inject rubble). */
 function needsOpponentTarget(card: Card): boolean {
@@ -599,6 +600,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const animationOff = useAnimationOff();
   const animSpeed = useAnimationSpeed();
   const sound = useSound();
+  const { showZoom } = useCardZoom();
   // Local player IDs this browser controls (for hotseat cycling)
   const localPlayerIds = localPlayerIdsProp ?? [];
   const shouldCycle = localPlayerIds.length > 1;
@@ -1851,7 +1853,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           }
         }
       }
-      if (entries.length > 0) {
+      if (entries.length === 1) {
+        setReviewHoveredTile(null);
+        showZoom(entries[0].card);
+      } else if (entries.length > 1) {
         setReviewHoveredTile(null);
         setReviewFullCards(entries);
       }
@@ -3846,7 +3851,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                             const actions = revealedActionsRef.current[pid];
                             const name = gameState.players[pid]?.name ?? pid;
                             setReviewHoveredPlayer(null);
-                            setReviewFullCards(actions.map(a => ({ playerId: pid, playerName: name, card: a.card })));
+                            if (actions.length === 1) {
+                              showZoom(actions[0].card);
+                            } else {
+                              setReviewFullCards(actions.map(a => ({ playerId: pid, playerName: name, card: a.card })));
+                            }
                           } else if (isClickable) {
                             handleSwitchPlayer(i);
                           }
