@@ -133,6 +133,11 @@ cards:
         value: 1
         timing: immediate
         condition: if_played_same_name
+      - type: power_per_same_name
+        value: 1
+        timing: immediate
+        metadata:
+          upgraded_only: true
 
   - id: swarm_dog_pile
     name: Dog Pile

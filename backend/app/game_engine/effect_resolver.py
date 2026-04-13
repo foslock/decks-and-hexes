@@ -141,6 +141,18 @@ def calculate_effective_power(
                     bonus += tile_bonus
             continue
 
+        if effect.type == EffectType.POWER_PER_SAME_NAME:
+            # Rabble+: +value power per same-name card played this round
+            if effect.metadata.get("upgraded_only") and not is_upgraded:
+                continue
+            base_name = card.name.rstrip("+")
+            same_count = sum(
+                1 for a in player.planned_actions
+                if a.card.name.rstrip("+") == base_name and a.card.id != card.id
+            )
+            bonus += effect.effective_value(is_upgraded) * same_count
+            continue
+
         if effect.type != EffectType.POWER_MODIFIER:
             continue
         if not check_condition(effect.condition, game, player, card, action):
@@ -1033,6 +1045,11 @@ def _handle_defense_per_adjacent(effect: Effect, ctx: EffectContext) -> None:
             actor=ctx.player.id)
 
 
+def _handle_power_per_same_name(effect: Effect, ctx: EffectContext) -> None:
+    """Rabble+: power calc handled in calculate_effective_power."""
+    pass
+
+
 def _handle_power_per_tiles_owned(effect: Effect, ctx: EffectContext) -> None:
     """Mob Rule / Locust Swarm: power calc handled in calculate_effective_power."""
     pass
@@ -1049,6 +1066,7 @@ def _handle_ignore_defense_override(effect: Effect, ctx: EffectContext) -> None:
 
 
 register_handler(EffectType.DEFENSE_PER_ADJACENT, _handle_defense_per_adjacent)
+register_handler(EffectType.POWER_PER_SAME_NAME, _handle_power_per_same_name)
 register_handler(EffectType.POWER_PER_TILES_OWNED, _handle_power_per_tiles_owned)
 register_handler(EffectType.IGNORE_DEFENSE_OVERRIDE, _handle_ignore_defense_override)
 

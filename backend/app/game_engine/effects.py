@@ -66,6 +66,7 @@ class EffectType(str, Enum):
     GRANT_STACKABLE = "grant_stackable"                # Rally Cry
     STACKING_POWER_BONUS = "stacking_power_bonus"      # Dog Pile
     CONDITIONAL_ACTION_RETURN = "conditional_action_return"  # Rabble
+    POWER_PER_SAME_NAME = "power_per_same_name"            # Rabble+: +1 power per same-name card played
 
     # Conditional draw effects
     CEASE_FIRE = "cease_fire"

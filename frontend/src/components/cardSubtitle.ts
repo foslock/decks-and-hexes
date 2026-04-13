@@ -167,7 +167,12 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       const bonusVal = isUpgraded ? (fixedBonus.upgraded_value ?? fixedBonus.value) : fixedBonus.value;
       parts.push(p(`⚔️${card.power}/${card.power + bonusVal}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
     } else {
-      parts.push(p(`⚔️${card.power}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
+      // Rabble+: +1 power per same-name card played → show dynamic power
+      const hasSameNamePowerScaling = card.effects?.some(e =>
+        e.type === 'power_per_same_name' && (!e.metadata?.upgraded_only || isUpgraded)
+      );
+      const powerSuffix = hasSameNamePowerScaling ? '+' : '';
+      parts.push(p(`⚔️${card.power}${powerSuffix}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
     }
 
     // Granted stackable indicator (Rally Cry) — shown as a separate glowing part
