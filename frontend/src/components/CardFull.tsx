@@ -40,6 +40,11 @@ const CARD_ART: Record<string, string> = {
   vanguard_counterattack: '↩️',
   vanguard_rearguard: '🛡️',
   vanguard_financier: '🏦',
+  vanguard_arms_dealer: '🏪',
+  vanguard_demon_pact: '😈',
+  vanguard_ultimatum: '⚠️',
+  vanguard_war_economy: '🏭',
+  vanguard_war_tithe: '💸',
 
   // ── Swarm ──
   swarm_scout: '👁️',
@@ -62,6 +67,12 @@ const CARD_ART: Record<string, string> = {
   swarm_locust_swarm: '🦗',
   swarm_consecrate: '⛪',
   swarm_war_trophies: '🏅',
+  swarm_colony: '🏘️',
+  swarm_el_dorado: '🌟',
+  swarm_exodus: '🚶',
+  swarm_heady_brew: '🍺',
+  swarm_infestation: '🪲',
+  swarm_plague: '☠️',
 
   // ── Fortress ──
   fortress_fortify: '🧱',
@@ -82,6 +93,14 @@ const CARD_ART: Record<string, string> = {
   fortress_iron_discipline: '⚖️',
   fortress_fortified_position: '🏅',
   fortress_diplomacy: '🕊️',
+  fortress_aegis: '🔰',
+  fortress_catch_up: '🏃',
+  fortress_mulligan: '🔄',
+  fortress_robin_hood: '🏹',
+  fortress_scorched_retreat: '🔥',
+  fortress_snowy_holiday: '❄️',
+  fortress_toll_road: '🛤️',
+  fortress_warden: '💂',
 
   // ── Neutral ──
   neutral_explore: '🧭',
@@ -106,7 +125,21 @@ const CARD_ART: Record<string, string> = {
   neutral_siege_tower: '🏗️',
   neutral_reclaim: '💱',
   neutral_diplomat: '🤝',
-  fortress_catch_up: '🏃',
+  neutral_ambush: '🗡️',
+  neutral_cartographer: '🗺️',
+  neutral_conqueror: '⚔️',
+  neutral_dividends: '💰',
+  neutral_moat: '🏊',
+  neutral_mobilize: '🎺',
+  neutral_palisade: '🪵',
+  neutral_spyglass: '🔍',
+  neutral_supply_depot: '📦',
+  neutral_tax_collector: '🪙',
+
+  // ── Special ──
+  debt: '⛓️',
+  rubble: '🪨',
+  spoils: '💎',
 };
 
 const ARCHETYPE_LABEL: Record<string, string> = {
