@@ -2070,7 +2070,7 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
     const resolution = isMobileUA ? Math.min(rawDpr, 2) : rawDpr;
 
     app.init({
-      background: '#1a1a2e',
+      backgroundAlpha: 0,
       resizeTo: containerRef.current,
       antialias: true,
       resolution,
