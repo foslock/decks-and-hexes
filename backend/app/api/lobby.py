@@ -21,12 +21,37 @@ from app.game_engine.cards import Archetype
 from app.game_engine.game_state import generate_map_seed
 from app.game_engine.game_state import (
     GameState,
+    Phase,
     create_game,
     execute_start_of_turn,
 )
 from app.game_engine.hex_grid import GridSize
 
 logger = logging.getLogger(__name__)
+
+
+def _maybe_restart_cpu_buys(game: GameState) -> None:
+    """Re-launch CPU buy task if the game is in BUY phase with pending CPUs
+    and no active background task (e.g. after a service restart)."""
+    from app.api.routes import _active_cpu_buy_tasks, _process_cpu_buys_with_cursors
+
+    if game.current_phase != Phase.BUY:
+        return
+    has_pending = any(
+        game.players[pid].is_cpu
+        and not game.players[pid].has_left
+        and pid not in game.players_done_buying
+        for pid in game.player_order
+    )
+    if not has_pending:
+        return
+    existing = _active_cpu_buy_tasks.get(game.id)
+    if existing and not existing.done():
+        return  # Task still running
+    logger.info("Restarting orphaned CPU buy task for game %s", game.id)
+    task = asyncio.create_task(_process_cpu_buys_with_cursors(game.id))
+    _active_cpu_buy_tasks[game.id] = task
+    task.add_done_callback(lambda _t: _active_cpu_buy_tasks.pop(game.id, None))
 
 # ── Data structures ─────────────────────────────────────────
 
@@ -803,6 +828,8 @@ async def lobby_websocket(ws: WebSocket, code: str, player_id: str, token: str) 
                 visible = get_visible_player_ids(game.id, player_id)
                 state = game.to_dict(for_player_id=player_id, visible_player_ids=visible)
                 await ws.send_json({"type": "game_state", "state": state})
+                # Recover orphaned CPU buy tasks (e.g. after service restart)
+                _maybe_restart_cpu_buys(game)
         else:
             await ws.send_json({"type": "lobby_update", "lobby": lobby.to_dict()})
 

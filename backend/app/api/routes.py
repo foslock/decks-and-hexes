@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import pickle
@@ -43,6 +44,8 @@ router = APIRouter(prefix="/api")
 
 # Game storage — backed by DB with in-memory cache
 _store: GameStore | None = None
+# Track active CPU buy background tasks per game to detect orphaned buys
+_active_cpu_buy_tasks: dict[str, "asyncio.Task[None]"] = {}
 _analytics: AnalyticsRecorder | None = None
 _card_registry: dict[str, Any] | None = None
 
@@ -445,9 +448,13 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
         raise HTTPException(400, "No CPU players pending")
 
     if _is_multiplayer(game):
-        # Launch async cursor simulation as a background task
-        import asyncio
-        asyncio.create_task(_process_cpu_buys_with_cursors(game_id))
+        # Launch async cursor simulation if not already running
+        existing = _active_cpu_buy_tasks.get(game_id)
+        if existing and not existing.done():
+            return {"message": "CPU buys already in progress", "state": game.to_dict()}
+        task = asyncio.create_task(_process_cpu_buys_with_cursors(game_id))
+        _active_cpu_buy_tasks[game_id] = task
+        task.add_done_callback(lambda _t: _active_cpu_buy_tasks.pop(game_id, None))
         return {"message": "CPU buys started (async)", "state": game.to_dict()}
 
     # Hot-seat: process instantly
@@ -461,8 +468,9 @@ async def _process_cpu_buys_with_cursors(game_id: str) -> None:
 
     All CPU players buy concurrently — each runs as an independent coroutine
     that re-fetches game state before every purchase to stay in sync.
+    If the task crashes or is cancelled, a finally block ensures all pending
+    CPU players get end_buy_phase() so the game doesn't get stuck.
     """
-    import asyncio
     from app.game_engine.cpu_player import CPUPlayer
 
     store = _get_store()
@@ -479,15 +487,22 @@ async def _process_cpu_buys_with_cursors(game_id: str) -> None:
     if not cpu_pids:
         return
 
-    async def _run_single_cpu(pid: str) -> None:
-        await _process_single_cpu_buy(game_id, pid)
-
-    await asyncio.gather(*[_run_single_cpu(pid) for pid in cpu_pids])
+    try:
+        await asyncio.gather(*[_process_single_cpu_buy(game_id, pid) for pid in cpu_pids])
+    except Exception:
+        logger.exception("CPU buy task failed for game %s — forcing completion", game_id)
+        # Force-complete any CPUs that didn't finish
+        game = await store.get(game_id)
+        if game and game.current_phase == Phase.BUY:
+            for pid in cpu_pids:
+                if pid not in game.players_done_buying:
+                    end_buy_phase(game, pid)
+            await store.save(game)
+            await _broadcast_state(game_id, game)
 
 
 async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
     """Run the full buy sequence for one CPU player."""
-    import asyncio
     import random
     import time
     from app.game_engine.cpu_player import CPUPlayer
