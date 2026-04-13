@@ -46,6 +46,15 @@ router = APIRouter(prefix="/api")
 _store: GameStore | None = None
 # Track active CPU buy background tasks per game to detect orphaned buys
 _active_cpu_buy_tasks: dict[str, "asyncio.Task[None]"] = {}
+# Per-game locks to serialize concurrent CPU buy mutations
+_game_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_game_lock(game_id: str) -> asyncio.Lock:
+    """Get or create an asyncio lock for a game to serialize state mutations."""
+    if game_id not in _game_locks:
+        _game_locks[game_id] = asyncio.Lock()
+    return _game_locks[game_id]
 _analytics: AnalyticsRecorder | None = None
 _card_registry: dict[str, Any] | None = None
 
@@ -454,7 +463,10 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
             return {"message": "CPU buys already in progress", "state": game.to_dict()}
         task = asyncio.create_task(_process_cpu_buys_with_cursors(game_id))
         _active_cpu_buy_tasks[game_id] = task
-        task.add_done_callback(lambda _t: _active_cpu_buy_tasks.pop(game_id, None))
+        def _cleanup(_t: asyncio.Task[None]) -> None:
+            _active_cpu_buy_tasks.pop(game_id, None)
+            _game_locks.pop(game_id, None)
+        task.add_done_callback(_cleanup)
         return {"message": "CPU buys started (async)", "state": game.to_dict()}
 
     # Hot-seat: process instantly
@@ -488,17 +500,27 @@ async def _process_cpu_buys_with_cursors(game_id: str) -> None:
         return
 
     try:
-        await asyncio.gather(*[_process_single_cpu_buy(game_id, pid) for pid in cpu_pids])
+        # Hard timeout of 15s prevents infinite stalls
+        await asyncio.wait_for(
+            asyncio.gather(*[_process_single_cpu_buy(game_id, pid) for pid in cpu_pids]),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("CPU buy task timed out for game %s — forcing completion", game_id)
     except Exception:
         logger.exception("CPU buy task failed for game %s — forcing completion", game_id)
+    else:
+        return  # All CPUs finished normally
         # Force-complete any CPUs that didn't finish
-        game = await store.get(game_id)
-        if game and game.current_phase == Phase.BUY:
-            for pid in cpu_pids:
-                if pid not in game.players_done_buying:
-                    end_buy_phase(game, pid)
-            await store.save(game)
-            await _broadcast_state(game_id, game)
+        lock = _get_game_lock(game_id)
+        async with lock:
+            game = await store.get(game_id)
+            if game and game.current_phase == Phase.BUY:
+                for pid in cpu_pids:
+                    if pid not in game.players_done_buying:
+                        end_buy_phase(game, pid)
+                await store.save(game)
+                await _broadcast_state(game_id, game)
 
 
 async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
@@ -541,24 +563,35 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
         if not _all_humans_done(g):
             await asyncio.sleep(min(seconds, _remaining()))
 
-    # Reroll market if desirable
+    lock = _get_game_lock(game_id)
+
+    # Reroll market if desirable — needs lock for state mutation
     if cpu.should_reroll_market(game):
-        reroll_market(game, pid)
-        await store.save(game)
-        await _broadcast_state(game_id, game)
+        async with lock:
+            game = await store.get(game_id)
+            if not game or game.current_phase != Phase.BUY:
+                return
+            reroll_market(game, pid)
+            await store.save(game)
+            await _broadcast_state(game_id, game)
         await _cpu_sleep(game, 0.5)
 
-    # Plan all purchases
-    purchases: list[dict[str, Any]] = []
-    for _ in range(10):
-        purchase = cpu.pick_next_purchase(game)
-        if purchase is None:
-            break
-        purchases.append(purchase)
+    # Plan purchases under lock (reads shared state like neutral market)
+    async with lock:
+        game = await store.get(game_id)
+        if not game or game.current_phase != Phase.BUY:
+            return
+        purchases: list[dict[str, Any]] = []
+        for _ in range(10):
+            purchase = cpu.pick_next_purchase(game)
+            if purchase is None:
+                break
+            purchases.append(purchase)
 
     # Simulate browsing for each purchase
     for purchase in purchases:
-        game = await store.get(game_id)
+        async with lock:
+            game = await store.get(game_id)
         if not game or game.current_phase != Phase.BUY:
             return
         player = game.players[pid]
@@ -592,29 +625,30 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
                 })
                 await asyncio.sleep(min(0.3 + random.random() * 0.4, _remaining()))
 
-        # Execute purchase — re-fetch to avoid stale state
-        game = await store.get(game_id)
-        if not game or game.current_phase != Phase.BUY:
-            return
-        success, _msg = buy_card(
-            game, pid, purchase["source"], purchase.get("card_id", ""),
-        )
-        if success:
-            if purchase["source"] == "neutral":
+        # Execute purchase under lock — atomic read-mutate-save
+        async with lock:
+            game = await store.get(game_id)
+            if not game or game.current_phase != Phase.BUY:
+                return
+            success, _msg = buy_card(
+                game, pid, purchase["source"], purchase.get("card_id", ""),
+            )
+            if success:
+                if purchase["source"] == "neutral":
+                    await manager.send_to_others(game_id, pid, {
+                        "type": "neutral_purchase",
+                        "player_id": pid,
+                        "player_name": player.name,
+                        "player_color": player.color,
+                        "card_id": purchase.get("card_id", ""),
+                        "card_name": _msg.replace("Bought ", ""),
+                    })
                 await manager.send_to_others(game_id, pid, {
-                    "type": "neutral_purchase",
+                    "type": "cursor_click",
                     "player_id": pid,
-                    "player_name": player.name,
-                    "player_color": player.color,
-                    "card_id": purchase.get("card_id", ""),
-                    "card_name": _msg.replace("Bought ", ""),
                 })
-            await manager.send_to_others(game_id, pid, {
-                "type": "cursor_click",
-                "player_id": pid,
-            })
-            await store.save(game)
-            await _broadcast_state(game_id, game)
+                await store.save(game)
+                await _broadcast_state(game_id, game)
         await _cpu_sleep(game, 0.3)
 
     # Clear cursor and signal done
@@ -627,13 +661,13 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
         "source": None,
     })
 
-    game = await store.get(game_id)
-    if not game or game.current_phase != Phase.BUY:
-        return
-    end_buy_phase(game, pid)
-    await store.save(game)
-    await _broadcast_state(game_id, game)
-    await _cpu_sleep(game, 0.3)
+    async with lock:
+        game = await store.get(game_id)
+        if not game or game.current_phase != Phase.BUY:
+            return
+        end_buy_phase(game, pid)
+        await store.save(game)
+        await _broadcast_state(game_id, game)
 
 
 def _pick_cpu_decoy_hovers(

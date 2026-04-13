@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 def _maybe_restart_cpu_buys(game: GameState) -> None:
     """Re-launch CPU buy task if the game is in BUY phase with pending CPUs
     and no active background task (e.g. after a service restart)."""
-    from app.api.routes import _active_cpu_buy_tasks, _process_cpu_buys_with_cursors
+    from app.api.routes import _active_cpu_buy_tasks, _game_locks, _process_cpu_buys_with_cursors
 
     if game.current_phase != Phase.BUY:
         return
@@ -51,7 +51,10 @@ def _maybe_restart_cpu_buys(game: GameState) -> None:
     logger.info("Restarting orphaned CPU buy task for game %s", game.id)
     task = asyncio.create_task(_process_cpu_buys_with_cursors(game.id))
     _active_cpu_buy_tasks[game.id] = task
-    task.add_done_callback(lambda _t: _active_cpu_buy_tasks.pop(game.id, None))
+    def _cleanup(_t: asyncio.Task[None]) -> None:
+        _active_cpu_buy_tasks.pop(game.id, None)
+        _game_locks.pop(game.id, None)
+    task.add_done_callback(_cleanup)
 
 # ── Data structures ─────────────────────────────────────────
 
