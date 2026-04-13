@@ -422,6 +422,37 @@ async def join_lobby(code: str, req: JoinLobbyRequest) -> dict[str, Any]:
     }
 
 
+class RejoinRequest(BaseModel):
+    player_id: str
+
+
+@lobby_router.post("/{code}/rejoin")
+async def rejoin_lobby(code: str, req: RejoinRequest) -> dict[str, Any]:
+    """Rejoin an existing lobby to get a fresh token.
+
+    Used when the client's token becomes stale (e.g. after server restart).
+    The player must already be a member of the lobby.
+    """
+    lobby = _require_lobby(code)
+
+    if req.player_id not in lobby.players:
+        raise HTTPException(403, "Not a member of this lobby")
+
+    player = lobby.players[req.player_id]
+
+    # Issue a fresh token
+    token = str(uuid.uuid4())
+    player.token = token
+    _tokens[req.player_id] = token
+    lobby.touch()
+
+    return {
+        "player_id": req.player_id,
+        "token": token,
+        "lobby": lobby.to_dict(),
+    }
+
+
 @lobby_router.get("/{code}")
 async def get_lobby(code: str, player_id: str, token: str) -> dict[str, Any]:
     """Get current lobby state."""

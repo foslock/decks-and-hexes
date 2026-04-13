@@ -103,10 +103,23 @@ function AppInner() {
   const wsPlayerId = screen.type === 'game' && screen.isMultiplayer ? screen.playerId : null;
   const wsToken = screen.type === 'game' && screen.isMultiplayer ? screen.token : null;
 
+  const handleGameTokenRefresh = useCallback((newToken: string) => {
+    setScreen(prev => {
+      if (prev.type === 'game' || prev.type === 'lobby') {
+        const updated = { ...prev, token: newToken };
+        saveSession(updated);
+        api.setAuthToken(newToken);
+        return updated;
+      }
+      return prev;
+    });
+  }, []);
+
   const { lastMessage: gameWsMessage } = useWebSocket(
     gameLobbyCode,
     wsPlayerId,
     wsToken,
+    handleGameTokenRefresh,
   );
 
   // Handle WebSocket game state updates
@@ -286,6 +299,7 @@ function AppInner() {
           initialLobby={screen.lobby}
           onGameStart={handleGameStart}
           onLeave={handleLeaveLobby}
+          onTokenRefresh={handleGameTokenRefresh}
         />
       </SettingsProvider>
     );

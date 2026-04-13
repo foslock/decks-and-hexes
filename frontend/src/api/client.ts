@@ -186,6 +186,16 @@ export async function joinLobby(
   });
 }
 
+export async function rejoinLobby(
+  code: string,
+  playerId: string,
+): Promise<{ player_id: string; token: string; lobby: LobbyState }> {
+  return request(`/lobby/${code}/rejoin`, {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId }),
+  });
+}
+
 export async function getLobby(
   code: string,
   playerId: string,

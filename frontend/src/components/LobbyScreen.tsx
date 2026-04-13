@@ -108,10 +108,11 @@ interface LobbyScreenProps {
   initialLobby: LobbyState;
   onGameStart: (gameId: string, state: GameState, localPlayerIds?: string[]) => void;
   onLeave: () => void;
+  onTokenRefresh?: (newToken: string) => void;
 }
 
 export default function LobbyScreen({
-  lobbyCode, playerId, token, isHost, initialLobby, onGameStart, onLeave,
+  lobbyCode, playerId, token, isHost, initialLobby, onGameStart, onLeave, onTokenRefresh,
 }: LobbyScreenProps) {
   const { settings, setAnimationMode, setTooltips } = useSettings();
   const [lobby, setLobby] = useState<LobbyState>(initialLobby);
@@ -201,7 +202,7 @@ export default function LobbyScreen({
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
-  const { lastMessage, status } = useWebSocket(lobbyCode, playerId, token);
+  const { lastMessage, status } = useWebSocket(lobbyCode, playerId, token, onTokenRefresh);
   const sound = useSound();
 
   // Handle WebSocket messages
