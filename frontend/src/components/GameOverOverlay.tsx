@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import type { GameState, Player, Card, HexTile } from '../types/game';
 import { CardViewPopup } from './CardHand';
 import { useSound } from '../audio/useSound';
@@ -91,9 +91,23 @@ export default function GameOverOverlay({
   const [buttonsVisible, setButtonsVisible] = useState(false);
   const [viewingDeck, setViewingDeck] = useState<string | null>(null);
   const [vpTooltip, setVpTooltip] = useState<{ pid: string; x: number; y: number } | null>(null);
+  const [hidden, setHidden] = useState(false);
   const sound = useSound();
 
   const [returnedToLobby, setReturnedToLobby] = useState(false);
+
+  // Toggle overlay visibility with Escape key
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === 'Escape' && bannerVisible && !viewingDeck) {
+      e.stopPropagation();
+      setHidden(prev => !prev);
+    }
+  }, [bannerVisible, viewingDeck]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [handleKeyDown]);
 
   const leaderboard: LeaderboardEntry[] = useMemo(() => {
     const tiles = gameState.grid.tiles;
@@ -170,6 +184,41 @@ export default function GameOverOverlay({
 
   const bannerColor = isVictory ? '#4a9eff' : '#ff4a4a';
   const bannerText = isVictory ? 'Victory' : 'Defeat';
+
+  if (hidden) {
+    return (
+      <>
+        {/* Transparent blocker to prevent game interaction */}
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 39999,
+          pointerEvents: 'all',
+          cursor: 'default',
+        }} />
+        {/* Show Results button */}
+        <button
+          onClick={() => setHidden(false)}
+          style={{
+            position: 'fixed',
+            top: 12,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 40000,
+            padding: '6px 14px',
+            background: 'rgba(20, 20, 50, 0.85)',
+            border: '1px solid #555',
+            borderRadius: 8,
+            color: '#aaa',
+            fontSize: 12,
+            cursor: 'pointer',
+          }}
+        >
+          Show Results (Esc)
+        </button>
+      </>
+    );
+  }
 
   return (
     <div style={{
@@ -360,6 +409,17 @@ export default function GameOverOverlay({
         >
           Exit Game
         </button>
+      </div>
+
+      {/* Hint to view map */}
+      <div style={{
+        marginTop: 14,
+        fontSize: 12,
+        color: '#555',
+        opacity: buttonsVisible ? 1 : 0,
+        transition: 'opacity 0.6s ease 0.3s',
+      }}>
+        Press <span style={{ color: '#777' }}>Esc</span> to view the map
       </div>
 
       {/* VP breakdown tooltip */}

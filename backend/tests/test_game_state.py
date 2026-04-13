@@ -129,7 +129,7 @@ class TestStartOfTurn:
 
     def test_archetype_market_populated(self, small_2p_game: GameState) -> None:
         for p in small_2p_game.players.values():
-            assert len(p.archetype_market) <= 3
+            assert len(p.archetype_market) <= 5
 
     def test_actions_reset(self, small_2p_game: GameState) -> None:
         for p in small_2p_game.players.values():

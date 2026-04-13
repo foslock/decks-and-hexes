@@ -643,6 +643,7 @@ def serialize_game(game: GameState) -> str:
         "map_seed": game.map_seed,
         "claim_ban_rounds": game.claim_ban_rounds,
         "max_rounds": game.max_rounds,
+        "archetype_market_size": game.archetype_market_size,
         "winners": game.winners,
         "test_mode": game.test_mode,
         # Grid
@@ -734,6 +735,7 @@ def deserialize_game(
         map_seed=blob.get("map_seed", ""),
         claim_ban_rounds=blob.get("claim_ban_rounds", 0),
         max_rounds=blob.get("max_rounds", 20),
+        archetype_market_size=blob.get("archetype_market_size", 5),
         winners=blob.get("winners", []),
         resolution_steps=blob.get("resolution_steps", []),
         player_effects=blob.get("player_effects", []),

@@ -424,6 +424,7 @@ class GameState:
     # Global claim ban (Snowy Holiday): rounds remaining where no player can play Claim cards
     claim_ban_rounds: int = 0
     max_rounds: int = DEFAULT_MAX_ROUNDS
+    archetype_market_size: int = 5
     winners: list[str] = field(default_factory=list)  # all winners (for tied victories)
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
@@ -668,6 +669,7 @@ def create_game(
     card_pack: str = "everything",
     map_seed: Optional[str] = None,
     max_rounds: Optional[int] = None,
+    archetype_market_size: Optional[int] = None,
 ) -> GameState:
     """Create a new game with the given configuration."""
     # Map seed: user-visible 6-char seed that controls grid layout only
@@ -700,6 +702,10 @@ def create_game(
     # Set round limit
     if max_rounds is not None:
         game.max_rounds = max_rounds
+
+    # Set archetype market size (default 3)
+    if archetype_market_size is not None:
+        game.archetype_market_size = archetype_market_size
 
     # Create players and assign starting positions
     for i, config in enumerate(player_configs):
@@ -877,11 +883,11 @@ def execute_start_of_turn(game: GameState) -> GameState:
         player.has_acknowledged_resolve = False
         player.has_ended_turn = False
 
-        # Reveal archetype market (3 random cards from archetype deck)
+        # Reveal archetype market (N random cards from archetype deck)
         player.archetype_market = []
         if player.archetype_deck:
             player.archetype_market = _draw_archetype_market(
-                player.archetype_deck, 3, game.rng, player,
+                player.archetype_deck, game.archetype_market_size, game.rng, player,
             )
 
     # Upkeep phase: distribute Debt cards (round 5+), then pause for frontend
@@ -2351,13 +2357,13 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
             return False, f"Need {REROLL_COST} resources"
         player.resources -= REROLL_COST
 
-    # Shuffle current market back, draw affordable 3
+    # Shuffle current market back, draw affordable N
     remaining_deck = [c for c in player.archetype_deck if c not in player.archetype_market]
     all_available = remaining_deck + player.archetype_market
     game.rng.shuffle(all_available)
     player.archetype_deck = all_available
     player.archetype_market = _draw_archetype_market(
-        all_available, 3, game.rng, player,
+        all_available, game.archetype_market_size, game.rng, player,
     )
 
     game._log(f"{player.name} re-rolls archetype market")

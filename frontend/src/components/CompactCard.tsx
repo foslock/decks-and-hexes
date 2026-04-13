@@ -3,6 +3,7 @@ import type { Card } from '../types/game';
 import { getCardDisplayColor } from '../constants/cardColors';
 import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
+import { useCardZoom } from './CardZoomContext';
 
 const COL_W = 134;
 
@@ -21,16 +22,19 @@ export default function CompactCard({ card, subtitleContext, effectiveResourceGa
   const typeColor = getCardDisplayColor(card);
   const ctx: CardSubtitleContext = { ...subtitleContext, effectiveResourceGain, effectiveDrawCards };
   const statParts = buildCardSubtitle(card, ctx);
+  const { showZoom } = useCardZoom();
 
   return (
-    <div style={{
+    <div
+      onClick={() => showZoom(card)}
+      style={{
       width: COL_W,
       padding: '3px 6px',
       background: '#2a2a3e',
       border: `1px solid ${typeColor}`,
       borderRadius: 5,
       color: '#fff',
-      cursor: 'default',
+      cursor: 'pointer',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
         <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

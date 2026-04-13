@@ -25,6 +25,7 @@ class EffectType(str, Enum):
     SELF_DISCARD = "self_discard"
     SELF_TRASH = "self_trash"
     TRASH_GAIN_BUY_COST = "trash_gain_buy_cost"  # Consolidate: trash + gain buy cost
+    TRASH_GAIN_POWER = "trash_gain_power"        # Arms Dealer: trash + gain 2× effective power as resources
 
     # Opponent-targeting
     FORCED_DISCARD = "forced_discard"
@@ -91,6 +92,9 @@ class EffectType(str, Enum):
 
     # Power scaled by total tiles owned (Mob Rule, Locust Swarm)
     POWER_PER_TILES_OWNED = "power_per_tiles_owned"
+
+    # Resources scaled by total tiles owned (War Economy)
+    RESOURCES_PER_TILES_OWNED = "resources_per_tiles_owned"
 
     # Override ignore-defense effects on a tile
     IGNORE_DEFENSE_OVERRIDE = "ignore_defense_override"

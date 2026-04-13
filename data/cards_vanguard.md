@@ -422,3 +422,63 @@ cards:
       - type: draw_per_debt
         value: 1
         timing: immediate
+
+  - id: vanguard_war_economy
+    name: War Economy
+    name_upgraded: War Economy+
+    type: Engine
+    buy_cost: 6
+    action_return: 0
+    power: 0
+    draw_cards: 1
+    upgraded_draw_cards: 2
+    effect: "Gain 1 resource for every 4 tiles you own (rounded down). Draw 1 card."
+    effect_upgraded: "Gain 1 resource for every 3 tiles you own (rounded down). Draw 2 cards."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Territory-scaling economy. Rewards Vanguard for building and holding a large footprint. Becomes 3-5+ resources mid-game as territory grows."
+
+    effects:
+      - type: resources_per_tiles_owned
+        timing: immediate
+        value: 4
+        upgraded_value: 3
+        metadata: {divisor_based: true}
+
+  - id: vanguard_arms_dealer
+    name: Arms Dealer
+    name_upgraded: Arms Dealer+
+    type: Engine
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    effect: "Trash 1 card from your hand. If it was a Claim card, gain resources equal to double its effective power and gain 1 action."
+    effect_upgraded: "Trash 1 card from your hand. If it was a Claim card, gain resources equal to double its effective power and gain 2 actions."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Combat-themed deck thinning. Uses effective power (including upgrades and printed modifiers), not base power. Turns outgrown Explores (0 res) into deck thinning, or surplus Claim cards into fuel."
+
+    effects:
+      - type: trash_gain_power
+        value: 2
+        timing: immediate
+        requires_choice: true
+        metadata: {optional: true, multiplier: 2, claim_only_bonus: true, use_effective_power: true, claim_action_return: 1, upgraded_claim_action_return: 2}
+
+  - id: vanguard_ultimatum
+    name: Ultimatum
+    name_upgraded: Ultimatum+
+    type: Claim
+    buy_cost: 10
+    action_return: 0
+    action_cost: 3
+    power: 8
+    upgraded_power: 10
+    draw_cards: 2
+    upgraded_draw_cards: 3
+    unique: true
+    effect: "Claim: Power 8. Draw 2 cards. Costs 3 actions to play."
+    effect_upgraded: "Claim: Power 10. Draw 3 cards. Costs 3 actions to play."
+    secondary_effect: null
+    secondary_timing: null
+    note: "The biggest single-card play in the Vanguard arsenal. Burns nearly your entire turn but delivers massive power and card advantage. Unique — only one copy allowed per deck."

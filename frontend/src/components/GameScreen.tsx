@@ -226,8 +226,11 @@ function getCardChoiceRequirement(card: Card): {
 } | null {
   if (!card.effects) return null;
   for (const effect of card.effects) {
-    if (effect.type === 'self_trash' || effect.type === 'trash_gain_buy_cost') {
-      const count = card.is_upgraded && effect.upgraded_value != null ? effect.upgraded_value : effect.value;
+    if (effect.type === 'self_trash' || effect.type === 'trash_gain_buy_cost' || effect.type === 'trash_gain_power') {
+      // trash_gain_power (Arms Dealer) always trashes exactly 1; others use effect value
+      const count = effect.type === 'trash_gain_power'
+        ? 1
+        : (card.is_upgraded && effect.upgraded_value != null ? effect.upgraded_value : effect.value);
       // Trashing is always optional — player can decline (but forfeits the bonus)
       return {
         effectType: effect.type as 'self_trash' | 'trash_gain_buy_cost',
@@ -3824,7 +3827,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 pointerEvents: hudVisible ? 'auto' : 'none',
               }}
             >
-              {(playerPanelExpanded || forcePlayerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp) ? (
+              {(playerPanelExpanded || forcePlayerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp || showGameOver) ? (
                 /* Expanded: all players */
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {

@@ -94,7 +94,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     resource_gain = _safe_int(entry.get("resource_gain", 0))
     effect = str(entry.get("effect", ""))
     has_gain_resources_effect = any(
-        e.get("type") in ("gain_resources", "resources_per_claims_last_round", "resource_scaling", "resource_per_vp_hex", "resources_per_tiles_lost", "next_turn_bonus", "abandon_and_block")
+        e.get("type") in ("gain_resources", "resources_per_claims_last_round", "resource_scaling", "resource_per_vp_hex", "resources_per_tiles_lost", "resources_per_tiles_owned", "next_turn_bonus", "abandon_and_block")
         for e in entry.get("effects", [])
     )
     if resource_gain == 0 and "gain" in effect.lower() and "resource" in effect.lower() and not has_gain_resources_effect:

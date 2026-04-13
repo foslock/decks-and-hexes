@@ -1177,7 +1177,6 @@ export default function LobbyScreen({
               fontSize: 13, color: '#aaa',
               padding: '8px 12px', background: '#1e1e36',
               display: 'flex', alignItems: 'center', gap: 8,
-              borderRadius: !isHost ? '0 0 8px 8px' : undefined,
             }}>
               <div style={{ width: 90, flexShrink: 0 }}>
                 <Tooltip content="The number of actions each player starts their round with.">
@@ -1220,6 +1219,58 @@ export default function LobbyScreen({
               ) : (
                 <strong style={{ color: '#fff' }}>
                   {lobby.config.granted_actions ?? 5}
+                </strong>
+              )}
+            </div>
+
+            {/* Archetype Market Size */}
+            <div style={{
+              fontSize: 13, color: '#aaa',
+              padding: '8px 12px', background: '#1e1e36',
+              display: 'flex', alignItems: 'center', gap: 8,
+              borderRadius: !isHost ? '0 0 8px 8px' : undefined,
+            }}>
+              <div style={{ width: 90, flexShrink: 0 }}>
+                <Tooltip content="The number of archetype cards available to buy each round.">
+                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Market Size</span>
+                </Tooltip>
+              </div>
+              {isHost ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={lobby.config.archetype_market_size ?? 3}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val >= 1 && val <= 10) {
+                        handleConfigChange('archetype_market_size', val);
+                      }
+                    }}
+                    style={{
+                      width: 52, padding: '0 6px', height: 26,
+                      background: '#2a2a3e', border: '1px solid #555',
+                      borderRadius: 4, color: '#fff', fontSize: 13,
+                      fontWeight: 'bold', textAlign: 'center',
+                    }}
+                  />
+                  {(lobby.config.archetype_market_size ?? 5) !== 5 && (
+                    <button
+                      onClick={() => handleConfigChange('archetype_market_size', 5)}
+                      style={{
+                        fontSize: 13, padding: '0 8px', height: 26,
+                        background: '#2a2a3e', border: '1px solid #555',
+                        borderRadius: 4, color: '#888', cursor: 'pointer',
+                      }}
+                    >
+                      Reset (3)
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <strong style={{ color: '#fff' }}>
+                  {lobby.config.archetype_market_size ?? 3}
                 </strong>
               )}
             </div>

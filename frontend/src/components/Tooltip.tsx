@@ -72,7 +72,7 @@ export default function Tooltip({ content, delay = 0, position: placement = 'abo
             lineHeight: 1.4,
             color: '#ddd',
             maxWidth: 260,
-            zIndex: 20000,
+            zIndex: 60000,
             pointerEvents: 'none',
             boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
             whiteSpace: 'normal',

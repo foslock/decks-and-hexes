@@ -9,14 +9,14 @@
  */
 
 export const CARD_TYPE_COLORS: Record<string, string> = {
-  claim: '#e04050',
-  defense: '#4a9eff',
-  engine: '#3bb44b',
-  passive: '#aa88cc',
+  claim: '#a83040',
+  defense: '#3a7abf',
+  engine: '#2e8a3a',
+  passive: '#8868a8',
 };
 
 /** Burnt orange color for Debt cards. */
-export const DEBT_CARD_COLOR = '#cc6622';
+export const DEBT_CARD_COLOR = '#9a5020';
 
 /** Lookup with fallback for unknown card types. */
 export function cardTypeColor(cardType: string): string {

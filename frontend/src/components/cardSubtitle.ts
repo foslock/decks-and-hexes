@@ -222,9 +222,9 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
     }
   }
 
-  // Check if card has a trash-conditional effect (self_trash or trash_gain_buy_cost)
+  // Check if card has a trash-conditional effect (self_trash, trash_gain_buy_cost, trash_gain_power)
   // These cards use "✂️N → bonuses" format where bonuses are conditional on trashing
-  const trashEffect = card.effects?.find(e => e.type === 'self_trash' || e.type === 'trash_gain_buy_cost');
+  const trashEffect = card.effects?.find(e => e.type === 'self_trash' || e.type === 'trash_gain_buy_cost' || e.type === 'trash_gain_power');
   const hasTrashConditional = !!trashEffect;
 
   // For trash-conditional cards, draw/action are shown after the → arrow, not here
@@ -238,8 +238,9 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
   // Exodus: abandon_tile is described first ("Abandon a tile..."), so defer
   // both draw and action so they render after the 🔷↘ icon.
   const hasAbandonTile = card.effects?.some(e => e.type === 'abandon_tile');
+  const hasResourcesPerTiles = card.effects?.some(e => e.type === 'resources_per_tiles_owned');
   const deferAction = hasDelayedDraw || hasSelfDiscard || hasMulligan || hasActionsPerCards || hasAbandonTile;
-  const deferDraw = hasAbandonTile;
+  const deferDraw = hasAbandonTile || hasResourcesPerTiles;
   if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan && !deferDraw) parts.push(p(`+${card.draw_cards}🃏`));
   if (card.action_return > 0 && !hasTrashConditional && !deferAction) parts.push(p(`+${card.action_return}⚡`));
   if (card.forced_discard > 0) parts.push(p(`🎯-${card.forced_discard}🃏`));
@@ -247,6 +248,13 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
   // Effect-based icons
   if (card.effects) {
     for (const eff of card.effects) {
+      if (eff.type === 'trash_gain_power') {
+        // Arms Dealer: trash 1, if Claim → gain 2× effective power as resources + action(s)
+        const actionVal = isUpgraded
+          ? ((eff.metadata?.upgraded_claim_action_return as number) ?? 1)
+          : ((eff.metadata?.claim_action_return as number) ?? 1);
+        parts.push(p(`✂️1 → +💰, +${actionVal}⚡`));
+      }
       if (eff.type === 'self_trash' || eff.type === 'trash_gain_buy_cost') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         // Build conditional bonuses after →
@@ -332,6 +340,19 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         } else {
           parts.push(p(`+${val}💰/★🔷`));
         }
+      }
+      if (eff.type === 'resources_per_tiles_owned') {
+        const divisor = isUpgraded ? (eff.upgraded_value ?? eff.value) : eff.value;
+        if (ctx?.effectiveResourceGain !== undefined) {
+          parts.push(p(`+${ctx.effectiveResourceGain}💰`, ctx.effectiveResourceGain > 0));
+        } else if (ctx?.tileCount !== undefined) {
+          const gained = Math.floor(ctx.tileCount / divisor);
+          parts.push(p(`+${gained}💰`, gained > 0));
+        } else {
+          parts.push(p(`+💰`));
+        }
+        // Emit deferred draw after resource effect (War Economy: "+💰 · +1🃏")
+        if (card.draw_cards > 0) parts.push(p(`+${card.draw_cards}🃏`));
       }
       if (eff.type === 'enhance_vp_tile') parts.push(p('🔷+★'));
       if (eff.type === 'draw_per_connected_vp') {

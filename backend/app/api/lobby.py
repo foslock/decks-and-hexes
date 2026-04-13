@@ -95,6 +95,7 @@ class LobbyConfig:
     card_pack: str = DEFAULT_PACK_ID
     max_rounds: int = 20
     map_seed: str = ""  # 6-char lowercase alphanumeric; "" = generate on init
+    archetype_market_size: int = 5  # Number of cards shown in archetype market each turn
 
     def __post_init__(self) -> None:
         if not self.map_seed:
@@ -111,6 +112,7 @@ class LobbyConfig:
             "card_pack": self.card_pack,
             "max_rounds": self.max_rounds,
             "map_seed": self.map_seed,
+            "archetype_market_size": self.archetype_market_size,
         }
 
 
@@ -282,6 +284,7 @@ class UpdateConfigRequest(BaseModel):
     granted_actions: Optional[int] = None
     card_pack: Optional[str] = None
     map_seed: Optional[str] = None
+    archetype_market_size: Optional[int] = None
 
 
 class UpdatePlayerRequest(BaseModel):
@@ -491,6 +494,11 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
         if not re.fullmatch(r'[a-z0-9]{6}', seed):
             raise HTTPException(400, "Map seed must be exactly 6 lowercase alphanumeric characters")
         lobby.config.map_seed = seed
+
+    if req.archetype_market_size is not None:
+        if not 1 <= req.archetype_market_size <= 10:
+            raise HTTPException(400, "archetype_market_size must be between 1 and 10")
+        lobby.config.archetype_market_size = req.archetype_market_size
 
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
@@ -753,6 +761,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
         card_pack=lobby.config.card_pack,
         map_seed=lobby.config.map_seed,
         max_rounds=lobby.config.max_rounds,
+        archetype_market_size=lobby.config.archetype_market_size,
     )
     game.host_id = lobby.host_id
     game.lobby_code = code

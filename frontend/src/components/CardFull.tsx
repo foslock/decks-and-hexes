@@ -135,6 +135,33 @@ function getCardArt(id: string, cardType: string): string {
   return TYPE_EMOJI[cardType] || '📄';
 }
 
+/** Resolve the image URL for a card, stripping instance suffixes.
+ *  Images are auto-detected: just drop a .png in /public/cards/ named by base card ID. */
+function getCardImageUrl(id: string): string {
+  // Strip instance suffixes to get the base card ID
+  let key = id;
+  // Try exact ID first, then progressively shorter prefixes
+  // The <img> onError handler falls back to emoji if the file doesn't exist
+  while (key.includes('_')) {
+    key = key.substring(0, key.lastIndexOf('_'));
+  }
+  // Use the longest matching prefix that looks like a card ID
+  // For cards like "neutral_explore_start_adv_0", we want "neutral_explore"
+  // For cards like "debt", we want "debt"
+  return `/cards/${getBaseCardId(id)}.png`;
+}
+
+/** Strip instance suffixes to get the base card ID (e.g. "neutral_explore_start_adv_0" → "neutral_explore") */
+function getBaseCardId(id: string): string {
+  if (CARD_ART[id]) return id;
+  let key = id;
+  while (key.includes('_')) {
+    key = key.substring(0, key.lastIndexOf('_'));
+    if (CARD_ART[key]) return key;
+  }
+  return id;
+}
+
 /** Standard card width for all full card views */
 export const CARD_FULL_WIDTH = 220;
 /** Standard card height (approximate — flex layout) */
@@ -184,6 +211,45 @@ const STAT_NOTE_TOOLTIPS: Record<string, string> = {
 function extractKeywords(card: Card): { keyword: string; definition: string }[] {
   const combined = [card.description || '', ...buildStatNotes(card)].join(' ');
   return extractKeywordsFromText(combined);
+}
+
+/** Art slot that tries to load a card image, falling back to emoji on error.
+ *  Just drop a .png in public/cards/ named by base card ID — no config needed. */
+function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
+  cardId: string; cardName: string; cardType: string; typeColor: string;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const imgUrl = getCardImageUrl(cardId);
+
+  const hasImage = !imgFailed;
+
+  return (
+    <div style={{
+      width: '100%',
+      height: 100,
+      borderRadius: 8,
+      border: `1px solid ${hasImage ? typeColor + '66' : typeColor + '44'}`,
+      background: '#151530',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 52,
+      userSelect: 'none',
+      flexShrink: 0,
+      overflow: 'hidden',
+    }}>
+      {hasImage ? (
+        <img
+          src={imgUrl}
+          alt={cardName}
+          onError={() => setImgFailed(true)}
+          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+        />
+      ) : (
+        getCardArt(cardId, cardType)
+      )}
+    </div>
+  );
 }
 
 export default function CardFull({ card, effectiveCost, remaining, style, showKeywordHints }: CardFullProps) {
@@ -310,22 +376,8 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
         </div>
       </div>
 
-      {/* Art placeholder */}
-      <div style={{
-        width: '100%',
-        height: 100,
-        borderRadius: 8,
-        border: `2px solid ${typeColor}44`,
-        background: '#151530',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 52,
-        userSelect: 'none',
-        flexShrink: 0,
-      }}>
-        {getCardArt(card.id, card.card_type)}
-      </div>
+      {/* Card art — tries image file, falls back to emoji */}
+      <CardArtSlot cardId={card.id} cardName={card.name} cardType={card.card_type} typeColor={typeColor} />
 
       {/* Archetype — Type line */}
       <div style={{
