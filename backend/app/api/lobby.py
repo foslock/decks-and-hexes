@@ -298,6 +298,7 @@ class UpdateConfigRequest(BaseModel):
     card_pack: Optional[str] = None
     map_seed: Optional[str] = None
     archetype_market_size: Optional[int] = None
+    max_rounds: Optional[int] = None
 
 
 class UpdatePlayerRequest(BaseModel):
@@ -537,6 +538,11 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
         if not 1 <= req.archetype_market_size <= 10:
             raise HTTPException(400, "archetype_market_size must be between 1 and 10")
         lobby.config.archetype_market_size = req.archetype_market_size
+
+    if req.max_rounds is not None:
+        if req.max_rounds < 5:
+            raise HTTPException(400, "max_rounds must be at least 5")
+        lobby.config.max_rounds = req.max_rounds
 
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())

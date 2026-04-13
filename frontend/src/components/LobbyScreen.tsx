@@ -1168,7 +1168,7 @@ export default function LobbyScreen({
                     type="number"
                     min={1}
                     max={10}
-                    value={lobby.config.archetype_market_size ?? 3}
+                    value={lobby.config.archetype_market_size ?? 5}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
                       if (!isNaN(val) && val >= 1 && val <= 10) {
@@ -1191,13 +1191,13 @@ export default function LobbyScreen({
                         borderRadius: 4, color: '#888', cursor: 'pointer',
                       }}
                     >
-                      Reset (3)
+                      Reset (5)
                     </button>
                   )}
                 </div>
               ) : (
                 <strong style={{ color: '#fff' }}>
-                  {lobby.config.archetype_market_size ?? 3}
+                  {lobby.config.archetype_market_size ?? 5}
                 </strong>
               )}
             </div>
