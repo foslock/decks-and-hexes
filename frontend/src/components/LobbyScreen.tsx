@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { GameState, LobbyState } from '../types/game';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useSettings, useBackgroundImages, type AnimationMode } from './SettingsContext';
+import { useSettings, type AnimationMode } from './SettingsContext';
 import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
@@ -115,7 +115,6 @@ export default function LobbyScreen({
   lobbyCode, playerId, token, isHost, initialLobby, onGameStart, onLeave, onTokenRefresh,
 }: LobbyScreenProps) {
   const { settings, setAnimationMode, setTooltips } = useSettings();
-  const bgEnabled = useBackgroundImages();
   const [lobby, setLobby] = useState<LobbyState>(initialLobby);
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -399,7 +398,7 @@ export default function LobbyScreen({
   // ── Render ───────────────────────────────────────────────
 
   return (
-    <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100dvh', ...(bgEnabled ? { backgroundImage: 'url(/backgrounds/bg-lobby.png)', backgroundSize: 'cover', backgroundPosition: 'center' } : {}) }}>
+    <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100dvh' }}>
       {/* Settings gear — top right */}
       <div ref={settingsRef} style={{ position: 'fixed', top: 16, right: 16, zIndex: 100 }}>
         <button

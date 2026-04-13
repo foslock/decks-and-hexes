@@ -3,7 +3,6 @@ import { BASE } from '../api/client';
 import CardBrowser from './CardBrowser';
 import HowToPlay from './HowToPlay';
 import HeroAnimation from './HeroAnimation';
-import { useBackgroundImages } from './SettingsContext';
 import packageJson from '../../package.json';
 
 interface SetupScreenProps {
@@ -11,10 +10,7 @@ interface SetupScreenProps {
   onJoinLobby: (code: string) => Promise<void>;
 }
 
-const BG_HOME = '/backgrounds/bg-home.png';
-
 export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenProps) {
-  const bgEnabled = useBackgroundImages();
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
@@ -48,7 +44,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   };
 
   return (
-    <div style={{ height: '100dvh', minWidth: 350, display: 'flex', flexDirection: 'column', overflow: 'auto', ...(bgEnabled ? { backgroundImage: `url(${BG_HOME})`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}) }}>
+    <div style={{ height: '100dvh', minWidth: 350, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
       <style>{`
         .lobby-btn { transition: box-shadow 0.2s ease; box-shadow: none; }
         .lobby-btn:hover { box-shadow: 0 0 16px rgba(74, 158, 255, 0.35); }
