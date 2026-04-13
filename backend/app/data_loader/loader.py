@@ -193,7 +193,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     # Parse upgraded fields
     name_upgraded = str(entry.get("name_upgraded", "") or "")
     effect_upgraded = str(entry.get("effect_upgraded", "") or "")
-    upgrade_description = effect_upgraded
+    upgrade_description = f"{effect_upgraded} {secondary_effect}".strip() if effect_upgraded else ""
 
     # Parse upgraded stats from effect_upgraded text and/or explicit YAML fields
     upgraded_power = _safe_optional_int(entry.get("upgraded_power"))
