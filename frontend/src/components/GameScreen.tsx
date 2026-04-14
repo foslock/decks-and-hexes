@@ -2898,13 +2898,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           return;
         }
 
-        // Priority 1: Play selected engine card (only non-targeting engines)
+        // Priority 1: Play selected engine card (only non-targeting engines).
+        // Debt is excluded — it costs 3 resources to trash, so accidentally
+        // pressing Enter while it's selected would silently burn an action
+        // and potentially fail. Force the player to use double-click.
         if (
           phase === 'play' && activePlayer && !resolving &&
           selectedCardIndex !== null && multiTileCardIndex === null && !trashMode
         ) {
           const card = activePlayer.hand[selectedCardIndex];
-          if (card?.card_type === 'engine' && !needsOpponentTarget(card) && !card.target_own_tile) {
+          if (card?.card_type === 'engine' && card.name !== 'Debt' && !needsOpponentTarget(card) && !card.target_own_tile) {
             handlePlayEngine();
             return;
           }
