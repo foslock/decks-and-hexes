@@ -457,8 +457,12 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         if (isUpgraded) parts.push(p('+1🃏'));
       }
       if (eff.type === 'next_turn_bonus') {
-        const draw = (eff.metadata?.draw as number) ?? 0;
-        const resources = (eff.metadata?.resources as number) ?? 0;
+        const draw = isUpgraded && eff.metadata?.upgraded_draw != null
+          ? (eff.metadata.upgraded_draw as number)
+          : ((eff.metadata?.draw as number) ?? 0);
+        const resources = isUpgraded && eff.metadata?.upgraded_resources != null
+          ? (eff.metadata.upgraded_resources as number)
+          : ((eff.metadata?.resources as number) ?? 0);
         const actions = isUpgraded ? ((eff.metadata?.upgraded_actions as number) ?? 0) : 0;
         const bonusParts: string[] = [];
         if (draw > 0) bonusParts.push(`+${draw}⏰🃏`);

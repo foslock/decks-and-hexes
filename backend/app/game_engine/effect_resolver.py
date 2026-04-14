@@ -1301,8 +1301,14 @@ def _handle_actions_per_cards_played(effect: Effect, ctx: EffectContext) -> None
 def _handle_next_turn_bonus(effect: Effect, ctx: EffectContext) -> None:
     """Supply Depot: grant bonuses at start of next turn."""
     is_upgraded = ctx.card.is_upgraded
-    extra_draw = int(effect.metadata.get("draw", 0))
-    extra_resources = int(effect.metadata.get("resources", 0))
+    if is_upgraded and "upgraded_draw" in effect.metadata:
+        extra_draw = int(effect.metadata.get("upgraded_draw", 0))
+    else:
+        extra_draw = int(effect.metadata.get("draw", 0))
+    if is_upgraded and "upgraded_resources" in effect.metadata:
+        extra_resources = int(effect.metadata.get("upgraded_resources", 0))
+    else:
+        extra_resources = int(effect.metadata.get("resources", 0))
     extra_actions = int(effect.metadata.get("upgraded_actions", 0)) if is_upgraded else 0
 
     if extra_draw > 0:

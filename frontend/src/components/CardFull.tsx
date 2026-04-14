@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
 import { renderWithKeywords, extractKeywordsFromText, KEYWORDS } from './Keywords';
@@ -259,42 +260,92 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
   const imgUrl = getCardImageUrl(cardId);
   // Start with cached knowledge; fall back to "try loading"
   const [imgFailed, setImgFailed] = useState(() => imgBad.has(imgUrl));
+  const [showFull, setShowFull] = useState(false);
 
   const hasImage = !imgFailed;
 
+  // Close fullscreen on pointer/mouse up anywhere
+  useEffect(() => {
+    if (!showFull) return;
+    const close = () => setShowFull(false);
+    window.addEventListener('pointerup', close);
+    window.addEventListener('pointercancel', close);
+    return () => {
+      window.removeEventListener('pointerup', close);
+      window.removeEventListener('pointercancel', close);
+    };
+  }, [showFull]);
+
   return (
-    <div style={{
-      width: '100%',
-      height: 100,
-      borderRadius: 8,
-      border: `1px solid ${hasImage ? typeColor + '66' : typeColor + '44'}`,
-      background: '#151530',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: 52,
-      userSelect: 'none',
-      flexShrink: 0,
-      overflow: 'hidden',
-    }}>
-      {hasImage ? (
-        <img
-          src={imgUrl}
-          alt={cardName}
-          onLoad={() => { imgOk.add(imgUrl); }}
-          onError={() => {
-            // Only mark as failed if this URL has never loaded successfully
-            if (!imgOk.has(imgUrl)) {
-              imgBad.add(imgUrl);
-              setImgFailed(true);
-            }
-          }}
-          style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
-        />
-      ) : (
-        getCardArt(cardId, cardType)
+    <>
+      <div
+        onPointerDown={(e) => {
+          if (hasImage) {
+            e.preventDefault();
+            setShowFull(true);
+          }
+        }}
+        style={{
+          width: '100%',
+          height: 100,
+          borderRadius: 8,
+          border: `1px solid ${hasImage ? typeColor + '66' : typeColor + '44'}`,
+          background: '#151530',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 52,
+          userSelect: 'none',
+          flexShrink: 0,
+          overflow: 'hidden',
+          cursor: hasImage ? 'zoom-in' : undefined,
+        }}
+      >
+        {hasImage ? (
+          <img
+            src={imgUrl}
+            alt={cardName}
+            draggable={false}
+            onLoad={() => { imgOk.add(imgUrl); }}
+            onError={() => {
+              // Only mark as failed if this URL has never loaded successfully
+              if (!imgOk.has(imgUrl)) {
+                imgBad.add(imgUrl);
+                setImgFailed(true);
+              }
+            }}
+            style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+        ) : (
+          getCardArt(cardId, cardType)
+        )}
+      </div>
+      {showFull && hasImage && createPortal(
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(0,0,0,0.9)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 60000,
+          cursor: 'zoom-out',
+        }}>
+          <img
+            src={imgUrl}
+            alt={cardName}
+            draggable={false}
+            style={{
+              maxWidth: '95vw',
+              maxHeight: '95vh',
+              objectFit: 'contain',
+              borderRadius: 8,
+            }}
+          />
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
 

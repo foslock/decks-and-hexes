@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
@@ -7,7 +7,7 @@ import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 
 interface CardZoomContextType {
-  showZoom: (card: Card) => void;
+  showZoom: (card: Card, cardList?: Card[]) => void;
 }
 
 const CardZoomContext = createContext<CardZoomContextType>({ showZoom: () => {} });
@@ -19,32 +19,57 @@ export function useCardZoom() {
 /** Wrap the app with this provider to enable card zoom overlay from anywhere. */
 export function CardZoomProvider({ children }: { children: ReactNode }) {
   const [zoomedCard, setZoomedCard] = useState<Card | null>(null);
+  const [navList, setNavList] = useState<Card[] | null>(null);
   const shiftHeld = useShiftKey();
 
-  const showZoom = useCallback((card: Card) => {
+  const showZoom = useCallback((card: Card, cardList?: Card[]) => {
     setZoomedCard(card);
+    setNavList(cardList ?? null);
   }, []);
 
   const closeZoom = useCallback(() => {
     setZoomedCard(null);
+    setNavList(null);
   }, []);
+
+  // Find current index in nav list
+  const currentIndex = navList && zoomedCard
+    ? navList.findIndex(c => c.id === zoomedCard.id)
+    : -1;
+
+  const navigate = useCallback((direction: -1 | 1) => {
+    if (!navList || currentIndex < 0) return;
+    const nextIndex = currentIndex + direction;
+    if (nextIndex >= 0 && nextIndex < navList.length) {
+      setZoomedCard(navList[nextIndex]);
+    }
+  }, [navList, currentIndex]);
 
   const displayCard = zoomedCard && shiftHeld && hasUpgradePreview(zoomedCard)
     ? getUpgradedPreview(zoomedCard)
     : zoomedCard;
 
-  // Escape key to close
+  // Keyboard handler: Escape to close, arrow keys to navigate
   useEffect(() => {
     if (!zoomedCard) return;
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
         closeZoom();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigate(-1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigate(1);
       }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [zoomedCard, closeZoom]);
+  }, [zoomedCard, closeZoom, navigate]);
+
+  const hasPrev = navList != null && currentIndex > 0;
+  const hasNext = navList != null && currentIndex >= 0 && currentIndex < navList.length - 1;
 
   return (
     <CardZoomContext.Provider value={{ showZoom }}>
@@ -64,6 +89,52 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
             cursor: 'pointer',
           }}
         >
+          {/* Left arrow */}
+          {hasPrev && (
+            <div
+              onClick={(e) => { e.stopPropagation(); navigate(-1); }}
+              style={{
+                position: 'fixed',
+                left: 32,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                fontSize: 36,
+                color: '#888',
+                cursor: 'pointer',
+                userSelect: 'none',
+                padding: '16px',
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#fff')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = '#888')}
+            >
+              ‹
+            </div>
+          )}
+
+          {/* Right arrow */}
+          {hasNext && (
+            <div
+              onClick={(e) => { e.stopPropagation(); navigate(1); }}
+              style={{
+                position: 'fixed',
+                right: 32,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                fontSize: 36,
+                color: '#888',
+                cursor: 'pointer',
+                userSelect: 'none',
+                padding: '16px',
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = '#fff')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = '#888')}
+            >
+              ›
+            </div>
+          )}
+
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
@@ -101,6 +172,9 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
             textAlign: 'center',
             pointerEvents: 'none',
           }}>
+            {navList && navList.length > 1 && (
+              <span>← → to browse · </span>
+            )}
             {zoomedCard && !zoomedCard.is_upgraded && hasUpgradePreview(zoomedCard)
               ? 'Hold Shift for upgrade preview · Click anywhere or Escape to close'
               : 'Click anywhere or press Escape to close'}
