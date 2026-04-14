@@ -170,7 +170,7 @@ function Flag({ text, color }: { text: string; color: string }) {
 
 // ── Card Popup (deck viewer / discard viewer) ────────────────
 
-function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; shiftHeld: boolean }) {
+function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: boolean; shiftHeld: boolean; navList?: Card[] }) {
   const animMode = useAnimationMode();
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = getCardDisplayColor(displayCard);
@@ -186,7 +186,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
       <div
         onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
         onPointerLeave={() => setHoverRect(null)}
-        onClick={() => showZoom(displayCard)}
+        onClick={() => showZoom(displayCard, navList)}
         style={{
           width: 154,
           padding: 6,
@@ -243,7 +243,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
     );
   }
   return (
-    <div style={{ flexShrink: 0, cursor: 'pointer' }} onClick={() => showZoom(displayCard)}>
+    <div style={{ flexShrink: 0, cursor: 'pointer' }} onClick={() => showZoom(displayCard, navList)}>
       <CardFull card={displayCard} style={{ flexShrink: 0 }} />
       {upgradeLabel}
     </div>
@@ -298,6 +298,22 @@ export function CardViewPopup({
   const trashedGroup = cards.find(g => g.label === 'Trashed');
   const trashedCount = trashedGroup?.items.length ?? 0;
   const deckCount = totalCount - trashedCount;
+
+  // Flat list of deck cards (excluding trash) in the same display order used
+  // by the rendered groups. Passed to the zoom overlay so arrow keys page
+  // through the deck. Trashed cards are intentionally excluded — clicking
+  // one opens it without nav (it's not part of the active deck).
+  const deckNavList = useMemo<Card[]>(() => {
+    const out: Card[] = [];
+    for (const group of cards) {
+      if (group.label === 'Trashed') continue;
+      const ordered = preserveOrder
+        ? group.items
+        : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name));
+      out.push(...ordered);
+    }
+    return out;
+  }, [cards, preserveOrder]);
 
   const toggleView = useCallback((full: boolean) => {
     setFullView(full);
@@ -395,7 +411,13 @@ export function CardViewPopup({
                     ? group.items
                     : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name))
                   ).map((card, i) => (
-                    <CardPopupItem key={`${card.id}-${i}`} card={card} full={false} shiftHeld={shiftHeld} />
+                    <CardPopupItem
+                      key={`${card.id}-${i}`}
+                      card={card}
+                      full={false}
+                      shiftHeld={shiftHeld}
+                      navList={isTrashed ? undefined : deckNavList}
+                    />
                   ))}
                 </div>
               )}

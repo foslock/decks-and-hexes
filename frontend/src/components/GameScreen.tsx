@@ -1417,9 +1417,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [breakingCount]);
 
-  // Show VP paths for ALL players during all phases (except while resolve animation is active)
+  // Show VP paths for ALL players during all phases EXCEPT reveal.
+  // During reveal, the resolve flow (doRevealSetup → handleResolveComplete)
+  // manages VP paths itself: it freezes the pre-resolve set, then refreshes
+  // them with the post-resolve tile state once the animation finishes.
+  // Without the explicit phase gate this effect would briefly flash the
+  // updated VP roads the moment the new state arrives — before `resolving`
+  // is even set to true.
   useEffect(() => {
-    if (resolving) return; // resolve animation manages its own VP paths
+    if (resolving || phase === 'reveal') return;
     const tiles = gameState.grid?.tiles;
     if (!tiles) return;
     const allPaths: VpPath[] = [];
@@ -4091,6 +4097,35 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     try {
       const resp = await api.undoCard(gameState.id, activePlayer.id, actionIndex);
       onStateUpdate(resp.state);
+
+      // Auto-select the returned card so the player can immediately re-play
+      // or retarget it. The backend appends to hand, so the index is the
+      // last hand position. Skip selection if the card can't be validly
+      // played right now (e.g. paid Mercenary cost, claim-banned).
+      const newPlayer = resp.state.players[activePlayer.id];
+      const newHand = newPlayer?.hand ?? [];
+      const returnedIdx = newHand.length - 1;
+      const returnedCard = newHand[returnedIdx];
+      if (returnedCard) {
+        const actionsAvail = newPlayer.actions_available - newPlayer.actions_used;
+        const actionCost = returnedCard.action_cost ?? 1;
+        const playCostEff = returnedCard.effects?.find((e: { type: string }) => e.type === 'play_resource_cost');
+        const playResourceCost = playCostEff
+          ? (returnedCard.is_upgraded && playCostEff.upgraded_value != null
+              ? playCostEff.upgraded_value
+              : playCostEff.value)
+          : 0;
+        const claimBanned = returnedCard.card_type === 'claim'
+          && !!resp.state.claim_ban_rounds
+          && resp.state.claim_ban_rounds > 0;
+        const canPlay = actionsAvail >= actionCost
+          && (newPlayer.resources ?? 0) >= playResourceCost
+          && !claimBanned;
+        if (canPlay) {
+          setSelectedCardIndex(returnedIdx);
+        }
+      }
+
       // Spawn floating "+N action" icon
       const id = ++floatingActionIdRef.current;
       const undoAmount = undoCard?.action_cost ?? 1;
