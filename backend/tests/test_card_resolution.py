@@ -3237,12 +3237,14 @@ class TestNeutralSupplyDepot:
         eff = card.effects[0]
         assert eff.type == EffectType.NEXT_TURN_BONUS
         assert eff.timing == Timing.ON_RESOLUTION
-        assert eff.metadata.get("draw") == 1
-        assert eff.metadata.get("resources") == 2
+        assert eff.metadata.get("draw") == 2
+        assert eff.metadata.get("resources") == 3
+        assert eff.metadata.get("upgraded_draw") == 2
+        assert eff.metadata.get("upgraded_resources") == 4
         assert eff.metadata.get("upgraded_actions") == 1
 
     def test_supply_depot_next_turn_bonuses(self, card_registry):
-        """Supply Depot queues +1 draw and +1 resource for next turn."""
+        """Supply Depot queues +2 draw and +3 resources for next turn."""
         card = card_registry.get("neutral_supply_depot")
         if not card:
             pytest.skip("Card not in registry")
@@ -3255,11 +3257,11 @@ class TestNeutralSupplyDepot:
         submit_play(game, "p0")
         submit_play(game, "p1")
         # After reveal, the on_resolution effect should set turn_modifiers
-        assert player.turn_modifiers.extra_draws_next_turn >= 1
-        assert player.turn_modifiers.extra_resources_next_turn >= 1
+        assert player.turn_modifiers.extra_draws_next_turn >= 2
+        assert player.turn_modifiers.extra_resources_next_turn >= 3
 
     def test_supply_depot_upgraded_extra_action(self, card_registry):
-        """Upgraded Supply Depot also grants +1 action next turn."""
+        """Upgraded Supply Depot grants +2 draw, +4 resources, +1 action next turn."""
         card = card_registry.get("neutral_supply_depot")
         if not card:
             pytest.skip("Card not in registry")
@@ -3272,8 +3274,8 @@ class TestNeutralSupplyDepot:
         assert success, msg
         submit_play(game, "p0")
         submit_play(game, "p1")
-        assert player.turn_modifiers.extra_draws_next_turn >= 1
-        assert player.turn_modifiers.extra_resources_next_turn >= 1
+        assert player.turn_modifiers.extra_draws_next_turn >= 2
+        assert player.turn_modifiers.extra_resources_next_turn >= 4
         assert player.turn_modifiers.extra_actions_next_turn >= 1
 
 

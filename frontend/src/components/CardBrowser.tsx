@@ -66,7 +66,7 @@ export function clearBrowserCollapseMemory() {
   browserCollapseMemory = null;
 }
 
-function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
+function BrowserCardCompact({ card, shiftHeld, onShiftClick, cardList }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void; cardList?: Card[] }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = getCardDisplayColor(displayCard);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
@@ -83,7 +83,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
           setFlashAdded(true);
           setTimeout(() => setFlashAdded(false), 400);
         } else {
-          showZoom(displayCard);
+          showZoom(displayCard, cardList);
         }
       }}
       style={{
@@ -141,7 +141,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick }: { card: Card; shi
   );
 }
 
-function BrowserCardFull({ card, shiftHeld, onShiftClick }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void }) {
+function BrowserCardFull({ card, shiftHeld, onShiftClick, cardList }: { card: Card; shiftHeld: boolean; onShiftClick?: (cardId: string) => void; cardList?: Card[] }) {
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const [flashAdded, setFlashAdded] = useState(false);
   const { showZoom } = useCardZoom();
@@ -154,7 +154,7 @@ function BrowserCardFull({ card, shiftHeld, onShiftClick }: { card: Card; shiftH
           setFlashAdded(true);
           setTimeout(() => setFlashAdded(false), 400);
         } else {
-          showZoom(displayCard);
+          showZoom(displayCard, cardList);
         }
       }}
       style={{
@@ -270,6 +270,9 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
     label: ARCHETYPE_LABELS[arch] || arch,
     cards: sortCards(filteredCards.filter(c => c.archetype === arch), sortMode),
   })).filter(g => g.cards.length > 0);
+
+  // Flat ordered list of all visible cards for zoom navigation
+  const allVisibleCards = useMemo(() => groups.flatMap(g => g.cards), [groups]);
 
   const totalCount = packFilteredCards.length;
 
@@ -408,7 +411,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
               {!collapsed[group.archetype] && (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
                   {group.cards.map((card) => (
-                    <BrowserCardCompact key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} />
+                    <BrowserCardCompact key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} cardList={allVisibleCards} />
                   ))}
                 </div>
               )}

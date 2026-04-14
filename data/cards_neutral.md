@@ -576,11 +576,11 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "At the start of your next round, draw 1 card and gain 2 resources."
-    effect_upgraded: "At the start of your next round, draw 1 card, gain 2 resources, and gain 1 action."
+    effect: "At the start of your next round, draw 2 cards and gain 3 resources."
+    effect_upgraded: "At the start of your next round, draw 2 cards, gain 4 resources, and gain 1 action."
     trash_on_use: false
     effects:
       - type: next_turn_bonus
         timing: on_resolution
-        metadata: {draw: 1, resources: 2, upgraded_actions: 1}
+        metadata: {draw: 2, resources: 3, upgraded_draw: 2, upgraded_resources: 4, upgraded_actions: 1}
     note: "Invest an action now for a better next round. The upgraded version's extra action is particularly strong for setting up big combo rounds."

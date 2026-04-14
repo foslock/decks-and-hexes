@@ -298,8 +298,8 @@ cards:
     action_cost: 2
     reversible: true
     power: 6
-    effect: "Claim: Power 6. Costs 1 less resource to purchase for each VP hex you currently control. Costs 2 actions to play."
-    effect_upgraded: "Claim: Power 8. Costs 1 less resource to purchase for each VP hex you currently control. Costs 2 actions to play."
+    effect: "Claim: Power 6. Costs 1 less resource to purchase for each VP tile you currently control. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 8. Costs 1 less resource to purchase for each VP tile you currently control. Costs 2 actions to play."
     secondary_effect: null
     secondary_timing: null
 
