@@ -53,8 +53,8 @@ Explore (Claim: Power 1 on any adjacent tile) and Gather (Gain 1 resource) are s
 ### Archetype Market
 Each archetype pool is shuffled separately. These are private per player — each player draws from their own archetype deck only.
 
-### Neutral Market
-Lay out all neutral cards in separate face-up stacks with their copy counts visible. These are shared by all players.
+### Shared Market
+Lay out all shared cards in separate face-up stacks with their copy counts visible. These are shared by all players.
 
 ### Upgrade Credits
 Place upgrade credit tokens in a shared pool (suggested: 2 × number of active players available at game start).

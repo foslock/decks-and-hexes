@@ -10,8 +10,8 @@ Performed individually, simultaneously by all players:
 
 1. **Debt distribution:** Starting from round 5, the current VP leader receives a **Debt** card in their discard pile. Debt is a dead ENGINE card that costs 1 action + 3 resources to trash. It cannot be trashed by other cards. Among tied VP leaders, the one closest in turn order to the first player receives the Debt.
 2. **Score VP hex tiles:** Earn 1 VP for each VP hex tile you already owned at the end of last turn. Tiles claimed last turn count; tiles claimed this turn do not yet count.
-4. **Draw hand:** Draw cards up to your hand size from your personal deck.
-   - If your deck is empty, shuffle your discard pile to form a new deck, then draw.
+4. **Draw hand:** Draw cards up to your hand size from your personal draw pile.
+   - If your draw pile is empty, shuffle your discard pile into a new draw pile, then draw.
    - Apply any **"draw X cards next turn"** bonuses earned last round now.
 5. **Reveal archetype market:** Three cards are drawn face-up from your archetype deck. These are available for purchase this turn only.
 6. **Apply upgrade credits:** If you hold any upgrade credit tokens, you may upgrade one card in your hand (see Upgrade Rules). Maximum one upgrade per turn. Upgrades happen before the Play Phase.
@@ -58,8 +58,8 @@ Before purchasing, the active buyer may adjust their archetype market using thes
 
 ### Purchasing Cards
 - **Archetype cards:** Buy from your personal three-card archetype market. Each card has a listed buy cost in resources. Purchased cards go to your **discard pile**.
-- **Neutral cards:** Buy from the shared neutral market stacks. Costs are listed per card. Purchased cards go to your **discard pile**. When a neutral card stack is exhausted, it is gone for the game.
-- A player may buy **multiple cards per turn** (archetype and neutral) if they have the resources. There is no limit on the number of neutral cards purchased.
+- **Shared cards:** Buy from the shared market stacks. Costs are listed per card. Purchased cards go to your **discard pile**. When a shared card stack is exhausted, it is gone for the game.
+- A player may buy **multiple cards per turn** (archetype and shared) if they have the resources. There is no limit on the number of shared cards purchased.
 - Resources not spent are **carried over** to next turn.
 - After each player finishes buying, their purchases are visible to all other players.
 

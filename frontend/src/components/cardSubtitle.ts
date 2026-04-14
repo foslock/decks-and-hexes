@@ -505,6 +505,24 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`✂️${count}`));
       }
+      if (eff.type === 'search_zone') {
+        // Compact icon for tutor/search effects. Format: <source> 🔎N → <targets>
+        // Zones use distinct glyphs so the trash bin is reserved for the
+        // permanent trash pile (one-way) and the recycle symbol marks the
+        // discard pile (gets reshuffled into the draw pile).
+        // Source glyphs: discard ♻️, draw 📚, trash 🗑️
+        // Target glyphs: hand ✋, top_of_draw 📥, discard ♻️, trash 🗑️
+        const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        const source = String(eff.metadata?.source ?? 'discard');
+        const rawTargets = Array.isArray(eff.metadata?.targets) ? eff.metadata?.targets : ['hand'];
+        const targets = (rawTargets as unknown[]).map(t => String(t));
+        const srcIcon =
+          source === 'draw' ? '📚' : source === 'trash' ? '🗑️' : '♻️';
+        const targetIcons = targets.map((t) =>
+          t === 'hand' ? '✋' : t === 'top_of_draw' ? '📥' : t === 'discard' ? '♻️' : '🗑️'
+        ).join('/');
+        parts.push(p(`${srcIcon}🔎${count}→${targetIcons}`));
+      }
       if (eff.type === 'adjacency_bridge') {
         // Road Builder: must connect two of your disconnected territory groups
         parts.push(p('🔷→🔷'));

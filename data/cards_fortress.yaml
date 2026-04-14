@@ -488,3 +488,55 @@ cards:
     secondary_timing: null
     note: "The ultimate defensive play. Locks down a huge swath of territory for one round. Unique — only one copy allowed per deck."
 
+  # ── TUTOR / SEARCH CARDS ──────────────────────────────────────────────
+
+  - id: fortress_stockroom
+    name: Stockroom
+    name_upgraded: Stockroom+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    effect: "Search your discard pile for up to 2 cards; put them on top of your draw pile."
+    effect_upgraded: "Search your discard pile for up to 3 cards; put them on top of your draw pile."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Quiet, methodical setup. Doesn't help this turn but guarantees the right cards come up first next round — perfect for Fortress's slow, deliberate cycle."
+
+    effects:
+      - type: search_zone
+        value: 2
+        upgraded_value: 3
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: discard
+          targets: [top_of_draw]
+          min: 0
+
+  - id: fortress_reserve_forces
+    name: Reserve Forces
+    name_upgraded: Reserve Forces+
+    type: Engine
+    buy_cost: 5
+    action_return: 0
+    power: 0
+    resource_gain: 2
+    upgraded_resource_gain: 3
+    effect: "Search your discard pile for a Defense card; put it in your hand. Gain 2 resources."
+    effect_upgraded: "Search your discard pile for a Defense card; put it in your hand. Gain 3 resources."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Pull a fresh Defense back into rotation while the supply chain hums. Strongest when the player is sitting on a tile they want to lock down for another round."
+
+    effects:
+      - type: search_zone
+        value: 1
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: discard
+          targets: [hand]
+          min: 0
+          filter: {card_type: defense}
+

@@ -584,3 +584,128 @@ cards:
         timing: on_resolution
         metadata: {draw: 2, resources: 3, upgraded_draw: 2, upgraded_resources: 4, upgraded_actions: 1}
     note: "Invest an action now for a better next round. The upgraded version's extra action is particularly strong for setting up big combo rounds."
+
+  # ── TUTOR / SEARCH CARDS ──────────────────────────────────────────────
+  # These cards let the player inspect a pile (discard, draw, trash) and
+  # retrieve cards from it. Each SEARCH_ZONE effect has:
+  #   source:  "discard" | "draw" | "trash"
+  #   targets: list of allowed destinations per card picked
+  #            ("hand" | "top_of_draw" | "discard" | "trash")
+  #   value:   max cards to pick (upgraded_value overrides when upgraded)
+  #   min:     min cards to pick (0 = optional)
+
+  - id: neutral_salvage
+    name: Salvage
+    name_upgraded: Salvage+
+    type: Engine
+    buy_cost: 3
+
+    action_return: 0
+    power: 0
+    effect: "Search your discard pile for 1 card and put it into your hand."
+    effect_upgraded: "Search your discard pile for 2 cards and put them into your hand."
+    trash_on_use: false
+    effects:
+      - type: search_zone
+        value: 1
+        upgraded_value: 2
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: discard
+          targets: [hand]
+          min: 0
+    note: "Recursion engine. Lets you pull your best card back from the wreckage of your discard pile. Upgrade lets you grab two at once."
+
+  - id: neutral_foresight
+    name: Foresight
+    name_upgraded: Foresight+
+    type: Engine
+    buy_cost: 7
+
+    action_return: 0
+    action_cost: 2
+    power: 0
+    effect: "Look at your entire draw pile. Choose up to 2 cards — put each into your hand or on top of your draw pile. Costs 2 actions to play."
+    effect_upgraded: "Look at your entire draw pile. Choose up to 3 cards — put each into your hand or on top of your draw pile. Costs 2 actions to play."
+    trash_on_use: false
+    effects:
+      - type: search_zone
+        value: 2
+        upgraded_value: 3
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: draw
+          targets: [hand, top_of_draw]
+          min: 0
+          peek_all: true
+    note: "Deck sculpting. Pull key cards into hand now, stack others on top for next round. Sees the whole draw pile — much stronger than top-N peek effects."
+
+  - id: neutral_redemption
+    name: Redemption
+    name_upgraded: Redemption+
+    type: Engine
+    buy_cost: 5
+
+    action_return: 0
+    power: 0
+    trash_on_use: true
+    effect: "Search your trash for 1 card and put it into your hand. Trash this card."
+    effect_upgraded: "Search your trash for 1 card and put it into your hand. Draw 1 card. Trash this card."
+    effects:
+      - type: search_zone
+        value: 1
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: trash
+          targets: [hand]
+          min: 0
+    note: "Rare recursion — reverse a trash decision at a premium cost. Trashes itself so you don't get stuck in a tutor loop."
+
+  - id: neutral_recall
+    name: Recall
+    name_upgraded: Recall+
+    type: Engine
+    buy_cost: 2
+
+    action_return: 0
+    power: 0
+    effect: "Search your discard pile for 1 card; put it on top of your draw pile."
+    effect_upgraded: "Search your discard pile for 2 cards; put them on top of your draw pile."
+    trash_on_use: false
+    effects:
+      - type: search_zone
+        value: 1
+        upgraded_value: 2
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: discard
+          targets: [top_of_draw]
+          min: 0
+    note: "Cheap recursion that doesn't refill your hand this turn — sets up a guaranteed draw next round. Pairs with deck-thinning to lock in your best openers."
+
+  - id: neutral_sift
+    name: Sift
+    name_upgraded: Sift+
+    type: Engine
+    buy_cost: 3
+
+    action_return: 0
+    power: 0
+    effect: "Look at the top 2 cards of your draw pile; put any number on top of your draw pile or in your discard pile."
+    effect_upgraded: "Look at the top 3 cards of your draw pile; put any number on top of your draw pile or in your discard pile."
+    trash_on_use: false
+    effects:
+      - type: search_zone
+        value: 2
+        upgraded_value: 3
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: draw
+          targets: [top_of_draw, discard]
+          min: 0
+    note: "Deck filtering. Push junk to discard so the next draw lands on something useful, or stack a great card for the top of your next-turn draw."

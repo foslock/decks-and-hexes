@@ -97,10 +97,10 @@ describe('API client', () => {
   describe('buyCard', () => {
     it('sends buy request', async () => {
       mockJsonResponse({ message: 'ok', state: makeGameState() });
-      await api.buyCard('abc', 'p0', 'neutral', 'some_card');
+      await api.buyCard('abc', 'p0', 'shared', 'some_card');
 
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
-      expect(body.source).toBe('neutral');
+      expect(body.source).toBe('shared');
       expect(body.card_id).toBe('some_card');
     });
   });

@@ -31,6 +31,7 @@ from app.game_engine.game_state import (
     reroll_market,
     spend_upgrade_credit,
     submit_pending_discard,
+    submit_pending_search,
     undo_planned_action,
     submit_play,
 )
@@ -115,11 +116,20 @@ class PlayCardRequest(BaseModel):
     discard_card_indices: Optional[list[int]] = None
     trash_card_indices: Optional[list[int]] = None
     extra_targets: Optional[list[list[int]]] = None
+    # Tutor / SEARCH_ZONE resolution — when the human UI gates the play on
+    # a selection modal, it bundles the selections here so the card + search
+    # commit atomically.
+    search_selections: Optional[list[dict[str, Any]]] = None
 
 
 class SubmitDiscardRequest(BaseModel):
     player_id: str
     discard_card_indices: list[int]
+
+
+class SubmitSearchRequest(BaseModel):
+    player_id: str
+    selections: list[dict[str, Any]]  # [{"card_id": "...", "target": "hand"}, ...]
 
 
 class SubmitPlanRequest(BaseModel):
@@ -128,7 +138,7 @@ class SubmitPlanRequest(BaseModel):
 
 class BuyCardRequest(BaseModel):
     player_id: str
-    source: str  # "archetype", "neutral", "upgrade"
+    source: str  # "archetype", "shared", "upgrade"
     card_id: Optional[str] = None
 
 
@@ -226,6 +236,7 @@ async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
         discard_card_indices=req.discard_card_indices,
         trash_card_indices=req.trash_card_indices,
         extra_targets=extra_targets,
+        search_selections=req.search_selections,
     )
     if not success:
         raise HTTPException(400, msg)
@@ -278,6 +289,25 @@ async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[
         raise HTTPException(404, "Game not found")
 
     success, msg = submit_pending_discard(game, req.player_id, req.discard_card_indices)
+    if not success:
+        raise HTTPException(400, msg)
+
+    await store.save(game)
+    if _is_multiplayer(game):
+        await _broadcast_state(game_id, game)
+
+    return {"message": msg, "state": _game_state_for_player(game, req.player_id)}
+
+
+@router.post("/games/{game_id}/submit-search")
+async def submit_search_route(game_id: str, req: SubmitSearchRequest) -> dict[str, Any]:
+    """Submit deferred tutor/search selections (SEARCH_ZONE effects)."""
+    store = _get_store()
+    game = await store.get(game_id)
+    if not game:
+        raise HTTPException(404, "Game not found")
+
+    success, msg = submit_pending_search(game, req.player_id, req.selections)
     if not success:
         raise HTTPException(400, msg)
 
@@ -356,9 +386,9 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
     if _is_multiplayer(game):
         # Broadcast a lightweight purchase event before the full state update
         # so other players can trigger fly animations immediately
-        if req.source == "neutral":
+        if req.source == "shared":
             await manager.send_to_others(game_id, req.player_id, {
-                "type": "neutral_purchase",
+                "type": "shared_purchase",
                 "player_id": req.player_id,
                 "player_name": game.players[req.player_id].name,
                 "player_color": game.players[req.player_id].color,
@@ -576,7 +606,7 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
             await _broadcast_state(game_id, game)
         await _cpu_sleep(game, 0.5)
 
-    # Plan purchases under lock (reads shared state like neutral market)
+    # Plan purchases under lock (reads shared state like shared market)
     async with lock:
         game = await store.get(game_id)
         if not game or game.current_phase != Phase.BUY:
@@ -634,9 +664,9 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
                 game, pid, purchase["source"], purchase.get("card_id", ""),
             )
             if success:
-                if purchase["source"] == "neutral":
+                if purchase["source"] == "shared":
                     await manager.send_to_others(game_id, pid, {
-                        "type": "neutral_purchase",
+                        "type": "shared_purchase",
                         "player_id": pid,
                         "player_name": player.name,
                         "player_color": player.color,
@@ -677,9 +707,9 @@ def _pick_cpu_decoy_hovers(
     import random
 
     decoys: list[dict[str, str]] = []
-    # Gather available neutral cards as potential decoys
-    available = game.neutral_market.get_available()
-    neutral_ids = [
+    # Gather available shared cards as potential decoys
+    available = game.shared_market.get_available()
+    shared_ids = [
         s["card"]["id"] for s in available
         if s["remaining"] > 0 or s.get("selling_out")
     ]
@@ -688,7 +718,7 @@ def _pick_cpu_decoy_hovers(
     arch_ids = [c.id for c in (cpu_player.archetype_market if cpu_player else [])]
 
     all_candidates = (
-        [{"card_id": cid, "source": "neutral"} for cid in neutral_ids]
+        [{"card_id": cid, "source": "shared"} for cid in shared_ids]
         + [{"card_id": cid, "source": "archetype"} for cid in arch_ids]
     )
     # Exclude the actual target

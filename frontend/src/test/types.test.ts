@@ -12,7 +12,7 @@ describe('Type contracts', () => {
       expect(state.player_order).toBeDefined();
       expect(state.current_phase).toBeDefined();
       expect(state.current_round).toBeDefined();
-      expect(state.neutral_market).toBeDefined();
+      expect(state.shared_market).toBeDefined();
       expect(state.log).toBeDefined();
     });
 

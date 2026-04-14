@@ -76,6 +76,26 @@ export interface PlannedAction {
   effective_draw_cards?: number;
 }
 
+export type SearchZoneSource = 'discard' | 'draw' | 'trash';
+export type SearchZoneTarget = 'hand' | 'top_of_draw' | 'discard' | 'trash';
+
+/** Deferred tutor/search state — player must pick cards from a pile. */
+export interface PendingSearch {
+  source: SearchZoneSource;
+  count: number;           // max cards to pick
+  min_count: number;       // min cards to pick (0 = optional)
+  allowed_targets: SearchZoneTarget[];
+  card_filter?: { card_type?: string; name?: string } | null;
+  /** Stable order of eligible cards at the time the search was triggered. */
+  snapshot_card_ids: string[];
+  /** True when the snapshot covers the entire source pile (peek_all metadata).
+   *  Lets the frontend decide whether opening the modal leaks new info: a
+   *  whole-pile peek shows only the SET (order is shuffled) which players can
+   *  already infer from public state, so cancellation stays allowed. A
+   *  partial peek leaks specific upcoming cards and must commit. */
+  peek_all?: boolean;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -110,6 +130,12 @@ export interface Player {
   free_rerolls: number;
   buy_locked: boolean;
   pending_discard: number;
+  pending_search?: PendingSearch | null;
+}
+
+export interface SearchSelection {
+  card_id: string;
+  target: SearchZoneTarget;
 }
 
 export interface MarketStack {
@@ -127,7 +153,7 @@ export interface CursorPosition {
   source: string | null;
 }
 
-export interface NeutralPurchaseEvent {
+export interface SharedPurchaseEvent {
   player_id: string;
   player_name: string;
   player_color: string;
@@ -178,7 +204,7 @@ export interface PlayerEffect {
   added_card_count?: number;
 }
 
-export interface NeutralPurchaseRecord {
+export interface SharedPurchaseRecord {
   card_id: string;
   card_name: string;
   player_id: string;
@@ -198,14 +224,14 @@ export interface GameState {
   current_phase: string;
   current_round: number;
   first_player_index: number;
-  neutral_market: MarketStack[];
+  shared_market: MarketStack[];
   vp_target: number;
   winner: string | null;
   log: string[];
   resolution_steps?: ResolutionStep[];
   player_effects?: PlayerEffect[];
   test_mode?: boolean;
-  neutral_purchases_last_round?: NeutralPurchaseRecord[];
+  shared_purchases_last_round?: SharedPurchaseRecord[];
   revealed_actions?: Record<string, PlannedAction[]>;
   players_done_buying: string[];
   buy_phase_purchases: Record<string, Array<{

@@ -235,6 +235,40 @@ class PlannedAction:
 
 
 @dataclass
+class PendingSearch:
+    """Deferred tutor/search state.
+
+    Set by SEARCH_ZONE effects to pause resolution until the player picks cards
+    from a pile and chooses destinations for them. Resolved via
+    submit_pending_search(). Mirrors the pending_discard deferred-choice pattern.
+    """
+    source: str                                # "discard" | "draw" | "trash"
+    count: int                                 # max cards to pick (already clamped to pile size)
+    min_count: int                             # minimum to pick (can be 0 for optional)
+    allowed_targets: list[str] = field(default_factory=list)  # e.g. ["hand", "top_of_draw"]
+    card_filter: Optional[dict[str, Any]] = None
+    snapshot_card_ids: list[str] = field(default_factory=list)  # stable order for the modal
+    # True when the snapshot covers the entire source pile (e.g. Foresight's
+    # peek_all). Used by the frontend to decide whether revealing the modal
+    # leaks new information — peeking the WHOLE draw pile gives the player
+    # only the set, not the order, which they could already infer from
+    # public game state, so cancellation is allowed. A partial peek leaks
+    # specific upcoming-card knowledge and must commit.
+    peek_all: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source": self.source,
+            "count": self.count,
+            "min_count": self.min_count,
+            "allowed_targets": list(self.allowed_targets),
+            "card_filter": self.card_filter,
+            "snapshot_card_ids": list(self.snapshot_card_ids),
+            "peek_all": self.peek_all,
+        }
+
+
+@dataclass
 class Player:
     id: str
     name: str
@@ -263,6 +297,7 @@ class Player:
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
     tiles_lost_last_round: int = 0  # tiles captured from this player last round (for Robin Hood)
     pending_discard: int = 0  # deferred discard count (e.g. Regroup: draw first, then discard)
+    pending_search: Optional[PendingSearch] = None  # deferred tutor/search (SEARCH_ZONE effects)
     # Smart roll state — hidden heuristics for archetype market draws.
     # _prev_market_ids is the most recent roll; _prev_market_ids_prev is the
     # roll before that. Together they enforce the "no repeats within any
@@ -340,12 +375,15 @@ class Player:
             "free_rerolls": self.turn_modifiers.free_rerolls,
             "buy_locked": self.turn_modifiers.buy_locked,
             "pending_discard": self.pending_discard,
+            # pending_search reveals private info (deck contents for tutor effects)
+            # so it's only serialized when the recipient is this player
+            "pending_search": self.pending_search.to_dict() if self.pending_search and not hide_hand else None,
         }
 
 
 @dataclass
-class NeutralMarket:
-    """Shared neutral market with fixed copy counts."""
+class SharedMarket:
+    """Shared market with fixed copy counts (the universal pool available to all players)."""
     stacks: dict[str, list[Card]] = field(default_factory=dict)
     # Template cards for each stack (so we can still serialize sold-out stacks)
     card_templates: dict[str, Card] = field(default_factory=dict)
@@ -465,7 +503,7 @@ class GameState:
     current_phase: Phase = Phase.SETUP
     current_round: int = 0
     first_player_index: int = 0
-    neutral_market: NeutralMarket = field(default_factory=NeutralMarket)
+    shared_market: SharedMarket = field(default_factory=SharedMarket)
     winner: Optional[str] = None
     rng: random.Random = field(default_factory=random.Random)
     card_registry: dict[str, Card] = field(default_factory=dict)
@@ -476,8 +514,8 @@ class GameState:
     granted_actions: Optional[int] = None  # None = use archetype default
     host_id: Optional[str] = None
     lobby_code: Optional[str] = None
-    # Tracks neutral market purchases: {card_id, card_name, player_id, player_name, round}
-    neutral_purchase_log: list[dict[str, Any]] = field(default_factory=list)
+    # Tracks shared market purchases: {card_id, card_name, player_id, player_name, round}
+    shared_purchase_log: list[dict[str, Any]] = field(default_factory=list)
     # Concurrent buy phase: tracks which players have signaled "done buying"
     players_done_buying: set[str] = field(default_factory=set)
     # Cards purchased by each player this round: {player_id: [{card_id, card_name, source, cost}]}
@@ -539,7 +577,7 @@ class GameState:
             for card in p.archetype_market:
                 dynamic = calculate_dynamic_buy_cost(self, p, card)
                 effective_costs[card.id] = _preview_cost_reductions(p, card, base_cost_override=dynamic) if has_reductions else dynamic
-            for base_id, stack in self.neutral_market.stacks.items():
+            for base_id, stack in self.shared_market.stacks.items():
                 if stack:
                     dynamic = calculate_dynamic_buy_cost(self, p, stack[0])
                     effective_costs[base_id] = _preview_cost_reductions(p, stack[0], base_cost_override=dynamic) if has_reductions else dynamic
@@ -562,7 +600,7 @@ class GameState:
             "current_phase": self.current_phase.value,
             "current_round": self.current_round,
             "first_player_index": self.first_player_index,
-            "neutral_market": self.neutral_market.get_available(),
+            "shared_market": self.shared_market.get_available(),
             "winner": self.winner,
             "vp_target": self.vp_target,
             "granted_actions": self.granted_actions,
@@ -581,8 +619,8 @@ class GameState:
         if self.player_effects:
             result["player_effects"] = self.player_effects
         # Neutral market purchases from last round (for purchase history indicators)
-        result["neutral_purchases_last_round"] = [
-            entry for entry in self.neutral_purchase_log
+        result["shared_purchases_last_round"] = [
+            entry for entry in self.shared_purchase_log
             if entry["round"] == self.current_round - 1
         ]
         # During REVEAL phase, expose all players' planned actions for review.
@@ -819,8 +857,8 @@ def create_game(
     # Random first player
     game.first_player_index = rng.randint(0, num_players - 1)
 
-    # Set up neutral market (N*2 copies per card, where N = player count)
-    _setup_neutral_market(game, card_registry, num_players, pack)
+    # Set up shared market (N*2 copies per card, where N = player count)
+    _setup_shared_market(game, card_registry, num_players, pack)
 
     game._log(f"Game created with {num_players} players on {grid_size.value} grid")
     game.current_phase = Phase.START_OF_TURN
@@ -829,30 +867,30 @@ def create_game(
     return game
 
 
-def _setup_neutral_market(
+def _setup_shared_market(
     game: GameState, card_registry: dict[str, Card], num_players: int,
     pack: Any = None,
 ) -> None:
-    """Set up the shared neutral market stacks.
+    """Set up the shared market stacks.
 
     Each neutral card gets N*2 copies where N is the number of players.
-    Filtered by the active card pack's neutral_card_ids if specified.
+    Filtered by the active card pack's shared_card_ids if specified.
     """
     neutral_cards = [
         c for c in card_registry.values()
-        if c.archetype == Archetype.NEUTRAL and not c.starter and c.buy_cost is not None
+        if c.archetype == Archetype.SHARED and not c.starter and c.buy_cost is not None
     ]
 
     # Filter by pack if it restricts neutral cards
-    if pack is not None and pack.neutral_card_ids is not None:
-        allowed = set(pack.neutral_card_ids)
+    if pack is not None and pack.shared_card_ids is not None:
+        allowed = set(pack.shared_card_ids)
         neutral_cards = [c for c in neutral_cards if c.id in allowed]
 
     copies_count = num_players * 2
     for card in neutral_cards:
         copies = [_copy_card(card, f"neutral_{i}") for i in range(copies_count)]
-        game.neutral_market.stacks[card.id] = copies
-        game.neutral_market.card_templates[card.id] = card
+        game.shared_market.stacks[card.id] = copies
+        game.shared_market.card_templates[card.id] = card
 
 
 # ── Phase execution ─────────────────────────────────────────────
@@ -1054,8 +1092,15 @@ def play_card(game: GameState, player_id: str, card_index: int,
               discard_card_indices: Optional[list[int]] = None,
               trash_card_indices: Optional[list[int]] = None,
               extra_targets: Optional[list[tuple[int, int]]] = None,
+              search_selections: Optional[list[dict[str, Any]]] = None,
               ) -> tuple[bool, str]:
-    """Play a card from hand during Play phase. Returns (success, message)."""
+    """Play a card from hand during Play phase. Returns (success, message).
+
+    `search_selections` is an optional list of {"card_id", "target"} entries
+    for SEARCH_ZONE (tutor) effects. When provided, the search resolves inline
+    and no `pending_search` state is set on the player. When omitted, a
+    SEARCH_ZONE effect sets pending_search and waits for submit_pending_search.
+    """
     if game.current_phase != Phase.PLAY:
         return False, "Not in Play phase"
 
@@ -1094,6 +1139,10 @@ def play_card(game: GameState, player_id: str, card_index: int,
     # Block card play while a deferred discard is pending
     if player.pending_discard > 0:
         return False, "Must discard before playing another card"
+
+    # Block card play while a deferred search (tutor) is pending
+    if player.pending_search is not None:
+        return False, "Must resolve pending search before playing another card"
 
     # Check action availability
     actions_remaining = player.actions_available - player.actions_used
@@ -1285,6 +1334,22 @@ def play_card(game: GameState, player_id: str, card_index: int,
             required = min(effect.effective_value(card.is_upgraded), max_discardable)
             if required > 0 and (not discard_card_indices or len(discard_card_indices) < required):
                 return False, f"{card.name} requires discarding {required} card(s)"
+        if effect.type == _EffectType.SEARCH_ZONE:
+            # Cannot play tutor cards if the source zone is empty (or no cards
+            # match the optional filter). Playing would be a wasted action.
+            from .effect_resolver import get_search_zone_cards, matches_card_filter
+            source = str(effect.metadata.get("source", "discard"))
+            source_cards = get_search_zone_cards(player, source)
+            card_filter = effect.metadata.get("filter") if isinstance(effect.metadata.get("filter"), dict) else None
+            eligible_count = sum(1 for c in source_cards if matches_card_filter(c, card_filter))
+            if eligible_count == 0:
+                zone_name = {"discard": "discard pile", "draw": "draw pile", "trash": "trash"}.get(source, source)
+                # Mention the filtered card type in the error so the player knows
+                # WHY their otherwise-stocked pile doesn't qualify.
+                if card_filter and card_filter.get("card_type"):
+                    type_label = str(card_filter["card_type"]).title()
+                    return False, f"{card.name} requires {type_label} cards in your {zone_name}"
+                return False, f"{card.name} requires cards in your {zone_name}"
 
     # Remove card from hand and create planned action
     # Compute effective power BEFORE removing the card so dynamic modifiers
@@ -1407,6 +1472,20 @@ def play_card(game: GameState, player_id: str, card_index: int,
             skip_discard=defer_discard,
         )
 
+    # Inline SEARCH_ZONE resolution: if the effect set pending_search AND the
+    # caller provided selections (human UI commits them with the play), resolve
+    # the search immediately so the card doesn't visibly hang in a pending
+    # state on the client. CPU and legacy callers omit search_selections and
+    # get the deferred pending_search flow.
+    if player.pending_search is not None and search_selections is not None:
+        ok, msg = submit_pending_search(game, player_id, search_selections)
+        if not ok:
+            # Validation failed — clear pending state so the player isn't stuck,
+            # then surface the error. The card has already been played at this
+            # point (planned_actions + action spent); search fizzles.
+            player.pending_search = None
+            return False, f"Invalid search selections: {msg}"
+
     # Set pending discard if the discard was deferred (card draws first, then player picks)
     if defer_discard:
         discard_effect = next(
@@ -1495,6 +1574,141 @@ def submit_pending_discard(
     return True, f"Discarded {len(discarded)} card(s)"
 
 
+def submit_pending_search(
+    game: GameState, player_id: str,
+    selections: list[dict[str, Any]],
+) -> tuple[bool, str]:
+    """Resolve a deferred search: move each selected card from source → chosen target zone.
+
+    Each selection is a dict {"card_id": str, "target": str}. Cards are moved
+    in snapshot order so ordering is deterministic. If min_count == 0, empty
+    selections are allowed (player declined).
+    """
+    from .effect_resolver import get_search_zone_cards
+
+    player = game.players.get(player_id)
+    if not player:
+        return False, "Player not found"
+    ps = player.pending_search
+    if ps is None:
+        return False, "No pending search"
+
+    if not isinstance(selections, list):
+        return False, "Invalid selections"
+
+    if len(selections) < ps.min_count:
+        return False, f"Must select at least {ps.min_count} card(s)"
+    if len(selections) > ps.count:
+        return False, f"Cannot select more than {ps.count} card(s)"
+
+    # Validate targets
+    for sel in selections:
+        if not isinstance(sel, dict):
+            return False, "Invalid selection entry"
+        target = sel.get("target")
+        if target not in ps.allowed_targets:
+            return False, f"Target '{target}' not allowed (allowed: {ps.allowed_targets})"
+        if target not in ("hand", "top_of_draw", "discard", "trash"):
+            return False, f"Unknown target '{target}'"
+
+    source_list = get_search_zone_cards(player, ps.source)
+
+    # Validate card_ids are in the snapshot and still present, with unique-index matching
+    # (duplicates of the same card id in the pile must each only be picked once).
+    snapshot_counts: dict[str, int] = {}
+    for cid in ps.snapshot_card_ids:
+        snapshot_counts[cid] = snapshot_counts.get(cid, 0) + 1
+
+    selected_counts: dict[str, int] = {}
+    for sel in selections:
+        raw_cid = sel.get("card_id")
+        if not isinstance(raw_cid, str):
+            return False, "Invalid card_id in selection"
+        selected_counts[raw_cid] = selected_counts.get(raw_cid, 0) + 1
+        if selected_counts[raw_cid] > snapshot_counts.get(raw_cid, 0):
+            return False, f"Card {raw_cid} selected more times than available"
+
+    # Resolve each selection: find the card instance in the source list by id,
+    # remove it, and append to the target zone. We consume from the start of
+    # the source list to pick stable matches when duplicates exist.
+    moves: list[tuple[Card, str]] = []
+    remaining = list(source_list)  # shallow copy for iteration
+    for sel in selections:
+        cid = sel["card_id"]
+        target = sel["target"]
+        # Find first match in `remaining`
+        match_idx = None
+        for i, c in enumerate(remaining):
+            if c.id == cid:
+                match_idx = i
+                break
+        if match_idx is None:
+            player.pending_search = None
+            return False, f"Card {cid} no longer available in {ps.source}"
+        card_obj = remaining.pop(match_idx)
+        moves.append((card_obj, str(target)))
+
+    # Apply moves: first remove each moved card from the real source list,
+    # then deposit into the target zone. We locate each card by identity (is).
+    for card_obj, _target in moves:
+        try:
+            source_list.remove(card_obj)
+        except ValueError:
+            player.pending_search = None
+            return False, f"Card {card_obj.id} vanished during resolution"
+
+    # Deposit into target zones. `top_of_draw` inserts at front; apply in
+    # reverse so the first-chosen card ends up on top.
+    moved_counts_by_target: dict[str, int] = {}
+    for card_obj, target in moves:
+        if target == "hand":
+            player.hand.append(card_obj)
+        elif target == "top_of_draw":
+            # Will apply in reverse below
+            pass
+        elif target == "discard":
+            player.deck.add_to_discard([card_obj])
+        elif target == "trash":
+            player.trash.append(card_obj)
+        if target != "top_of_draw":
+            moved_counts_by_target[target] = moved_counts_by_target.get(target, 0) + 1
+
+    # Apply top_of_draw in reverse so the first chosen card ends up on top
+    top_of_draw_cards = [c for c, t in moves if t == "top_of_draw"]
+    for card_obj in reversed(top_of_draw_cards):
+        player.deck.add_to_top(card_obj)
+    if top_of_draw_cards:
+        moved_counts_by_target["top_of_draw"] = len(top_of_draw_cards)
+
+    # Log the result. Translate internal zone keys to player-friendly phrases.
+    from .effect_resolver import _SEARCH_ZONE_DISPLAY
+    zone_name = _SEARCH_ZONE_DISPLAY.get(ps.source, ps.source)
+    target_phrase = {
+        "hand": "hand",
+        "top_of_draw": "top of draw pile",
+        "discard": "discard pile",
+        "trash": "trash",
+    }
+    if moves:
+        target_parts = [
+            f"{cnt} to {target_phrase.get(t, t.replace('_', ' '))}"
+            for t, cnt in moved_counts_by_target.items()
+        ]
+        names = ", ".join(c.name for c, _ in moves)
+        game._log(
+            f"{player.name} takes {names} from {zone_name} ({'; '.join(target_parts)})",
+            visible_to=[player_id], actor=player_id,
+        )
+    else:
+        game._log(
+            f"{player.name} declines to take any cards from {zone_name}",
+            visible_to=[player_id], actor=player_id,
+        )
+
+    player.pending_search = None
+    return True, f"Moved {len(moves)} card(s)"
+
+
 def submit_play(game: GameState, player_id: str) -> tuple[bool, str]:
     """Mark a player as done playing."""
     player = game.players.get(player_id)
@@ -1502,6 +1716,8 @@ def submit_play(game: GameState, player_id: str) -> tuple[bool, str]:
         return False, "Player not found"
     if player.pending_discard > 0:
         return False, "Must discard before submitting plan"
+    if player.pending_search is not None:
+        return False, "Must resolve pending search before submitting plan"
     player.has_submitted_play = True
     game._log(f"{player.name} submits plan ({len(player.planned_actions)} actions)",
               actor=player_id)
@@ -2124,7 +2340,7 @@ def _transition_to_buy(game: GameState) -> None:
     """Transition from REVEAL to BUY phase (concurrent — all players buy simultaneously)."""
     game.current_phase = Phase.BUY
     game.buy_phase_purchases = {}
-    game.neutral_market.selling_out.clear()
+    game.shared_market.selling_out.clear()
     # Mark left players as already done
     game.players_done_buying = {
         pid for pid in game.player_order if game.players[pid].has_left
@@ -2152,7 +2368,7 @@ def player_owns_card_by_name(player: "Player", card_name: str) -> bool:
 def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tuple[bool, str]:
     """Buy a card during Buy phase.
 
-    source: "archetype", "neutral", or "upgrade"
+    source: "archetype", "shared", or "upgrade"
     """
     if game.current_phase != Phase.BUY:
         return False, "Not in Buy phase"
@@ -2215,30 +2431,30 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         game._log(f"{player.name} buys {target.name} from archetype market")
         return True, f"Bought {target.name}"
 
-    if source == "neutral":
+    if source == "shared":
         # One copy per neutral card per round per player
         already_bought = game.buy_phase_purchases.get(player_id, [])
-        if any(p["source"] == "neutral" and p["card_id"] == card_id for p in already_bought):
+        if any(p["source"] == "shared" and p["card_id"] == card_id for p in already_bought):
             return False, "Already purchased this card this round (limit 1 per round)"
 
         # Peek at the card before committing the purchase so we can enforce
         # Unique without mutating the market on failure. Check both physical
         # copies and selling-out templates.
         peek_card: Optional[Card] = None
-        for base_id, copies in game.neutral_market.stacks.items():
+        for base_id, copies in game.shared_market.stacks.items():
             if copies and (base_id == card_id or card_id.startswith(base_id)):
                 peek_card = copies[0]
                 break
         if peek_card is None:
             # Check selling-out templates
-            for base_id in game.neutral_market.selling_out:
+            for base_id in game.shared_market.selling_out:
                 if base_id == card_id or card_id.startswith(base_id):
-                    peek_card = game.neutral_market.card_templates.get(base_id)
+                    peek_card = game.shared_market.card_templates.get(base_id)
                     break
         if peek_card is not None and peek_card.unique and player_owns_card_by_name(player, peek_card.name):
             return False, f"You already own a copy of {peek_card.name} (Unique)"
 
-        result = game.neutral_market.purchase(card_id, player_id)
+        result = game.shared_market.purchase(card_id, player_id)
         if not result:
             return False, "Card not available in shared market"
         purchased, base_card_id = result
@@ -2247,21 +2463,21 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             effective_cost = _apply_cost_reductions(player, purchased, base_cost_override=dynamic_cost)
             if effective_cost > 0 and player.resources < effective_cost:
                 # Put it back (only if not selling-out — selling-out clones are ephemeral)
-                if base_card_id not in game.neutral_market.selling_out or \
-                        player_id not in game.neutral_market.selling_out[base_card_id]:
-                    game.neutral_market.stacks.setdefault(base_card_id, []).insert(0, purchased)
+                if base_card_id not in game.shared_market.selling_out or \
+                        player_id not in game.shared_market.selling_out[base_card_id]:
+                    game.shared_market.stacks.setdefault(base_card_id, []).insert(0, purchased)
                 else:
                     # Undo selling-out record for this player
-                    game.neutral_market.selling_out[base_card_id].discard(player_id)
+                    game.shared_market.selling_out[base_card_id].discard(player_id)
                 return False, f"Need {effective_cost} resources"
             if effective_cost > 0:
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
         game.buy_phase_purchases.setdefault(player_id, []).append({
             "card_id": base_card_id, "card_name": purchased.name,
-            "source": "neutral", "cost": effective_cost if not free else 0,
+            "source": "shared", "cost": effective_cost if not free else 0,
         })
-        game.neutral_purchase_log.append({
+        game.shared_purchase_log.append({
             "card_id": base_card_id,
             "card_name": purchased.name,
             "player_id": player_id,
@@ -2463,7 +2679,7 @@ def end_buy_phase(game: GameState, player_id: str) -> tuple[bool, str]:
         for pid in game.player_order
     )
     if all_done:
-        game.neutral_market.finalize_selling_out()
+        game.shared_market.finalize_selling_out()
         execute_end_of_turn(game)
 
     return True, "Done buying"
@@ -2575,6 +2791,10 @@ def auto_play_cpu_plays(game: GameState) -> None:
             if player.pending_discard > 0:
                 discard_indices = cpu._pick_cards_to_discard(player, player.pending_discard)
                 submit_pending_discard(game, pid, discard_indices)
+            # Auto-resolve deferred search (tutor) for CPU players
+            if player.pending_search is not None:
+                selections = cpu._pick_search_selections(player, player.pending_search)
+                submit_pending_search(game, pid, selections)
 
         submit_play(game, pid)
 

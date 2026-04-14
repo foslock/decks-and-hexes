@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import type { Card, MarketStack, CursorPosition, NeutralPurchaseEvent } from '../types/game';
+import type { Card, MarketStack, CursorPosition, SharedPurchaseEvent } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { renderWithKeywords } from './Keywords';
 import { useAnimationMode } from './SettingsContext';
@@ -22,19 +22,19 @@ const ARCHETYPE_EMOJI: Record<string, string> = {
   vanguard: '🗡️',
   swarm: '🐝',
   fortress: '🏰',
-  neutral: '⬜',
+  shared: '⬜',
 };
 
 
 
 interface ShopOverlayProps {
   archetypeMarket: Card[];
-  neutralMarket: MarketStack[];
+  sharedMarket: MarketStack[];
   playerResources: number;
   playerArchetype: string;
   effectiveBuyCosts?: Record<string, number>;
   onBuyArchetype: (cardId: string) => void;
-  onBuyNeutral: (cardId: string) => void;
+  onBuyShared: (cardId: string) => void;
   onBuyUpgrade: () => void;
   onReroll: () => void;
   disabled: boolean;
@@ -43,7 +43,7 @@ interface ShopOverlayProps {
   onClose?: () => void;
   testMode?: boolean;
   /** Neutral market purchases from last round (by other players) */
-  neutralPurchasesLastRound?: import('../types/game').NeutralPurchaseRecord[];
+  neutralPurchasesLastRound?: import('../types/game').SharedPurchaseRecord[];
   /** Current player ID (to filter out own purchases from the history) */
   currentPlayerId?: string;
   /** Current-turn purchases by all players (from buy_phase_purchases) */
@@ -289,7 +289,7 @@ function CompactShopCard({
 }
 
 /** Animated card that flies from a neutral market card to a player's HUD. */
-export function PurchaseFlyAnimation({ event, onDone }: { event: NeutralPurchaseEvent; onDone: () => void }) {
+export function PurchaseFlyAnimation({ event, onDone }: { event: SharedPurchaseEvent; onDone: () => void }) {
   const [style, setStyle] = useState<React.CSSProperties>({ display: 'none' });
 
   const typeColor = getCardDisplayColor(event.card);
@@ -359,12 +359,12 @@ export function PurchaseFlyAnimation({ event, onDone }: { event: NeutralPurchase
 
 export default function ShopOverlay({
   archetypeMarket,
-  neutralMarket,
+  sharedMarket,
   playerResources,
   playerArchetype,
   effectiveBuyCosts,
   onBuyArchetype,
-  onBuyNeutral,
+  onBuyShared,
   onBuyUpgrade,
   onReroll,
   disabled,
@@ -419,8 +419,8 @@ export default function ShopOverlay({
 
   const buyNeutralWithSound = useCallback((cardId: string) => {
     sound.cardPurchase();
-    onBuyNeutral(cardId);
-  }, [onBuyNeutral, sound]);
+    onBuyShared(cardId);
+  }, [onBuyShared, sound]);
 
   // Floating "+1 Credit" animation state
   const [showCreditFloat, setShowCreditFloat] = useState(false);
@@ -448,7 +448,7 @@ export default function ShopOverlay({
   }, [neutralPurchasesLastRound, currentPlayerId]);
 
   // Build lookup: neutral card_id → [{ playerName, count }] for current-turn purchases by OTHER players
-  const currentTurnNeutralPurchases = useMemo(() => {
+  const currentTurnSharedPurchases = useMemo(() => {
     const map = new Map<string, Array<{ playerName: string; count: number }>>();
     if (!buyPhasePurchases) return map;
     for (const [pid, purchases] of Object.entries(buyPhasePurchases)) {
@@ -456,7 +456,7 @@ export default function ShopOverlay({
       // Count neutral purchases per card_id
       const counts = new Map<string, number>();
       for (const p of purchases) {
-        if (p.source === 'neutral') {
+        if (p.source === 'shared') {
           counts.set(p.card_id, (counts.get(p.card_id) ?? 0) + 1);
         }
       }
@@ -471,13 +471,13 @@ export default function ShopOverlay({
   }, [buyPhasePurchases, currentPlayerId, players]);
 
   // Track which neutral cards the current player already bought this round (1 per round limit)
-  const myNeutralPurchasesThisRound = useMemo(() => {
+  const mySharedPurchasesThisRound = useMemo(() => {
     const set = new Set<string>();
     if (!buyPhasePurchases || !currentPlayerId) return set;
     const myPurchases = buyPhasePurchases[currentPlayerId];
     if (!myPurchases) return set;
     for (const p of myPurchases) {
-      if (p.source === 'neutral') {
+      if (p.source === 'shared') {
         set.add(p.card_id);
       }
     }
@@ -528,7 +528,7 @@ export default function ShopOverlay({
   useEffect(() => {
     const allMarketCards = [
       ...archetypeMarket,
-      ...neutralMarket.map(s => s.card),
+      ...sharedMarket.map(s => s.card),
     ];
 
     setHoverState(prev => {
@@ -549,7 +549,7 @@ export default function ShopOverlay({
 
       return { card: newCard, rect: el.getBoundingClientRect() };
     });
-  }, [archetypeMarket, neutralMarket]);
+  }, [archetypeMarket, sharedMarket]);
 
   // Position hover preview above the card (fixed, viewport-relative)
   const previewStyle = displayedHover ? (() => {
@@ -835,18 +835,18 @@ export default function ShopOverlay({
                 <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Limit 1 copy of each card per round</div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
-                {[...neutralMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
+                {[...sharedMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
                   const canAfford = effCost !== null && playerResources >= (effCost ?? 0);
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
-                  const turnPurchases = currentTurnNeutralPurchases.get(stack.card.id);
-                  const alreadyBoughtThisRound = myNeutralPurchasesThisRound.has(stack.card.id);
+                  const turnPurchases = currentTurnSharedPurchases.get(stack.card.id);
+                  const alreadyBoughtThisRound = mySharedPurchasesThisRound.has(stack.card.id);
                   const sellingOutBoughtByMe = stack.selling_out && stack.selling_out_bought_by?.includes(currentPlayerId ?? '');
                   const alreadyOwnsUnique = !!stack.card.unique && !!ownedUniqueCardNames?.has(stack.card.name);
                   // Gather cursors hovering on this card
                   const cardCursors = otherPlayerCursors
                     ? Object.values(otherPlayerCursors).filter(
-                        c => c.hovered_card_id === stack.card.id && c.source === 'neutral'
+                        c => c.hovered_card_id === stack.card.id && c.source === 'shared'
                       )
                     : [];
                   return (
@@ -872,7 +872,7 @@ export default function ShopOverlay({
                       sellingOut={stack.selling_out}
                       cursors={cardCursors}
                       cursorClicks={cursorClicks}
-                      onCardHoverChange={onCardHoverChange ? (hovering) => onCardHoverChange(hovering ? stack.card.id : null, hovering ? 'neutral' : null) : undefined}
+                      onCardHoverChange={onCardHoverChange ? (hovering) => onCardHoverChange(hovering ? stack.card.id : null, hovering ? 'shared' : null) : undefined}
                     />
                   );
                 })}
@@ -883,13 +883,13 @@ export default function ShopOverlay({
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
               <div
                 style={{ position: 'relative', flexShrink: 0 }}
-                onMouseEnter={() => onCardHoverChange?.('__upgrade_credit', 'neutral')}
+                onMouseEnter={() => onCardHoverChange?.('__upgrade_credit', 'shared')}
                 onMouseLeave={() => onCardHoverChange?.(null, null)}
               >
                 {/* Other players' cursor indicators */}
                 {otherPlayerCursors && (() => {
                   const upgCursors = Object.values(otherPlayerCursors).filter(
-                    c => c.hovered_card_id === '__upgrade_credit' && c.source === 'neutral'
+                    c => c.hovered_card_id === '__upgrade_credit' && c.source === 'shared'
                   );
                   return upgCursors.length > 0 ? (
                     <div style={{ display: 'flex', gap: 3, position: 'absolute', top: -14, left: 4, zIndex: 5 }}>
@@ -1003,7 +1003,7 @@ export default function ShopOverlay({
           )}
           {(() => {
             const buyer = neutralPurchaseMap.get(displayedHover.card.id);
-            const turnPurchases = currentTurnNeutralPurchases.get(displayedHover.card.id);
+            const turnPurchases = currentTurnSharedPurchases.get(displayedHover.card.id);
             if (!buyer && !turnPurchases) return null;
             return (
               <div style={{

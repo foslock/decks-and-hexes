@@ -46,6 +46,8 @@ const CARD_ART: Record<string, string> = {
   vanguard_ultimatum: '⚠️',
   vanguard_war_economy: '🏭',
   vanguard_war_tithe: '💸',
+  vanguard_mobilize_forces: '📯',
+  vanguard_forward_scout: '🦅',
 
   // ── Swarm ──
   swarm_scout: '👁️',
@@ -74,6 +76,8 @@ const CARD_ART: Record<string, string> = {
   swarm_heady_brew: '🍺',
   swarm_infestation: '🪲',
   swarm_plague: '☠️',
+  swarm_second_wave: '↩️',
+  swarm_brood_memory: '🪺',
 
   // ── Fortress ──
   fortress_fortify: '🧱',
@@ -102,6 +106,8 @@ const CARD_ART: Record<string, string> = {
   fortress_snowy_holiday: '❄️',
   fortress_toll_road: '🛤️',
   fortress_warden: '💂',
+  fortress_stockroom: '🗄️',
+  fortress_reserve_forces: '🪖',
 
   // ── Neutral ──
   neutral_explore: '🧭',
@@ -136,6 +142,11 @@ const CARD_ART: Record<string, string> = {
   neutral_spyglass: '🔍',
   neutral_supply_depot: '📦',
   neutral_tax_collector: '🪙',
+  neutral_salvage: '🪤',
+  neutral_foresight: '🔮',
+  neutral_redemption: '🌅',
+  neutral_recall: '⏪',
+  neutral_sift: '⚗️',
 
   // ── Special ──
   debt: '⛓️',
@@ -147,7 +158,7 @@ const ARCHETYPE_LABEL: Record<string, string> = {
   vanguard: 'Vanguard',
   swarm: 'Swarm',
   fortress: 'Fortress',
-  neutral: 'Neutral',
+  shared: 'Shared',
 };
 
 const TYPE_LABEL: Record<string, string> = {

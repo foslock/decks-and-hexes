@@ -475,3 +475,54 @@ cards:
     secondary_effect: null
     secondary_timing: null
     note: "Massive single-turn refuel. Burns nearly your entire turn but floods your hand and economy. Unique — only one copy allowed per deck."
+
+  # ── TUTOR / SEARCH CARDS ──────────────────────────────────────────────
+
+  - id: swarm_second_wave
+    name: Second Wave
+    name_upgraded: Second Wave+
+    type: Engine
+    buy_cost: 2
+    action_return: 1
+    power: 0
+    effect: "Search your discard pile for 1 card; put it in your hand. Gain 1 action."
+    effect_upgraded: "Search your discard pile for 1 card; put it in your hand. Gain 1 action and 1 resource."
+    resource_gain: 0
+    upgraded_resource_gain: 1
+    secondary_effect: null
+    secondary_timing: null
+    note: "The chain enabler. The first surge of drones falls back; a second crests over them. Cheap, action-positive, and refuels your hand mid-combo."
+
+    effects:
+      - type: search_zone
+        value: 1
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: discard
+          targets: [hand]
+          min: 0
+
+  - id: swarm_brood_memory
+    name: Brood Memory
+    name_upgraded: Brood Memory+
+    type: Engine
+    buy_cost: 4
+    action_return: 0
+    power: 0
+    effect: "Look at the top 3 cards of your draw pile; put any number in your hand or your discard pile."
+    effect_upgraded: "Look at the top 4 cards of your draw pile; put any number in your hand or your discard pile."
+    secondary_effect: null
+    secondary_timing: null
+    note: "The hive's collective memory sorts what's worth keeping. Aggressive sift — pull any number into hand or push junk to discard for a cleaner future draw."
+
+    effects:
+      - type: search_zone
+        value: 3
+        upgraded_value: 4
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: draw
+          targets: [hand, discard]
+          min: 0

@@ -971,7 +971,7 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
             # Mark leaving player as done buying
             game.players_done_buying.add(player_id)
             if all(pid in game.players_done_buying for pid in game.player_order):
-                game.neutral_market.finalize_selling_out()
+                game.shared_market.finalize_selling_out()
                 execute_end_of_turn(game)
 
     # Persist state before broadcasting

@@ -13,7 +13,7 @@ const KEYWORDS: Record<string, string> = {
   'Defense': 'Add defense strength to a tile you own, making it harder for opponents to claim. Applied before any claims in a round.',
   'Engine': 'Gain resources, draw cards, or trigger effects without targeting a tile.',
   'Power': 'Determines the strength of a claim; highest power wins the contested tile.',
-  'Draw': 'Take additional cards from your deck into your hand.',
+  'Draw': 'Take additional cards from your draw pile into your hand.',
   'Discard': 'Put a card from your hand into your discard pile.',
   'Debt': 'A dead-weight card given to the VP leader each round (starting round 5). Play it and pay 3 resources to trash it.',
   'Adjacent': 'A hex tile directly neighboring one you already own (6 possible directions).',

@@ -9,7 +9,7 @@ Each round has five simultaneous phases:
 1. **Start of Turn** — Distribute Debt to VP leader (round 5+), score VP from held hexes, draw hand, reveal archetype market
 2. **Plan** — All players simultaneously place cards face-down on target tiles (action-slot limited, with undo for reversible cards)
 3. **Reveal & Resolve** — Flip all cards; highest power wins each contested tile (ties to defender)
-4. **Buy** — Spend resources on archetype cards, neutral market cards, or upgrade credits
+4. **Buy** — Spend resources on archetype cards, shared market cards, or upgrade credits
 5. **End of Turn** — Discard hands, check objective reveals, rotate first player, advance round
 
 Three asymmetric archetypes each play differently:
@@ -77,7 +77,7 @@ frontend/
       GameScreen.tsx         # Main game view with phase-aware UI
       LobbyScreen.tsx        # Multiplayer lobby (create/join, settings, chat)
       SetupScreen.tsx        # Home screen with game creation and join
-      MarketPanel.tsx        # Archetype + neutral market with buy UI
+      MarketPanel.tsx        # Archetype + shared market with buy UI
       ShopOverlay.tsx        # Full-screen shop during buy phase
       ResolveOverlay.tsx     # Animated claim resolution display
       GameOverOverlay.tsx    # End-of-game results screen
@@ -99,13 +99,13 @@ frontend/
       Keywords.tsx           # Card keyword reference
       Tooltip.tsx            # Reusable tooltip component
   test/                      # 48 vitest tests
-data/                        # Game content (YAML-in-markdown), 109 cards total
-  cards_vanguard.md          # 25 Vanguard cards + upgrades
-  cards_swarm.md             # 25 Swarm cards + upgrades
-  cards_fortress.md          # 25 Fortress cards + upgrades
-  cards_neutral.md           # Starter cards + 34 market cards
-  objectives.md              # 28 objectives across 4 pools
-  passives.md                # 37 passive abilities
+data/                        # Game content (YAML), 109 cards total
+  cards_vanguard.yaml        # 25 Vanguard cards + upgrades
+  cards_swarm.yaml           # 25 Swarm cards + upgrades
+  cards_fortress.yaml        # 25 Fortress cards + upgrades
+  cards_neutral.yaml         # Starter cards + 34 market cards
+  objectives.yaml            # 28 objectives across 4 pools
+  passives.yaml              # 37 passive abilities
 rules/                       # Human-readable game rules (5 files)
 render.yaml                  # Render.com deployment blueprint
 .github/workflows/ci.yml    # CI: pytest, mypy, vitest, tsc on PRs
@@ -166,12 +166,12 @@ npx tsc --noEmit
 
 **Core Game**
 - Full 5-phase turn loop with server-authoritative game logic
-- 109 cards across 3 archetypes + neutral market, loaded from YAML data files
+- 109 cards across 3 archetypes + shared market, loaded from YAML data files
 - Hex grid generation for 5 sizes with randomized VP hex and blocked terrain placement
 - Claim resolution with power comparison, adjacency rules, defender-wins-ties, and stacking exceptions
 - Resource system with persistent carry-over and buy phase spending
 - VP scoring from held tiles with dynamic VP target
-- Archetype market (3-card draw, re-roll, retain) and neutral market with per-game copy limits
+- Archetype market (3-card draw, re-roll, retain) and shared market with per-game copy limits
 - Upgrade credit system with permanent card upgrades
 - 28 objectives with reveal timing and first-to-complete scoring
 - 37 passive abilities with draft system

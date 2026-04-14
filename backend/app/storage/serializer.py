@@ -34,7 +34,8 @@ from app.game_engine.effects import (
 from app.game_engine.game_state import (
     GameState,
     LogEntry,
-    NeutralMarket,
+    SharedMarket,
+    PendingSearch,
     Phase,
     PlannedAction,
     Player,
@@ -383,6 +384,7 @@ def _serialize_player(player: Player, registry: dict[str, Card]) -> dict[str, An
         "claims_won_last_round": player.claims_won_last_round,
         "tiles_lost_last_round": player.tiles_lost_last_round,
         "pending_discard": player.pending_discard,
+        "pending_search": player.pending_search.to_dict() if player.pending_search else None,
         "_prev_market_ids": player._prev_market_ids,
         "_prev_market_ids_prev": player._prev_market_ids_prev,
         "_prev_market_types": player._prev_market_types,
@@ -393,6 +395,20 @@ def _deserialize_card_list(
     data: list[dict[str, Any]], registry: dict[str, Card]
 ) -> list[Card]:
     return [_deserialize_card_ref(ref, registry) for ref in data]
+
+
+def _deserialize_pending_search(data: Any) -> Optional[PendingSearch]:
+    if not data or not isinstance(data, dict):
+        return None
+    return PendingSearch(
+        source=str(data.get("source", "discard")),
+        count=int(data.get("count", 0)),
+        min_count=int(data.get("min_count", 0)),
+        allowed_targets=[str(t) for t in data.get("allowed_targets", [])],
+        card_filter=data.get("card_filter") if isinstance(data.get("card_filter"), dict) else None,
+        snapshot_card_ids=[str(s) for s in data.get("snapshot_card_ids", [])],
+        peek_all=bool(data.get("peek_all", False)),
+    )
 
 
 def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Player:
@@ -444,6 +460,7 @@ def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Play
         claims_won_last_round=data.get("claims_won_last_round", 0),
         tiles_lost_last_round=data.get("tiles_lost_last_round", 0),
         pending_discard=data.get("pending_discard", 0),
+        pending_search=_deserialize_pending_search(data.get("pending_search")),
     )
     player._prev_market_ids = data.get("_prev_market_ids", [])
     player._prev_market_ids_prev = data.get("_prev_market_ids_prev", [])
@@ -526,11 +543,11 @@ def _deserialize_grid(data: dict[str, Any]) -> HexGrid:
 
 
 # ---------------------------------------------------------------------------
-# NeutralMarket serialization
+# SharedMarket serialization
 # ---------------------------------------------------------------------------
 
-def _serialize_neutral_market(
-    market: NeutralMarket, registry: dict[str, Card]
+def _serialize_shared_market(
+    market: SharedMarket, registry: dict[str, Card]
 ) -> dict[str, Any]:
     stacks: dict[str, list[dict[str, Any]]] = {}
     for base_id, copies in market.stacks.items():
@@ -546,10 +563,10 @@ def _serialize_neutral_market(
     return {"stacks": stacks, "card_templates": templates, "selling_out": selling_out}
 
 
-def _deserialize_neutral_market(
+def _deserialize_shared_market(
     data: dict[str, Any], registry: dict[str, Card]
-) -> NeutralMarket:
-    market = NeutralMarket()
+) -> SharedMarket:
+    market = SharedMarket()
     for base_id, copies_data in data.get("stacks", {}).items():
         market.stacks[base_id] = _deserialize_card_list(copies_data, registry)
     for base_id, tmpl_data in data.get("card_templates", {}).items():
@@ -661,8 +678,8 @@ def serialize_game(game: GameState) -> str:
             for pid, p in game.players.items()
         },
         # Markets
-        "neutral_market": _serialize_neutral_market(game.neutral_market, registry),
-        "neutral_purchase_log": game.neutral_purchase_log,
+        "shared_market": _serialize_shared_market(game.shared_market, registry),
+        "shared_purchase_log": game.shared_purchase_log,
         "buy_phase_purchases": game.buy_phase_purchases,
         # Logs
         "log": game.log,
@@ -703,9 +720,10 @@ def deserialize_game(
     for pid, pdata in blob.get("players", {}).items():
         players[pid] = _deserialize_player(pdata, card_registry)
 
-    # Markets
-    neutral_market = _deserialize_neutral_market(
-        blob.get("neutral_market", {}), card_registry
+    # Markets — fall back to the legacy "neutral_market" key for saves made
+    # before the rename to "shared_market".
+    shared_market = _deserialize_shared_market(
+        blob.get("shared_market") or blob.get("neutral_market", {}), card_registry
     )
 
     # Logs
@@ -724,7 +742,7 @@ def deserialize_game(
         current_phase=Phase(blob["current_phase"]),
         current_round=blob.get("current_round", 0),
         first_player_index=blob.get("first_player_index", 0),
-        neutral_market=neutral_market,
+        shared_market=shared_market,
         winner=blob.get("winner"),
         rng=rng,
         card_registry=card_registry,
@@ -735,7 +753,7 @@ def deserialize_game(
         granted_actions=blob.get("granted_actions"),
         host_id=blob.get("host_id"),
         lobby_code=blob.get("lobby_code"),
-        neutral_purchase_log=blob.get("neutral_purchase_log", []),
+        shared_purchase_log=blob.get("shared_purchase_log", blob.get("neutral_purchase_log", [])),
         players_done_buying=set(blob.get("players_done_buying", [])),
         buy_phase_purchases=blob.get("buy_phase_purchases", {}),
         card_pack=blob.get("card_pack", "everything"),

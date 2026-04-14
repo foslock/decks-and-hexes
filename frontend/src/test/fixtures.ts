@@ -4,7 +4,7 @@ export function makeCard(overrides: Partial<Card> = {}): Card {
   return {
     id: 'test_card',
     name: 'Test Card',
-    archetype: 'neutral',
+    archetype: 'shared',
     card_type: 'claim',
     power: 1,
     resource_gain: 0,
@@ -139,7 +139,7 @@ export function makeGameState(overrides: Partial<GameState> = {}): GameState {
     first_player_index: 0,
     players_done_buying: [],
     buy_phase_purchases: {},
-    neutral_market: [
+    shared_market: [
       { card: makeCard({ id: 'neutral_mercenary', name: 'Mercenary', buy_cost: 3, power: 3 }), remaining: 5 },
       { card: makeCard({ id: 'neutral_gather', name: 'Land Grant', buy_cost: 2, card_type: 'engine' }), remaining: 3 },
     ],

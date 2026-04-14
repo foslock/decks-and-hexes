@@ -22,7 +22,7 @@ from app.game_engine.effects import Effect, EffectType, TurnModifiers
 from app.game_engine.game_state import (
     GameState,
     LogEntry,
-    NeutralMarket,
+    SharedMarket,
     Phase,
     PlannedAction,
     Player,
@@ -173,7 +173,7 @@ def _assert_games_equal(a: GameState, b: GameState) -> None:
     assert a.map_seed == b.map_seed
     assert a.test_mode == b.test_mode
     assert a.log == b.log
-    assert a.neutral_purchase_log == b.neutral_purchase_log
+    assert a.shared_purchase_log == b.shared_purchase_log
     assert a.buy_phase_purchases == b.buy_phase_purchases
     assert a.resolution_steps == b.resolution_steps
     assert a.player_effects == b.player_effects
@@ -200,13 +200,13 @@ def _assert_games_equal(a: GameState, b: GameState) -> None:
         assert la.actor == lb.actor
 
     # Neutral market
-    assert set(a.neutral_market.stacks.keys()) == set(b.neutral_market.stacks.keys())
-    for base_id in a.neutral_market.stacks:
-        stack_a = a.neutral_market.stacks[base_id]
-        stack_b = b.neutral_market.stacks[base_id]
+    assert set(a.shared_market.stacks.keys()) == set(b.shared_market.stacks.keys())
+    for base_id in a.shared_market.stacks:
+        stack_a = a.shared_market.stacks[base_id]
+        stack_b = b.shared_market.stacks[base_id]
         assert len(stack_a) == len(stack_b), f"Neutral market '{base_id}' stack length mismatch"
         for j, (ca, cb) in enumerate(zip(stack_a, stack_b)):
-            _assert_cards_equal(ca, cb, f"neutral_market[{base_id}][{j}]")
+            _assert_cards_equal(ca, cb, f"shared_market[{base_id}][{j}]")
 
 
 # ---------------------------------------------------------------------------
@@ -622,8 +622,8 @@ class TestMultiRoundRoundTrip:
         _assert_games_equal(game, restored)
 
 
-class TestNeutralMarket:
-    def test_neutral_market_round_trip(self, card_registry: dict[str, Card]) -> None:
+class TestSharedMarket:
+    def test_shared_market_round_trip(self, card_registry: dict[str, Card]) -> None:
         """Neutral market with varied stack sizes round-trips."""
         game = create_game(
             GridSize.SMALL,
@@ -636,16 +636,16 @@ class TestNeutralMarket:
         )
 
         # Verify neutral market exists
-        assert len(game.neutral_market.stacks) > 0
+        assert len(game.shared_market.stacks) > 0
 
         blob = serialize_game(game)
         restored = deserialize_game(blob, card_registry)
 
         # Same stacks, same counts
-        for base_id in game.neutral_market.stacks:
-            assert base_id in restored.neutral_market.stacks
-            assert len(restored.neutral_market.stacks[base_id]) == len(
-                game.neutral_market.stacks[base_id]
+        for base_id in game.shared_market.stacks:
+            assert base_id in restored.shared_market.stacks
+            assert len(restored.shared_market.stacks[base_id]) == len(
+                game.shared_market.stacks[base_id]
             )
 
 

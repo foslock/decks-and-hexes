@@ -44,7 +44,7 @@ const PAGES = [
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa' }}>
           You start with a <strong style={{ color: '#fff' }}>10-card deck</strong> of basic cards.
           Each round you draw a hand of 5 cards in your Upkeep phase, play some during the Play phase, then discard
-          the rest. When your deck runs out, your discard pile is reshuffled into a new draw pile.
+          the rest. When your draw pile runs out, your discard pile is reshuffled into a new draw pile.
         </p>
         <div style={{
           marginTop: 20,

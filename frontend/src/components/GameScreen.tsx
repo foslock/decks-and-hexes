@@ -1,11 +1,13 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, NeutralPurchaseEvent } from '../types/game';
+import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
 import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardBrowser from './CardBrowser';
 import ShopOverlay, { PurchaseFlyAnimation } from './ShopOverlay';
+import PileSearchModal from './PileSearchModal';
+import PileSearchFlyAnimation, { type SearchFlight } from './PileSearchFlyAnimation';
 import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import PhaseBanner from './PhaseBanner';
@@ -277,6 +279,80 @@ function getCardChoiceRequirement(card: Card): {
   return null;
 }
 
+/**
+ * Build a synthetic PendingSearch for a tutor card BEFORE it's played,
+ * using the active player's current pile state. The human UI gates the play
+ * on this modal and commits the selections with the card play (atomic).
+ *
+ * Matches the backend's `_handle_search_zone` logic (effect_resolver.py):
+ * filter source pile, clamp count/min to pile size.
+ *
+ * Returns null if the card has no search_zone effect or the source pile
+ * has zero eligible cards (the card wouldn't be playable anyway).
+ */
+function buildPrePlaySearch(
+  card: Card,
+  source_pile: { discard: Card[]; deck_cards: Card[]; trash: Card[] },
+): PendingSearch | null {
+  const eff = card.effects?.find((e: any) => e.type === 'search_zone');
+  if (!eff) return null;
+
+  const meta = (eff.metadata ?? {}) as Record<string, unknown>;
+  const source = String(meta.source ?? 'discard') as PendingSearch['source'];
+  const rawTargets = Array.isArray(meta.targets) ? (meta.targets as unknown[]) : ['hand'];
+  const allowed_targets = rawTargets.map((t) => String(t)) as SearchZoneTarget[];
+  const card_filter = (typeof meta.filter === 'object' && meta.filter !== null)
+    ? (meta.filter as PendingSearch['card_filter'])
+    : null;
+
+  const srcList: Card[] =
+    source === 'discard' ? source_pile.discard
+      : source === 'draw' ? source_pile.deck_cards
+        : source === 'trash' ? source_pile.trash
+          : [];
+
+  // Apply filter (card_type / name only — mirrors backend `matches_card_filter`)
+  const filtered = srcList.filter((c) => {
+    if (!card_filter) return true;
+    if (card_filter.card_type && c.card_type.toLowerCase() !== card_filter.card_type.toLowerCase()) return false;
+    if (card_filter.name && c.name !== card_filter.name) return false;
+    return true;
+  });
+
+  const baseValue = eff.value ?? 0;
+  const upgradedValue = eff.upgraded_value;
+  const rawCount = card.is_upgraded && upgradedValue != null ? upgradedValue : baseValue;
+
+  // Draw-pile peek is capped to "top N" (matches backend _handle_search_zone).
+  // The card text default is "look at the top N cards" — peeking the entire
+  // draw pile would leak information the effect doesn't grant. Two metadata
+  // overrides: `peek_all: true` shows the entire pile (Foresight); `peek: N`
+  // sets a custom peek depth. Defaults to the pick count.
+  const peekAll = source === 'draw' && !!meta.peek_all;
+  let eligible = filtered;
+  if (source === 'draw' && !peekAll) {
+    const peekRaw = meta.peek;
+    const peek = peekRaw != null ? Number(peekRaw) : rawCount;
+    eligible = filtered.slice(0, peek);
+  }
+
+  if (eligible.length === 0) return null;
+
+  const rawMin = meta.min != null ? Number(meta.min) : rawCount;
+  const count = Math.min(rawCount, eligible.length);
+  const min_count = Math.max(0, Math.min(rawMin, count));
+
+  return {
+    source,
+    count,
+    min_count,
+    allowed_targets,
+    card_filter,
+    snapshot_card_ids: eligible.map((c) => c.id),
+    peek_all: peekAll,
+  };
+}
+
 const HEX_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 
 /** Count VP tiles owned by a player that are connected to their base through owned territory. */
@@ -468,7 +544,7 @@ const DEBT_FLY_CARD_H = CARD_FULL_MIN_HEIGHT * DEBT_FLY_SCALE;
 const DEBT_CARD_OBJ: Card = {
   id: 'debt_fly',
   name: 'Debt',
-  archetype: 'neutral',
+  archetype: 'shared',
   card_type: 'engine',
   power: 0,
   resource_gain: -3,
@@ -628,10 +704,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [showDeckViewer, setShowDeckViewer] = useState(false);
   const [showShopOverlay, setShowShopOverlay] = useState(false);
   const [otherCursors, setOtherCursors] = useState<Record<string, CursorPosition>>({});
-  const [neutralPurchaseEvents, setNeutralPurchaseEvents] = useState<NeutralPurchaseEvent[]>([]);
+  const [neutralPurchaseEvents, setSharedPurchaseEvents] = useState<SharedPurchaseEvent[]>([]);
   const [cursorClicks, setCursorClicks] = useState<Record<string, number>>({}); // player_id -> timestamp
   const [showCardBrowser, setShowCardBrowser] = useState(false);
-  const [cardPackDefs, setCardPackDefs] = useState<{ id: string; name: string; neutral_card_ids: string[] | null; archetype_card_ids: Record<string, string[]> | null }[]>([]);
+  const [cardPackDefs, setCardPackDefs] = useState<{ id: string; name: string; shared_card_ids: string[] | null; archetype_card_ids: Record<string, string[]> | null }[]>([]);
   const [discardingAll, setDiscardingAll] = useState(false);
   const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
   /** Temporarily stores drag release position/velocity so executePlayCard can include it in lastPlayedTarget */
@@ -676,6 +752,35 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     pendingDiscard?: boolean;  // true when resolving a deferred discard (not during card play)
   } | null>(null);
   const [trashSelectedIndices, setTrashSelectedIndices] = useState<Set<number>>(new Set());
+
+  // Pile search (SEARCH_ZONE / tutor) state. Two modes:
+  //   - prePlaySearchMode: card hasn't been played yet. The modal is shown
+  //     using a synthetic PendingSearch derived from current state. Confirming
+  //     commits the play AND the search atomically. Cancelling leaves the
+  //     card in hand (no API call).
+  //   - server-driven pending_search (activePlayer.pending_search): legacy /
+  //     reconnection path. Same modal rendered, but confirm calls
+  //     submitSearch against the already-pending state on the server.
+  const [prePlaySearchMode, setPrePlaySearchMode] = useState<{
+    cardIndex: number;
+    targetQ?: number;
+    targetR?: number;
+    targetPlayerId?: string;
+    extraTargets?: [number, number][];
+    pending: PendingSearch;
+  } | null>(null);
+  const [searchFlights, setSearchFlights] = useState<SearchFlight[] | null>(null);
+  // When true, the player has confirmed a search; suppresses the modal while
+  // the fly animation plays. Cleared after submitSearchCommit runs.
+  const [searchAnimating, setSearchAnimating] = useState(false);
+  // Card IDs that the tutor UI just flew into the hand — passed to CardHand
+  // so it doesn't re-animate them as if they were drawn from the deck.
+  const [searchSuppressedHandIds, setSearchSuppressedHandIds] = useState<Set<string>>(() => new Set());
+  // True for the brief window between submitting a tutor commit and the
+  // resulting state arriving. Tells CardHand to skip its shuffle-detection
+  // heuristic, which would otherwise misfire on the discard-pile shrinkage
+  // caused by tutor moves (e.g. discard → hand or discard → top of draw).
+  const [tutorCommitInFlight, setTutorCommitInFlight] = useState(false);
   // Intro overlay state — skip on reconnection or when animations are off
   const skipIntro = skipIntroProp || animationOff;
   const [showIntro, setShowIntro] = useState(!skipIntro);
@@ -944,7 +1049,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const byId = new Map<string, import('../types/game').Card>();
     const byName = new Map<string, import('../types/game').Card>();
     // Neutral market cards
-    for (const stack of gameState.neutral_market) {
+    for (const stack of gameState.shared_market) {
       byId.set(stack.card.id, stack.card);
       byName.set(stack.card.name, stack.card);
     }
@@ -957,7 +1062,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       for (const c of p.trash ?? []) { byId.set(c.id, c); byName.set(c.name, c); }
     }
     return { cardById: byId, cardByName: byName };
-  }, [gameState.neutral_market, gameState.players]);
+  }, [gameState.shared_market, gameState.players]);
 
   // Enrich purchase records with card_type for pill border colors
   const enrichPurchases = useCallback((purchases?: Array<{ card_id: string; card_name: string; source: string; cost: number }>) => {
@@ -1464,6 +1569,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     targetPlayerId?: string,
     trashIndices?: number[],
     discardIndices?: number[],
+    searchSelections?: SearchSelection[],
   ) => {
     if (phase !== 'play' || !activePlayer) return;
     const card = activePlayer.hand[cardIndex];
@@ -1524,7 +1630,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const result = await api.playCard(
         gameState.id, activePlayerId, cardIndex,
         q, r, targetPlayerId, extraTargets,
-        trashIndices, discardIndices,
+        trashIndices, discardIndices, searchSelections,
       );
       // Spawn floating action icon — card costs N actions
       {
@@ -1580,6 +1686,58 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [phase, activePlayer, gameState.id, activePlayerId, onStateUpdate]);
 
   /** Enter trash/discard selection mode if the card requires it, otherwise play immediately. */
+  /**
+   * If the card has a SEARCH_ZONE (tutor) effect, route the play through the
+   * appropriate pre-play search flow.
+   *
+   * Two paths:
+   *   1. Partial draw peeks (top N) — commit the play to the backend
+   *      IMMEDIATELY (no selections yet). The backend sets pending_search
+   *      and the modal opens via the server-driven path. Refreshing the
+   *      page can't bypass it: pending_search is on the server, the modal
+   *      will re-open, and the play has already cost an action.
+   *   2. All others (discard/trash/whole-pile peek) — pre-play mode: show
+   *      the modal locally without touching the backend. Cancel keeps the
+   *      card in hand. The information shown either is already public
+   *      (discard/trash) or only reveals the SET (peek_all) which the
+   *      player could already infer, so refreshing-to-cancel is harmless.
+   *
+   * Returns true if search mode was entered (caller should skip executePlayCard).
+   */
+  const maybeEnterPileSearchMode = useCallback(async (
+    cardIndex: number,
+    targetQ?: number, targetR?: number,
+    extraTargets?: [number, number][],
+    targetPlayerId?: string,
+  ): Promise<boolean> => {
+    if (!activePlayer) return false;
+    const card = activePlayer.hand[cardIndex];
+    if (!card) return false;
+    const pending = buildPrePlaySearch(card, {
+      discard: activePlayer.discard ?? [],
+      deck_cards: activePlayer.deck_cards ?? [],
+      trash: activePlayer.trash ?? [],
+    });
+    if (!pending) return false;
+
+    const isPartialDrawPeek = pending.source === 'draw' && !pending.peek_all;
+    if (isPartialDrawPeek) {
+      // Server-commit-first path: play the card with no selections; backend
+      // sets pending_search; modal opens via the server-driven render.
+      setSelectedCardIndex(null);
+      await executePlayCard(cardIndex, targetQ, targetR, extraTargets, targetPlayerId);
+      return true;
+    }
+
+    // Local pre-play path: show modal immediately, commit on confirm.
+    setPrePlaySearchMode({
+      cardIndex, targetQ, targetR, targetPlayerId, extraTargets,
+      pending,
+    });
+    setSelectedCardIndex(null);
+    return true;
+  }, [activePlayer, executePlayCard]);
+
   const maybeEnterTrashMode = useCallback((
     cardIndex: number,
     choiceReq: ReturnType<typeof getCardChoiceRequirement>,
@@ -1685,8 +1843,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return;
     }
 
+    // Tutor / search_zone cards: show the selection modal before committing.
+    // The play and the search resolve atomically on confirm.
+    if (await maybeEnterPileSearchMode(cardIndex, q, r, extraTargets, targetPlayerId)) {
+      return;
+    }
+
     await executePlayCard(cardIndex, q, r, extraTargets, targetPlayerId);
-  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode, gameState.grid?.tiles, activePlayerId]);
+  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode, maybeEnterPileSearchMode, gameState.grid?.tiles, activePlayerId]);
 
   const playCardNoTarget = useCallback(async (cardIndex: number) => {
     if (phase !== 'play' || !activePlayer) return;
@@ -1699,9 +1863,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       return;
     }
 
+    // Tutor / search_zone cards: show the selection modal before committing.
+    if (await maybeEnterPileSearchMode(cardIndex)) {
+      return;
+    }
+
     playedTargetlessRef.current = true;
     await executePlayCard(cardIndex);
-  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode]);
+  }, [phase, activePlayer, executePlayCard, maybeEnterTrashMode, maybeEnterPileSearchMode]);
 
   // Convert screen coords from card drag to hex grid coords
   const handleDragPlay = useCallback((cardIndex: number, screenX: number, screenY: number, dragVelocityX?: number, dragVelocityY?: number) => {
@@ -2154,6 +2323,190 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     });
   }, [trashMode]);
 
+  // ── Pile search (SEARCH_ZONE / tutor) handlers ──
+  //
+  // Flow:
+  //   1. Backend sets `pending_search` on the active player after playing a
+  //      tutor card. The modal appears (see bottom of render).
+  //   2. Player picks cards + destinations, clicks Confirm. We capture the
+  //      card DOM rects from the modal, resolve target zone rects on the
+  //      HUD, and hand a list of `SearchFlight` to PileSearchFlyAnimation.
+  //   3. While the animation runs, `searchAnimating` suppresses the modal
+  //      so the cards aren't hidden behind an opaque overlay.
+  //   4. On animation complete, we POST /submit-search. The state update
+  //      clears `pending_search` server-side and the fly state resets.
+  const resolveSearchTargetRect = useCallback((target: SearchZoneTarget): DOMRect | null => {
+    if (target === 'trash') return null; // tear-in-place — no rect needed
+    const selector =
+      target === 'hand'
+        ? '[data-hand-zone]'
+        : target === 'top_of_draw'
+          ? '[data-draw-pile]'
+          : '[data-discard-pile]';
+    const el = document.querySelector<HTMLElement>(selector);
+    return el ? el.getBoundingClientRect() : null;
+  }, []);
+
+  // Effective pending state: pre-play mode (card not yet played) takes
+  // precedence over server-driven pending_search (legacy / reconnection path).
+  const effectivePending = prePlaySearchMode?.pending ?? activePlayer?.pending_search ?? null;
+  const pileSearchSourceCards = useMemo<Card[]>(() => {
+    if (!effectivePending) return [];
+    const src = effectivePending.source;
+    if (src === 'discard') return activePlayer?.discard ?? [];
+    if (src === 'draw') return activePlayer?.deck_cards ?? [];
+    if (src === 'trash') return activePlayer?.trash ?? [];
+    return [];
+  }, [effectivePending, activePlayer?.discard, activePlayer?.deck_cards, activePlayer?.trash]);
+
+  // Ref used to defer the actual play-card API call until the fly animation
+  // completes. In pre-play mode we capture card + selections here; in
+  // server-driven mode we capture just the selections.
+  const searchCommitRef = useRef<{
+    mode: 'pre_play';
+    cardIndex: number;
+    targetQ?: number;
+    targetR?: number;
+    targetPlayerId?: string;
+    extraTargets?: [number, number][];
+    selections: SearchSelection[];
+  } | {
+    mode: 'server_pending';
+    selections: SearchSelection[];
+  } | null>(null);
+
+  const submitSearchCommit = useCallback(async () => {
+    const commit = searchCommitRef.current;
+    searchCommitRef.current = null;
+    if (!commit) return;
+    // Mark any hand-targeted cards as "already visually present" so the hand
+    // doesn't re-animate them as freshly-drawn when the backend state arrives.
+    // Also flag a tutor-commit window so CardHand's shuffle-detection
+    // heuristic doesn't misfire on the discard pile shrinking (which it
+    // would otherwise treat as a reshuffle when the draw pile is empty).
+    // Both flags clear after ~1s — enough time for the state update + render.
+    const handIds = new Set(
+      commit.selections.filter((s) => s.target === 'hand').map((s) => s.card_id)
+    );
+    if (commit.selections.length > 0) {
+      setTutorCommitInFlight(true);
+    }
+    if (handIds.size > 0) {
+      setSearchSuppressedHandIds((prev) => new Set([...prev, ...handIds]));
+    }
+    setTimeout(() => {
+      setTutorCommitInFlight(false);
+      if (handIds.size > 0) {
+        setSearchSuppressedHandIds((prev) => {
+          if (prev.size === 0) return prev;
+          const next = new Set(prev);
+          for (const id of handIds) next.delete(id);
+          return next;
+        });
+      }
+    }, 1000);
+    try {
+      setError(null);
+      if (commit.mode === 'pre_play') {
+        // Atomic card play + search resolution
+        await executePlayCard(
+          commit.cardIndex, commit.targetQ, commit.targetR,
+          commit.extraTargets, commit.targetPlayerId,
+          undefined, undefined, commit.selections,
+        );
+      } else {
+        const result = await api.submitSearch(gameState.id, activePlayerId, commit.selections);
+        onStateUpdate(result.state);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [activePlayerId, executePlayCard, gameState.id, onStateUpdate]);
+
+  const handlePileSearchConfirm = useCallback(
+    (selections: SearchSelection[], sourceRects: Map<string, DOMRect>) => {
+      if (!effectivePending) return;
+
+      const isPrePlay = !!prePlaySearchMode;
+      const commit: NonNullable<typeof searchCommitRef.current> = isPrePlay
+        ? {
+          mode: 'pre_play',
+          cardIndex: prePlaySearchMode!.cardIndex,
+          targetQ: prePlaySearchMode!.targetQ,
+          targetR: prePlaySearchMode!.targetR,
+          targetPlayerId: prePlaySearchMode!.targetPlayerId,
+          extraTargets: prePlaySearchMode!.extraTargets,
+          selections,
+        }
+        : { mode: 'server_pending', selections };
+
+      searchCommitRef.current = commit;
+      // Close the modal immediately so the fly animation isn't obscured.
+      setPrePlaySearchMode(null);
+
+      // Empty selections (declined) — skip animation, submit immediately.
+      if (selections.length === 0) {
+        submitSearchCommit();
+        return;
+      }
+
+      // Build flights. If the card isn't in the source list (shouldn't
+      // happen), we skip — still fires API call.
+      const cardById = new Map<string, Card>();
+      for (const c of pileSearchSourceCards) {
+        cardById.set(c.id, c);
+      }
+      const flights: SearchFlight[] = selections
+        .map((sel) => {
+          const card = cardById.get(sel.card_id);
+          const sourceRect = sourceRects.get(sel.card_id);
+          if (!card || !sourceRect) return null;
+          return {
+            card,
+            sourceRect,
+            targetKind: sel.target,
+            targetRect: resolveSearchTargetRect(sel.target),
+          } satisfies SearchFlight;
+        })
+        .filter((f): f is SearchFlight => f !== null);
+
+      if (!animated || flights.length === 0) {
+        submitSearchCommit();
+        return;
+      }
+
+      setSearchAnimating(true);
+      setSearchFlights(flights);
+    },
+    [effectivePending, prePlaySearchMode, pileSearchSourceCards, animated, resolveSearchTargetRect, submitSearchCommit]
+  );
+
+  const handlePileSearchCancel = useCallback(() => {
+    // Pre-play: just close the modal. The card stays in hand, nothing sent
+    // to the backend. This is always allowed (min_count is a suggestion only
+    // when the player already opted in by playing the card).
+    if (prePlaySearchMode) {
+      setPrePlaySearchMode(null);
+      return;
+    }
+    // Server-driven: cancel only works when min_count == 0 (optional).
+    if (!activePlayer?.pending_search) return;
+    if (activePlayer.pending_search.min_count !== 0) return;
+    searchCommitRef.current = { mode: 'server_pending', selections: [] };
+    submitSearchCommit();
+  }, [prePlaySearchMode, activePlayer?.pending_search, submitSearchCommit]);
+
+  const handlePileSearchFlyComplete = useCallback(() => {
+    setSearchFlights(null);
+    void (async () => {
+      try {
+        await submitSearchCommit();
+      } finally {
+        setSearchAnimating(false);
+      }
+    })();
+  }, [submitSearchCommit]);
+
   // Start the in-play exit animations and call onComplete when done
   const startExitAnims = useCallback((exitAnims: InPlayExitAnim[], prePlayDiscardCount: number, onComplete: () => void) => {
     const STAGGER = Math.round(400 * animSpeed);
@@ -2262,7 +2615,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const handleBuyNeutral = useCallback(async (cardId: string) => {
     try {
       setError(null);
-      const result = await api.buyCard(gameState.id, activePlayerId, 'neutral', cardId);
+      const result = await api.buyCard(gameState.id, activePlayerId, 'shared', cardId);
       onStateUpdate(result.state);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -2404,11 +2757,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const newPurchases = purchases.slice(prevCount);
       const isSelf = pid === activePlayerId;
       for (const p of newPurchases) {
-        if (p.source === 'neutral') {
+        if (p.source === 'shared') {
           const player = gameState.players[pid];
-          const stack = gameState.neutral_market.find(s => s.card.id === p.card_id || s.card.name === p.card_name);
+          const stack = gameState.shared_market.find(s => s.card.id === p.card_id || s.card.name === p.card_name);
           if (!stack) continue;
-          setNeutralPurchaseEvents(evts => [...evts, {
+          setSharedPurchaseEvents(evts => [...evts, {
             player_id: pid,
             player_name: player?.name ?? pid,
             player_color: player?.color ?? '#666',
@@ -2422,7 +2775,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           // Find the card in the previous archetype market (it's been removed after purchase)
           const card = prevArchMarketRef.current?.find(c => c.id === p.card_id || c.name === p.card_name);
           if (!card) continue;
-          setNeutralPurchaseEvents(evts => [...evts, {
+          setSharedPurchaseEvents(evts => [...evts, {
             player_id: pid,
             player_name: player?.name ?? pid,
             player_color: player?.color ?? '#666',
@@ -2444,7 +2797,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   useEffect(() => {
     if (gameState.current_phase !== 'buy') {
       setOtherCursors({});
-      setNeutralPurchaseEvents([]);
+      setSharedPurchaseEvents([]);
       setCursorClicks({});
     }
   }, [gameState.current_phase]);
@@ -3934,7 +4287,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               vpPaths={vpPaths.length > 0 && !resolving ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
-              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
+              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || prePlaySearchMode || activePlayer?.pending_search || searchAnimating || searchFlights || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
               reviewPulseTiles={reviewPulseTiles}
               onTileHover={reviewing ? (q, r, sx, sy) => {
                 setReviewHoveredTile(`${q},${r}`);
@@ -4614,11 +4967,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           {showShopOverlay && activePlayer && (
             <ShopOverlay
               archetypeMarket={activePlayer.archetype_market}
-              neutralMarket={gameState.neutral_market}
+              sharedMarket={gameState.shared_market}
               playerResources={activePlayer.resources}
               playerArchetype={activePlayer.archetype}
               onBuyArchetype={handleBuyArchetype}
-              onBuyNeutral={handleBuyNeutral}
+              onBuyShared={handleBuyNeutral}
               onBuyUpgrade={handleBuyUpgrade}
               onReroll={handleReroll}
               disabled={phase !== 'buy' || gameState.players_done_buying.includes(activePlayerId)}
@@ -4626,7 +4979,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onClose={() => setShowShopOverlay(false)}
               testMode={!!gameState.test_mode}
               effectiveBuyCosts={activePlayer?.effective_buy_costs}
-              neutralPurchasesLastRound={gameState.neutral_purchases_last_round}
+              neutralPurchasesLastRound={gameState.shared_purchases_last_round}
               currentPlayerId={activePlayerId}
               buyPhasePurchases={gameState.buy_phase_purchases}
               players={gameState.players}
@@ -4642,7 +4995,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             <PurchaseFlyAnimation
               key={`${evt.player_id}-${evt.card_id}-${idx}`}
               event={evt}
-              onDone={() => setNeutralPurchaseEvents(prev => prev.filter((_, i) => i !== idx))}
+              onDone={() => setSharedPurchaseEvents(prev => prev.filter((_, i) => i !== idx))}
             />
           ))}
 
@@ -5159,6 +5512,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               discardCount={discardCountOverride !== null ? discardCountOverride : activePlayer.discard_count}
               discardCards={activePlayer.discard}
               deckCards={activePlayer.deck_cards}
+              trashCards={activePlayer.trash}
               inPlayCards={inPlayCards}
               discardAll={discardingAll}
               onDiscardAllComplete={handleDiscardAllComplete}
@@ -5179,6 +5533,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               playerResources={activePlayer?.resources}
               actionsRemaining={phase === 'play' && activePlayer && !playSubmitted ? activePlayer.actions_available - activePlayer.actions_used : undefined}
               onCardHover={setHoveredCardIndex}
+              suppressEnterAnimFor={searchSuppressedHandIds.size > 0 ? searchSuppressedHandIds : undefined}
+              suppressShuffleDetection={tutorCommitInFlight}
             />
             </div>
           )}
@@ -5208,7 +5564,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         return (
           <CardBrowser
             onClose={() => setShowCardBrowser(false)}
-            packNeutralIds={pack?.neutral_card_ids}
+            packSharedIds={pack?.shared_card_ids}
             packArchetypeIds={pack?.archetype_card_ids}
             packName={pack?.name}
             onShiftClickCard={gameState.test_mode ? handleTestGiveCard : undefined}
@@ -5617,6 +5973,36 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           targetRect={debtFlyTarget}
           onComplete={handleDebtFlyComplete}
           speed={animationMode === 'fast' ? 0.5 : 1}
+        />
+      )}
+
+      {/* Pile search modal (SEARCH_ZONE tutor effects). Hidden while the fly
+          animation plays so the cards aren't obscured by the overlay.
+          Shown for either pre-play mode (card in hand pending play) or
+          server-driven pending_search (legacy / reconnection path). */}
+      {effectivePending && !searchAnimating && !searchFlights && (
+        <PileSearchModal
+          pending={effectivePending}
+          cards={pileSearchSourceCards}
+          onConfirm={handlePileSearchConfirm}
+          onCancel={handlePileSearchCancel}
+          cancelAlwaysEnabled={!!prePlaySearchMode}
+          // Partial draw-pile peeks (top N) reveal which specific cards are
+          // upcoming — info the player couldn't otherwise infer. Once shown,
+          // the play is committed; cancel is hidden. Whole-pile peeks
+          // (peek_all, e.g. Foresight) only reveal the SET (shuffled), which
+          // the player could already deduce from public state, so cancel is
+          // still allowed.
+          forceCommit={effectivePending.source === 'draw' && !effectivePending.peek_all}
+        />
+      )}
+
+      {/* Pile search fly animation — each card travels from modal to its zone */}
+      {searchFlights && (
+        <PileSearchFlyAnimation
+          flights={searchFlights}
+          speed={animationMode === 'fast' ? 0.5 : 1}
+          onComplete={handlePileSearchFlyComplete}
         />
       )}
 

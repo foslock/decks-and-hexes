@@ -42,12 +42,12 @@ Bump frontend version when frontend files change, backend version when backend f
 - `rules/05_card_anatomy_and_timing.md` — Card types, timing rules, resource rules
 
 ## Data Files (game content — balance will change frequently)
-- `data/cards_vanguard.md` — 14 Vanguard archetype cards + upgrades
-- `data/cards_swarm.md` — 14 Swarm archetype cards + upgrades
-- `data/cards_fortress.md` — 14 Fortress archetype cards + upgrades
-- `data/cards_neutral.md` — Starter cards (Advance, Gather) + 12 market cards
-- `data/objectives.md` — 28 objectives (Vanguard, Swarm, Fortress, Wildcard pools)
-- `data/passives.md` — 37 passive abilities
+- `data/cards_vanguard.yaml` — 14 Vanguard archetype cards + upgrades
+- `data/cards_swarm.yaml` — 14 Swarm archetype cards + upgrades
+- `data/cards_fortress.yaml` — 14 Fortress archetype cards + upgrades
+- `data/cards_neutral.yaml` — Starter cards (Advance, Gather) + 12 market cards
+- `data/objectives.yaml` — 28 objectives (Vanguard, Swarm, Fortress, Wildcard pools)
+- `data/passives.yaml` — 37 passive abilities
 
 ---
 
@@ -57,7 +57,7 @@ Bump frontend version when frontend files change, backend version when backend f
 1. **Start of Turn** — Distribute Debt card to VP leader (round 5+), score VP hexes held since last turn, draw hand, reveal archetype market (3 random cards from player's archetype deck)
 2. **Play Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
-4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, neutral market cards (unlimited per turn), or upgrade credits (4 resources). Purchases are visible to all players.
+4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, shared market cards (unlimited per turn), or upgrade credits (4 resources). Purchases are visible to all players.
 5. **End of Turn** — Discard hand. Check objective reveal threshold. Rotate first player token clockwise.
 
 ### Action Slot System
@@ -87,7 +87,7 @@ Bump frontend version when frontend files change, backend version when backend f
 
 ### Markets
 - **Archetype market:** 3 random cards drawn from player's private archetype deck each turn. Private per player. Re-roll (2 res) or Retain one card (1 res) during Buy Phase.
-- **Neutral market:** Shared stacks with N×2 copies per card (N = player count). When exhausted, gone for the game.
+- **Shared market:** Shared stacks with N×2 copies per card (N = player count). When exhausted, gone for the game.
 - **Upgrade credits:** Tokens, 4 resources each. Spent at start of Phase 1 to upgrade one card in hand. Max one upgrade per turn. Permanent.
 
 ### Forced Discards
@@ -149,7 +149,7 @@ Bump frontend version when frontend files change, backend version when backend f
 6. Resource system (carry-over, buy phase spending)
 7. VP scoring and win condition
 8. Archetype market (3-card draw, re-roll, retain)
-9. Neutral market (shared stacks, exhaustion)
+9. Shared market (shared stacks, exhaustion)
 
 ### Phase 2 — Full Feature Set
 10. Upgrade credit system
