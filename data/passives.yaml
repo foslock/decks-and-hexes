@@ -102,7 +102,7 @@ passives:
     name: Curator
     category: deck_hand
     best_for: ["any"]
-    effect: "You may look at the top card of your deck at any time, including during the Plan Phase. You do not draw it — only view it."
+    effect: "You may look at the top card of your draw pile at any time, including during the Plan Phase. You do not draw it — only view it."
     notes: "Reduces bad draws. Knowing what's coming enables better planning in the simultaneous phase."
 
   - id: passive_hoarder
@@ -116,7 +116,7 @@ passives:
     name: Efficient
     category: deck_hand
     best_for: ["vanguard", "swarm"]
-    effect: "Once per game, at the start of Phase 1, you may draw your entire deck into your hand instead of your normal hand size. The 6-action cap still applies. All unplayed cards are discarded at end of round as normal."
+    effect: "Once per game, at the start of Phase 1, you may draw your entire draw pile into your hand instead of your normal hand size. The 6-action cap still applies. All unplayed cards are discarded at end of round as normal."
     notes: "One explosive round. Best saved for a critical round near the VP win threshold."
 
   - id: passive_scavenger

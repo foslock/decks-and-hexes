@@ -6,10 +6,10 @@ import { renderSubtitleText } from './SubtitlePartRenderer';
 
 interface MarketPanelProps {
   archetypeMarket: Card[];
-  neutralMarket: MarketStack[];
+  sharedMarket: MarketStack[];
   playerResources: number;
   onBuyArchetype: (cardId: string) => void;
-  onBuyNeutral: (cardId: string) => void;
+  onBuyShared: (cardId: string) => void;
   onBuyUpgrade: () => void;
   onReroll: () => void;
   disabled: boolean;
@@ -17,10 +17,10 @@ interface MarketPanelProps {
 
 export default function MarketPanel({
   archetypeMarket,
-  neutralMarket,
+  sharedMarket,
   playerResources,
   onBuyArchetype,
-  onBuyNeutral,
+  onBuyShared,
   onBuyUpgrade,
   onReroll,
   disabled,
@@ -89,13 +89,13 @@ export default function MarketPanel({
           </IrreversibleButton>
         </h4>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {neutralMarket.map((stack) => (
+          {sharedMarket.map((stack) => (
             <MarketCard
               key={stack.card.id}
               card={stack.card}
               remaining={stack.remaining}
               canAfford={stack.card.buy_cost !== null && playerResources >= stack.card.buy_cost}
-              onBuy={() => onBuyNeutral(stack.card.id)}
+              onBuy={() => onBuyShared(stack.card.id)}
               disabled={disabled}
             />
           ))}

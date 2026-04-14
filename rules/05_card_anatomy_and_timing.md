@@ -31,7 +31,7 @@ Action Cost – Always 1 (flat for all cards)
 Effect      – What the card does when played
 Timing      – When the effect resolves (see below)
 Upgraded    – The "+" version of this card (after spending an upgrade credit)
-Archetype   – Vanguard / Swarm / Fortress / Neutral
+Archetype   – Vanguard / Swarm / Fortress / Shared
 ```
 
 ---
@@ -90,8 +90,8 @@ To avoid ambiguity, Card Clash uses explicit timing language on all card draw ef
 
 ## Purchasing & Discard Rules
 
-- All purchased cards (archetype and neutral) go directly to the **discard pile**, never to hand.
-- Cards in the discard pile are not accessible until the deck runs out and the discard is shuffled into a new deck.
+- All purchased cards (archetype and shared) go directly to the **discard pile**, never to hand.
+- Cards in the discard pile are not accessible until the draw pile runs out and the discard is shuffled into a new draw pile.
 - This means a card purchased this turn **may** appear in hand next turn if a reshuffle occurs, creating exciting variance.
 - Upgrade credits are **tokens**, not cards. They persist in a player's possession between turns until spent.
 

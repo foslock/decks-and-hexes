@@ -492,3 +492,54 @@ cards:
     secondary_effect: null
     secondary_timing: null
     note: "The biggest single-card play in the Vanguard arsenal. Burns nearly your entire turn but delivers massive power and card advantage. Unique — only one copy allowed per deck."
+
+  # ── TUTOR / SEARCH CARDS ──────────────────────────────────────────────
+
+  - id: vanguard_mobilize_forces
+    name: Mobilize Forces
+    name_upgraded: Mobilize Forces+
+    type: Engine
+    buy_cost: 5
+    action_return: 0
+    power: 0
+    effect: "Search your discard pile for up to 2 Claim cards; put them in your hand."
+    effect_upgraded: "Search your discard pile for up to 3 Claim cards; put them in your hand."
+    secondary_effect: null
+    secondary_timing: null
+    note: "The classic Vanguard refuel — pull spent attackers back into hand for another assault. Filter to Claims only keeps it focused on the offensive game plan."
+
+    effects:
+      - type: search_zone
+        value: 2
+        upgraded_value: 3
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: discard
+          targets: [hand]
+          min: 0
+          filter: {card_type: claim}
+
+  - id: vanguard_forward_scout
+    name: Forward Scout
+    name_upgraded: Forward Scout+
+    type: Engine
+    buy_cost: 3
+    action_return: 0
+    power: 0
+    effect: "Look at the top 2 cards of your draw pile; put any number in your hand or on top of your draw pile."
+    effect_upgraded: "Look at the top 3 cards of your draw pile; put any number in your hand or on top of your draw pile."
+    secondary_effect: null
+    secondary_timing: null
+    note: "A Vanguard scout's eye on the road ahead. Cheap deck-look for finding the next finisher, or stacking your top draw for a big opening play."
+
+    effects:
+      - type: search_zone
+        value: 2
+        upgraded_value: 3
+        timing: immediate
+        requires_choice: true
+        metadata:
+          source: draw
+          targets: [hand, top_of_draw]
+          min: 0

@@ -14,7 +14,7 @@ class TestCardLoading:
 
     def test_loads_all_archetypes(self, card_registry: dict[str, Card]) -> None:
         archetypes = {c.archetype for c in card_registry.values()}
-        assert Archetype.NEUTRAL in archetypes
+        assert Archetype.SHARED in archetypes
         assert Archetype.VANGUARD in archetypes
         assert Archetype.SWARM in archetypes
         assert Archetype.FORTRESS in archetypes
@@ -52,10 +52,10 @@ class TestCardLoading:
         fortress = [c for c in card_registry.values() if c.archetype == Archetype.FORTRESS]
         assert len(fortress) >= 10
 
-    def test_neutral_market_cards_have_costs(self, card_registry: dict[str, Card]) -> None:
+    def test_shared_market_cards_have_costs(self, card_registry: dict[str, Card]) -> None:
         market_cards = [
             c for c in card_registry.values()
-            if c.archetype == Archetype.NEUTRAL and not c.starter and c.buy_cost is not None
+            if c.archetype == Archetype.SHARED and not c.starter and c.buy_cost is not None
         ]
         assert len(market_cards) > 0
         for card in market_cards:

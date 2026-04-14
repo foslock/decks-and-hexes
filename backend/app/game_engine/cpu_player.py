@@ -1200,6 +1200,104 @@ class CPUPlayer:
         scored.sort(key=lambda x: x[0])
         return [idx for _, idx in scored[:count]]
 
+    def _score_card_for_tutor(self, card: Card) -> float:
+        """Rate how desirable a card is to retrieve from a pile (higher = pick first).
+
+        Mirrors the inverse of _pick_cards_to_discard — cards we'd discard last
+        are cards we'd tutor first.
+        """
+        if card.name == "Debt":
+            return -20.0
+        if card.name == "Rubble":
+            return -15.0
+        if card.name == "Spoils":
+            return -5.0  # pure vp, don't waste a tutor slot on it
+        score = 0.0
+        if card.card_type == CardType.CLAIM:
+            score = card.effective_power + 3.0
+        elif card.card_type == CardType.DEFENSE:
+            score = card.effective_defense_bonus + 1.5
+        elif card.card_type == CardType.ENGINE:
+            score = card.effective_resource_gain + card.effective_draw_cards + 2.0
+        if card.starter:
+            score -= 1.5  # prefer non-starters when tutoring
+        if card.buy_cost is not None:
+            score += card.buy_cost * 0.2  # lean toward expensive cards
+        if card.is_upgraded:
+            score += 1.0
+        return score
+
+    def _pick_search_selections(self, player: Any, pending: Any) -> list[dict[str, Any]]:
+        """Heuristic CPU choice for a pending SEARCH_ZONE effect.
+
+        Picks the highest-scoring eligible cards (up to `count`) and routes
+        each to the best-matching allowed target zone. Debt/Rubble are
+        intentionally sent to `trash` when that's an allowed target.
+        """
+        from .effect_resolver import get_search_zone_cards
+
+        source_list = get_search_zone_cards(player, pending.source)
+        allowed_ids = set(pending.snapshot_card_ids)
+
+        # Score all still-eligible cards. If a card id appears N times in the
+        # snapshot and is still in the source list, we treat each instance
+        # independently (picked by identity via the resolver).
+        candidates: list[tuple[float, Any]] = []
+        snapshot_budget: dict[str, int] = {}
+        for cid in pending.snapshot_card_ids:
+            snapshot_budget[cid] = snapshot_budget.get(cid, 0) + 1
+
+        seen_by_id: dict[str, int] = {}
+        for card in source_list:
+            if card.id not in allowed_ids:
+                continue
+            seen_by_id[card.id] = seen_by_id.get(card.id, 0) + 1
+            if seen_by_id[card.id] > snapshot_budget.get(card.id, 0):
+                continue
+            candidates.append((self._score_card_for_tutor(card), card))
+
+        candidates.sort(key=lambda x: x[0], reverse=True)
+
+        targets: list[str] = [str(t) for t in pending.allowed_targets] or ["hand"]
+
+        def _choose_target(card: Any, score: float) -> str:
+            # Debt/Rubble go to trash if possible, else discard, else whichever
+            if card.name in ("Debt", "Rubble"):
+                for pref in ("trash", "discard"):
+                    if pref in targets:
+                        return pref
+                return targets[0]
+            # Good cards go to hand if allowed, else top_of_draw, else first allowed
+            for pref in ("hand", "top_of_draw"):
+                if pref in targets:
+                    return pref
+            return targets[0]
+
+        selections: list[dict[str, Any]] = []
+        # Only pick positive-value cards unless we must meet min_count
+        positive = [(s, c) for s, c in candidates if s > 0]
+        must_pick = min(pending.min_count, len(candidates))
+        may_pick = min(pending.count, len(candidates))
+
+        chosen_sequence = positive[:may_pick]
+        # If we didn't hit the minimum with positive-only, add from remaining
+        if len(chosen_sequence) < must_pick:
+            already = {id(c) for _, c in chosen_sequence}
+            for s, c in candidates:
+                if len(chosen_sequence) >= must_pick:
+                    break
+                if id(c) in already:
+                    continue
+                chosen_sequence.append((s, c))
+
+        for score, card in chosen_sequence:
+            selections.append({
+                "card_id": card.id,
+                "target": _choose_target(card, score),
+            })
+
+        return selections
+
     def _pick_tile_to_abandon(self, game: Any, player: Any,
                               weights: StrategyWeights,
                               allow_vp: bool = False) -> Optional[tuple[float, int, int]]:
@@ -1261,7 +1359,7 @@ class CPUPlayer:
         """Decide what to buy during Buy phase.
 
         Returns list of purchase actions:
-            [{"source": "archetype"|"neutral"|"upgrade", "card_id": str|None}, ...]
+            [{"source": "archetype"|"shared"|"upgrade", "card_id": str|None}, ...]
         """
         player = game.players[self.player_id]
         if player.turn_modifiers.buy_locked:
@@ -1318,9 +1416,9 @@ class CPUPlayer:
         # Score neutral market cards (limit 1 copy per card per round)
         already_bought_neutral = {
             p["card_id"] for p in game.buy_phase_purchases.get(self.player_id, [])
-            if p["source"] == "neutral"
+            if p["source"] == "shared"
         }
-        for base_id, copies in game.neutral_market.stacks.items():
+        for base_id, copies in game.shared_market.stacks.items():
             if not copies:
                 continue
             if base_id in already_bought_neutral:
@@ -1332,7 +1430,7 @@ class CPUPlayer:
             if cost > player.resources:
                 continue
             score = self._score_card_for_purchase(card_obj, player, weights, cost, game, composition)
-            scored.append((score, {"source": "neutral", "card_id": base_id}))
+            scored.append((score, {"source": "shared", "card_id": base_id}))
 
         # Score upgrade credits
         if player.resources >= UPGRADE_CREDIT_COST:
@@ -1610,4 +1708,4 @@ class CPUPlayer:
         return False
 
     # NOTE: Passive draft (pick_passive) was removed — passives are a candidate
-    # feature preserved in data/passives.md but not currently in the game.
+    # feature preserved in data/passives.yaml but not currently in the game.

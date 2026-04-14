@@ -14,7 +14,7 @@ from app.game_engine.cards import Archetype, CardType, Card
 class CardPack:
     """A named selection of cards available for a game session.
 
-    - neutral_card_ids: list of neutral card IDs to include, or None for all.
+    - shared_card_ids: list of neutral card IDs to include, or None for all.
     - archetype_card_ids: per-archetype card ID lists, or None for all.
       Keys are archetype names (e.g. "vanguard"), values are lists of card IDs.
     - starter_overrides: reserved for future packs that change starting decks.
@@ -22,7 +22,7 @@ class CardPack:
     """
     id: str
     name: str
-    neutral_card_ids: Optional[list[str]] = None
+    shared_card_ids: Optional[list[str]] = None
     archetype_card_ids: Optional[dict[str, list[str]]] = None
     starter_overrides: Optional[dict[str, Any]] = None
 
@@ -30,7 +30,7 @@ class CardPack:
         return {
             "id": self.id,
             "name": self.name,
-            "neutral_card_ids": self.neutral_card_ids,
+            "shared_card_ids": self.shared_card_ids,
             "archetype_card_ids": self.archetype_card_ids,
         }
 
@@ -39,7 +39,7 @@ CARD_PACKS: dict[str, CardPack] = {
     "everything": CardPack(
         id="everything",
         name="Everything",
-        neutral_card_ids=None,
+        shared_card_ids=None,
         archetype_card_ids=None,
     ),
 
@@ -56,12 +56,13 @@ CARD_PACKS: dict[str, CardPack] = {
         #   4. Vanguard War Tithe / Plunder + Mercenary → claims pay for themselves
         #   5. Swarm Scavenge + Dividends → resource engine even at 0 actions
         #   6. Fortress Supply Line + Dividends → economy doubling
-        neutral_card_ids=[
+        #   7. Salvage + Mercenary / Tax Collector → recur your best money card
+        shared_card_ids=[
             "neutral_reduce",          # Cull: deck thinning (1💰)
             "neutral_recruit",         # Levy: cheap claim + action (2💰)
             "neutral_prospector",      # Prospector: 2 resources (2💰)
             "neutral_war_bonds",       # Tithe: 2 resources + 1 action (3💰)
-            "neutral_conscription",    # Muster: draw 2 cards (4💰)
+            "neutral_salvage",         # Salvage: recur a card from discard (3💰)
             "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
             "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
             "neutral_dividends",       # Dividends: resources scale with wealth (4💰)
@@ -82,7 +83,7 @@ CARD_PACKS: dict[str, CardPack] = {
         #   5. Palisade + Barricade → cheap action-neutral defense to hold newly bridged tiles
         #   6. Palisade (action chain) → set up bigger plays while still fortifying
         #   7. Supply Depot + Cease Fire → stack next-turn value while playing defensively
-        neutral_card_ids=[
+        shared_card_ids=[
             "neutral_reduce",          # Cull: deck thinning (2💰)
             "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
             "neutral_road_builder",    # Road Builder: bridge territory (2💰)
@@ -108,7 +109,7 @@ CARD_PACKS: dict[str, CardPack] = {
         #   5. Conqueror + Siege Tower → two finisher options: anti-defense vs raw power
         #   6. Forced March / Mobilize → fuel the 2-action cost of Conqueror / Siege Tower
         #   7. Spyglass + action-hungry archetypes → cheap draw when hand is low
-        neutral_card_ids=[
+        shared_card_ids=[
             "neutral_reduce",          # Cull: deck thinning (2💰)
             "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
             "neutral_recruit",         # Levy: cheap claim + action (2💰)
@@ -138,7 +139,7 @@ CARD_PACKS: dict[str, CardPack] = {
         #   6. Supply Depot + slow play → invest an action now for a fully-loaded next round
         #   7. Surveyor + archetype defense cards → find Fortify / Iron Wall / Stronghold faster
         #   8. Cull → thin starter Explores for tighter draws of defense cards
-        neutral_card_ids=[
+        shared_card_ids=[
             "neutral_reduce",          # Cull: deck thinning (2💰)
             "neutral_palisade",        # Palisade: +1 defense + 1 action (2💰)
             "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
@@ -158,17 +159,19 @@ CARD_PACKS: dict[str, CardPack] = {
     "mini_lean_machine": CardPack(
         id="mini_lean_machine",
         name="Mini: Lean Machine",
-        # Theme: Deck efficiency — thin, cycle, and optimize every draw.
+        # Theme: Deck efficiency — thin, cycle, sculpt, and recur every card.
         # Synergies:
         #   1. Cull + Reclaim → trash junk cards AND gain resources from their buy cost
-        #   2. Cartographer + Spyglass → cycle through deck fast, refill hand cheaply
-        #   3. Works great with Swarm Thin the Herd / Spoils Hoard (VP from trash pile)
-        #   4. Fortress Consolidate + Reclaim → double trash-for-value engine
-        neutral_card_ids=[
+        #   2. Sift + Cartographer → push junk to discard, then cycle into fresh draws
+        #   3. Recall + Cartographer → fish a card back, then immediately re-cycle
+        #   4. Cull/Reclaim + Recall → trash junk so Recall always pulls something useful
+        #   5. Works great with Swarm Thin the Herd / Spoils Hoard (VP from trash pile)
+        #   6. Fortress Consolidate + Reclaim → double trash-for-value engine
+        shared_card_ids=[
             "neutral_reduce",          # Cull: trash cards from hand (1💰)
-            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
+            "neutral_recall",          # Recall: discard → top of draw pile (2💰)
             "neutral_reclaim",         # Reclaim: trash for resources (2💰)
-            "neutral_prospector",      # Prospector: basic economy (2💰)
+            "neutral_sift",            # Sift: filter top of draw pile (3💰)
             "neutral_cartographer",    # Cartographer: discard 2, draw 2 (3💰)
         ],
         archetype_card_ids=None,  # all archetype cards
@@ -183,7 +186,7 @@ CARD_PACKS: dict[str, CardPack] = {
         #   3. Ambush + Militia → read opponents, punish contested tiles, reward territory
         #   4. Vanguard War Tithe + Mercenary → claims generate resources to buy more claims
         #   5. Fortress Robin Hood + losing tiles → economic comeback into Mercenary power
-        neutral_card_ids=[
+        shared_card_ids=[
             "neutral_recruit",         # Levy: cheap claim + action (2💰)
             "neutral_militia",         # Militia: territorial power claim (3💰)
             "neutral_war_bonds",       # Tithe: 2 resources + 1 action (3💰)
@@ -201,7 +204,7 @@ def _get_purchasable_neutrals(card_registry: dict[str, Card]) -> list[Card]:
     """Return all purchasable neutral market cards from the registry."""
     return [
         c for c in card_registry.values()
-        if c.archetype == Archetype.NEUTRAL and not c.starter and c.buy_cost is not None
+        if c.archetype == Archetype.SHARED and not c.starter and c.buy_cost is not None
     ]
 
 
@@ -257,7 +260,7 @@ def generate_daily_pack(seed: int, card_registry: dict[str, Card]) -> CardPack:
     return CardPack(
         id=f"daily_{seed}",
         name=name,
-        neutral_card_ids=[c.id for c in selected],
+        shared_card_ids=[c.id for c in selected],
         archetype_card_ids=None,
     )
 

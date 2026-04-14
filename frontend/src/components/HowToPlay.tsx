@@ -44,7 +44,7 @@ const PAGES = [
         <p style={{ fontSize: 15, lineHeight: 1.7, color: '#aaa' }}>
           You start with a <strong style={{ color: '#fff' }}>10-card deck</strong> of basic cards.
           Each round you draw a hand of 5 cards in your Upkeep phase, play some during the Play phase, then discard
-          the rest. When your deck runs out, your discard pile is reshuffled into a new draw pile.
+          the rest. When your draw pile runs out, your discard pile is reshuffled into a new draw pile.
         </p>
         <div style={{
           marginTop: 20,
@@ -261,7 +261,7 @@ const PAGES = [
           <div style={{ padding: '12px 16px', background: '#1a1a40', borderRadius: 8, border: '1px solid #333' }}>
             <div style={{ fontSize: 14, fontWeight: 'bold', color: '#5dde5d', marginBottom: 4 }}>4. Buy</div>
             <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.5 }}>
-              Players take turns buying. Spend resources to buy new cards from your archetype
+              All players buy simultaneously. Spend resources on new cards from your archetype
               market and/or the shared market. You can also re-roll your archetype market or
               purchase upgrade credits. Other players can see what you bought.
             </div>

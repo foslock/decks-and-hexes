@@ -99,7 +99,7 @@ class TestDebtCardProperties:
 
     def test_debt_card_is_neutral(self):
         debt = make_debt_card()
-        assert debt.archetype == Archetype.NEUTRAL
+        assert debt.archetype == Archetype.SHARED
 
     def test_debt_card_unique_ids(self):
         d1 = make_debt_card()

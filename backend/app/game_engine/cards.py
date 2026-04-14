@@ -28,7 +28,10 @@ class Archetype(str, Enum):
     VANGUARD = "vanguard"
     SWARM = "swarm"
     FORTRESS = "fortress"
-    NEUTRAL = "neutral"
+    # "Shared" is the universal/neutral pool — cards available to every player
+    # via the shared market. Renamed from "neutral" for terminology consistency
+    # with the user-facing "Shared Market" wording.
+    SHARED = "shared"
 
 
 # Action slots per archetype
@@ -230,7 +233,7 @@ def make_land_grant_card() -> Card:
     return Card(
         id=f"land_grant_{_land_grant_counter}",
         name="Land Grant",
-        archetype=Archetype.NEUTRAL,
+        archetype=Archetype.SHARED,
         card_type=CardType.PASSIVE,
         passive_vp=1,
         unplayable=True,
@@ -248,7 +251,7 @@ def make_rubble_card() -> Card:
     return Card(
         id=f"rubble_{_rubble_counter}",
         name="Rubble",
-        archetype=Archetype.NEUTRAL,
+        archetype=Archetype.SHARED,
         card_type=CardType.PASSIVE,
         passive_vp=0,
         unplayable=True,
@@ -266,7 +269,7 @@ def make_spoils_card() -> Card:
     return Card(
         id=f"spoils_{_spoils_counter}",
         name="Spoils",
-        archetype=Archetype.NEUTRAL,
+        archetype=Archetype.SHARED,
         card_type=CardType.PASSIVE,
         passive_vp=1,
         unplayable=True,
@@ -285,7 +288,7 @@ def make_debt_card() -> Card:
     return Card(
         id=f"debt_{_debt_counter}",
         name="Debt",
-        archetype=Archetype.NEUTRAL,
+        archetype=Archetype.SHARED,
         card_type=CardType.ENGINE,
         resource_gain=-3,
         trash_on_use=True,

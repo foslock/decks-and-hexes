@@ -1652,3 +1652,115 @@ def _handle_resources_per_tiles_owned(effect: Effect, ctx: EffectContext) -> Non
 
 
 register_handler(EffectType.RESOURCES_PER_TILES_OWNED, _handle_resources_per_tiles_owned)
+
+
+# ── Search / tutor handler ────────────────────────────────────────
+
+_SEARCH_ZONE_FIELDS = {
+    "discard": lambda p: p.deck.discard,
+    "draw": lambda p: p.deck.cards,
+    "trash": lambda p: p.trash,
+}
+
+# User-facing zone names for log messages. "draw" is an internal key; players
+# see it as "draw pile".
+_SEARCH_ZONE_DISPLAY = {
+    "discard": "discard pile",
+    "draw": "draw pile",
+    "trash": "trash",
+}
+
+
+def get_search_zone_cards(player: Any, source: str) -> list[Card]:
+    """Return the live list of cards for a search source zone.
+
+    Returns the same list object the Deck/Player stores, so callers can mutate
+    it directly when moving cards out of the zone.
+    """
+    getter = _SEARCH_ZONE_FIELDS.get(source)
+    if getter is None:
+        return []
+    result: list[Card] = getter(player)
+    return result
+
+
+def _handle_search_zone(effect: Effect, ctx: EffectContext) -> None:
+    """Set pending_search state; resolution is deferred until the player submits selections."""
+    from .game_state import PendingSearch
+
+    source = str(effect.metadata.get("source", "discard"))
+    targets = effect.metadata.get("targets") or ["hand"]
+    if not isinstance(targets, list) or not targets:
+        targets = ["hand"]
+
+    count = effect.effective_value(ctx.card.is_upgraded)
+    min_count_raw = effect.metadata.get("min")
+    min_count = int(min_count_raw) if min_count_raw is not None else count
+
+    source_list = get_search_zone_cards(ctx.player, source)
+
+    # Apply filter to determine eligible card ids (kept for snapshot ordering)
+    card_filter = effect.metadata.get("filter") if isinstance(effect.metadata.get("filter"), dict) else None
+    eligible = [c for c in source_list if _matches_card_filter(c, card_filter)]
+
+    # For draw-pile searches, the default card-text contract is "look at the
+    # top N cards" — peeking the entire draw pile would leak information the
+    # effect doesn't grant. Cap the snapshot to the top N (in natural draw
+    # order; the frontend then shuffles for display). Two metadata overrides:
+    #   peek_all: true   — see the entire pile (e.g. Foresight)
+    #   peek: <int>      — see top X (e.g. "look at top 4, pick up to 2")
+    # When neither is set, peek defaults to the pick count.
+    peek_all = source == "draw" and bool(effect.metadata.get("peek_all", False))
+    if source == "draw" and not peek_all:
+        peek_raw = effect.metadata.get("peek")
+        peek = int(peek_raw) if peek_raw is not None else count
+        eligible = eligible[:peek]
+
+    zone_name = _SEARCH_ZONE_DISPLAY.get(source, source)
+
+    if not eligible:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name}: no matching cards in {zone_name} — effect fizzles",
+            visible_to=[ctx.player.id], actor=ctx.player.id,
+        )
+        return
+
+    clamped_count = min(count, len(eligible))
+    clamped_min = max(0, min(min_count, clamped_count))
+
+    ctx.player.pending_search = PendingSearch(
+        source=source,
+        count=clamped_count,
+        min_count=clamped_min,
+        allowed_targets=[str(t) for t in targets],
+        card_filter=card_filter,
+        snapshot_card_ids=[c.id for c in eligible],
+        peek_all=peek_all,
+    )
+    ctx.game._log(
+        f"{ctx.player.name} searches {zone_name} with {ctx.card.name} "
+        f"(pick {clamped_min}..{clamped_count})",
+        visible_to=[ctx.player.id], actor=ctx.player.id,
+    )
+
+
+def matches_card_filter(card: Card, card_filter: Optional[dict[str, Any]]) -> bool:
+    """Check whether a card satisfies the optional SEARCH_ZONE filter metadata."""
+    if not card_filter:
+        return True
+    card_type_filter = card_filter.get("card_type")
+    if card_type_filter:
+        expected = str(card_type_filter).lower()
+        if card.card_type.value.lower() != expected:
+            return False
+    name_filter = card_filter.get("name")
+    if name_filter and card.name != name_filter:
+        return False
+    return True
+
+
+# Backward-compat alias for existing internal callers.
+_matches_card_filter = matches_card_filter
+
+
+register_handler(EffectType.SEARCH_ZONE, _handle_search_zone)

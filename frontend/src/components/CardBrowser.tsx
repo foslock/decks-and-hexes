@@ -17,10 +17,10 @@ const CARD_EMOJI: Record<string, string> = {
   passive: '📜',
 };
 
-const ARCHETYPE_ORDER = ['neutral', 'vanguard', 'swarm', 'fortress'];
+const ARCHETYPE_ORDER = ['shared', 'vanguard', 'swarm', 'fortress'];
 
 const ARCHETYPE_LABELS: Record<string, string> = {
-  neutral: '⬜ Neutral',
+  shared: '🏪 Shared',
   vanguard: '🗡️ Vanguard',
   swarm: '🐝 Swarm',
   fortress: '🏰 Fortress',
@@ -173,7 +173,7 @@ function BrowserCardFull({ card, shiftHeld, onShiftClick, cardList }: { card: Ca
 interface CardBrowserProps {
   onClose: () => void;
   /** Neutral card IDs to include; null/undefined = all */
-  packNeutralIds?: string[] | null;
+  packSharedIds?: string[] | null;
   /** Per-archetype card IDs to include; null/undefined = all */
   packArchetypeIds?: Record<string, string[]> | null;
   /** Pack name shown in the header */
@@ -182,20 +182,33 @@ interface CardBrowserProps {
   onShiftClickCard?: (cardId: string) => void;
   /** Player's selected archetype — used for default collapse state */
   playerArchetype?: string;
+  /** When true, every archetype section starts collapsed and only the
+   *  Neutral section is open. Overrides the default `playerArchetype`-based
+   *  expansion. Used by the lobby card browser where the player wants to
+   *  focus on the shared market first. */
+  collapseArchetypes?: boolean;
 }
 
-export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds, packName, onShiftClickCard, playerArchetype }: CardBrowserProps) {
+export default function CardBrowser({ onClose, packSharedIds, packArchetypeIds, packName, onShiftClickCard, playerArchetype, collapseArchetypes }: CardBrowserProps) {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullView, setFullViewRaw] = useState(() => browserViewMemory);
   const [sortMode, setSortModeRaw] = useState<SortMode>(() => browserSortMemory);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     if (browserCollapseMemory) return browserCollapseMemory;
+    if (collapseArchetypes) {
+      // Lobby browser: only Neutral expanded, every archetype collapsed.
+      const init: Record<string, boolean> = {};
+      for (const arch of ARCHETYPE_ORDER) {
+        if (arch !== 'shared') init[arch] = true;
+      }
+      return init;
+    }
     if (!playerArchetype) return {};  // home screen: all expanded
-    // Lobby/game: only neutral + player's archetype expanded
+    // In-game: only neutral + player's archetype expanded
     const init: Record<string, boolean> = {};
     for (const arch of ARCHETYPE_ORDER) {
-      if (arch !== 'neutral' && arch !== playerArchetype) init[arch] = true;
+      if (arch !== 'shared' && arch !== playerArchetype) init[arch] = true;
     }
     return init;
   });
@@ -232,18 +245,19 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
     });
   };
 
-  // Apply pack filtering: keep starters always, filter neutrals and archetype cards by pack
+  // Apply pack filtering: hide universal starters (Explore/Gather — every
+  // player has them in their starting deck, no need to surface in the pack
+  // browser) and filter neutrals/archetype cards by pack.
   const packFilteredCards = useMemo(() => {
     if (!cards) return [];
     return cards.filter(c => {
-      // Starters are always shown
-      if (c.starter) return true;
-      // Filter neutral non-starters by pack
-      if (c.archetype === 'neutral' && packNeutralIds != null) {
-        return packNeutralIds.includes(c.id);
+      if (c.starter) return false;
+      // Filter neutral cards by pack
+      if (c.archetype === 'shared' && packSharedIds != null) {
+        return packSharedIds.includes(c.id);
       }
-      // Filter archetype non-starters by pack
-      if (packArchetypeIds != null && c.archetype && c.archetype !== 'neutral') {
+      // Filter archetype cards by pack
+      if (packArchetypeIds != null && c.archetype && c.archetype !== 'shared') {
         const allowed = packArchetypeIds[c.archetype];
         if (allowed != null) {
           return allowed.includes(c.id);
@@ -251,7 +265,7 @@ export default function CardBrowser({ onClose, packNeutralIds, packArchetypeIds,
       }
       return true;
     });
-  }, [cards, packNeutralIds, packArchetypeIds]);
+  }, [cards, packSharedIds, packArchetypeIds]);
 
   // Filter cards by search query (partial match on name or description)
   const filteredCards = useMemo(() => {

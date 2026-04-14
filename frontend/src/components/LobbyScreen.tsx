@@ -10,7 +10,7 @@ import CardBrowser, { clearBrowserCollapseMemory } from './CardBrowser';
 interface CardPackDef {
   id: string;
   name: string;
-  neutral_card_ids: string[] | null;
+  shared_card_ids: string[] | null;
   archetype_card_ids: Record<string, string[]> | null;
 }
 
@@ -831,7 +831,13 @@ export default function LobbyScreen({
                 </strong>
               )}
               <button
-                onClick={() => setShowPackBrowser(true)}
+                onClick={() => {
+                  // Reset any prior collapse memory so the lobby browser opens
+                  // in its canonical default (Neutral expanded, archetypes
+                  // collapsed) regardless of in-game interactions earlier.
+                  clearBrowserCollapseMemory();
+                  setShowPackBrowser(true);
+                }}
                 style={{
                   fontSize: 13, padding: '0 8px', height: 26,
                   background: '#2a2a3e', border: '1px solid #555',
@@ -1322,10 +1328,11 @@ export default function LobbyScreen({
         return (
           <CardBrowser
             onClose={() => setShowPackBrowser(false)}
-            packNeutralIds={pack?.neutral_card_ids}
+            packSharedIds={pack?.shared_card_ids}
             packArchetypeIds={pack?.archetype_card_ids}
             packName={pack?.name}
             playerArchetype={lobby.players[playerId]?.archetype}
+            collapseArchetypes
           />
         );
       })()}

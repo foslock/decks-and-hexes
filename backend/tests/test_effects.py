@@ -54,7 +54,7 @@ def _make_card(
     card_id: str = "test_card",
     name: str = "Test Card",
     card_type: CardType = CardType.ENGINE,
-    archetype: Archetype = Archetype.NEUTRAL,
+    archetype: Archetype = Archetype.SHARED,
     power: int = 0,
     timing: Timing = Timing.IMMEDIATE,
     effects: list[Effect] | None = None,

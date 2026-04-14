@@ -1,4 +1,4 @@
-import type { GameState, LobbyState } from '../types/game';
+import type { GameState, LobbyState, SearchSelection } from '../types/game';
 
 const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
 export const BASE = BACKEND_HOST ? `${window.location.protocol}//${BACKEND_HOST}/api` : '/api';
@@ -54,6 +54,7 @@ export async function playCard(
   extraTargets?: [number, number][],
   trashCardIndices?: number[],
   discardCardIndices?: number[],
+  searchSelections?: SearchSelection[],
 ): Promise<{ message: string; state: GameState }> {
   return request(`/games/${gameId}/play`, {
     method: 'POST',
@@ -66,6 +67,7 @@ export async function playCard(
       extra_targets: extraTargets,
       trash_card_indices: trashCardIndices,
       discard_card_indices: discardCardIndices,
+      search_selections: searchSelections,
     }),
   });
 }
@@ -91,6 +93,20 @@ export async function submitDiscard(
     body: JSON.stringify({
       player_id: playerId,
       discard_card_indices: discardCardIndices,
+    }),
+  });
+}
+
+export async function submitSearch(
+  gameId: string,
+  playerId: string,
+  selections: SearchSelection[],
+): Promise<{ message: string; state: GameState }> {
+  return request(`/games/${gameId}/submit-search`, {
+    method: 'POST',
+    body: JSON.stringify({
+      player_id: playerId,
+      selections,
     }),
   });
 }

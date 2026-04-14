@@ -52,6 +52,9 @@ interface CardHandProps {
   discardCount: number;
   discardCards: Card[];
   deckCards: Card[];
+  /** Cards in the trash pile — used to disable tutor cards that search the trash
+   *  (and to apply card-type filters like "search trash for a Defense card"). */
+  trashCards?: Card[];
   inPlayCards?: Card[];
   /** When set to true, all hand cards animate to discard pile. Fires onDiscardAllComplete when done. */
   discardAll?: boolean;
@@ -79,6 +82,21 @@ interface CardHandProps {
   actionsRemaining?: number;
   /** Called when the user hovers over a card (index) or leaves all cards (null). */
   onCardHover?: (index: number | null) => void;
+  /**
+   * Card IDs that should NOT play the entering (arc-from-draw-pile) animation
+   * when they first appear in the hand. Used by the tutor/search UI: after
+   * the fly animation lands a card in the hand zone, the card already looks
+   * like it's there — we don't want to re-animate it in from the draw pile.
+   */
+  suppressEnterAnimFor?: Set<string>;
+  /**
+   * When true, skip the shuffle-detection heuristic for one update cycle.
+   * Tutor/search effects move cards between zones (e.g. discard → hand) which
+   * shrink the discard pile WITHOUT a real reshuffle — the heuristic would
+   * misfire and play a shuffle animation. The parent sets this true around
+   * the commit window and clears it after the state update lands.
+   */
+  suppressShuffleDetection?: boolean;
 }
 
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
@@ -152,7 +170,7 @@ function Flag({ text, color }: { text: string; color: string }) {
 
 // ── Card Popup (deck viewer / discard viewer) ────────────────
 
-function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; shiftHeld: boolean }) {
+function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: boolean; shiftHeld: boolean; navList?: Card[] }) {
   const animMode = useAnimationMode();
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
   const color = getCardDisplayColor(displayCard);
@@ -168,7 +186,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
       <div
         onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
         onPointerLeave={() => setHoverRect(null)}
-        onClick={() => showZoom(displayCard)}
+        onClick={() => showZoom(displayCard, navList)}
         style={{
           width: 154,
           padding: 6,
@@ -225,7 +243,7 @@ function CardPopupItem({ card, full, shiftHeld }: { card: Card; full: boolean; s
     );
   }
   return (
-    <div style={{ flexShrink: 0, cursor: 'pointer' }} onClick={() => showZoom(displayCard)}>
+    <div style={{ flexShrink: 0, cursor: 'pointer' }} onClick={() => showZoom(displayCard, navList)}>
       <CardFull card={displayCard} style={{ flexShrink: 0 }} />
       {upgradeLabel}
     </div>
@@ -280,6 +298,22 @@ export function CardViewPopup({
   const trashedGroup = cards.find(g => g.label === 'Trashed');
   const trashedCount = trashedGroup?.items.length ?? 0;
   const deckCount = totalCount - trashedCount;
+
+  // Flat list of deck cards (excluding trash) in the same display order used
+  // by the rendered groups. Passed to the zoom overlay so arrow keys page
+  // through the deck. Trashed cards are intentionally excluded — clicking
+  // one opens it without nav (it's not part of the active deck).
+  const deckNavList = useMemo<Card[]>(() => {
+    const out: Card[] = [];
+    for (const group of cards) {
+      if (group.label === 'Trashed') continue;
+      const ordered = preserveOrder
+        ? group.items
+        : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name));
+      out.push(...ordered);
+    }
+    return out;
+  }, [cards, preserveOrder]);
 
   const toggleView = useCallback((full: boolean) => {
     setFullView(full);
@@ -377,7 +411,13 @@ export function CardViewPopup({
                     ? group.items
                     : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name))
                   ).map((card, i) => (
-                    <CardPopupItem key={`${card.id}-${i}`} card={card} full={false} shiftHeld={shiftHeld} />
+                    <CardPopupItem
+                      key={`${card.id}-${i}`}
+                      card={card}
+                      full={false}
+                      shiftHeld={shiftHeld}
+                      navList={isTrashed ? undefined : deckNavList}
+                    />
                   ))}
                 </div>
               )}
@@ -435,6 +475,7 @@ export default function CardHand({
   discardCount,
   discardCards,
   deckCards,
+  trashCards,
   inPlayCards,
   discardAll,
   onDiscardAllComplete,
@@ -449,6 +490,8 @@ export default function CardHand({
   playerResources,
   actionsRemaining,
   onCardHover,
+  suppressEnterAnimFor,
+  suppressShuffleDetection,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -684,18 +727,31 @@ export default function CardHand({
     const prev = prevCardsForShuffleRef.current;
     prevCardsForShuffleRef.current = cards;
 
+    // Tutor/search just committed: refs are updated above so future renders
+    // start from a clean baseline, but we skip the shuffle inference because
+    // discard-shrinkage from a tutor isn't a reshuffle.
+    if (suppressShuffleDetection) {
+      return;
+    }
+
     // A shuffle happened when:
     // - Draw pile was empty (or nearly so) and is now replenished
     // - Discard pile shrank (cards moved from discard → draw pile)
     // - New cards appeared in hand (a draw was attempted)
     // - OR deck contents changed even if counts stayed the same (Heady Brew swap)
+    //
+    // Stricter requirement: there must be POSITIVE evidence the deck composition
+    // changed — either deckSize grew or new ids appeared in deckCards. Without
+    // this, the discard pile shrinking for non-shuffle reasons (e.g. submitting
+    // a play with the draw pile empty triggers reveal flow that can transiently
+    // shrink discard counts via overrides) was firing a false-positive shuffle.
     const newCardIds = cards.filter(c => !prev.some(p => p.id === c.id)).map(c => c.id);
     const hasNewCards = newCardIds.length > 0;
     const discardMovedToDraw = prevDiscard > 0 && discardCount < prevDiscard;
-    const deckReplenished = deckSize > prevDeck || (prevDeck === 0 && deckSize >= 0 && discardMovedToDraw);
+    const deckGotNewIds = [...currDeckIds].some(id => !prevDeckIds.has(id));
+    const deckReplenished = deckSize > prevDeck || deckGotNewIds;
     // Detect Heady Brew: deck contents changed even though counts may be equal (swap)
-    const deckContentsChanged = currDeckIds.size > 0 && prevDeckIds.size > 0 &&
-      [...currDeckIds].some(id => !prevDeckIds.has(id));
+    const deckContentsChanged = currDeckIds.size > 0 && prevDeckIds.size > 0 && deckGotNewIds;
     const isSwapShuffle = deckContentsChanged && (prevDiscard > 0 || prevDeck > 0);
 
     if ((discardMovedToDraw && deckReplenished || isSwapShuffle) && !animationOff) {
@@ -716,7 +772,7 @@ export default function CardHand({
       const existing = deferredDrawnCardsRef.current;
       deferredDrawnCardsRef.current = new Set([...existing, ...newCardIds]);
     }
-  }, [deckSize, discardCount, cards, deckCards, animated, animationOff, shuffling]);
+  }, [deckSize, discardCount, cards, deckCards, animated, animationOff, shuffling, suppressShuffleDetection]);
 
   // Phase 1: Detect hand changes.
   // New cards are registered immediately with a placeholder offset (offsetComputed: false).
@@ -743,6 +799,12 @@ export default function CardHand({
     // to hand) isn't detected as a "new" card and doesn't trigger draw animation.
     const prevIds = new Set(prev.map(c => c.id));
     for (const id of prevInPlayIds) prevIds.add(id);
+    // Cards whose enter-animation is externally suppressed (e.g. the tutor UI
+    // already animated them from the modal to the hand) — treat them as if
+    // they were already present so the hand skips the arc-from-draw animation.
+    if (suppressEnterAnimFor) {
+      for (const id of suppressEnterAnimFor) prevIds.add(id);
+    }
     const currIds = new Set(cards.map(c => c.id));
     const newCards = cards.filter(c => !prevIds.has(c.id));
     const removedCards = prev.filter(c => !currIds.has(c.id));
@@ -1493,6 +1555,7 @@ export default function CardHand({
           <button
             className="hud-btn"
             ref={drawBtnRef}
+            data-draw-pile
             onClick={() => setShowDeckPopup(true)}
             title="View cards in draw pile"
             style={{
@@ -1516,6 +1579,7 @@ export default function CardHand({
         {/* Cards container */}
         <div
           ref={handContainerRef}
+          data-hand-zone
           style={{
             minWidth: 0,
             minHeight: CARD_MIN_HEIGHT,
@@ -1555,12 +1619,43 @@ export default function CardHand({
             const cantAfford = playCostEff && playerResources !== undefined &&
               playerResources < ((card.is_upgraded && playCostEff.upgraded_value != null) ? playCostEff.upgraded_value : playCostEff.value);
             const notEnoughActions = actionsRemaining !== undefined && actionsRemaining < (card.action_cost ?? 1);
-            const isDimmed = isClaimBanned || cantAfford || notEnoughActions;
+            // SEARCH_ZONE (tutor) cards are unplayable when the source zone has
+            // no cards matching the effect's filter (or no cards at all). Mirrors
+            // the backend rejection in play_card so the dim state is accurate.
+            const searchZoneEff = card.effects?.find((e: any) => e.type === 'search_zone');
+            const searchZoneEmpty = (() => {
+              if (!searchZoneEff) return false;
+              const source = String(searchZoneEff.metadata?.source ?? 'discard');
+              const filter = searchZoneEff.metadata?.filter as { card_type?: string; name?: string } | undefined;
+              const sourceCards: Card[] | undefined =
+                source === 'discard' ? discardCards
+                : source === 'draw' ? deckCards
+                : source === 'trash' ? trashCards
+                : undefined;
+              if (!sourceCards) return false;
+              if (sourceCards.length === 0) return true;
+              if (!filter) return false;
+              // Filter is satisfied if AT LEAST ONE card in the zone matches.
+              const expectedType = filter.card_type?.toLowerCase();
+              const expectedName = filter.name;
+              const hasMatch = sourceCards.some((c) => {
+                if (expectedType && c.card_type.toLowerCase() !== expectedType) return false;
+                if (expectedName && c.name !== expectedName) return false;
+                return true;
+              });
+              return !hasMatch;
+            })();
+            const isDimmed = isClaimBanned || cantAfford || notEnoughActions || searchZoneEmpty;
             const isHovered = hoveredIndex === localIdx && !isBeingDragged && !trashMode && !isAnimating;
             // FLIP reflow transforms are applied directly to DOM elements (not via React state)
             const baseTransform = isSelected && !isBeingDragged ? 'translateY(-6px)' : isHovered ? 'translateY(-4px)' : 'translateY(0)';
             let cardTransform = baseTransform;
-            let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : isDimmed ? 0.4 : 1;
+            // Dimmed cards (unplayable — can't afford, not enough actions, empty tutor
+            // source, claim banned) darken via a brightness filter rather than fade to
+            // transparency. Animation/drag states still use opacity because those are
+            // intentionally see-through effects.
+            let cardOpacity: number = isDeferredDuringShuffle ? 0 : isDiscardingAll ? 0 : isBeingDragged ? 0.3 : 1;
+            let cardFilter: string | undefined = isDimmed ? 'brightness(0.45) saturate(0.7)' : undefined;
             let cardTransition = animated
               ? 'border-color 0.1s, box-shadow 0.1s, transform 0.1s'
               : 'none';
@@ -1621,6 +1716,7 @@ export default function CardHand({
                   pointerEvents: isAnimating ? 'none' as const : 'auto' as const,
                   cursor: trashMode ? (isTrashPlayed ? 'default' : 'pointer') : disabled ? 'not-allowed' : 'grab',
                   opacity: cardOpacity,
+                  filter: cardFilter,
                   transition: cardTransition,
                   transform: isTrashSelected ? 'translateY(-8px)' : cardTransform,
                   animation: cardAnimation ?? 'none',

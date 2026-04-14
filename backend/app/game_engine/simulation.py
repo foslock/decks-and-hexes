@@ -21,6 +21,7 @@ from .game_state import (
     execute_upkeep,
     play_card,
     submit_pending_discard,
+    submit_pending_search,
     submit_play,
     advance_resolve,
     buy_card,
@@ -44,7 +45,7 @@ class SimConfig:
     verbose: bool = False
     vp_target: Optional[int] = None  # None = use game default
     speed: str = "normal"  # "fast", "normal", "slow"
-    card_pack: str = "everything"  # Card pack ID to filter neutral market
+    card_pack: str = "everything"  # Card pack ID to filter shared market
 
 
 @dataclass
@@ -259,6 +260,10 @@ def _run_play_phase(game: GameState, cpus: dict[str, CPUPlayer],
                 if player.pending_discard > 0:
                     discard_indices = cpu._pick_cards_to_discard(player, player.pending_discard)
                     submit_pending_discard(game, pid, discard_indices)
+                # Auto-resolve deferred search (tutor) for CPU players
+                if player.pending_search is not None:
+                    selections = cpu._pick_search_selections(player, player.pending_search)
+                    submit_pending_search(game, pid, selections)
 
                 # Track claims
                 if action.get("target_q") is not None:
@@ -317,7 +322,7 @@ def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
                     tracking[pid].cards_purchased.get(bought_name, 0) + 1
             else:
                 # Don't break entirely on failure — the CPU might have other
-                # purchases available (e.g. archetype cards after a neutral failure).
+                # purchases available (e.g. archetype cards after a shared failure).
                 # Only break after consecutive failures to avoid infinite loops.
                 purchases += 1  # count toward safety limit to prevent infinite loop
 

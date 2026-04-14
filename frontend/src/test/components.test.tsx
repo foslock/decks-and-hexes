@@ -112,7 +112,7 @@ describe('MarketPanel', () => {
     makeCard({ id: 'arch_1', name: 'Overrun', buy_cost: 5, power: 5 }),
     makeCard({ id: 'arch_2', name: 'Strike Team', buy_cost: 3, power: 3 }),
   ];
-  const neutralMarket = [
+  const sharedMarket = [
     { card: makeCard({ id: 'n1', name: 'Mercenary', buy_cost: 3, power: 3 }), remaining: 5 },
     { card: makeCard({ id: 'n2', name: 'Land Grant', buy_cost: 2, card_type: 'engine' }), remaining: 3 },
   ];
@@ -121,10 +121,10 @@ describe('MarketPanel', () => {
     render(
       <MarketPanel
         archetypeMarket={archetypeMarket}
-        neutralMarket={neutralMarket}
+        sharedMarket={sharedMarket}
         playerResources={5}
         onBuyArchetype={() => {}}
-        onBuyNeutral={() => {}}
+        onBuyShared={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
                disabled={false}
@@ -140,10 +140,10 @@ describe('MarketPanel', () => {
     render(
       <MarketPanel
         archetypeMarket={archetypeMarket}
-        neutralMarket={neutralMarket}
+        sharedMarket={sharedMarket}
         playerResources={10}
         onBuyArchetype={onBuy}
-        onBuyNeutral={() => {}}
+        onBuyShared={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
                disabled={false}
@@ -161,10 +161,10 @@ describe('MarketPanel', () => {
     render(
       <MarketPanel
         archetypeMarket={archetypeMarket}
-        neutralMarket={neutralMarket}
+        sharedMarket={sharedMarket}
         playerResources={5}
         onBuyArchetype={() => {}}
-        onBuyNeutral={() => {}}
+        onBuyShared={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={onReroll}
                disabled={false}
@@ -178,10 +178,10 @@ describe('MarketPanel', () => {
     render(
       <MarketPanel
         archetypeMarket={archetypeMarket}
-        neutralMarket={neutralMarket}
+        sharedMarket={sharedMarket}
         playerResources={1}
         onBuyArchetype={() => {}}
-        onBuyNeutral={() => {}}
+        onBuyShared={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
                disabled={false}
@@ -195,10 +195,10 @@ describe('MarketPanel', () => {
     render(
       <MarketPanel
         archetypeMarket={[]}
-        neutralMarket={[]}
+        sharedMarket={[]}
         playerResources={3}
         onBuyArchetype={() => {}}
-        onBuyNeutral={() => {}}
+        onBuyShared={() => {}}
         onBuyUpgrade={() => {}}
         onReroll={() => {}}
                disabled={false}

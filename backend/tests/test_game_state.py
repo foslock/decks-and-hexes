@@ -84,7 +84,7 @@ class TestGameCreation:
         for p in game.players.values():
             assert len(p.archetype_deck) > 0
 
-    def test_neutral_market_initialized(self, card_registry: dict[str, Card]) -> None:
+    def test_shared_market_initialized(self, card_registry: dict[str, Card]) -> None:
         game = create_game(
             GridSize.SMALL,
             [
@@ -94,7 +94,7 @@ class TestGameCreation:
             card_registry,
             seed=42,
         )
-        available = game.neutral_market.get_available()
+        available = game.shared_market.get_available()
         assert len(available) > 0
 
     def test_three_player_game(self, card_registry: dict[str, Card]) -> None:
@@ -393,7 +393,7 @@ class TestBuyPhase:
         self._advance_to_buy(game)
 
         p0 = game.players["p0"]
-        available = game.neutral_market.get_available()
+        available = game.shared_market.get_available()
         # Find an affordable card
         affordable = next(
             (s for s in available if s["card"]["buy_cost"] is not None and s["card"]["buy_cost"] <= p0.resources),
@@ -403,7 +403,7 @@ class TestBuyPhase:
             # The neutral market card["id"] is the base card id (stack key)
             base_id = affordable["card"]["id"]
             resources_before = p0.resources
-            ok, msg = buy_card(game, "p0", "neutral", base_id)
+            ok, msg = buy_card(game, "p0", "shared", base_id)
             assert ok, msg
             assert p0.resources < resources_before
 
@@ -447,7 +447,7 @@ class TestBuyPhase:
 
     def test_buy_wrong_phase(self, small_2p_game: GameState) -> None:
         """Cannot buy during Play phase."""
-        ok, msg = buy_card(small_2p_game, "p0", "neutral", "some_card")
+        ok, msg = buy_card(small_2p_game, "p0", "shared", "some_card")
         assert not ok
 
     def test_unique_card_blocked_when_already_owned(
@@ -661,7 +661,7 @@ class TestGameSerialization:
         assert "player_order" in d
         assert "current_phase" in d
         assert "current_round" in d
-        assert "neutral_market" in d
+        assert "shared_market" in d
         assert "log" in d
 
     def test_to_dict_hides_other_hands(self, small_2p_game: GameState) -> None:

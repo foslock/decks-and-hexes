@@ -1,7 +1,4 @@
-"""Load card, objective, and passive data from markdown files in /data/.
-
-Data files use YAML embedded in .md files with # comments.
-"""
+"""Load card, objective, and passive data from YAML files in /data/."""
 
 from __future__ import annotations
 
@@ -23,10 +20,10 @@ def load_all_cards() -> dict[str, Card]:
     registry: dict[str, Card] = {}
 
     files = {
-        "cards_neutral.md": Archetype.NEUTRAL,
-        "cards_vanguard.md": Archetype.VANGUARD,
-        "cards_swarm.md": Archetype.SWARM,
-        "cards_fortress.md": Archetype.FORTRESS,
+        "cards_neutral.yaml": Archetype.SHARED,
+        "cards_vanguard.yaml": Archetype.VANGUARD,
+        "cards_swarm.yaml": Archetype.SWARM,
+        "cards_fortress.yaml": Archetype.FORTRESS,
     }
 
     for filename, archetype in files.items():
@@ -296,6 +293,6 @@ def _safe_optional_int(value: Any) -> Optional[int]:
 
 
 
-# NOTE: Objectives (data/objectives.md) and Passives (data/passives.md)
+# NOTE: Objectives (data/objectives.yaml) and Passives (data/passives.yaml)
 # are candidate features preserved in the data files for future reference,
 # but are not currently part of the active game implementation.

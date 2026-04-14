@@ -55,7 +55,7 @@ def _make_card(
     card_id: str = "test_card",
     name: str = "Test Card",
     card_type: CardType = CardType.ENGINE,
-    archetype: Archetype = Archetype.NEUTRAL,
+    archetype: Archetype = Archetype.SHARED,
     power: int = 0,
     timing: Timing = Timing.IMMEDIATE,
     effects: list[Effect] | None = None,
@@ -2722,7 +2722,7 @@ class TestNeutralSpyglass:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.ENGINE
         assert card.buy_cost == 1
-        assert card.archetype == Archetype.NEUTRAL
+        assert card.archetype == Archetype.SHARED
         assert card.draw_cards == 1
         assert len(card.effects) >= 1
         eff = card.effects[0]
@@ -2789,7 +2789,7 @@ class TestNeutralDividends:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.ENGINE
         assert card.buy_cost == 4
-        assert card.archetype == Archetype.NEUTRAL
+        assert card.archetype == Archetype.SHARED
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.RESOURCE_SCALING
@@ -2852,7 +2852,7 @@ class TestNeutralCartographer:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.ENGINE
         assert card.buy_cost == 3
-        assert card.archetype == Archetype.NEUTRAL
+        assert card.archetype == Archetype.SHARED
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.CYCLE
@@ -2901,7 +2901,7 @@ class TestNeutralTaxCollector:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.ENGINE
         assert card.buy_cost == 4
-        assert card.archetype == Archetype.NEUTRAL
+        assert card.archetype == Archetype.SHARED
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.RESOURCE_PER_VP_HEX
@@ -2973,7 +2973,7 @@ class TestNeutralMobilize:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.ENGINE
         assert card.buy_cost == 4
-        assert card.archetype == Archetype.NEUTRAL
+        assert card.archetype == Archetype.SHARED
         assert card.trash_on_use is True
         assert len(card.effects) >= 1
         eff = card.effects[0]
@@ -3032,7 +3032,7 @@ class TestNeutralAmbush:
         assert card.card_type == CardType.CLAIM
         assert card.buy_cost == 4
         assert card.power == 2
-        assert card.archetype == Archetype.NEUTRAL
+        assert card.archetype == Archetype.SHARED
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.POWER_MODIFIER
@@ -3232,7 +3232,7 @@ class TestNeutralSupplyDepot:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.ENGINE
         assert card.buy_cost == 6
-        assert card.archetype == Archetype.NEUTRAL
+        assert card.archetype == Archetype.SHARED
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.NEXT_TURN_BONUS
