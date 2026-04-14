@@ -1333,6 +1333,7 @@ export default function LobbyScreen({
             packName={pack?.name}
             playerArchetype={lobby.players[playerId]?.archetype}
             collapseArchetypes
+            hideNonPurchasable
           />
         );
       })()}
