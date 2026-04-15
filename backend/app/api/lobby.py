@@ -114,7 +114,7 @@ class LobbyPlayer:
 class LobbyConfig:
     grid_size: str = "medium"
     speed: str = "normal"
-    max_players: int = 3
+    max_players: int = 6
     test_mode: bool = False
     vp_target: Optional[int] = None  # None = use computed default
     granted_actions: Optional[int] = None  # None = use archetype default (currently 5)
