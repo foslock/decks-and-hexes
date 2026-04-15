@@ -640,6 +640,12 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // Nothing to render if off mode or no steps
   if (!step || isOff || !gridTransform || !measuredRect) return null;
 
+  // Shine sweep timing: fires once on the winning number as it finishes growing.
+  // Delay starts the sweep ~55% into the grow so the glint peaks right as the
+  // number reaches full size. Parabolic motion: X bulges right while Y falls.
+  const shineDurationMs = Math.round(500 * animSpeed);
+  const shineDelayMs = Math.round(growMs * 0.55);
+
   return (
     <div style={{
       position: 'fixed',
@@ -647,6 +653,21 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
       pointerEvents: 'none',
       zIndex: 500,
     }}>
+      <style>{`
+        @keyframes winner-number-shine {
+          0%   { background-position: 140% -40%; opacity: 0; }
+          50%  { opacity: 1; }
+          100% { background-position: -60% 140%; opacity: 0; }
+        }
+        @keyframes resolve-number-fade-in {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes resolve-number-fade-out {
+          from { opacity: 1; }
+          to { opacity: 0; }
+        }
+      `}</style>
       {/* Defense applied animation — shield values grow/shrink */}
       {isDefenseApplied && step && (() => {
         const target = toScreen(step.q, step.r);
@@ -663,11 +684,11 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
         } else if (stage === 'numbers_move') {
           scale = 1.6;
           opacity = 1;
-          transition = `all ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.2)`;
+          transition = `transform ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.2), opacity ${moveMs}ms ease-out`;
         } else if (stage === 'winner_grow') {
           scale = 1;
           opacity = 1;
-          transition = `all ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1)`;
+          transition = `transform ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1), opacity ${growMs}ms ease-out`;
         } else {
           scale = 1;
           opacity = 0;
@@ -678,11 +699,12 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
             key="defense-shield"
             style={{
               position: 'fixed',
-              left: target.x,
-              top: target.y,
-              transform: `translate(-50%, -50%) scale(${scale})`,
+              left: 0,
+              top: 0,
+              transform: `translate3d(${target.x}px, ${target.y}px, 0) translate(-50%, -50%) scale(${scale})`,
               opacity,
               transition,
+              willChange: 'transform, opacity',
               fontSize: 22,
               fontWeight: 'bold',
               whiteSpace: 'nowrap',
@@ -714,11 +736,11 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
         } else if (stage === 'numbers_move') {
           scale = 2.5;
           opacity = 1;
-          transition = `all ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.1)`;
+          transition = `transform ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.1), opacity ${moveMs}ms ease-out`;
         } else if (stage === 'winner_grow') {
           scale = 1;
           opacity = 1;
-          transition = `all ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1)`;
+          transition = `transform ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1), opacity ${growMs}ms ease-out`;
         } else {
           scale = 1;
           opacity = 0;
@@ -729,11 +751,12 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
             key="consecrate-star"
             style={{
               position: 'fixed',
-              left: target.x,
-              top: target.y,
-              transform: `translate(-50%, -50%) scale(${scale})`,
+              left: 0,
+              top: 0,
+              transform: `translate3d(${target.x}px, ${target.y}px, 0) translate(-50%, -50%) scale(${scale})`,
               opacity,
               transition,
+              willChange: 'transform, opacity',
               fontSize: 28,
               color: '#ffd700',
               textShadow: `0 0 12px ${color}, 0 0 24px rgba(255, 215, 0, 0.6), 0 2px 4px rgba(0,0,0,0.8)`,
@@ -775,14 +798,14 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
           y = target.y;
           scale = 1.4;
           opacity = 1;
-          transition = `all ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.1)`;
+          transition = `transform ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.1), opacity ${moveMs}ms ease-out`;
         } else if (stage === 'winner_grow') {
           // Settle at target
           x = target.x;
           y = target.y;
           scale = 1;
           opacity = 1;
-          transition = `all ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1)`;
+          transition = `transform ${growMs}ms cubic-bezier(0.3, 0, 0.2, 1), opacity ${growMs}ms ease-out`;
         } else {
           x = target.x;
           y = target.y;
@@ -796,11 +819,12 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
             key="auto-claim-icon"
             style={{
               position: 'fixed',
-              left: x,
-              top: y,
-              transform: `translate(-50%, -50%) scale(${scale})`,
+              left: 0,
+              top: 0,
+              transform: `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%) scale(${scale})`,
               opacity,
               transition,
+              willChange: 'transform, opacity',
               fontSize: 24,
               fontWeight: 'bold',
               color: '#fff',
@@ -819,7 +843,6 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
 
       {/* Power numbers (skip for Consecrate, Defense Applied, Auto-claim — custom animations handle them) */}
       {!isConsecrate && !isDefenseApplied && !isAutoClaim && numbers.map((num, i) => {
-        const haloColor = playerColorStr(num.playerId);
         const isWinStage = stage === 'winner_grow';
 
         // Position calculation
@@ -884,30 +907,73 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
               scale = 0.5;
             }
           } else {
+            // `done` stage — winner settles (scale 1.8→1, default opacity). For losers we
+            // must explicitly preserve the faded-out opacity from winner_grow; otherwise the
+            // lingering CSS transition animates opacity back to its default 1, visibly
+            // fading defeated numbers back in during the brief pause.
             x = num.endX;
             y = num.endY;
+            if (!num.isWinner) {
+              if (edgeOffset && isWedgeBattle) {
+                opacity = attackerWins ? 0 : 1;
+              } else {
+                opacity = 0;
+              }
+            }
           }
+          // Split per-property: the bouncy overshoot bezier gives position/scale a nice
+          // snap into place, but applied to opacity it hits ~1.0 by ~30% of the duration
+          // (and overshoots past 1 → clamped), which reads as an instant pop rather than
+          // a fade. Use a plain ease-out curve for opacity so the number visibly fades in
+          // across the full moveMs as the wedge grows.
+          //
+          // Perf: animate `transform` (compositor-only, GPU-accelerated) — NOT `left`/`top`,
+          // which trigger layout + paint every frame. Avoid `transition: all` so the browser
+          // only tracks the two properties we actually change.
           transition = stage === 'numbers_move'
-            ? `all ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.2)`
-            : `all ${growMs}ms ease-out`;
+            ? `transform ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.2), opacity ${moveMs}ms ease-out`
+            : `transform ${growMs}ms ease-out, opacity ${growMs}ms ease-out`;
         }
 
+        // During numbers_move we use a CSS keyframe animation for the opacity fade-in
+        // instead of a transition. The transition approach depends on React committing
+        // opacity:0 and the browser painting it BEFORE the next commit flips to opacity:1.
+        // React 18's automatic batching can elide that intermediate paint, so the transition
+        // never fires and the number pops. A keyframe animation runs on its own timeline
+        // the moment it's applied, so the fade is guaranteed regardless of commit cadence.
+        const inFadeIn = stage === 'numbers_move' && numbersActive;
+        // Symmetric case on the way out: when a loser's opacity target is 0 during
+        // winner_grow, use a keyframe fade-out. A plain CSS transition from an
+        // animation-filled value (the fade-in held opacity:1 via `both`) to the new
+        // inline opacity:0 often doesn't fire — the browser treats the animated value
+        // as non-transitionable. The keyframe guarantees the fade is visible.
+        const inFadeOut = isWinStage && !num.isWinner && opacity === 0;
         return (
           <div
             key={`${num.playerId}-${i}`}
             style={{
               position: 'fixed',
-              left: x,
-              top: y,
-              transform: `translate(-50%, -50%) scale(${scale})`,
+              left: 0,
+              top: 0,
+              // Fold position into the transform so the whole animation runs on the
+              // compositor: translate(x,y) handles position, translate(-50%,-50%)
+              // re-centers on the target, scale() handles growth. No layout-triggering
+              // left/top updates per frame.
+              transform: `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%) scale(${scale})`,
               opacity,
               transition,
+              animation: inFadeIn
+                ? `resolve-number-fade-in ${moveMs}ms ease-out both`
+                : inFadeOut
+                ? `resolve-number-fade-out ${growMs}ms ease-out both`
+                : undefined,
+              willChange: 'transform, opacity',
               fontSize: 18,
               fontWeight: 'bold',
               color: playerColorDark(num.playerId),
-              WebkitTextStroke: '2.5px rgba(255,255,255,0.95)',
+              WebkitTextStroke: '2px rgba(255,255,255,0.95)',
               paintOrder: 'stroke fill',
-              textShadow: `0 0 8px ${haloColor}, 0 2px 4px rgba(0,0,0,0.8)`,
+              textShadow: 'none',
               zIndex: num.isWinner && isWinStage ? 502 : 501,
               whiteSpace: 'nowrap',
             }}
@@ -927,6 +993,34 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
               }}>🛡</span>
             )}
             {num.power}
+            {num.isWinner && isWinStage && (
+              // Shine sweep — a white gradient stripe clipped to the glyph shape via
+              // background-clip: text, sweeping monotonically from upper-right to
+              // lower-left with an ease-in-out speed profile (slow fade-in, fast at
+              // peak opacity, slow fade-out). Fires once as the winner reaches full size.
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  color: 'transparent',
+                  WebkitTextStroke: 0,
+                  textShadow: 'none',
+                  backgroundImage:
+                    'linear-gradient(115deg, rgba(255,255,255,0) 42%, rgba(255,255,255,1) 50%, rgba(255,255,255,0) 58%)',
+                  backgroundSize: '260% 260%',
+                  backgroundRepeat: 'no-repeat',
+                  WebkitBackgroundClip: 'text',
+                  backgroundClip: 'text',
+                  pointerEvents: 'none',
+                  opacity: 0,
+                  animation: `winner-number-shine ${shineDurationMs}ms ease-in-out ${shineDelayMs}ms forwards`,
+                }}
+              >
+                {num.power}
+              </span>
+            )}
           </div>
         );
       })}
