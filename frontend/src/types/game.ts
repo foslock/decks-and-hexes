@@ -178,6 +178,10 @@ export interface ResolutionStep {
   claimants: ResolutionClaimant[];
   defender_id: string | null;
   defender_power: number;
+  /** Axial coords of the defender's nearest owned tile — used client-side to anchor the
+   *  defender's number/shield to the edge closest to their territory in the resolve animation. */
+  defender_source_q?: number;
+  defender_source_r?: number;
   winner_id: string | null;
   previous_owner: string | null;
   outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate' | 'defense_applied' | 'auto_claim';

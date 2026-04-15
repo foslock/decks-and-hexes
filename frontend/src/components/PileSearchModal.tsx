@@ -247,9 +247,12 @@ export default function PileSearchModal({
   // the deck would also reveal which cards come up next, which is information
   // the search effect doesn't grant.
   //
-  // The shuffle is stable across re-renders by keying useMemo on the snapshot
-  // ids, so opening the modal once gives a single deterministic-per-session
-  // arrangement; opening it again (next time the effect fires) reshuffles.
+  // The shuffle must be stable across re-renders so the order doesn't churn
+  // visually as unrelated WebSocket updates arrive. `pending` is re-parsed
+  // from JSON on every broadcast, so `snapshot_card_ids` has a fresh array
+  // reference each render — we key the memo on a joined string so identical
+  // contents reuse the cached result.
+  const snapshotKey = pending.snapshot_card_ids.join(',');
   const eligibleCards = useMemo(() => {
     const snapshot = new Set(pending.snapshot_card_ids);
     const filtered = cards.filter((c) => snapshot.has(c.id));
@@ -264,7 +267,7 @@ export default function PileSearchModal({
     }
     return filtered;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending.snapshot_card_ids, pending.source]);
+  }, [snapshotKey, pending.source]);
 
   const handleToggle = useCallback(
     (cardId: string) => {

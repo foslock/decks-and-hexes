@@ -5,9 +5,11 @@ import SetupScreen from './components/SetupScreen';
 import GameScreen from './components/GameScreen';
 import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
+import ResolveAnimationPreview from './components/ResolveAnimationPreview';
 import { useWebSocket } from './hooks/useWebSocket';
 import * as api from './api/client';
 import { CardZoomProvider } from './components/CardZoomContext';
+import { getSavedPlayerName } from './utils/playerName';
 
 /** Catches render-time crashes so the whole app doesn't white-screen. */
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -205,7 +207,7 @@ function AppInner() {
   const handleCreateLobby = useCallback(async () => {
     try {
       setError(null);
-      const result = await api.createLobby('Player 1', 'vanguard');  // First player is always #1
+      const result = await api.createLobby(getSavedPlayerName() ?? 'Player 1', 'vanguard');  // First player is always #1
       api.setAuthToken(result.token);
       const lobbyScreen: AppScreen = {
         type: 'lobby',
@@ -223,7 +225,7 @@ function AppInner() {
 
   const handleJoinLobby = useCallback(async (code: string) => {
     setError(null);
-    const result = await api.joinLobby(code.toUpperCase(), 'Player', 'vanguard');
+    const result = await api.joinLobby(code.toUpperCase(), getSavedPlayerName() ?? 'Player', 'vanguard');
     api.setAuthToken(result.token);
     const lobbyScreen: AppScreen = {
       type: 'lobby',
@@ -279,6 +281,13 @@ function AppInner() {
     return (
       <SettingsProvider>
         <VpPathPreview />
+      </SettingsProvider>
+    );
+  }
+  if (previewMode === 'resolve-animations') {
+    return (
+      <SettingsProvider>
+        <ResolveAnimationPreview />
       </SettingsProvider>
     );
   }
