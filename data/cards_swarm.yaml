@@ -38,7 +38,7 @@ cards:
     name: Surge
     name_upgraded: Surge+
     type: Claim
-    buy_cost: 2
+    buy_cost: 3
     action_return: 0
     reversible: true
     power: 1
@@ -222,7 +222,7 @@ cards:
     name: Scavenge
     name_upgraded: Scavenge+
     type: Engine
-    buy_cost: 1
+    buy_cost: 2
     action_return: 0
     power: 0
     effect: "Gain 2 resources. If you have 0 actions, gain 1 action."

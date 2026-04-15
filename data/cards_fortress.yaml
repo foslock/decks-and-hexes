@@ -89,7 +89,7 @@ cards:
     name: Iron Wall
     name_upgraded: Iron Wall+
     type: Defense
-    buy_cost: 4
+    buy_cost: 3
     action_return: 0
     reversible: true
     power: 0
@@ -112,9 +112,9 @@ cards:
     buy_cost: 3
     action_return: 0
     reversible: true
-    power: 3
-    effect: "Claim: Power 3. If defending an owned tile, power is 5 instead."
-    effect_upgraded: "Claim: Power 4. If defending an owned tile, power is 7 instead."
+    power: 4
+    effect: "Claim: Power 4. If defending an owned tile, power is 6 instead."
+    effect_upgraded: "Claim: Power 5. If defending an owned tile, power is 8 instead."
     secondary_effect: null
     secondary_timing: null
 
@@ -150,7 +150,7 @@ cards:
     name: Supply Line
     name_upgraded: Supply Line+
     type: Engine
-    buy_cost: 3
+    buy_cost: 2
     action_return: 1
     power: 0
     effect: "Gain 2 resources. Gain 1 action. Your next purchase this round costs 1 less."

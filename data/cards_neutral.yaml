@@ -89,7 +89,7 @@ cards:
     name: Mercenary
     name_upgraded: Mercenary+
     type: Claim
-    buy_cost: 4
+    buy_cost: 3
 
     action_return: 0
     power: 3
@@ -151,7 +151,7 @@ cards:
     name: Road Builder
     name_upgraded: Road Builder+
     type: Claim
-    buy_cost: 2
+    buy_cost: 3
 
     action_return: 0
     reversible: true
@@ -167,7 +167,7 @@ cards:
     name: Prospector
     name_upgraded: Prospector+
     type: Engine
-    buy_cost: 2
+    buy_cost: 3
 
     action_return: 0
     power: 0
@@ -264,7 +264,7 @@ cards:
     name: Moat
     name_upgraded: Moat+
     type: Defense
-    buy_cost: 6
+    buy_cost: 4
 
     action_return: 1
     power: 0
@@ -371,7 +371,7 @@ cards:
     name: Watchtower
     name_upgraded: Watchtower+
     type: Defense
-    buy_cost: 3
+    buy_cost: 2
 
     action_return: 0
     power: 0
@@ -514,7 +514,7 @@ cards:
     name: Tax Collector
     name_upgraded: Tax Collector+
     type: Engine
-    buy_cost: 4
+    buy_cost: 3
 
     action_return: 0
     power: 0
