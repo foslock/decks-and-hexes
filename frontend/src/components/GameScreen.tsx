@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
-import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors } from './HexGrid';
+import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardBrowser from './CardBrowser';
@@ -928,6 +928,51 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     for (const c of activePlayer.discard) if (c.unique) s.add(c.name);
     return s;
   }, [activePlayer]);
+
+  // True when the player can't afford any buy-phase action: no purchasable
+  // archetype or shared card, no upgrade credit, no re-roll. Used to drop the
+  // hold requirement on Done Buying and flip its color to green — they have
+  // genuinely nothing else to do. Mirrors the affordability checks in
+  // ShopOverlay so the button stays in sync with visible buy options.
+  const cannotAffordAnyBuyOption = useMemo(() => {
+    if (!activePlayer) return false;
+    const resources = activePlayer.resources;
+    const buyLocked = !!activePlayer.buy_locked;
+    const freeRerolls = activePlayer.free_rerolls ?? 0;
+    // Re-roll (1 resource or free; unaffected by buy_locked).
+    if (freeRerolls > 0) return false;
+    if (resources >= 1) return false;
+    // Upgrade credit (5 resources, blocked by buy_locked).
+    if (!buyLocked && resources >= 5) return false;
+    if (!buyLocked) {
+      // Archetype market.
+      for (const card of activePlayer.archetype_market) {
+        const eff = activePlayer.effective_buy_costs?.[card.id] ?? card.buy_cost;
+        if (eff === null || eff === undefined) continue;
+        if (card.unique && ownedUniqueCardNames.has(card.name)) continue;
+        if (resources >= eff) return false;
+      }
+      // Shared market — respect remaining stock, per-round 1-copy limit,
+      // selling-out claim, and unique ownership.
+      const myBoughtSharedIds = new Set<string>();
+      const myPurchases = gameState.buy_phase_purchases?.[activePlayerId];
+      if (myPurchases) {
+        for (const p of myPurchases) {
+          if (p.source === 'shared') myBoughtSharedIds.add(p.card_id);
+        }
+      }
+      for (const stack of gameState.shared_market) {
+        if (stack.remaining <= 0) continue;
+        if (myBoughtSharedIds.has(stack.card.id)) continue;
+        if (stack.selling_out && stack.selling_out_bought_by?.includes(activePlayerId)) continue;
+        if (stack.card.unique && ownedUniqueCardNames.has(stack.card.name)) continue;
+        const eff = activePlayer.effective_buy_costs?.[stack.card.id] ?? stack.card.buy_cost;
+        if (eff === null || eff === undefined) continue;
+        if (resources >= eff) return false;
+      }
+    }
+    return true;
+  }, [activePlayer, ownedUniqueCardNames, gameState.shared_market, gameState.buy_phase_purchases, activePlayerId]);
   // True when the player has submitted (server-side) or exit animations are pending/playing
   const playSubmitted = !!(activePlayer?.has_submitted_play || inPlayExitAnims.length > 0);
 
@@ -1182,7 +1227,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         if (hasSteps && !animationOff) {
           setSelectedCardIndex(null);
-          setResolutionSteps(steps);
+          // Rewrite each claimant's source_q/source_r using PRE-RESOLVE tile
+          // ownership. The backend fills these fields while stepping through
+          // resolution, so by step N the "closest owned tile" for a player
+          // may be one they won EARLIER in the same turn. For animation
+          // purposes (chevron source, wedge approach direction) we want the
+          // arrow to originate from tiles the player actually held going
+          // into the turn — tiles won this turn must not count.
+          const rewritten = steps.map(s => ({
+            ...s,
+            claimants: s.claimants.map(c => {
+              const src = findNearestOwnedTile(s.q, s.r, oldTiles, c.player_id);
+              return {
+                ...c,
+                source_q: src?.q ?? null,
+                source_r: src?.r ?? null,
+              };
+            }),
+          }));
+          setResolutionSteps(rewritten);
           setGridTransformSnapshot(gridTransformRef.current);
           setGridRectSnapshot(gridContainerRef.current?.getBoundingClientRect() ?? null);
           setResolving(true);
@@ -1192,9 +1255,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           // Pre-compute chevron sources using pre-resolve tile state
           const cachedChevrons: typeof resolveChevronCacheRef.current = [];
           for (let i = 0; i < steps.length; i++) {
-            const step = steps[i];
+            const step: ResolutionStep = steps[i];
             if (step.outcome === 'defense_applied') continue;
+            const targetKey = `${step.q},${step.r}`;
             for (const claimant of step.claimants) {
+              // Skip chevron for players claiming a tile they already own
+              // (defensive play) — no directional arrow needed.
+              if (oldTiles[targetKey]?.owner === claimant.player_id) continue;
               const color = PLAYER_COLORS[claimant.player_id] ?? 0xffffff;
               const closest = findNearestOwnedTile(step.q, step.r, oldTiles, claimant.player_id);
               if (!closest) continue;
@@ -1831,14 +1898,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setError(`${card.name} can only target unoccupied tiles`);
         return;
       }
-      // Check duplicate claim (non-stackable) — multi-target claims lock
-      // their extra targets too.
+      // Stacking: a stackable new card may always land on a tile with
+      // prior claims. A non-stackable new card is blocked only if some
+      // prior planned claim on the tile (primary or extra) is also
+      // non-stackable — prior stackable claims don't lock the tile.
       if (!card.stackable && activePlayer.planned_actions?.some(a => {
         if (a.card.card_type !== 'claim') return false;
+        if (a.card.stackable) return false;
         if (a.target_q === q && a.target_r === r) return true;
         return a.extra_targets?.some(([eq, er]) => eq === q && er === r) ?? false;
       })) {
-        setError(`You already have a claim on that tile this round`);
+        setError(`That tile already has a non-stackable claim this round`);
         return;
       }
     }
@@ -2898,6 +2968,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           return;
         }
 
+        // Priority 0.5: Confirm multi-tile selection when full
+        if (
+          phase === 'play' && activePlayer && !resolving &&
+          multiTileCardIndex !== null && multiTilePrimaryTarget
+        ) {
+          const multiTileCard = activePlayer.hand[multiTileCardIndex];
+          const isDefenseMulti = multiTileCard?.card_type === 'defense' && (multiTileCard?.defense_target_count ?? 1) > 1;
+          const maxTotal = isDefenseMulti
+            ? (multiTileCard?.defense_target_count ?? 1)
+            : 1 + (multiTileCard?.multi_target_count ?? 0);
+          if (1 + multiTileTargets.length >= maxTotal) {
+            handleConfirmMultiTile();
+            return;
+          }
+        }
+
         // Priority 1: Play selected engine card (only non-targeting engines).
         // Debt is excluded — it costs 3 resources to trash, so accidentally
         // pressing Enter while it's selected would silently burn an action
@@ -2972,7 +3058,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, resolving, reviewing, reviewButtonVisible, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
+  }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, multiTileTargets, multiTilePrimaryTarget, handleConfirmMultiTile, resolving, reviewing, reviewButtonVisible, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -3637,12 +3723,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const strong = new Set<string>();
     const weak = new Set<string>();
 
-    // Tiles where the player already has a non-stacking claim this turn.
-    // Multi-target claims (Surge) also lock their extra targets.
+    // Tiles locked by a prior non-stackable claim this turn (primary or
+    // extra target). Stackable prior claims don't lock the tile, and a
+    // stackable new card is never locked out.
     const alreadyClaimed = new Set<string>();
     if (!card.stackable && activePlayer?.planned_actions) {
       for (const action of activePlayer.planned_actions) {
         if (action.card.card_type !== 'claim') continue;
+        if (action.card.stackable) continue;
         if (action.target_q != null) {
           alreadyClaimed.add(`${action.target_q},${action.target_r}`);
         }
@@ -3734,12 +3822,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       let effectivePower = computeClaimPowerOnTile(card, tile, tiles, activePlayerId, handSize, playerTileCount);
       // For stackable cards, add power from existing planned claims on this tile
       if (card.stackable && activePlayer?.planned_actions) {
+        const combinedClaims: Card[] = [card];
         for (const action of activePlayer.planned_actions) {
           if (action.card.card_type !== 'claim') continue;
           if (`${action.target_q},${action.target_r}` === key) {
             effectivePower += computeClaimPowerOnTile(action.card, tile, tiles, activePlayerId, handSize, playerTileCount);
+            combinedClaims.push(action.card);
           }
         }
+        // Add stacking power bonus (e.g. Dog Pile) — each claim with
+        // stacking_power_bonus grants its value to every other claim in the stack.
+        effectivePower += computeStackingPowerBonus(combinedClaims);
       }
       if (canClaimCaptureTile(card, tile, effectivePower)) {
         strong.add(key);
@@ -3820,6 +3913,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (!card.stackable && activePlayer?.planned_actions) {
           for (const action of activePlayer.planned_actions) {
             if (action.card.card_type !== 'claim') continue;
+            if (action.card.stackable) continue;
             if (action.target_q != null) {
               alreadyClaimed.add(`${action.target_q},${action.target_r}`);
             }
@@ -4167,6 +4261,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             <HexGrid
               tiles={displayState.grid.tiles}
               onTileClick={handleTileClick}
+              onTilePointerDown={() => { tileClickedRef.current = true; }}
               highlightTiles={(() => {
                 if (phase !== 'play') return undefined;
                 if (multiTileCardIndex !== null) {
@@ -4229,6 +4324,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     if (!card.stackable && activePlayer?.planned_actions) {
                       for (const action of activePlayer.planned_actions) {
                         if (action.card.card_type !== 'claim') continue;
+                        if (action.card.stackable) continue;
                         if (action.target_q != null) alreadyClaimed.add(`${action.target_q},${action.target_r}`);
                         if (action.extra_targets) for (const [eq, er] of action.extra_targets) alreadyClaimed.add(`${eq},${er}`);
                       }
@@ -5197,8 +5293,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 ? (multiTileCard?.defense_target_count ?? 1)
                 : 1 + (multiTileCard?.multi_target_count ?? 0);
               const label = multiTileCard?.name ?? (isDefenseMulti ? 'Defend' : 'Claim');
+              const isFullSelection = (1 + multiTileTargets.length) >= maxTotal;
               return (
                 <>
+                  <style>{`
+                    @keyframes pulseGlowGreenMulti {
+                      0%, 100% { box-shadow: 0 0 6px rgba(42,170,74,0.3), 0 2px 8px rgba(0,0,0,0.4); }
+                      50% { box-shadow: 0 0 14px rgba(42,170,74,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                    }
+                  `}</style>
                   <span style={{ fontSize: 12, color: '#aaa' }}>
                     Tiles selected: {1 + multiTileTargets.length}/{maxTotal}
                   </span>
@@ -5223,10 +5326,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   <IrreversibleButton
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={handleConfirmMultiTile}
-                    tooltip={`Confirm all selected tiles for this ${label} card.`}
+                    tooltip={`Confirm all selected tiles for this ${label} card.${isFullSelection ? ' (Press Enter)' : ''}`}
                     style={{
                       padding: '10px 24px',
-                      background: '#4a9eff',
+                      background: isFullSelection ? '#2aaa4a' : '#4a9eff',
                       border: 'none',
                       borderRadius: 8,
                       color: '#fff',
@@ -5235,6 +5338,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       fontSize: 18,
                       lineHeight: '1.2',
                       boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
+                      animation: isFullSelection ? 'pulseGlowGreenMulti 1.6s ease-in-out infinite' : undefined,
                     }}
                   >
                     Confirm Tiles
@@ -5375,14 +5479,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !gameState.players_done_buying.includes(activePlayerId) && !activePlayer.has_ended_turn && (
               <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
+                <style>{`
+                  @keyframes pulseGlowOrange {
+                    0%, 100% { box-shadow: 0 0 6px rgba(255,136,68,0.3), 0 2px 8px rgba(0,0,0,0.4); }
+                    50% { box-shadow: 0 0 14px rgba(255,136,68,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                  }
+                  @keyframes pulseGlowGreen {
+                    0%, 100% { box-shadow: 0 0 6px rgba(42,170,74,0.3), 0 2px 8px rgba(0,0,0,0.4); }
+                    50% { box-shadow: 0 0 14px rgba(42,170,74,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                  }
+                `}</style>
                 <HoldToSubmitButton
                   ref={endTurnRef}
                   onConfirm={handleEndTurn}
-                  requireHold={true}
+                  requireHold={!cannotAffordAnyBuyOption}
                   warning="Done buying ends your shopping. Any unspent resources carry over."
+                  tooltip={cannotAffordAnyBuyOption ? "You can't afford any card, upgrade, or re-roll." : undefined}
                   style={{
                     padding: '10px 24px',
-                    background: '#ff8844',
+                    background: cannotAffordAnyBuyOption ? '#2a9a3e' : '#ff8844',
                     border: 'none',
                     borderRadius: 8,
                     color: '#fff',
@@ -5390,10 +5505,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     cursor: 'pointer',
                     fontSize: 18,
                     lineHeight: '1.2',
-                    animation: 'pulseGlowOrange 2s ease-in-out infinite',
+                    animation: cannotAffordAnyBuyOption ? 'pulseGlowGreen 2s ease-in-out infinite' : 'pulseGlowOrange 2s ease-in-out infinite',
                   }}
                 >
-                  Done Buying →
+                  Done Buying {cannotAffordAnyBuyOption ? '✓' : '→'}
                 </HoldToSubmitButton>
               </div>
             )}
@@ -5616,6 +5731,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         <ResolveOverlay
           steps={resolutionSteps}
           gridTransform={gridTransformSnapshot}
+          gridTransformRef={gridTransformRef}
           gridRect={gridRectSnapshot ?? gridRect}
           gridContainerRef={gridContainerRef}
           onStepApply={applyResolveStep}

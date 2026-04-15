@@ -383,7 +383,10 @@ class CPUPlayer:
                 if a.target_q == tile.q and a.target_r == tile.r
                 and a.card.card_type == CardType.CLAIM
             ]
-            if existing_claims and not card.stackable:
+            # Stackable new cards can always land on a tile with prior
+            # claims. Non-stackable new cards are blocked only if any prior
+            # claim on the tile is also non-stackable.
+            if not card.stackable and any(not a.card.stackable for a in existing_claims):
                 continue
 
             score = self._score_tile_for_claim(game, player, tile, card, weights)

@@ -70,6 +70,27 @@ export interface PlannedActionIcon {
   tempDefPower: number;
 }
 
+/**
+ * Total stacking power bonus across a stack of claim cards on a single tile.
+ * Mirrors the backend `_stacking_power_bonus`: each claim with a
+ * `stacking_power_bonus` effect (e.g. Dog Pile) grants its value to every
+ * OTHER claim on the tile, so the total added to the tile's combined power
+ * is `value × (N − 1)` summed across all such cards.
+ */
+export function computeStackingPowerBonus(claimCards: Card[]): number {
+  if (claimCards.length < 2) return 0;
+  let totalVal = 0;
+  for (const c of claimCards) {
+    if (!c.effects) continue;
+    for (const eff of c.effects) {
+      if (eff.type !== 'stacking_power_bonus') continue;
+      const v = c.is_upgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
+      totalVal += v;
+    }
+  }
+  return totalVal * (claimCards.length - 1);
+}
+
 export interface ClaimChevron {
   targetQ: number;
   targetR: number;
@@ -97,6 +118,8 @@ export interface VpPath {
 interface HexGridProps {
   tiles: Record<string, HexTile>;
   onTileClick: (q: number, r: number, shiftKey?: boolean) => void;
+  /** Called on pointerdown on any tile — used by parent to suppress deselect-on-empty-grid-click. */
+  onTilePointerDown?: () => void;
   highlightTiles?: Set<string>;
   /** Tiles where claim power is insufficient — shown with orange outline */
   weakHighlightTiles?: Set<string>;
@@ -424,7 +447,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles }: HexGridProps) {
   const bgEnabled = useBackgroundImages();
   const bgEnabledRef = useRef(bgEnabled);
   bgEnabledRef.current = bgEnabled;
@@ -496,6 +519,8 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
   // Long-press undo state
   const onLongPressRef = useRef(onLongPress);
   onLongPressRef.current = onLongPress;
+  const onTilePointerDownRef = useRef(onTilePointerDown);
+  onTilePointerDownRef.current = onTilePointerDown;
   const undoableTilesRef = useRef(undoableTiles);
   undoableTilesRef.current = undoableTiles;
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -706,9 +731,22 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
       g.cursor = 'pointer';
       g.hitArea = { contains: (px: number, py: number) => {
         const dx = px - x; const dy = py - y;
-        return Math.sqrt(dx * dx + dy * dy) < HEX_SIZE;
+        // Slightly enlarge the hit radius so clicks that land on the yellow
+        // highlight stroke (drawn on the hex edge, extends ~1.25px beyond)
+        // still register on a tile. Without this, clicks exactly on a hex
+        // corner are at distance HEX_SIZE and miss every tile's hit area,
+        // causing the parent grid-container to deselect the active card.
+        const HIT_PADDING = 3;
+        const r = HEX_SIZE + HIT_PADDING;
+        return dx * dx + dy * dy <= r * r;
       }};
       g.on('pointerdown', (e) => {
+        // Signal to parent that a tile was pressed, BEFORE any branching. The
+        // parent uses this to suppress the "click empty grid to deselect" logic;
+        // without this, clicking an undoable tile (whose click only fires on
+        // pointerup) would let the parent's pointerdown handler deselect the
+        // currently-selected card before the click resolves.
+        onTilePointerDownRef.current?.();
         const isUndoable = undoableTilesRef.current?.has(key);
         if (!isUndoable) {
           // No long-press behavior: fire click immediately
@@ -920,8 +958,16 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
             }
             previewPower = basePower;
             const existingPlanned = plannedActionsRef.current?.get(key);
-            if (pCard.stackable && existingPlanned) {
-              previewPower = existingPlanned.power + basePower;
+            if (existingPlanned && pCard.card_type === 'claim') {
+              // When a claim lands on a tile with prior planned claims (legal either because
+              // pCard is stackable OR because every prior claim is stackable — see backend
+              // stacking rules), the tile's resolve-time power is the sum of all intrinsic
+              // claim powers + any stacking bonus from stackable claims in the combined stack.
+              const existingClaims = existingPlanned.allCards
+                .filter(ac => ac.card.card_type === 'claim')
+                .map(ac => ac.card);
+              const combinedClaims = [...existingClaims, pCard];
+              previewPower = existingPlanned.power + basePower + computeStackingPowerBonus(combinedClaims);
             }
 
             if (isImmunityPreview) {
@@ -1024,7 +1070,11 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
         const multiTileCard = previewCardRef.current;
         const isMultiTileTarget = multiTileCard && multiTileTargetsRef.current?.some(([sq, sr]) => `${sq},${sr}` === key);
         if (plannedAction) {
-          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name, allCards: plannedAction.allCards, undoable: undoableTilesRef.current?.has(key) });
+          const claimOnlyCards = plannedAction.allCards
+            .filter(ac => ac.card.card_type === 'claim')
+            .map(ac => ac.card);
+          const tooltipPower = plannedAction.power + computeStackingPowerBonus(claimOnlyCards);
+          setTooltip({ x: e.global.x, y: e.global.y, card: plannedAction.card, totalPower: tooltipPower, displayName: plannedAction.name, allCards: plannedAction.allCards, undoable: undoableTilesRef.current?.has(key) });
         } else if (isMultiTileTarget && multiTileCard) {
           const permDef = multiTileCard.effects?.find(e => e.type === 'permanent_defense');
           const defPow = permDef
@@ -1819,7 +1869,11 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
           actionLabel = new Text({ text: '🎯', style: new TextStyle({ fontSize: 13, fill: 0xff6666, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
           (actionLabel as Text).anchor.set(0.5);
         } else if (!isDefensivePlay) {
-          actionLabel = new Text({ text: `⚔ ${plannedAction.power}`, style: new TextStyle({ fontSize: claimFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
+          const claimCardsOnTile = plannedAction.allCards
+            .filter(ac => ac.card.card_type === 'claim')
+            .map(ac => ac.card);
+          const displayPower = plannedAction.power + computeStackingPowerBonus(claimCardsOnTile);
+          actionLabel = new Text({ text: `⚔ ${displayPower}`, style: new TextStyle({ fontSize: claimFontSize, fill: 0xffffff, fontWeight: 'bold', stroke: actionStroke }), resolution: Math.ceil(window.devicePixelRatio || 2) });
           (actionLabel as Text).anchor.set(0.5);
         } else {
           // Check if any card on this tile grants immunity
@@ -1947,11 +2001,18 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
         const { x: sx, y: sy } = axialToPixel(sq, sr);
         const sLabelAlpha = buildAlpha(sq, sr);
 
-        // Combine with existing planned action power on this tile
+        // Combine with existing planned action power on this tile. Stacking is legal whenever
+        // the engine accepted this tile as a valid extra target — either pCard is stackable,
+        // or every prior planned claim here is stackable. Either way the resolve-time power
+        // is the sum of all intrinsic claim powers + any stacking bonus.
         const existingPlanned = planned?.get(sKey);
         let previewPower = cardPower;
-        if (existingPlanned && multiTilePreviewCard.stackable) {
-          previewPower = existingPlanned.power + cardPower;
+        if (existingPlanned && multiTilePreviewCard.card_type === 'claim') {
+          const existingClaims = existingPlanned.allCards
+            .filter(ac => ac.card.card_type === 'claim')
+            .map(ac => ac.card);
+          const combinedClaims = [...existingClaims, multiTilePreviewCard];
+          previewPower = existingPlanned.power + cardPower + computeStackingPowerBonus(combinedClaims);
         }
 
         const isDefensivePlay = isDefenseCard || sTile.owner === activePlayer;
@@ -2355,7 +2416,11 @@ export default function HexGrid({ tiles, onTileClick, highlightTiles, weakHighli
     const plannedAction = plannedActionsRef.current?.get(key);
     if (plannedAction) {
       // Update tooltip with current planned action data
-      setTooltip(prev => prev ? { ...prev, card: plannedAction.card, totalPower: plannedAction.power, displayName: plannedAction.name, allCards: plannedAction.allCards, undoable: undoableTilesRef.current?.has(key) } : null);
+      const claimOnlyCards = plannedAction.allCards
+        .filter(ac => ac.card.card_type === 'claim')
+        .map(ac => ac.card);
+      const tooltipPower = plannedAction.power + computeStackingPowerBonus(claimOnlyCards);
+      setTooltip(prev => prev ? { ...prev, card: plannedAction.card, totalPower: tooltipPower, displayName: plannedAction.name, allCards: plannedAction.allCards, undoable: undoableTilesRef.current?.has(key) } : null);
     } else {
       // No more planned actions on this tile — hide tooltip
       setTooltip(null);

@@ -105,17 +105,68 @@ def calculate_effective_power(
     player: Player,
     card: Card,
     action: PlannedAction,
+    include_stacking_bonus: bool = True,
 ) -> int:
     """Calculate total power for a claim card including conditional modifiers.
 
     If the action already has a snapshotted effective_power (computed at play
-    time), returns that directly — dynamic values are frozen once when played.
-    Otherwise computes from the current game state (used at play time itself).
-    """
-    # Return the frozen snapshot if available (used during resolve phase)
-    if action.effective_power is not None:
-        return action.effective_power
+    time), that frozen intrinsic value is used as the base. Otherwise the
+    intrinsic value is computed from the card's own effects against the
+    current game state.
 
+    STACKING_POWER_BONUS (Dog Pile) is applied on top and is *not*
+    snapshotted — the tile may gain or lose stacking sources after this
+    card is played, so the bonus must be recomputed from the player's
+    current planned_actions at resolve time.
+
+    Pass `include_stacking_bonus=False` when the caller is itself snapshotting
+    this action's intrinsic power (to avoid double-counting at resolve).
+    """
+    # Intrinsic power: either the frozen snapshot (if a dynamic modifier
+    # applied at play time) or computed fresh from the card's own effects.
+    if action.effective_power is not None:
+        intrinsic = action.effective_power
+    else:
+        intrinsic = _calculate_intrinsic_power(game, player, card, action)
+
+    if not include_stacking_bonus or card.card_type != CardType.CLAIM or action.target_q is None:
+        return intrinsic
+
+    return intrinsic + _stacking_power_bonus(player, action)
+
+
+def _stacking_power_bonus(player: Player, action: PlannedAction) -> int:
+    """Sum of STACKING_POWER_BONUS values from OTHER claims by this player on
+    the same tile as `action`. Dog Pile's +1 doesn't apply to itself.
+    """
+    if action.target_q is None:
+        return 0
+    tq = action.target_q
+    tr = action.target_r if action.target_r is not None else 0
+    bonus = 0
+    for other in player.planned_actions:
+        if other is action:
+            continue
+        if other.card.card_type != CardType.CLAIM:
+            continue
+        other_r = other.target_r if other.target_r is not None else 0
+        if other.target_q != tq or other_r != tr:
+            continue
+        for eff in other.card.effects:
+            if eff.type == EffectType.STACKING_POWER_BONUS:
+                bonus += eff.effective_value(other.card.is_upgraded)
+    return bonus
+
+
+def _calculate_intrinsic_power(
+    game: GameState,
+    player: Player,
+    card: Card,
+    action: PlannedAction,
+) -> int:
+    """Compute power from this card's own effects only (no stacking bonus).
+    This is the value that gets snapshotted at play time.
+    """
     base_power = card.effective_power
     bonus = 0
 
@@ -689,7 +740,9 @@ def _handle_resource_refund_if_neutral(effect: Effect, ctx: EffectContext) -> No
 
 
 def _handle_stacking_power_bonus(effect: Effect, ctx: EffectContext) -> None:
-    """Dog Pile: handled in calculate_effective_power, no runtime action needed."""
+    """Dog Pile: the +1 bonus is applied to other claims on the same tile via
+    calculate_effective_power (_stacking_power_bonus). Nothing to do here.
+    """
     pass
 
 

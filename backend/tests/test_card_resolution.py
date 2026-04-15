@@ -1341,6 +1341,87 @@ class TestSwarmDogPile:
         assert len(bonus_fx) == 1
         assert bonus_fx[0].value == 1
 
+    def test_dog_pile_boosts_other_claim_on_same_tile(self, card_registry):
+        """Dog Pile + another claim on the same tile: the other claim gets +1."""
+        game = _make_2p_game(card_registry)
+        dog_pile = _copy_card(card_registry["swarm_dog_pile"], "test_dp")
+        # Use a plain stackable claim (another Dog Pile would also carry the
+        # bonus; we want to test a "plain" target getting the boost).
+        other = _make_card(
+            card_id="test_plain_claim",
+            name="Plain Claim",
+            card_type=CardType.CLAIM,
+            power=3,
+            stackable=True,
+        )
+        player = game.players["p1"]
+        player.hand = [dog_pile, other] + player.hand[2:]
+
+        q, r = _find_adjacent_neutral(game, "p1")
+        assert q is not None
+        assert play_card(game, "p1", 0, target_q=q, target_r=r)[0]
+        assert play_card(game, "p1", 0, target_q=q, target_r=r)[0]
+
+        dp_action = next(a for a in player.planned_actions if a.card is dog_pile)
+        other_action = next(a for a in player.planned_actions if a.card is other)
+
+        # Dog Pile itself: base power 2, no self-bonus
+        assert calculate_effective_power(game, player, dp_action.card, dp_action) == 2
+        # Plain claim: base power 3, +1 from Dog Pile on same tile
+        assert calculate_effective_power(game, player, other_action.card, other_action) == 4
+
+    def test_dog_pile_pair_each_boosts_the_other(self, card_registry):
+        """Two Dog Piles on the same tile: each gets +1 from the other."""
+        game = _make_2p_game(card_registry)
+        dp1 = _copy_card(card_registry["swarm_dog_pile"], "test_dp1")
+        dp2 = _copy_card(card_registry["swarm_dog_pile"], "test_dp2")
+        player = game.players["p1"]
+        player.hand = [dp1, dp2] + player.hand[2:]
+
+        q, r = _find_adjacent_neutral(game, "p1")
+        assert q is not None
+        assert play_card(game, "p1", 0, target_q=q, target_r=r)[0]
+        assert play_card(game, "p1", 0, target_q=q, target_r=r)[0]
+
+        a1 = next(a for a in player.planned_actions if a.card is dp1)
+        a2 = next(a for a in player.planned_actions if a.card is dp2)
+        assert calculate_effective_power(game, player, a1.card, a1) == 3
+        assert calculate_effective_power(game, player, a2.card, a2) == 3
+
+    def test_dog_pile_does_not_boost_other_tile(self, card_registry):
+        """Dog Pile's bonus is tile-scoped — claims on a different tile don't get it."""
+        game = _make_2p_game(card_registry)
+        dog_pile = _copy_card(card_registry["swarm_dog_pile"], "test_dp")
+        other = _make_card(
+            card_id="test_other_tile_claim",
+            name="Other Tile Claim",
+            card_type=CardType.CLAIM,
+            power=3,
+        )
+        player = game.players["p1"]
+        player.hand = [dog_pile, other] + player.hand[2:]
+
+        assert game.grid is not None
+        # Find two distinct adjacent neutral tiles for p1
+        adj_neutrals: list[tuple[int, int]] = []
+        for pt in game.grid.get_player_tiles("p1"):
+            for adj in game.grid.get_adjacent(pt.q, pt.r):
+                if adj.owner is None and not adj.is_blocked and (adj.q, adj.r) not in adj_neutrals:
+                    adj_neutrals.append((adj.q, adj.r))
+                    if len(adj_neutrals) >= 2:
+                        break
+            if len(adj_neutrals) >= 2:
+                break
+        assert len(adj_neutrals) >= 2
+        (q1, r1), (q2, r2) = adj_neutrals[0], adj_neutrals[1]
+
+        assert play_card(game, "p1", 0, target_q=q1, target_r=r1)[0]
+        assert play_card(game, "p1", 0, target_q=q2, target_r=r2)[0]
+
+        other_action = next(a for a in player.planned_actions if a.card is other)
+        # Plain claim on a different tile: base power 3, no bonus
+        assert calculate_effective_power(game, player, other_action.card, other_action) == 3
+
 
 class TestSwarmNumbersGame:
     """Already tested in test_effects.py — TestConditionalPower."""

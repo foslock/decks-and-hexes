@@ -6,6 +6,7 @@ import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
 import CardBrowser, { clearBrowserCollapseMemory } from './CardBrowser';
+import { savePlayerName } from '../utils/playerName';
 
 interface CardPackDef {
   id: string;
@@ -324,6 +325,7 @@ export default function LobbyScreen({
     try {
       setError(null);
       await api.updateLobbyPlayer(lobbyCode, playerId, token, updates);
+      if (updates.name !== undefined) savePlayerName(updates.name);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }

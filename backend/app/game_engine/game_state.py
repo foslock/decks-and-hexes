@@ -1191,12 +1191,17 @@ def play_card(game: GameState, player_id: str, card_index: int,
             # with higher defense (e.g. to stack multiple claims). Insufficient
             # power simply fails at resolution time.
 
-            # Check stacking (only one claim per tile unless exception).
-            # Multi-target claims (Surge) lock their extra targets too, so a
-            # subsequent non-stackable claim on any of them is rejected.
-            def _tile_is_claimed(q: int, r: int) -> bool:
+            # Stacking rules:
+            #  - A stackable new card may always be played on a tile that has
+            #    prior claims, regardless of those claims' own stackability.
+            #  - A non-stackable new card is rejected if any prior planned
+            #    claim on the tile (primary or extra target) is non-stackable.
+            #    (Prior stackable claims don't lock the tile.)
+            def _tile_has_non_stackable_claim(q: int, r: int) -> bool:
                 for a in player.planned_actions:
                     if a.card.card_type != CardType.CLAIM:
+                        continue
+                    if a.card.stackable:
                         continue
                     if a.target_q == q and a.target_r == r:
                         return True
@@ -1204,7 +1209,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
                         return True
                 return False
 
-            if not card.stackable and _tile_is_claimed(target_q, _target_r):
+            if not card.stackable and _tile_has_non_stackable_claim(target_q, _target_r):
                 return False, "This card is not Stackable"
 
             # Adjacency bridge: target must connect two disconnected territory groups
@@ -1265,9 +1270,10 @@ def play_card(game: GameState, player_id: str, card_index: int,
                     continue
             if card.effective_unoccupied_only and et_tile.owner is not None:
                 continue
-            # Non-stackable claims can't land on a tile any prior planned
-            # claim (primary or extra) already targets this round.
-            if not card.stackable and _tile_is_claimed(et_q, et_r):
+            # A non-stackable claim can't land on a tile any prior planned
+            # non-stackable claim (primary or extra) already targets this
+            # round. Stackable claims pass through unrestricted.
+            if not card.stackable and _tile_has_non_stackable_claim(et_q, et_r):
                 continue
             validated_extra.append((et_q, et_r))
 
@@ -1374,7 +1380,12 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 card.card_type == CardType.DEFENSE and card.effective_defense_target_count > 1
             ) else [],
         )
-        computed = calculate_effective_power(game, player, card, _tmp_action)
+        # Snapshot intrinsic power only — stacking_power_bonus (Dog Pile)
+        # is applied fresh at resolve time, since more stacking sources may
+        # be played on this tile after this snapshot is taken.
+        computed = calculate_effective_power(
+            game, player, card, _tmp_action, include_stacking_bonus=False,
+        )
         # Only store if it differs from the base power (i.e. a dynamic modifier applied)
         if computed != card.effective_power:
             snapshotted_power = computed
