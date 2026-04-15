@@ -213,7 +213,14 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // transitions, or the banner unmounting). Both values come from the same
   // post-layout snapshot so they are always mutually consistent.
   useLayoutEffect(() => {
-    measuredRectRef.current = gridContainerRef?.current?.getBoundingClientRect() ?? gridRect ?? null;
+    const container = gridContainerRef?.current;
+    // Use the canvas element's rect when available — it exactly matches Pixi's
+    // app.screen dimensions (the drawing surface), whereas the outer wrapper div
+    // may be taller/wider due to flex layout. fitGrid positions the hexContainer
+    // at (app.screen.width/2, app.screen.height/2), so we must use those same
+    // dimensions as the coordinate origin for correct number placement.
+    const canvas = container?.querySelector('canvas') ?? null;
+    measuredRectRef.current = (canvas ?? container)?.getBoundingClientRect() ?? gridRect ?? null;
     measuredTransformRef.current = gridTransformRef?.current ?? gridTransformProp ?? null;
   });
 
