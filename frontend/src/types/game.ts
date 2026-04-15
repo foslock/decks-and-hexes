@@ -190,6 +190,7 @@ export interface ResolutionStep {
   defense_permanent?: number;  // defense_applied: persistent defense after application
   defense_temporary?: number;  // defense_applied: temporary defense after application
   defense_immunity?: boolean;  // defense_applied: tile has immunity (Iron Wall / Stronghold)
+  is_base_raid?: boolean;  // claim targets the defender's base tile — uses a distinct resolution animation
 }
 
 export interface PlayerEffect {

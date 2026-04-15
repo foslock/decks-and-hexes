@@ -2969,6 +2969,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           return;
         }
 
+        // Priority 0.25: Confirm Trash/Discard selection when at max
+        if (phase === 'play' && trashMode && trashSelectedIndices.size === trashMode.maxCards && trashMode.maxCards > 0) {
+          handleConfirmTrash();
+          return;
+        }
+
         // Priority 0.5: Confirm multi-tile selection when full
         if (
           phase === 'play' && activePlayer && !resolving &&
@@ -3059,7 +3065,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, handleTrashToggle, selectedCardIndex, multiTileCardIndex, multiTileTargets, multiTilePrimaryTarget, handleConfirmMultiTile, resolving, reviewing, reviewButtonVisible, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
+  }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, trashSelectedIndices, handleTrashToggle, handleConfirmTrash, selectedCardIndex, multiTileCardIndex, multiTileTargets, multiTilePrimaryTarget, handleConfirmMultiTile, resolving, reviewing, reviewButtonVisible, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
   const handleDiscardAllComplete = useCallback(() => {
     setDiscardingAll(false);
@@ -5353,9 +5359,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               const card = activePlayer?.hand[trashMode.cardIndex];
               const count = trashSelectedIndices.size;
               const canConfirm = count >= trashMode.minCards && count <= trashMode.maxCards;
+              const atMaxSelection = count === trashMode.maxCards && trashMode.maxCards > 0;
               const isOptional = trashMode.minCards === 0;
               return (
                 <>
+                  <style>{`
+                    @keyframes pulseGlowConfirmTrash {
+                      0%, 100% { box-shadow: 0 0 6px rgba(255,220,120,0.35), 0 2px 8px rgba(0,0,0,0.4); }
+                      50% { box-shadow: 0 0 16px rgba(255,220,120,0.75), 0 2px 8px rgba(0,0,0,0.4); }
+                    }
+                  `}</style>
                   <span style={{ fontSize: 12, color: '#aaa' }}>
                     {trashMode.label}: {count}/{trashMode.maxCards} card{trashMode.maxCards !== 1 ? 's' : ''} selected
                     {isOptional && <span style={{ color: '#888' }}> (optional)</span>}
@@ -5395,6 +5408,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       lineHeight: '1.2',
                       boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                       opacity: canConfirm ? 1 : 0.5,
+                      animation: atMaxSelection ? 'pulseGlowConfirmTrash 1.4s ease-in-out infinite' : undefined,
                     }}
                   >
                     Confirm {trashMode.label}
