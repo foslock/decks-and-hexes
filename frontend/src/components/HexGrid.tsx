@@ -163,7 +163,12 @@ interface HexGridProps {
   onLongPress?: (q: number, r: number) => void;
   /** Tile keys where long-press triggers undo (have reversible planned actions) */
   undoableTiles?: Set<string>;
+  /** Ref populated with the Pixi Container used for resolve animations — set by HexGrid, read by ResolveOverlay */
+  resolveLayerRef?: React.MutableRefObject<Container | null>;
 }
+
+/** Re-exported so callers can type the resolve layer ref without importing pixi.js directly. */
+export type { Container as PixiContainer };
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
   const x = HEX_SIZE * (3 / 2) * q;
@@ -447,7 +452,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles, resolveLayerRef }: HexGridProps) {
   const bgEnabled = useBackgroundImages();
   const bgEnabledRef = useRef(bgEnabled);
   bgEnabledRef.current = bgEnabled;
@@ -459,6 +464,8 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
   const onClickRef = useRef(onTileClick);
   const playerInfoRef = useRef(playerInfo);
   const transformRefLocal = useRef(transformRef);
+  const resolveLayerRefLocal = useRef(resolveLayerRef);
+  const resolveLayerContainerRef = useRef<Container | null>(null);
   const borderTilesRef = useRef(borderTiles);
   const activePlayerIdRef = useRef(activePlayerId);
   const plannedActionsRef = useRef(plannedActions);
@@ -535,6 +542,7 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
   onClickRef.current = onTileClick;
   playerInfoRef.current = playerInfo;
   transformRefLocal.current = transformRef;
+  resolveLayerRefLocal.current = resolveLayerRef;
   borderTilesRef.current = borderTiles;
   activePlayerIdRef.current = activePlayerId;
   plannedActionsRef.current = plannedActions;
@@ -626,9 +634,10 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
     // finishes, so destroying them here would invalidate those refs.
     const preservedVp = vpPathGraphicsRef.current;
     const preservedPulse = reviewPulseGraphicsRef.current;
+    const preservedResolve = resolveLayerContainerRef.current;
     const oldChildren = hexContainer.removeChildren();
     for (const child of oldChildren) {
-      if (child === preservedVp || child === preservedPulse) continue;
+      if (child === preservedVp || child === preservedPulse || child === preservedResolve) continue;
       // destroy({children: true}) recursively frees nested Containers/Text
       // (e.g. the multi-line labels pushed into textChildrenRef).
       child.destroy({ children: true });
@@ -2174,6 +2183,15 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
       const idx = Math.min(vpInsertIndexRef.current, hexContainer.children.length);
       hexContainer.addChildAt(vpPathG, idx);
 
+      // Create resolve animation layer — sits just above VP paths; children are Pixi Graphics
+      // drawn by ResolveOverlay. Preserved across renderTiles calls so in-flight animations
+      // survive tile re-renders (e.g. ownership updates during resolution).
+      const resolveC = new Container();
+      resolveC.sortableChildren = true; // winner wedge draws on top via zIndex
+      resolveLayerContainerRef.current = resolveC;
+      if (resolveLayerRefLocal.current) resolveLayerRefLocal.current.current = resolveC;
+      hexContainer.addChildAt(resolveC, Math.min(idx + 1, hexContainer.children.length));
+
       // Pixi ticker for smooth VP path pulse animation
       const vpTickerFn = () => {
         const g = vpPathGraphicsRef.current;
@@ -2371,6 +2389,8 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
         appRef.current = null;
       }
       vpPathGraphicsRef.current = null;
+      resolveLayerContainerRef.current = null;
+      if (resolveLayerRefLocal.current) resolveLayerRefLocal.current.current = null;
     };
   }, []);
 
@@ -2400,6 +2420,12 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
     if (vpG && hexContainerRef.current) {
       const idx = Math.min(vpInsertIndexRef.current, hexContainerRef.current.children.length);
       hexContainerRef.current.addChildAt(vpG, idx);
+    }
+    // Re-add resolve animation layer just above VP paths, below text labels
+    const resolveC = resolveLayerContainerRef.current;
+    if (resolveC && hexContainerRef.current) {
+      const resolveIdx = vpInsertIndexRef.current + (vpG ? 1 : 0);
+      hexContainerRef.current.addChildAt(resolveC, Math.min(resolveIdx, hexContainerRef.current.children.length));
     }
     // Re-add review pulse layer on top
     const pulseG = reviewPulseGraphicsRef.current;

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type { HexTile, ResolutionStep, ResolutionClaimant } from '../types/game';
-import HexGrid, { type GridTransform, PLAYER_COLORS } from './HexGrid';
+import HexGrid, { type GridTransform, type PixiContainer, PLAYER_COLORS } from './HexGrid';
 import ResolveOverlay from './ResolveOverlay';
 import { useSettings, type AnimationMode } from './SettingsContext';
 
@@ -194,6 +194,7 @@ export default function ResolveAnimationPreview() {
 
   const transformRef = useRef<GridTransform | null>(null);
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
+  const resolveLayerRef = useRef<PixiContainer | null>(null);
 
   const { settings, setAnimationMode } = useSettings();
 
@@ -336,6 +337,7 @@ export default function ResolveAnimationPreview() {
           tiles={tiles}
           onTileClick={handleTileClick}
           transformRef={transformRef}
+          resolveLayerRef={resolveLayerRef}
           activePlayerId={lastScenario ? PLAYERS[0] : undefined}
         />
       </div>
@@ -360,6 +362,7 @@ export default function ResolveAnimationPreview() {
           gridTransform={snapshotTransform}
           gridRect={snapshotRect}
           gridContainerRef={gridContainerRef}
+          resolveLayerRef={resolveLayerRef}
           onStepApply={applyStep}
           onComplete={handleComplete}
         />
