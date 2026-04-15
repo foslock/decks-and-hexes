@@ -109,7 +109,7 @@ cards:
     name: Garrison
     name_upgraded: Garrison+
     type: Claim
-    buy_cost: 3
+    buy_cost: 5
     action_return: 0
     reversible: true
     power: 4
