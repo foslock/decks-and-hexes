@@ -181,7 +181,7 @@ cards:
     name: Forward March
     name_upgraded: Forward March+
     type: Claim
-    buy_cost: 2
+    buy_cost: 3
     action_return: 0
     reversible: true
     power: 1

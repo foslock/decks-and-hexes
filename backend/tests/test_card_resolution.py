@@ -577,7 +577,7 @@ class TestNeutralWatchtower:
         """Watchtower: +2 defense, draw 1."""
         card = card_registry["neutral_watchtower"]
         assert card.defense_bonus == 2
-        assert card.buy_cost == 3
+        assert card.buy_cost == 2
 
 
 class TestNeutralSiegeTower:
@@ -1715,7 +1715,7 @@ class TestFortressGarrison:
     def test_garrison_is_claim(self, card_registry):
         card = card_registry["fortress_garrison"]
         assert card.card_type == CardType.CLAIM
-        assert card.power == 3
+        assert card.power == 4
 
 
 class TestFortressMountaineer:
@@ -2976,12 +2976,12 @@ class TestNeutralCartographer:
 
 class TestNeutralTaxCollector:
     def test_tax_collector_properties(self, card_registry):
-        """Tax Collector: engine, cost 4, resource_per_vp_hex effect."""
+        """Tax Collector: engine, cost 3, resource_per_vp_hex effect."""
         card = card_registry.get("neutral_tax_collector")
         if not card:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.ENGINE
-        assert card.buy_cost == 4
+        assert card.buy_cost == 3
         assert card.archetype == Archetype.SHARED
         assert len(card.effects) >= 1
         eff = card.effects[0]

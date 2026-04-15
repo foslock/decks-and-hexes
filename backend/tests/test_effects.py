@@ -529,7 +529,7 @@ class TestConditionalPower:
 
         # Tile is owned by Fort -> defending
         effective = calculate_effective_power(game, fort, garrison, action)
-        assert effective == 5  # 3 base + 2 defending bonus
+        assert effective == 6  # 4 base + 2 defending bonus
 
     def test_garrison_attacking_power(self, card_registry):
         """Garrison: base power (3) when attacking an enemy tile."""
@@ -554,7 +554,7 @@ class TestConditionalPower:
         action = PlannedAction(card=garrison, target_q=target.q, target_r=target.r)
 
         effective = calculate_effective_power(game, fort, garrison, action)
-        assert effective == 3  # base only, not defending
+        assert effective == 4  # base only, not defending
 
     def test_militia_conditional_power(self, card_registry):
         """Militia: power 4 if 3+ adjacent tiles owned."""

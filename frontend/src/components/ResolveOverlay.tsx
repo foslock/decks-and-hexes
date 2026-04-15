@@ -170,7 +170,7 @@ interface ActiveNumber {
   isDefender: boolean;
 }
 
-type StepStage = 'numbers_move' | 'winner_grow' | 'done';
+type StepStage = 'numbers_move' | 'winner_grow' | 'done' | 'br_fortify' | 'br_ram' | 'br_final';
 
 /**
  * Overlay rendered on top of the hex grid that animates resolution steps
@@ -196,6 +196,17 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
 
   // Pixi wedge state — Graphics objects live inside the resolve container provided by HexGrid
   const pixiWedgesRef = useRef<PixiWedge[] | null>(null);
+
+  // Base-raid Pixi state — fortification ring + crenellations + shatter shards. Cleaned up
+  // when the step changes or the component unmounts.
+  const pixiBaseRaidRef = useRef<{ ring: Graphics; crenels: Graphics; shards: Graphics } | null>(null);
+
+  // Ram-impact state — drives screen shake when the attacker wedge connects.
+  const [ramImpactCount, setRamImpactCount] = useState(0);
+
+  // Ref to the overlay root so we can shake the HTML number layer in sync with the canvas —
+  // the overlay is position:fixed above the grid, so the canvas shake doesn't reach it.
+  const overlayRootRef = useRef<HTMLDivElement | null>(null);
 
   // Stable refs for callbacks — prevents effect cleanup from cancelling
   // pending timeouts when parent re-renders (e.g. from WebSocket updates)
@@ -314,6 +325,13 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     && (step.outcome === 'claimed' || step.outcome === 'defended' || step.outcome === 'tie' || step.outcome === 'defense_held');
   /** True when an attacker wins and the tile color will flip; false when the defender holds. */
   const attackerWins = !!step?.winner_id && step.winner_id !== step?.defender_id && step?.outcome === 'claimed';
+
+  /** Base-raid: claim lands on an opponent's base tile. Gets a distinct, more dramatic
+   *  animation flow: br_fortify (defender glows, fortification ring appears) → br_ram
+   *  (attacker lunges 3×, screen shake) → br_final (shatter if captured, hold-flash if
+   *  defended) → done. Only applies to the wedge-battle outcomes where a defender exists. */
+  const isBaseRaid = !!step && step.is_base_raid === true && isWedgeBattle;
+  const baseRaidCaptured = isBaseRaid && attackerWins;
 
   // Triangular wedges, one per attacker (defender gets no wedge). Each wedge is a triangle formed
   // by the two corners of the attacker's approach edge plus an apex that animates from the edge
@@ -460,6 +478,13 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   const growMs = isOff ? 0 : Math.round((isAutoClaim ? 400 : isDefenseApplied ? 400 : isConsecrate ? 800 : isContested ? 1200 : 400) * animSpeed);
   const pauseMs = isOff ? 50 : Math.round((isDefenseApplied ? 100 : 200) * animSpeed);
 
+  // Base-raid timing — each phase is longer than the default wedge battle to convey weight.
+  const fortifyMs = isOff ? 0 : Math.round(900 * animSpeed);
+  const ramCount = 3;
+  const ramEachMs = isOff ? 0 : Math.round(420 * animSpeed);
+  const ramMs = ramEachMs * ramCount;
+  const finalMs = isOff ? 0 : Math.round(1000 * animSpeed);
+
   const fireStepApply = useCallback((idx: number) => {
     if (appliedStepsRef.current.has(idx)) return;
     appliedStepsRef.current.add(idx);
@@ -496,11 +521,14 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isWedgeBattle, isOff]);
 
-  // Effect 2: numbers_move phase — apex flies from edgeMid → hexCenter
+  // Effect 2: numbers_move phase — apex flies from edgeMid → hexCenter.
+  // For base raids, the wedge stays collapsed at the edge during numbers_move (only the
+  // number flies in); the apex advance happens later during br_ram as lunges.
   useEffect(() => {
     if (!numbersActive || stage !== 'numbers_move' || !isWedgeBattle) return;
     const wedges = pixiWedgesRef.current;
     if (!wedges) return;
+    if (isBaseRaid) return; // apex stays collapsed; br_ram drives it instead
 
     const start = performance.now();
     let raf = 0;
@@ -514,7 +542,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [numbersActive, stage, isWedgeBattle, moveMs]);
+  }, [numbersActive, stage, isWedgeBattle, moveMs, isBaseRaid]);
 
   // Effect 3: winner_grow phase — winner expands to full hex, losers shrink to edge
   useEffect(() => {
@@ -562,6 +590,331 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     return () => cancelAnimationFrame(raf);
   }, [stage, isWedgeBattle, pauseMs]);
 
+  // Screen-shake on ram impacts — apply a short shake animation to BOTH the grid canvas
+  // and the HTML number overlay each time ramImpactCount increments. Both shake in lock-step
+  // so the power numbers move with the wedges they label. The overlay is a position:fixed
+  // sibling of the grid, so we have to animate it separately; driving them from a single
+  // useEffect with the same duration keeps them perfectly synced.
+  useEffect(() => {
+    if (ramImpactCount === 0) return;
+    const container = gridContainerRef?.current;
+    const canvas = (container?.querySelector('canvas') ?? null) as HTMLElement | null;
+    const overlay = overlayRootRef.current;
+    const targets = [canvas, overlay].filter((el): el is HTMLElement => el != null);
+    if (targets.length === 0) return;
+    const duration = 260;
+    for (const t of targets) {
+      t.style.animation = 'none';
+      // Force reflow so re-applying the same animation name restarts it.
+      void t.offsetWidth;
+      t.style.animation = `base-raid-screen-shake ${duration}ms ease-out`;
+    }
+    const timer = setTimeout(() => {
+      for (const t of targets) t.style.animation = '';
+    }, duration + 50);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ramImpactCount]);
+
+  // ─── Base-raid Pixi effects ──────────────────────────────────────────────
+  // Effect BR-1: create fortification ring + crenellations + shards Graphics
+  useEffect(() => {
+    const prev = pixiBaseRaidRef.current;
+    if (prev) {
+      for (const g of [prev.ring, prev.crenels, prev.shards]) { if (!g.destroyed) g.destroy(); }
+      pixiBaseRaidRef.current = null;
+    }
+    const container = resolveLayerRef?.current;
+    if (!container || !step || !isBaseRaid || isOff) return;
+
+    const ring = new Graphics();    ring.zIndex = 2;  container.addChild(ring);
+    const crenels = new Graphics(); crenels.zIndex = 2; container.addChild(crenels);
+    const shards = new Graphics();  shards.zIndex = 3;  container.addChild(shards);
+    // Initial alpha: 0; effects below ramp it up during br_fortify.
+    ring.alpha = 0;
+    crenels.alpha = 0;
+    shards.alpha = 0;
+
+    pixiBaseRaidRef.current = { ring, crenels, shards };
+
+    return () => {
+      for (const g of [ring, crenels, shards]) { if (!g.destroyed) g.destroy(); }
+      pixiBaseRaidRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, isBaseRaid, isOff]);
+
+  // Effect BR-2: fortify phase — hex-shaped ring + crenellations along each edge materialize
+  // around the defender's base. The ring traces the hex outline at a small outward offset;
+  // crenellations are square "teeth" sitting on the outside of each of the 6 edges.
+  useEffect(() => {
+    if (stage !== 'br_fortify' || !isBaseRaid) return;
+    const br = pixiBaseRaidRef.current;
+    if (!br || !step) return;
+    const hexCenter = axialToPixel(step.q, step.r);
+    // Silver fortification — reads as "stone walls + metal trim" regardless of defender color,
+    // keeps the ring visually distinct from both wedges and player territory.
+    const ringColor = 0xd4d8de;
+    // Push corners outward a hair so the ring sits just outside the tile's own outline.
+    const ringCornerR = HEX_SIZE * 1.06;
+    // Crenel size, scaled off the tile's edge length.
+    const edgeLen = HEX_SIZE; // flat-top hex: side length == HEX_SIZE
+    const crenelW = edgeLen * 0.22;
+    const crenelH = edgeLen * 0.18;
+    // Evenly spaced offsets along each edge (in edge-local param space -0.5..+0.5).
+    const crenelOffsets = [-0.3, 0, 0.3];
+
+    // Flat-top hex corner at angle k*60° (matches the rest of the file's geometry).
+    const hexCorner = (k: number, radius: number) => ({
+      x: hexCenter.x + Math.cos(k * Math.PI / 3) * radius,
+      y: hexCenter.y + Math.sin(k * Math.PI / 3) * radius,
+    });
+
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const raw = Math.min(1, (now - start) / Math.max(fortifyMs, 1));
+      const t = raw < 0.7 ? raw / 0.7 : 1;
+      // Subtle breathing pulse — scales the whole ring outward/inward.
+      const pulse = 1 + Math.sin(raw * Math.PI * 3) * 0.03 * (1 - raw);
+      const cornerR = ringCornerR * pulse;
+
+      // Compute the 6 hex corners at this scale.
+      const corners = [0, 1, 2, 3, 4, 5].map(k => hexCorner(k, cornerR));
+
+      if (!br.ring.destroyed) {
+        br.ring.clear();
+        br.ring.setStrokeStyle({ width: 4 * t, color: ringColor, alpha: 0.95, join: 'miter' });
+        // Trace the hex outline as a closed polygon.
+        br.ring.poly(corners);
+        br.ring.stroke();
+        br.ring.alpha = t;
+      }
+      if (!br.crenels.destroyed) {
+        br.crenels.clear();
+        br.crenels.fill({ color: ringColor, alpha: 0.9 });
+        // Place crenels along each of the 6 edges.
+        for (let k = 0; k < 6; k++) {
+          const a = corners[k];
+          const b = corners[(k + 1) % 6];
+          // Edge direction (unit) and outward normal (unit).
+          const ex = b.x - a.x, ey = b.y - a.y;
+          const eLen = Math.hypot(ex, ey) || 1;
+          const ux = ex / eLen, uy = ey / eLen;
+          // Outward normal points away from hex center. For a flat-top hex wound CCW, rotating
+          // the edge vector +90° (−y,+x) gives the outward normal.
+          const nx = -uy, ny = ux;
+          for (const param of crenelOffsets) {
+            // Center of this crenel on the edge, pushed slightly outward so the tooth sits on
+            // the outside of the wall.
+            const cxE = a.x + ex * (0.5 + param) + nx * 1;
+            const cyE = a.y + ey * (0.5 + param) + ny * 1;
+            // Tooth footprint: half-width along the edge, full height along the normal.
+            const hw = crenelW / 2;
+            const pts = [
+              { x: cxE - ux * hw,          y: cyE - uy * hw          },
+              { x: cxE + ux * hw,          y: cyE + uy * hw          },
+              { x: cxE + ux * hw + nx * crenelH, y: cyE + uy * hw + ny * crenelH },
+              { x: cxE - ux * hw + nx * crenelH, y: cyE - uy * hw + ny * crenelH },
+            ];
+            br.crenels.poly(pts);
+          }
+        }
+        br.crenels.fill();
+        br.crenels.alpha = t;
+      }
+      if (raw < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, isBaseRaid, step, fortifyMs]);
+
+  // Effect BR-3: ram phase — attacker wedge apex lunges toward center ramCount times.
+  // Each lunge emits a ram sound + increments ramImpactCount to trigger CSS screen shake.
+  useEffect(() => {
+    if (stage !== 'br_ram' || !isBaseRaid) return;
+    const wedges = pixiWedgesRef.current;
+    const br = pixiBaseRaidRef.current;
+    if (!wedges || !br || !step) return;
+
+    setRamImpactCount(0);
+    const hexCenter = axialToPixel(step.q, step.r);
+    const ringColor = 0xd4d8de; // silver fortification
+    const ringCornerR = HEX_SIZE * 1.06;
+    const hexCorners = (radius: number) => [0, 1, 2, 3, 4, 5].map(k => ({
+      x: hexCenter.x + Math.cos(k * Math.PI / 3) * radius,
+      y: hexCenter.y + Math.sin(k * Math.PI / 3) * radius,
+    }));
+
+    const start = performance.now();
+    let raf = 0;
+    let soundedIndex = -1;
+    // Each lunge: 0 → 0.5 is the forward slam (apex: edgeMid → deep). 0.5 → 1 is the pull-back.
+    // We allow the apex to overshoot slightly past hex center to sell the ram collision.
+    const lungeFrac = 1 / ramCount;
+    const tick = (now: number) => {
+      const raw = Math.min(1, (now - start) / Math.max(ramMs, 1));
+      const idx = Math.min(ramCount - 1, Math.floor(raw / lungeFrac));
+      const local = (raw - idx * lungeFrac) / lungeFrac; // 0..1 within this lunge
+      // Apex position: 0 = at edgeMid, 1 = just past hexCenter, 0.5 = peak impact
+      let apexT: number;
+      if (local < 0.5) {
+        // forward slam — ease-in (accelerate into the gate)
+        const u = local / 0.5;
+        apexT = u * u * 1.15; // overshoot
+      } else {
+        // pull-back — ease-out
+        const u = (local - 0.5) / 0.5;
+        apexT = 1.15 - 1.15 * (u * (2 - u));
+      }
+      for (const w of wedges) {
+        if (w.g.destroyed) continue;
+        const apex = lerp2d(w.edgeMidPt, w.hexCenter, apexT);
+        fillWedge(w, [w.cornerA, w.cornerB, apex]);
+      }
+      // Fire a ram-impact event when we cross the peak (local ~0.5) for each lunge index
+      if (local >= 0.5 && idx > soundedIndex) {
+        soundedIndex = idx;
+        sound.resolveBaseRaidRam();
+        setRamImpactCount((c) => c + 1);
+        // Ring flashes/wobbles on each hit — hex-shaped to match the tile outline.
+        if (!br.ring.destroyed) {
+          br.ring.clear();
+          br.ring.setStrokeStyle({ width: 6, color: 0xffffff, alpha: 1, join: 'miter' });
+          br.ring.poly(hexCorners(ringCornerR * 1.05));
+          br.ring.stroke();
+          setTimeout(() => {
+            if (br.ring.destroyed) return;
+            br.ring.clear();
+            br.ring.setStrokeStyle({ width: 4, color: ringColor, alpha: 0.95, join: 'miter' });
+            br.ring.poly(hexCorners(ringCornerR));
+            br.ring.stroke();
+          }, 100);
+        }
+      }
+      if (raw < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, isBaseRaid, ramMs]);
+
+  // Effect BR-4: final phase — captured: winner wedge grows + ring shatters.
+  //              defended: attacker wedge recoils to edge + ring flashes and holds.
+  useEffect(() => {
+    if (stage !== 'br_final' || !isBaseRaid) return;
+    const wedges = pixiWedgesRef.current;
+    const br = pixiBaseRaidRef.current;
+    if (!wedges || !br || !step) return;
+
+    const hexCenter = axialToPixel(step.q, step.r);
+    const ringCornerR = HEX_SIZE * 1.06;
+    const hexCorners = (radius: number) => [0, 1, 2, 3, 4, 5].map(k => ({
+      x: hexCenter.x + Math.cos(k * Math.PI / 3) * radius,
+      y: hexCenter.y + Math.sin(k * Math.PI / 3) * radius,
+    }));
+    const ringColor = 0xd4d8de; // silver fortification
+    const captured = baseRaidCaptured;
+
+    // Pre-compute shard trajectories for the shatter — 12 shards flying outward.
+    const shardCount = 12;
+    const shards: { angle: number; dist: number; spin: number; size: number }[] = [];
+    for (let k = 0; k < shardCount; k++) {
+      const angle = (k / shardCount) * Math.PI * 2 + Math.random() * 0.2;
+      shards.push({
+        angle,
+        dist: HEX_SIZE * (1.6 + Math.random() * 0.8),
+        spin: (Math.random() - 0.5) * Math.PI,
+        size: HEX_SIZE * (0.14 + Math.random() * 0.1),
+      });
+    }
+
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const raw = Math.min(1, (now - start) / Math.max(finalMs, 1));
+
+      if (captured) {
+        // Ring + crenels fade out as wedge takes over.
+        const fade = 1 - raw;
+        if (!br.ring.destroyed) br.ring.alpha = fade;
+        if (!br.crenels.destroyed) br.crenels.alpha = fade;
+        // Shards: fly outward + fade over the first ~60% of the phase.
+        if (!br.shards.destroyed) {
+          br.shards.clear();
+          if (raw < 0.8) {
+            const shardT = Math.min(1, raw / 0.8);
+            const shardFade = 1 - shardT;
+            br.shards.alpha = shardFade;
+            br.shards.fill({ color: ringColor, alpha: 0.95 });
+            for (const sh of shards) {
+              const d = sh.dist * shardT;
+              const x = hexCenter.x + Math.cos(sh.angle) * d;
+              const y = hexCenter.y + Math.sin(sh.angle) * d;
+              const a = sh.angle + sh.spin * shardT;
+              const cosA = Math.cos(a), sinA = Math.sin(a);
+              const s = sh.size;
+              const pts = [
+                { x: x + cosA * s, y: y + sinA * s },
+                { x: x - sinA * s * 0.6, y: y + cosA * s * 0.6 },
+                { x: x - cosA * s, y: y - sinA * s },
+              ];
+              br.shards.poly(pts);
+            }
+            br.shards.fill();
+          } else {
+            br.shards.alpha = 0;
+          }
+        }
+        // Wedge grows to full hex (attacker winner).
+        const t = solveCubicBezier(raw, 0.4, 0, 0.2, 1);
+        for (const w of wedges) {
+          if (w.g.destroyed) continue;
+          if (w.isWinner) {
+            w.g.zIndex = 1;
+            fillWedge(w, [w.cornerA, w.cornerB, ...w.otherCorners.map(c => lerp2d(w.hexCenter, c, t))]);
+          } else {
+            w.g.zIndex = 0;
+            fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.hexCenter, w.edgeMidPt, t)]);
+          }
+        }
+      } else {
+        // Defended: wedge recoils from center back past edge (overshoots outward), fading.
+        const t = solveCubicBezier(raw, 0.2, 0.9, 0.3, 1);
+        for (const w of wedges) {
+          if (w.g.destroyed) continue;
+          // Apex retreats from hexCenter (start of br_final, where the peak ram hit left it,
+          // partially) all the way past edgeMidPt back toward the corner-side.
+          // Simplify: apex = lerp(hexCenter, edgeMidPt * 1.15-ish, t)
+          const recoilTarget = {
+            x: w.edgeMidPt.x + (w.edgeMidPt.x - w.hexCenter.x) * 0.15,
+            y: w.edgeMidPt.y + (w.edgeMidPt.y - w.hexCenter.y) * 0.15,
+          };
+          fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.hexCenter, recoilTarget, t)]);
+          w.g.alpha = 1 - raw * 0.7; // fade the wedge partially so defender tile reads clearly
+        }
+        // Ring pulses triumphantly — brief bright flash, then settles. Hex-shaped outline.
+        if (!br.ring.destroyed) {
+          const flash = raw < 0.4 ? Math.sin((raw / 0.4) * Math.PI) : 0;
+          const color = flash > 0.5 ? 0xffffff : ringColor;
+          br.ring.clear();
+          br.ring.setStrokeStyle({ width: 4 + flash * 4, color, alpha: 0.95, join: 'miter' });
+          br.ring.poly(hexCorners(ringCornerR * (1 + flash * 0.08)));
+          br.ring.stroke();
+          br.ring.alpha = 1 - raw * 0.5;
+        }
+        if (!br.crenels.destroyed) {
+          br.crenels.alpha = 1 - raw * 0.5;
+        }
+      }
+      if (raw < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, isBaseRaid, finalMs, baseRaidCaptured]);
+
   // Trigger number movement after mount (wait for position data before starting)
   useEffect(() => {
     if (!step) return;
@@ -587,15 +940,41 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
       // Wedge battle: defer the tile-color flip until the winning wedge has fully engulfed the
       // hex (handled in the winner_grow branch below).
       if (!isWedgeBattle) fireStepApply(currentIdx);
-      if (isDefenseApplied) {
+      if (isBaseRaid) {
+        // Don't fire the standard resolve sound — the base-raid flow has its own sound on br_fortify.
+      } else if (isDefenseApplied) {
         sound.resolveDefenseFortify();
       } else if (isContested) {
         sound.resolveContested();
       } else {
         sound.resolveTileOccupied();
       }
-      const t = setTimeout(() => setStage('winner_grow'), moveMs);
+      const nextStage: StepStage = isBaseRaid ? 'br_fortify' : 'winner_grow';
+      const t = setTimeout(() => setStage(nextStage), moveMs);
       return () => clearTimeout(t);
+    }
+    if (stage === 'br_fortify') {
+      sound.resolveBaseRaidFortify();
+      const t = setTimeout(() => setStage('br_ram'), fortifyMs);
+      return () => clearTimeout(t);
+    }
+    if (stage === 'br_ram') {
+      // Ram sounds are emitted by the Pixi-driven ram effect on each impact beat.
+      const t = setTimeout(() => setStage('br_final'), ramMs);
+      return () => clearTimeout(t);
+    }
+    if (stage === 'br_final') {
+      if (baseRaidCaptured) sound.resolveBaseRaidShatter();
+      else sound.resolveBaseRaidHold();
+      // Flip the tile color at the end of br_final if captured.
+      let raf1 = 0, raf2 = 0;
+      const applyT = setTimeout(() => {
+        if (baseRaidCaptured) fireStepApply(currentIdx);
+        raf1 = requestAnimationFrame(() => {
+          raf2 = requestAnimationFrame(() => setStage('done'));
+        });
+      }, finalMs);
+      return () => { clearTimeout(applyT); cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
     }
     if (stage === 'winner_grow') {
       if (isWedgeBattle) {
@@ -615,7 +994,8 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
       const t = setTimeout(() => setStage('done'), growMs);
       return () => clearTimeout(t);
     }
-  }, [stage, numbersActive, step, moveMs, growMs, isOff, currentIdx, fireStepApply, hasPositionData, isWedgeBattle]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, numbersActive, step, moveMs, growMs, isOff, currentIdx, fireStepApply, hasPositionData, isWedgeBattle, isBaseRaid, baseRaidCaptured, fortifyMs, ramMs, finalMs]);
 
   // Advance to next step or complete
   useEffect(() => {
@@ -647,7 +1027,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   const shineDelayMs = Math.round(growMs * 0.55);
 
   return (
-    <div style={{
+    <div ref={overlayRootRef} style={{
       position: 'fixed',
       inset: 0,
       pointerEvents: 'none',
@@ -666,6 +1046,19 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
         @keyframes resolve-number-fade-out {
           from { opacity: 1; }
           to { opacity: 0; }
+        }
+        @keyframes base-raid-defender-pulse {
+          0%, 100% { filter: drop-shadow(0 0 2px rgba(255,255,255,0.3)); }
+          50%      { filter: drop-shadow(0 0 10px rgba(255,255,255,0.95)); }
+        }
+        @keyframes base-raid-screen-shake {
+          0%   { transform: translate(0, 0); }
+          15%  { transform: translate(-6px, 4px); }
+          30%  { transform: translate(7px, -3px); }
+          45%  { transform: translate(-5px, -5px); }
+          60%  { transform: translate(4px, 6px); }
+          75%  { transform: translate(-3px, 2px); }
+          100% { transform: translate(0, 0); }
         }
       `}</style>
       {/* Defense applied animation — shield values grow/shrink */}
@@ -843,7 +1236,8 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
 
       {/* Power numbers (skip for Consecrate, Defense Applied, Auto-claim — custom animations handle them) */}
       {!isConsecrate && !isDefenseApplied && !isAutoClaim && numbers.map((num, i) => {
-        const isWinStage = stage === 'winner_grow';
+        const isWinStage = stage === 'winner_grow' || stage === 'br_final';
+        const isBrStage = stage === 'br_fortify' || stage === 'br_ram' || stage === 'br_final';
 
         // Position calculation
         let x: number, y: number;
@@ -870,6 +1264,20 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
             y = num.startY;
             opacity = 0;
             scale = 0.5;
+          } else if (isBaseRaid && stage === 'numbers_move') {
+            // Base raid: attacker number lands at wedge edge midpoint (wedge hasn't advanced).
+            // Defender number sits at hex center.
+            if (num.isDefender) {
+              x = num.endX;
+              y = num.endY;
+            } else if (centroidCollapsed) {
+              x = centroidCollapsed.x;
+              y = centroidCollapsed.y;
+            } else {
+              x = num.endX;
+              y = num.endY;
+            }
+            scale = 1;
           } else if (stage === 'numbers_move') {
             if (centroidAtCenter) {
               // Land on the wedge centroid (2/3 of the way from hex center toward the edge midpoint)
@@ -885,6 +1293,39 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
               y = num.endY;
             }
             scale = 1;
+          } else if (stage === 'br_fortify' || stage === 'br_ram') {
+            // Defender sits at hex center and pulses (via keyframe below). Attacker number
+            // stays anchored at the wedge edge — the Pixi wedge does all the lunge motion.
+            if (num.isDefender) {
+              x = num.endX;
+              y = num.endY;
+              scale = 1.15;
+            } else if (centroidCollapsed) {
+              x = centroidCollapsed.x;
+              y = centroidCollapsed.y;
+              scale = 1;
+            } else {
+              x = num.endX;
+              y = num.endY;
+              scale = 1;
+            }
+          } else if (stage === 'br_final') {
+            // Final stage — winner scales up at center, loser fades.
+            if (num.isWinner) {
+              x = num.endX;
+              y = num.endY;
+              scale = 1.8;
+            } else if (centroidCollapsed) {
+              x = centroidCollapsed.x;
+              y = centroidCollapsed.y;
+              opacity = 0;
+              scale = 1;
+            } else {
+              x = num.endX;
+              y = num.endY;
+              opacity = 0;
+              scale = 1;
+            }
           } else if (isWinStage) {
             if (num.isWinner) {
               // Winner scales up at the hex center regardless (whether attacker or defender).
@@ -930,9 +1371,17 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
           // Perf: animate `transform` (compositor-only, GPU-accelerated) — NOT `left`/`top`,
           // which trigger layout + paint every frame. Avoid `transition: all` so the browser
           // only tracks the two properties we actually change.
-          transition = stage === 'numbers_move'
-            ? `transform ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.2), opacity ${moveMs}ms ease-out`
-            : `transform ${growMs}ms ease-out, opacity ${growMs}ms ease-out`;
+          if (stage === 'numbers_move') {
+            transition = `transform ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1.2), opacity ${moveMs}ms ease-out`;
+          } else if (stage === 'br_fortify') {
+            transition = `transform ${fortifyMs}ms ease-out, opacity ${fortifyMs}ms ease-out`;
+          } else if (stage === 'br_ram') {
+            transition = `transform ${ramEachMs}ms ease-in-out, opacity ${ramMs}ms ease-out`;
+          } else if (stage === 'br_final') {
+            transition = `transform ${finalMs}ms cubic-bezier(0.3, 0, 0.2, 1), opacity ${finalMs}ms ease-out`;
+          } else {
+            transition = `transform ${growMs}ms ease-out, opacity ${growMs}ms ease-out`;
+          }
         }
 
         // During numbers_move we use a CSS keyframe animation for the opacity fade-in
@@ -948,6 +1397,8 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
         // inline opacity:0 often doesn't fire — the browser treats the animated value
         // as non-transitionable. The keyframe guarantees the fade is visible.
         const inFadeOut = isWinStage && !num.isWinner && opacity === 0;
+        // Defender pulse during base-raid fortify/ram — draws attention to the dug-in defender.
+        const inDefenderPulse = isBrStage && stage !== 'br_final' && num.isDefender;
         return (
           <div
             key={`${num.playerId}-${i}`}
@@ -965,7 +1416,9 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
               animation: inFadeIn
                 ? `resolve-number-fade-in ${moveMs}ms ease-out both`
                 : inFadeOut
-                ? `resolve-number-fade-out ${growMs}ms ease-out both`
+                ? `resolve-number-fade-out ${stage === 'br_final' ? finalMs : growMs}ms ease-out both`
+                : inDefenderPulse
+                ? `base-raid-defender-pulse 900ms ease-in-out infinite`
                 : undefined,
               willChange: 'transform, opacity',
               fontSize: 18,

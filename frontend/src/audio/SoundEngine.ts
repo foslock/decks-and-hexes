@@ -134,6 +134,30 @@ class SoundEngine {
     sounds.resolveContested(ctx, this.dest);
   }
 
+  resolveBaseRaidFortify() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.resolveBaseRaidFortify(ctx, this.dest, this.noise);
+  }
+
+  resolveBaseRaidRam() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.resolveBaseRaidRam(ctx, this.dest, this.noise);
+  }
+
+  resolveBaseRaidShatter() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.resolveBaseRaidShatter(ctx, this.dest, this.noise);
+  }
+
+  resolveBaseRaidHold() {
+    if (!this.ok()) return;
+    const ctx = this.ensureContext();
+    sounds.resolveBaseRaidHold(ctx, this.dest, this.noise);
+  }
+
   upgradeCard() {
     if (!this.ok()) return;
     const ctx = this.ensureContext();

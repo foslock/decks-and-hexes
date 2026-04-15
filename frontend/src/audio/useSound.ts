@@ -20,6 +20,10 @@ const NO_OP_SOUNDS = {
   resolveDefenseFortify: NO_OP,
   resolveTileOccupied: NO_OP,
   resolveContested: NO_OP,
+  resolveBaseRaidFortify: NO_OP,
+  resolveBaseRaidRam: NO_OP,
+  resolveBaseRaidShatter: NO_OP,
+  resolveBaseRaidHold: NO_OP,
   upgradeCard: NO_OP,
   beginJingle: NO_OP,
 };
@@ -53,6 +57,10 @@ export function useSound(): SoundApi {
       resolveDefenseFortify: () => soundEngine.resolveDefenseFortify(),
       resolveTileOccupied: () => soundEngine.resolveTileOccupied(),
       resolveContested: () => soundEngine.resolveContested(),
+      resolveBaseRaidFortify: () => soundEngine.resolveBaseRaidFortify(),
+      resolveBaseRaidRam: () => soundEngine.resolveBaseRaidRam(),
+      resolveBaseRaidShatter: () => soundEngine.resolveBaseRaidShatter(),
+      resolveBaseRaidHold: () => soundEngine.resolveBaseRaidHold(),
       upgradeCard: () => soundEngine.upgradeCard(),
       beginJingle: () => soundEngine.beginJingle(),
     };

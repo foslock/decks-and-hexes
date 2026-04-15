@@ -293,3 +293,59 @@ export function resolveTileOccupied(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer)
 export function resolveContested(ctx: Ctx, dest: Dest) {
   osc(ctx, dest, 'sine', 500, 0.09, 0.25, 8, 600);
 }
+
+/** Base raid — fortification rising. Deep sub-bass swell + stone-grind + metallic clang.
+ *  Meant to feel ominous and weighty. Longer than normal resolveDefenseFortify. */
+export function resolveBaseRaidFortify(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
+  // Deep sub-bass foundation rising
+  osc(ctx, dest, 'sine', 55, 0.12, 0.65, 40, 90);
+  osc(ctx, dest, 'triangle', 110, 0.06, 0.55, 40, 180);
+  // Stone-grind — filtered noise sweeping up
+  noise(ctx, noiseBuf, dest, 0.08, 0.55, 'bandpass', 200, 800, 30);
+  // Metallic clang near the end (like a portcullis slamming down)
+  oscAt(ctx, dest, 'triangle', 320, 0.08, 0.4, 0.25, 5);
+  oscAt(ctx, dest, 'sine', 640, 0.05, 0.4, 0.25, 5);
+  // High glint
+  oscAt(ctx, dest, 'sine', 1200, 0.04, 0.45, 0.3, 8);
+}
+
+/** Base raid — a single battering-ram impact. Low thud + mid crack + splinter noise.
+ *  Called once per ram hit (typically 3 times). */
+export function resolveBaseRaidRam(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
+  // Massive low thud
+  osc(ctx, dest, 'sine', 60, 0.14, 0.2, 2, 30);
+  // Mid-register crack
+  osc(ctx, dest, 'triangle', 220, 0.08, 0.12, 2, 110);
+  // Wood-splinter noise burst
+  noise(ctx, noiseBuf, dest, 0.12, 0.15, 'bandpass', 1400, 500, 2);
+  // Sharp high transient
+  noise(ctx, noiseBuf, dest, 0.05, 0.06, 'highpass', 3500, 2500, 1);
+}
+
+/** Base raid — wall shatters / raid succeeds. Big crack, glass-like shatter, low boom aftermath. */
+export function resolveBaseRaidShatter(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
+  // Initial crack transient
+  noise(ctx, noiseBuf, dest, 0.18, 0.08, 'bandpass', 3000, 1000, 1);
+  // Glassy shatter — high noise cascade
+  noise(ctx, noiseBuf, dest, 0.10, 0.5, 'highpass', 4000, 2000, 2);
+  noise(ctx, noiseBuf, dest, 0.07, 0.4, 'bandpass', 6000, 3000, 3);
+  // Low boom aftermath
+  oscAt(ctx, dest, 'sine', 45, 0.16, 0.05, 0.8, 3);
+  oscAt(ctx, dest, 'sine', 90, 0.08, 0.05, 0.7, 3);
+  // Metallic shimmer tail
+  oscAt(ctx, dest, 'triangle', 1800, 0.04, 0.1, 0.4, 5);
+  oscAt(ctx, dest, 'sine', 2400, 0.03, 0.15, 0.35, 5);
+}
+
+/** Base raid — defender holds. Triumphant deep boom + resonant bell + rising shimmer. */
+export function resolveBaseRaidHold(ctx: Ctx, dest: Dest, noiseBuf: AudioBuffer) {
+  // Heavy impact — the attack bouncing off
+  osc(ctx, dest, 'sine', 70, 0.14, 0.35, 3, 40);
+  noise(ctx, noiseBuf, dest, 0.08, 0.12, 'lowpass', 600, 300, 2);
+  // Resonant bell tones — defender "holding firm"
+  oscAt(ctx, dest, 'sine', 440, 0.08, 0.1, 0.6, 8);
+  oscAt(ctx, dest, 'triangle', 660, 0.05, 0.1, 0.55, 8);
+  oscAt(ctx, dest, 'sine', 880, 0.04, 0.15, 0.5, 10);
+  // Rising victory shimmer
+  oscAt(ctx, dest, 'sine', 1320, 0.04, 0.25, 0.4, 12);
+}

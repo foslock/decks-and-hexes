@@ -47,7 +47,7 @@ function makeBlankTile(q: number, r: number): HexTile {
   };
 }
 
-function buildDemoTiles(centralOwner: string | null): Record<string, HexTile> {
+function buildDemoTiles(centralOwner: string | null, centerIsBase: boolean = false): Record<string, HexTile> {
   const tiles: Record<string, HexTile> = {};
   for (let q = -RADIUS; q <= RADIUS; q++) {
     for (let r = -RADIUS; r <= RADIUS; r++) {
@@ -70,12 +70,19 @@ function buildDemoTiles(centralOwner: string | null): Record<string, HexTile> {
       }
     }
   }
-  // Central contested tile — mark as VP so it looks like a prize
+  // Central contested tile — either a VP prize (default) or the defender's base (base-raid mode)
   const center = tiles[CONTESTED_KEY];
   if (center) {
     center.owner = centralOwner;
-    center.is_vp = true;
-    center.vp_value = 1;
+    if (centerIsBase && centralOwner) {
+      center.is_base = true;
+      center.base_owner = centralOwner;
+      center.is_vp = false;
+      center.vp_value = 0;
+    } else {
+      center.is_vp = true;
+      center.vp_value = 1;
+    }
   }
   return tiles;
 }
@@ -87,6 +94,10 @@ interface Scenario {
   numAttackers: number;
   /** If true, the central tile is owned by an additional player not in the attacker list. */
   hasDefender: boolean;
+  /** Base raid: the central tile is the defender's base tile instead of a VP tile. */
+  isBaseRaid?: boolean;
+  /** Force the base-raid outcome: 'defended' = base holds, 'captured' = raid succeeds. */
+  baseRaidOutcome?: 'defended' | 'captured';
   description: string;
 }
 
@@ -103,6 +114,8 @@ const SCENARIOS: Scenario[] = [
   { id: 'battle-4-o',     label: '4 ⚔ Owned',     numAttackers: 3, hasDefender: true,  description: '4 players (3 attackers + defender) battling over an owned tile' },
   { id: 'battle-5-o',     label: '5 ⚔ Owned',     numAttackers: 4, hasDefender: true,  description: '5 players (4 attackers + defender) battling over an owned tile' },
   { id: 'battle-6-o',     label: '6 ⚔ Owned',     numAttackers: 5, hasDefender: true,  description: '6 players (5 attackers + defender) battling over an owned tile' },
+  { id: 'base-raid-def',  label: '🏰 Base Raid: Defended', numAttackers: 1, hasDefender: true, isBaseRaid: true, baseRaidOutcome: 'defended', description: 'Base raid on an enemy base — defender holds' },
+  { id: 'base-raid-cap',  label: '🏰 Base Raid: Captured', numAttackers: 1, hasDefender: true, isBaseRaid: true, baseRaidOutcome: 'captured', description: 'Base raid on an enemy base — raid succeeds' },
 ];
 
 /** Build a ResolutionStep + the defender_id (for grid pre-setup) for a scenario.
@@ -130,10 +143,17 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
   let defenderSourceR: number | undefined;
   if (s.hasDefender) {
     defenderId = PLAYERS[s.numAttackers]; // next unused player
-    // Normal mode: nominal 1 so there's a visible defense number. Forced-defended: 9 so the
-    // defender wins outright against any attacker (max attacker power in demo is 5), while
-    // staying a single digit so the centered number renders identically to normal play.
-    defenderPower = forceDefended ? 9 : 1;
+    if (s.isBaseRaid) {
+      // Base raid: force the desired outcome directly via defender power.
+      // 'defended' → defender > any attacker (max attacker power 5).
+      // 'captured' → defender lower than the lone attacker (attacker has power 2).
+      defenderPower = s.baseRaidOutcome === 'defended' ? 9 : 1;
+    } else {
+      // Normal mode: nominal 1 so there's a visible defense number. Forced-defended: 9 so the
+      // defender wins outright against any attacker (max attacker power in demo is 5), while
+      // staying a single digit so the centered number renders identically to normal play.
+      defenderPower = forceDefended ? 9 : 1;
+    }
     // Defender sits one hex along their approach direction — this lets the overlay anchor
     // the defense number to the edge closest to the defender's territory.
     const [dq, dr] = APPROACH_DIRS[s.numAttackers];
@@ -176,6 +196,7 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
       winner_id: winnerId,
       previous_owner: defenderId,
       outcome,
+      is_base_raid: s.isBaseRaid === true,
     },
     defenderId,
   };
@@ -200,8 +221,9 @@ export default function ResolveAnimationPreview() {
 
   const playScenario = useCallback((s: Scenario) => {
     const { step, defenderId } = buildScenarioStep(s, forceDefended);
-    // Reset the grid so the central tile matches this scenario's pre-battle state
-    setTiles(buildDemoTiles(defenderId));
+    // Reset the grid so the central tile matches this scenario's pre-battle state.
+    // For base-raid scenarios the central tile is the defender's base (not a VP tile).
+    setTiles(buildDemoTiles(defenderId, s.isBaseRaid === true));
     setSteps([step]);
     setLastScenario(s);
     setRunId(x => x + 1);

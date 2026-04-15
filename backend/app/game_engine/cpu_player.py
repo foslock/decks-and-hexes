@@ -209,6 +209,27 @@ class CPUPlayer:
 
     # ── Selection helper ──────────────────────────────────────────
 
+    def _pick_best(self, scored: list[tuple[float, Any]]) -> Optional[Any]:
+        """Always deterministically pick the highest-scored item, ignoring noise.
+
+        Used for tile target decisions so that noise only affects *which card*
+        is played or purchased, not *where* it lands.
+        """
+        if not scored:
+            return None
+        return max(scored, key=lambda x: x[0])[1]
+
+    def _best_action(
+        self, results: list[tuple[float, Any]]
+    ) -> list[tuple[float, Any]]:
+        """Collapse a list of (score, action) tile candidates to only the
+        deterministic best.  Call this inside _score_claim_targets /
+        _score_defense_targets so that noise cannot accidentally pick a
+        sub-optimal tile for an otherwise-selected card."""
+        if not results:
+            return []
+        return [max(results, key=lambda x: x[0])]
+
     def _pick(self, scored: list[tuple[float, Any]]) -> Optional[Any]:
         """Pick from scored options using noise-controlled selection.
 
@@ -356,7 +377,7 @@ class CPUPlayer:
                             "card_index": card_index,
                             "target_q": pt.q, "target_r": pt.r,
                         }))
-                return results
+                return self._best_action(results)
 
             # Flood cards: target own tiles with many claimable adjacent
             for pt in player_tiles:
@@ -371,7 +392,7 @@ class CPUPlayer:
                     "card_index": card_index,
                     "target_q": pt.q, "target_r": pt.r,
                 }))
-            return results
+            return self._best_action(results)
 
         # Get all tiles in range
         candidate_tiles = self._get_claimable_tiles(game, player, card, player_tiles)
@@ -436,7 +457,11 @@ class CPUPlayer:
 
             results.append((score, action_dict))
 
-        return results
+        # Tile targeting is always deterministic — noise must not pick a
+        # sub-optimal tile for an otherwise good card.  Collapse to the single
+        # best target here; the caller (_pick_best_card) applies noise across
+        # card-level choices.
+        return self._best_action(results)
 
     def _get_claimable_tiles(self, game: Any, player: Any, card: Card,
                              player_tiles: list[HexTile]) -> list[HexTile]:
@@ -738,7 +763,8 @@ class CPUPlayer:
                 action_dict["extra_targets"] = extra_targets
             results.append((score, action_dict))
 
-        return results
+        # Tile targeting is always deterministic — return only the best.
+        return self._best_action(results)
 
     def _score_engine(self, game: Any, player: Any, card: Card,
                       card_index: int,
