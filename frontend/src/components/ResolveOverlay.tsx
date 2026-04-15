@@ -1,8 +1,113 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import type { ResolutionStep } from '../types/game';
 import { type GridTransform, PLAYER_COLORS } from './HexGrid';
+import type { Container } from 'pixi.js';
+import { Graphics } from 'pixi.js';
 import { useAnimationMode, useAnimationSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
+
+// ---------------------------------------------------------------------------
+// Pixi wedge animation helpers — wedge geometry lives in the hex grid's own
+// Pixi coordinate space (axialToPixel, HEX_SIZE=32, unscaled), so there is
+// no screen-coordinate conversion and no measurement-timing bugs.
+// ---------------------------------------------------------------------------
+
+/** Cubic-bezier easing solver matching CSS cubic-bezier(x1,y1,x2,y2). */
+function solveCubicBezier(t: number, x1: number, y1: number, x2: number, y2: number): number {
+  const cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  const cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  let u = t;
+  for (let i = 0; i < 8; i++) {
+    const xu = ((ax * u + bx) * u + cx) * u;
+    const dxu = (3 * ax * u + 2 * bx) * u + cx;
+    if (Math.abs(dxu) < 1e-6) break;
+    u = Math.max(0, Math.min(1, u - (xu - t) / dxu));
+  }
+  return ((ay * u + by) * u + cy) * u;
+}
+
+function lerp2d(a: { x: number; y: number }, b: { x: number; y: number }, t: number) {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+interface PixiWedge {
+  playerId: string;
+  isWinner: boolean;
+  cornerA: { x: number; y: number };
+  cornerB: { x: number; y: number };
+  edgeMidPt: { x: number; y: number };
+  hexCenter: { x: number; y: number };
+  /** The 4 remaining hex corners (CCW from edgeK+2..edgeK+5) — used to expand winner to full hex. */
+  otherCorners: { x: number; y: number }[];
+  g: Graphics;
+}
+
+/** Build wedge geometry and Graphics objects for each attacker in the given step. */
+function buildPixiWedges(step: ResolutionStep, container: Container): PixiWedge[] {
+  const hexCenter = axialToPixel(step.q, step.r);
+  const inscribedR = HEX_SIZE * Math.sqrt(3) / 2;
+
+  const grouped = new Map<string, { sourceQ: number; sourceR: number }>();
+  for (const c of step.claimants) {
+    if (!grouped.has(c.player_id)) {
+      grouped.set(c.player_id, { sourceQ: c.source_q ?? step.q, sourceR: c.source_r ?? step.r });
+    }
+  }
+
+  const corner = (k: number) => ({
+    x: hexCenter.x + HEX_SIZE * Math.cos(k * Math.PI / 3),
+    y: hexCenter.y + HEX_SIZE * Math.sin(k * Math.PI / 3),
+  });
+
+  const usedEdges = new Set<number>();
+  const wedges: PixiWedge[] = [];
+
+  for (const [playerId, info] of grouped) {
+    const local = axialToPixel(info.sourceQ - step.q, info.sourceR - step.r);
+    const approachAngle = Math.atan2(local.y, local.x);
+
+    const sorted = [0, 1, 2, 3, 4, 5].map(k => {
+      const mid = Math.PI / 6 + k * Math.PI / 3;
+      let d = Math.abs(approachAngle - mid) % (2 * Math.PI);
+      if (d > Math.PI) d = 2 * Math.PI - d;
+      return { k, d };
+    }).sort((a, b) => a.d - b.d);
+
+    let edgeK = sorted[0].k;
+    for (const c of sorted) {
+      if (!usedEdges.has(c.k)) { edgeK = c.k; break; }
+    }
+    usedEdges.add(edgeK);
+
+    const g = new Graphics();
+    g.zIndex = 0;
+    container.addChild(g);
+
+    wedges.push({
+      playerId,
+      isWinner: playerId === step.winner_id,
+      cornerA: corner(edgeK),
+      cornerB: corner(edgeK + 1),
+      edgeMidPt: {
+        x: hexCenter.x + inscribedR * Math.cos((edgeK + 0.5) * Math.PI / 3),
+        y: hexCenter.y + inscribedR * Math.sin((edgeK + 0.5) * Math.PI / 3),
+      },
+      hexCenter,
+      otherCorners: [2, 3, 4, 5].map(off => corner(edgeK + off)),
+      g,
+    });
+  }
+
+  return wedges;
+}
+
+function fillWedge(w: PixiWedge, pts: { x: number; y: number }[]) {
+  const color = PLAYER_COLORS[w.playerId] ?? 0xffffff;
+  w.g.clear();
+  w.g.fill({ color, alpha: 0.9 });
+  w.g.poly(pts);
+  w.g.fill();
+}
 
 // Must match HexGrid.tsx
 const HEX_SIZE = 32;
@@ -47,6 +152,9 @@ interface ResolveOverlayProps {
   onStepApply?: (stepIndex: number) => void;
   /** Called after all steps have been animated. */
   onComplete: () => void;
+  /** Pixi Container inside the hex grid — when provided, wedge animations are rendered in Pixi
+   *  (no screen-coordinate conversion needed, eliminating the measurement-timing offset bug). */
+  resolveLayerRef?: React.RefObject<Container | null>;
 }
 
 interface ActiveNumber {
@@ -69,12 +177,12 @@ type StepStage = 'numbers_move' | 'winner_grow' | 'done';
  * one-by-one: power numbers fly in from source tiles, bounce at the center,
  * then the winner's number grows while losers fade.
  */
-export default function ResolveOverlay({ steps, gridTransform: gridTransformProp, gridRect, gridContainerRef, gridTransformRef, onStepApply, onComplete }: ResolveOverlayProps) {
-  // Prefer the live grid transform when available. The snapshot can go stale
-  // if the grid container re-lays out between resolve start and when the
-  // overlay actually renders (banner dismiss, chevron reveal finishing, window
-  // resize). Live values match whatever pixi just rendered.
-  const gridTransform = gridTransformRef?.current ?? gridTransformProp;
+export default function ResolveOverlay({ steps, gridTransform: gridTransformProp, gridRect, gridContainerRef, gridTransformRef, onStepApply, onComplete, resolveLayerRef }: ResolveOverlayProps) {
+  // Snapshot rect + transform measured in useLayoutEffect (fires after DOM
+  // commit, before paint) so we always get post-layout values rather than
+  // stale values captured during React's render phase.
+  const measuredRectRef = useRef<DOMRect | null>(null);
+  const measuredTransformRef = useRef<GridTransform | null>(null);
   const animMode = useAnimationMode();
   const isOff = animMode === 'off';
   const animSpeed = useAnimationSpeed();
@@ -86,6 +194,9 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   const completedRef = useRef(false);
   const appliedStepsRef = useRef(new Set<number>());
 
+  // Pixi wedge state — Graphics objects live inside the resolve container provided by HexGrid
+  const pixiWedgesRef = useRef<PixiWedge[] | null>(null);
+
   // Stable refs for callbacks — prevents effect cleanup from cancelling
   // pending timeouts when parent re-renders (e.g. from WebSocket updates)
   const onCompleteRef = useRef(onComplete);
@@ -95,27 +206,59 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
 
   const step = steps[currentIdx] as ResolutionStep | undefined;
 
-  // Convert hex coords to screen coords (uses live DOM measurement for accuracy)
+  // Re-measure rect + transform after every DOM commit (useLayoutEffect fires
+  // synchronously post-commit, before paint). This is more reliable than
+  // reading getBoundingClientRect() during render, where the DOM may not yet
+  // reflect pending layout changes (e.g. the hand panel resizing as the phase
+  // transitions, or the banner unmounting). Both values come from the same
+  // post-layout snapshot so they are always mutually consistent.
+  useLayoutEffect(() => {
+    const container = gridContainerRef?.current;
+    // Use the canvas element's rect when available — it exactly matches Pixi's
+    // app.screen dimensions (the drawing surface), whereas the outer wrapper div
+    // may be taller/wider due to flex layout. fitGrid positions the hexContainer
+    // at (app.screen.width/2, app.screen.height/2), so we must use those same
+    // dimensions as the coordinate origin for correct number placement.
+    const canvas = container?.querySelector('canvas') ?? null;
+    measuredRectRef.current = (canvas ?? container)?.getBoundingClientRect() ?? gridRect ?? null;
+    measuredTransformRef.current = gridTransformRef?.current ?? gridTransformProp ?? null;
+  });
+
+  // Local aliases for the measured values — safe to read during render because
+  // they're updated by the useLayoutEffect above (which fires before paint).
+  // On the very first render these are null; hasPositionData guards usage.
+  const gridTransform = measuredTransformRef.current;
+  const measuredRect = measuredRectRef.current;
+
+  // Convert hex coords to screen coords using the layout-effect snapshot.
   const toScreen = useCallback((q: number, r: number) => {
-    if (!gridTransform) return { x: 0, y: 0 };
-    // Prefer live DOM rect for accuracy; fall back to prop
-    const rect = gridContainerRef?.current?.getBoundingClientRect() ?? gridRect;
-    if (!rect) return { x: 0, y: 0 };
+    const rect = measuredRectRef.current;
+    const transform = measuredTransformRef.current;
+    if (!rect || !transform) return { x: 0, y: 0 };
     const local = axialToPixel(q, r);
     // Rotation-aware: apply pivot-based transform
-    const relX = (local.x - gridTransform.pivotX) * gridTransform.scale;
-    const relY = (local.y - gridTransform.pivotY) * gridTransform.scale;
-    const cos = Math.cos(gridTransform.rotation);
-    const sin = Math.sin(gridTransform.rotation);
+    const relX = (local.x - transform.pivotX) * transform.scale;
+    const relY = (local.y - transform.pivotY) * transform.scale;
+    const cos = Math.cos(transform.rotation);
+    const sin = Math.sin(transform.rotation);
     return {
       x: relX * cos - relY * sin + rect.width / 2 + rect.left,
       y: relX * sin + relY * cos + rect.height / 2 + rect.top,
     };
-  }, [gridTransform, gridRect, gridContainerRef]);
+  // Deps are stable refs — toScreen reads them via .current at call time.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // hasPositionData: true when both transform and rect are available.
+  // Falls back to snapshot props on the first render (before useLayoutEffect has fired),
+  // because refs are null until after the first DOM commit.
+  const hasPositionData = !!(
+    (measuredTransformRef.current ?? gridTransformRef?.current ?? gridTransformProp) &&
+    (measuredRectRef.current ?? gridRect));
 
   // Build the numbers for current step
   const numbers: ActiveNumber[] = [];
-  if (step && gridTransform && gridRect) {
+  if (step && hasPositionData) {
     const target = toScreen(step.q, step.r);
 
     // Group claimants by player — stacked claims render one combined power number.
@@ -176,7 +319,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // by the two corners of the attacker's approach edge plus an apex that animates from the edge
   // midpoint to the hex center. Geometry is in the element's LOCAL pixel space (unrotated hex);
   // grid rotation is applied via CSS transform on each wedge element.
-  const wedgeGeom = isWedgeBattle && step && gridTransform && gridRect ? (() => {
+  const wedgeGeom = isWedgeBattle && step && gridTransform && measuredRect ? (() => {
     // Group claimants by player (stackable claims combine to a single wedge)
     const grouped = new Map<string, { sourceQ: number; sourceR: number }>();
     for (const claimant of step.claimants) {
@@ -317,13 +460,107 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   const growMs = isOff ? 0 : Math.round((isAutoClaim ? 400 : isDefenseApplied ? 400 : isConsecrate ? 800 : isContested ? 1200 : 400) * animSpeed);
   const pauseMs = isOff ? 50 : Math.round((isDefenseApplied ? 100 : 200) * animSpeed);
 
-  const hasPositionData = !!(gridTransform && gridRect);
-
   const fireStepApply = useCallback((idx: number) => {
     if (appliedStepsRef.current.has(idx)) return;
     appliedStepsRef.current.add(idx);
     onStepApplyRef.current?.(idx);
   }, []);
+
+  // === PIXI WEDGE ANIMATION EFFECTS ===
+  // Wedge shapes are drawn directly into the HexGrid's Pixi Container, so geometry
+  // is in axial-pixel space with no screen-coordinate conversion needed.
+
+  // Effect 1: create Pixi Graphics for the current step's wedges
+  useEffect(() => {
+    // Tear down any wedges from the previous step
+    const prev = pixiWedgesRef.current;
+    if (prev) {
+      for (const w of prev) { if (!w.g.destroyed) w.g.destroy(); }
+      pixiWedgesRef.current = null;
+    }
+
+    const container = resolveLayerRef?.current;
+    if (!container || !step || !isWedgeBattle || isOff) return;
+
+    const wedges = buildPixiWedges(step, container);
+    pixiWedgesRef.current = wedges;
+
+    // Initial state: collapsed triangle at the approach edge
+    for (const w of wedges) fillWedge(w, [w.cornerA, w.cornerB, w.edgeMidPt]);
+
+    return () => {
+      for (const w of wedges) { if (!w.g.destroyed) w.g.destroy(); }
+      pixiWedgesRef.current = null;
+    };
+  // isWedgeBattle is derived from step — step change covers both
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, isWedgeBattle, isOff]);
+
+  // Effect 2: numbers_move phase — apex flies from edgeMid → hexCenter
+  useEffect(() => {
+    if (!numbersActive || stage !== 'numbers_move' || !isWedgeBattle) return;
+    const wedges = pixiWedgesRef.current;
+    if (!wedges) return;
+
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const raw = Math.min(1, (now - start) / Math.max(moveMs, 1));
+      const t = solveCubicBezier(raw, 0.2, 0.8, 0.3, 1.0);
+      for (const w of wedges) {
+        if (!w.g.destroyed) fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.edgeMidPt, w.hexCenter, t)]);
+      }
+      if (raw < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [numbersActive, stage, isWedgeBattle, moveMs]);
+
+  // Effect 3: winner_grow phase — winner expands to full hex, losers shrink to edge
+  useEffect(() => {
+    if (stage !== 'winner_grow' || !isWedgeBattle) return;
+    const wedges = pixiWedgesRef.current;
+    if (!wedges) return;
+
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const raw = Math.min(1, (now - start) / Math.max(growMs, 1));
+      const t = solveCubicBezier(raw, 0.4, 0, 0.2, 1);
+      for (const w of wedges) {
+        if (w.g.destroyed) continue;
+        if (w.isWinner) {
+          w.g.zIndex = 1; // draw above losers
+          fillWedge(w, [w.cornerA, w.cornerB, ...w.otherCorners.map(c => lerp2d(w.hexCenter, c, t))]);
+        } else {
+          w.g.zIndex = 0;
+          fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.hexCenter, w.edgeMidPt, t)]);
+        }
+      }
+      if (raw < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [stage, isWedgeBattle, growMs]);
+
+  // Effect 4: done phase — fade wedges out
+  useEffect(() => {
+    if (stage !== 'done' || !isWedgeBattle) return;
+    const wedges = pixiWedgesRef.current;
+    if (!wedges) return;
+
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const raw = Math.min(1, (now - start) / Math.max(pauseMs, 50));
+      for (const w of wedges) {
+        if (!w.g.destroyed) w.g.alpha = 1 - raw;
+      }
+      if (raw < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [stage, isWedgeBattle, pauseMs]);
 
   // Trigger number movement after mount (wait for position data before starting)
   useEffect(() => {
@@ -401,7 +638,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   }, [stage, currentIdx, steps.length, pauseMs]);
 
   // Nothing to render if off mode or no steps
-  if (!step || isOff || !gridTransform || !gridRect) return null;
+  if (!step || isOff || !gridTransform || !measuredRect) return null;
 
   return (
     <div style={{
@@ -578,79 +815,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
         );
       })()}
 
-      {/* Triangular-wedge claim animation — attackers only. Each wedge fills a triangle rooted on
-          the attacker's approach edge; apex animates from edge midpoint → hex center simultaneously.
-          Attacker-wins: winner's wedge expands to full hex, engulfing losers and flipping the tile.
-          Defender-wins: all attacker wedges shrink back to their edges; tile color unchanged. */}
-      {wedgeGeom && (() => {
-        const target = toScreen(step.q, step.r);
-        const rotationDeg = (gridTransform.rotation * 180) / Math.PI;
-        const { wedges: ws, hexWidth, hexHeight, cx, cy } = wedgeGeom;
-        const center = { x: cx, y: cy };
-        // Each wedge's polygon is always expressed as 6 vertices so CSS can interpolate cleanly
-        // between the keyframes: collapsed-to-edge → triangle-to-center → full-hex.
-        const triangleCollapsed = (w: typeof ws[number]) => [w.cornerA, w.cornerB, w.edgeMid, w.edgeMid, w.edgeMid, w.edgeMid];
-        const triangleToCenter  = (w: typeof ws[number]) => [w.cornerA, w.cornerB, center, center, center, center];
-        const fullHex           = (w: typeof ws[number]) => [w.cornerA, w.cornerB, ...w.remaining];
-        const polyStr = (pts: { x: number; y: number }[]) =>
-          `polygon(${pts.map(p => `${p.x.toFixed(2)}px ${p.y.toFixed(2)}px`).join(', ')})`;
-
-        return ws.map((w, i) => {
-          const color = playerColorStr(w.playerId);
-          let clipPath: string;
-          let transition: string;
-          let opacity = 1;
-          let zIndex = 499;
-
-          if (!numbersActive) {
-            clipPath = polyStr(triangleCollapsed(w));
-            transition = 'none';
-          } else if (stage === 'numbers_move') {
-            clipPath = polyStr(triangleToCenter(w));
-            transition = `clip-path ${moveMs}ms cubic-bezier(0.2, 0.8, 0.3, 1)`;
-          } else if (stage === 'winner_grow') {
-            if (w.isWinner) {
-              // Winner grows triangle → full hex, painted above the losers so it engulfs them.
-              clipPath = polyStr(fullHex(w));
-              transition = `clip-path ${growMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
-              zIndex = 500;
-            } else {
-              // All losers (attacker or defender outcome) — shrink the wedge back to its edge
-              // in concert with the winner's expansion. Reads as the losers "retreating".
-              clipPath = polyStr(triangleCollapsed(w));
-              transition = `clip-path ${growMs}ms cubic-bezier(0.4, 0, 0.2, 1)`;
-            }
-          } else {
-            // done: fade out overlay (tile has either been repainted to winner's color, or stayed as defender's).
-            const finalShape = w.isWinner ? fullHex(w) : triangleCollapsed(w);
-            clipPath = polyStr(finalShape);
-            transition = `opacity ${pauseMs}ms ease`;
-            opacity = 0;
-            zIndex = w.isWinner ? 500 : 499;
-          }
-
-          return (
-            <div
-              key={`wedge-${w.playerId}-${i}`}
-              style={{
-                position: 'fixed',
-                left: target.x,
-                top: target.y,
-                width: hexWidth,
-                height: hexHeight,
-                transform: `translate(-50%, -50%) rotate(${rotationDeg}deg)`,
-                transformOrigin: 'center center',
-                background: color,
-                clipPath,
-                opacity,
-                transition,
-                pointerEvents: 'none',
-                zIndex,
-              }}
-            />
-          );
-        });
-      })()}
+      {/* Wedge claim animations are rendered in Pixi (see Pixi effects above) — no HTML here */}
 
       {/* Power numbers (skip for Consecrate, Defense Applied, Auto-claim — custom animations handle them) */}
       {!isConsecrate && !isDefenseApplied && !isAutoClaim && numbers.map((num, i) => {

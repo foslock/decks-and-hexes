@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
-import HexGrid, { type GridTransform, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './HexGrid';
+import HexGrid, { type GridTransform, type PixiContainer, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './HexGrid';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardBrowser from './CardBrowser';
@@ -887,6 +887,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const pendingStateRef = useRef<GameState | null>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridTransformRef = useRef<GridTransform | null>(null);
+  const resolveLayerRef = useRef<PixiContainer | null>(null);
   const tileClickedRef = useRef(false);
   // Chevron reveal state (resolve phase pre-animation)
   const [chevronRevealPhase, setChevronRevealPhase] = useState(false);
@@ -4389,6 +4390,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               borderTiles={phase === 'play' ? adjacentTiles : undefined}
               playerInfo={playerInfo}
               transformRef={gridTransformRef}
+              resolveLayerRef={resolveLayerRef}
               gridRotation={gridRotation}
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
               plannedActions={phase === 'play' ? plannedActions : undefined}
@@ -5734,6 +5736,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           gridTransformRef={gridTransformRef}
           gridRect={gridRectSnapshot ?? gridRect}
           gridContainerRef={gridContainerRef}
+          resolveLayerRef={resolveLayerRef}
           onStepApply={applyResolveStep}
           onComplete={handleResolveComplete}
         />
