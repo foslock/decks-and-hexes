@@ -55,7 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await engine.dispose()
 
 
-app = FastAPI(title="Card Clash", version="0.1.105", lifespan=lifespan)
+app = FastAPI(title="Card Clash", version="0.1.106", lifespan=lifespan)
 
 # CORS — allow frontend origins (dev + Render)
 origins = [
