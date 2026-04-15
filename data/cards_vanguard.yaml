@@ -37,7 +37,7 @@ cards:
     name: Blitz
     name_upgraded: Blitz+
     type: Claim
-    buy_cost: 4
+    buy_cost: 3
     action_return: 0
     reversible: true
     power: 2
@@ -73,7 +73,7 @@ cards:
     name: Strike Team
     name_upgraded: Strike Team+
     type: Claim
-    buy_cost: 5
+    buy_cost: 4
     action_return: 0
     reversible: true
     power: 3
@@ -93,7 +93,7 @@ cards:
     name: Rapid Assault
     name_upgraded: Rapid Assault+
     type: Claim
-    buy_cost: 6
+    buy_cost: 5
     action_return: 0
     reversible: true
     power: 3
@@ -113,7 +113,7 @@ cards:
     name: Spearhead
     name_upgraded: Spearhead+
     type: Claim
-    buy_cost: 8
+    buy_cost: 7
     action_return: 0
     power: 8
     upgraded_power: 9
@@ -136,7 +136,7 @@ cards:
     name: Coordinated Push
     name_upgraded: Coordinated Push+
     type: Claim
-    buy_cost: 6
+    buy_cost: 5
     action_return: 0
     reversible: true
     power: 3
@@ -220,7 +220,7 @@ cards:
     name: Breakthrough
     name_upgraded: Breakthrough+
     type: Claim
-    buy_cost: 7
+    buy_cost: 6
     action_return: 0
     power: 3
     effect: "Claim: Power 3. If successful, randomly claim up to one available adjacent neutral tile automatically."
@@ -238,7 +238,7 @@ cards:
     name: Flanking Strike
     name_upgraded: Flanking Strike+
     type: Claim
-    buy_cost: 6
+    buy_cost: 5
     action_return: 0
     reversible: true
     power: 2

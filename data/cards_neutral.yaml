@@ -104,7 +104,6 @@ cards:
 
   - id: neutral_land_grant
     name: Land Grant
-    name_upgraded: Land Grant+
     type: Passive
     buy_cost: 7
 
@@ -113,9 +112,8 @@ cards:
     unplayable: true
     passive_vp: 1
     effect: "+1 VP per copy."
-    effect_upgraded: "+2 VP per copy."
     trash_on_use: false
-    note: "Awards VP on purchase but clogs your deck permanently. Finite stack makes buying multiples a real investment."
+    note: "Awards VP on purchase but clogs your deck permanently. Finite stack makes buying multiples a real investment. Not upgradable."
 
   - id: neutral_sabotage
     name: Sabotage
@@ -174,7 +172,7 @@ cards:
     action_return: 0
     power: 0
     effect: "Gain 3 resources."
-    effect_upgraded: "Gain 4 resources."
+    effect_upgraded: "Gain 5 resources."
     trash_on_use: false
 
   - id: neutral_surveyor
