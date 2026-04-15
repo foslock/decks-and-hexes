@@ -123,11 +123,17 @@ const PAGES = [
             background: '#1a1a40',
             borderRadius: 8,
             border: `1px solid ${CARD_TYPE_COLORS.claim}`,
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.claim, marginBottom: 4 }}>⚔️ Claim Cards</div>
-            <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
-              Target a tile on the board to claim it. Each has a Power value — highest power wins
-              the tile. This is how you expand your territory and contest opponents.
+            <img src="/assets/howtoplay/claim.png" alt="" style={{ width: 80, height: 80, flexShrink: 0, objectFit: 'contain' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.claim, marginBottom: 4 }}>Claim Cards</div>
+              <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
+                Target a tile on the board to claim it. Each has a Power value — highest power wins
+                the tile. This is how you expand your territory and contest opponents.
+              </div>
             </div>
           </div>
           <div style={{
@@ -135,11 +141,17 @@ const PAGES = [
             background: '#1a1a40',
             borderRadius: 8,
             border: `1px solid ${CARD_TYPE_COLORS.engine}`,
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.engine, marginBottom: 4 }}>⚙️ Engine Cards</div>
-            <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
-              Support cards that generate resources, draw extra cards, grant actions, or
-              provide other effects. They don't claim tiles directly but fuel your strategy.
+            <img src="/assets/howtoplay/engine.png" alt="" style={{ width: 80, height: 80, flexShrink: 0, objectFit: 'contain' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.engine, marginBottom: 4 }}>Engine Cards</div>
+              <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
+                Support cards that generate resources, draw extra cards, grant actions, or
+                provide other effects. They don't claim tiles directly but fuel your strategy.
+              </div>
             </div>
           </div>
           <div style={{
@@ -147,11 +159,17 @@ const PAGES = [
             background: '#1a1a40',
             borderRadius: 8,
             border: `1px solid ${CARD_TYPE_COLORS.defense}`,
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.defense, marginBottom: 4 }}>🛡️ Defense Cards</div>
-            <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
-              Protect tiles you own by boosting their defense. A defended tile is harder
-              for opponents to take. Applied before any claims in a round.
+            <img src="/assets/howtoplay/defense.png" alt="" style={{ width: 80, height: 80, flexShrink: 0, objectFit: 'contain' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.defense, marginBottom: 4 }}>Defense Cards</div>
+              <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
+                Protect tiles you own by boosting their defense. A defended tile is harder
+                for opponents to take. Applied before any claims in a round.
+              </div>
             </div>
           </div>
           <div style={{
@@ -159,11 +177,17 @@ const PAGES = [
             background: '#1a1a40',
             borderRadius: 8,
             border: `1px solid ${CARD_TYPE_COLORS.passive}`,
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.passive, marginBottom: 4 }}>📜 Passive Cards</div>
-            <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
-              Cards that provide ongoing effects or VP bonuses without being played.
-              They take up a hand slot when drawn.
+            <img src="/assets/howtoplay/passive.png" alt="" style={{ width: 80, height: 80, flexShrink: 0, objectFit: 'contain' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 15, fontWeight: 'bold', color: CARD_TYPE_COLORS.passive, marginBottom: 4 }}>Passive Cards</div>
+              <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
+                Cards that provide ongoing effects or VP bonuses without being played.
+                They take up a hand slot when drawn.
+              </div>
             </div>
           </div>
         </div>
@@ -189,11 +213,17 @@ const PAGES = [
             background: '#1a1a40',
             borderRadius: 8,
             border: '1px solid #e05050',
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
           }}>
-            <div style={{ fontSize: 17, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>⚔️ Vanguard</div>
-            <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
-              High-power claim cards that hit hard. Excels at taking contested territory
-              and overwhelming opponents. Cards are expensive but decisive.
+            <img src="/assets/howtoplay/vanguard.png" alt="" style={{ width: 96, height: 96, flexShrink: 0, objectFit: 'contain' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 17, fontWeight: 'bold', color: '#e05050', marginBottom: 4 }}>Vanguard</div>
+              <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
+                High-power claim cards that hit hard. Excels at taking contested territory
+                and overwhelming opponents. Cards are expensive but decisive.
+              </div>
             </div>
           </div>
           <div style={{
@@ -201,11 +231,17 @@ const PAGES = [
             background: '#1a1a40',
             borderRadius: 8,
             border: '1px solid #e0c050',
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
           }}>
-            <div style={{ fontSize: 17, fontWeight: 'bold', color: '#e0c050', marginBottom: 4 }}>🐝 Swarm</div>
-            <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
-              Floods the board with many low-power claims. Cheap cards, lots of card draw,
-              and action generation let Swarm play more cards per turn than anyone else.
+            <img src="/assets/howtoplay/swarm.png" alt="" style={{ width: 96, height: 96, flexShrink: 0, objectFit: 'contain' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 17, fontWeight: 'bold', color: '#e0c050', marginBottom: 4 }}>Swarm</div>
+              <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
+                Floods the board with many low-power claims. Cheap cards, lots of card draw,
+                and action generation let Swarm play more cards per turn than anyone else.
+              </div>
             </div>
           </div>
           <div style={{
@@ -213,11 +249,17 @@ const PAGES = [
             background: '#1a1a40',
             borderRadius: 8,
             border: '1px solid #5090e0',
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
           }}>
-            <div style={{ fontSize: 17, fontWeight: 'bold', color: '#5090e0', marginBottom: 4 }}>🏰 Fortress</div>
-            <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
-              Slow but sturdy. Strong defense cards make territory hard to take back.
-              Generates lots of resources and builds an engine before pushing outward.
+            <img src="/assets/howtoplay/fortress.png" alt="" style={{ width: 96, height: 96, flexShrink: 0, objectFit: 'contain' }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 17, fontWeight: 'bold', color: '#5090e0', marginBottom: 4 }}>Fortress</div>
+              <div style={{ fontSize: 14, color: '#aaa', lineHeight: 1.6 }}>
+                Slow but sturdy. Strong defense cards make territory hard to take back.
+                Generates lots of resources and builds an engine before pushing outward.
+              </div>
             </div>
           </div>
         </div>
