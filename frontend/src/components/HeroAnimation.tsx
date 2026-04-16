@@ -129,24 +129,50 @@ export default function HeroAnimation() {
       gridContainer.rotation = Math.PI / 6; // 30 degrees
       stage.addChild(gridContainer);
 
+      // Hover highlight layer (behind cards)
+      const hoverG = new Graphics();
+      gridContainer.addChild(hoverG);
+      let prevHoverKey: string | null = null;
+
       const cardContainer = new Container();
       stage.addChild(cardContainer);
 
       // --- Cursor proximity tracking ---
+      // Use native DOM events to avoid Pixi's coordinate mismatch with object-fit: contain
       let cursorHex: { q: number; r: number } | null = null;
       let cursorOnGrid = false;
       let cursorFade = 0;
       const CURSOR_FADE_MAX = 3; // max hex distance
       const CURSOR_FADE_SPEED = 0.08;
-      stage.eventMode = 'static';
-      stage.hitArea = app.screen;
-      stage.on('pointermove', (e) => {
-        const local = gridContainer.toLocal(e.global);
-        const frac = pixelToAxial(local.x, local.y);
+      const GRID_ROTATION = Math.PI / 6;
+
+      const canvasEl = app.canvas as HTMLCanvasElement;
+      const updateCursorHex = (clientX: number, clientY: number) => {
+        const rect = canvasEl.getBoundingClientRect();
+        // object-fit: contain scales uniformly — compute actual drawn area within the element
+        const scaleX = rect.width / CANVAS_W;
+        const scaleY = rect.height / CANVAS_H;
+        const scale = Math.min(scaleX, scaleY);
+        const drawnW = CANVAS_W * scale;
+        const drawnH = CANVAS_H * scale;
+        const offsetX = (rect.width - drawnW) / 2;
+        const offsetY = (rect.height - drawnH) / 2;
+        // Position in internal canvas coordinates
+        const px = (clientX - rect.left - offsetX) / scale;
+        const py = (clientY - rect.top - offsetY) / scale;
+        // Undo grid container transform (translate to center, then inverse rotation)
+        const dx = px - centerX;
+        const dy = py - centerY;
+        const cos = Math.cos(-GRID_ROTATION);
+        const sin = Math.sin(-GRID_ROTATION);
+        const localX = dx * cos - dy * sin;
+        const localY = dx * sin + dy * cos;
+        const frac = pixelToAxial(localX, localY);
         cursorHex = axialRound(frac.q, frac.r);
-      });
-      stage.on('pointerenter', () => { cursorOnGrid = true; });
-      stage.on('pointerleave', () => { cursorOnGrid = false; cursorHex = null; });
+      };
+      canvasEl.addEventListener('pointermove', (e) => updateCursorHex(e.clientX, e.clientY));
+      canvasEl.addEventListener('pointerenter', () => { cursorOnGrid = true; });
+      canvasEl.addEventListener('pointerleave', () => { cursorOnGrid = false; cursorHex = null; });
 
       // --- Draw base grid (per-tile outlines for ripple support) ---
       const gridOutlines: { g: Graphics; hexDist: number; px: number; py: number; q: number; r: number }[] = [];
@@ -322,6 +348,36 @@ export default function HeroAnimation() {
           const fade = 1 - dist / CURSOR_FADE_MAX; // 1 at cursor, 0 at max dist
           return 1 - fade * 0.25 * cursorFade; // 25% max reduction
         };
+
+        // --- Hex hover highlight ---
+        {
+          const hoverKey = cursorHex && hexSet.has(`${cursorHex.q},${cursorHex.r}`)
+            ? `${cursorHex.q},${cursorHex.r}` : null;
+          if (hoverKey !== prevHoverKey) {
+            prevHoverKey = hoverKey;
+            hoverG.clear();
+            if (cursorHex && hoverKey) {
+              const { x: hx, y: hy } = axialToPixel(cursorHex.q, cursorHex.r);
+              // Glow fill
+              hoverG.setFillStyle({ color: 0xffffff, alpha: 0.1 });
+              drawHexagon(hoverG, hx, hy, HEX_SIZE - 1);
+              hoverG.fill();
+              // Edge highlight
+              hoverG.setStrokeStyle({ width: 2.5, color: 0xffffff, alpha: 0.6, cap: 'round' });
+              drawHexagon(hoverG, hx, hy, HEX_SIZE - 1);
+              hoverG.stroke();
+              // Neighbor subtle glow
+              for (const [dq, dr] of HEX_DIRS) {
+                const nk = `${cursorHex.q + dq},${cursorHex.r + dr}`;
+                if (!hexSet.has(nk)) continue;
+                const { x: nx, y: ny } = axialToPixel(cursorHex.q + dq, cursorHex.r + dr);
+                hoverG.setStrokeStyle({ width: 1.5, color: 0xffffff, alpha: 0.15, cap: 'round' });
+                drawHexagon(hoverG, nx, ny, HEX_SIZE - 1);
+                hoverG.stroke();
+              }
+            }
+          }
+        }
 
         // --- Grid base fade in ---
         {

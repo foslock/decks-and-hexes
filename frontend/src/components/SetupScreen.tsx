@@ -49,10 +49,14 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
         .lobby-btn { transition: box-shadow 0.2s ease; box-shadow: none; }
         .lobby-btn:hover { box-shadow: 0 0 16px rgba(74, 158, 255, 0.35); }
         .lobby-btn-green:hover { box-shadow: 0 0 16px rgba(58, 142, 94, 0.5); }
+        @keyframes title-glow {
+          0%, 100% { text-shadow: 0 0 20px rgba(74, 158, 255, 0.3), 0 0 40px rgba(74, 120, 255, 0.15); }
+          50% { text-shadow: 0 0 30px rgba(74, 158, 255, 0.5), 0 0 60px rgba(74, 120, 255, 0.25), 0 0 80px rgba(74, 100, 255, 0.1); }
+        }
       `}</style>
       {/* Title */}
       <div style={{ textAlign: 'center', marginTop: 60, flexShrink: 0, padding: '0 24px' }}>
-        <h1 style={{ fontSize: 52, fontWeight: 900, marginBottom: 8, letterSpacing: 4, fontFamily: "'Cinzel', serif", textTransform: 'uppercase' }}>
+        <h1 style={{ fontSize: 52, fontWeight: 900, marginBottom: 8, letterSpacing: 4, fontFamily: "'Cinzel', serif", textTransform: 'uppercase', animation: 'title-glow 3s ease-in-out infinite' }}>
           Card Clash
         </h1>
         <div style={{ fontSize: 14, color: '#666' }}>
