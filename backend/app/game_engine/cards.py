@@ -382,12 +382,10 @@ def build_starting_deck(archetype: Archetype, card_registry: dict[str, Card]) ->
 def _copy_card(card: Card, instance_id: str) -> Card:
     """Create a copy of a card with a unique instance ID.
 
-    `definition_id` is preserved from the source so identity checks
-    against the original definition continue to match.
+    `definition_id` is preserved from the source via deepcopy so identity
+    checks against the original definition continue to match.
     """
     import copy
     c = copy.deepcopy(card)
     c.id = f"{card.id}_{instance_id}"
-    if not c.definition_id:
-        c.definition_id = card.definition_id
     return c
