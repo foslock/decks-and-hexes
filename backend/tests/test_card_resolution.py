@@ -2651,7 +2651,7 @@ class TestFortressWarden:
         assert not success
 
     def test_warden_vp_from_uncaptured_tiles(self, card_registry):
-        """Warden: +1 VP per 4 non-base tiles with capture_count == 0."""
+        """Warden: +1 VP per 8 non-base tiles with capture_count == 0."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
 
@@ -2661,16 +2661,16 @@ class TestFortressWarden:
 
         vp_before = compute_player_vp(game, "p0")
 
-        # Give player 4 non-base tiles with capture_count=0
+        # Give player 8 non-base tiles with capture_count=0
         assert game.grid is not None
         neutrals = [t for t in game.grid.tiles.values()
                      if t.owner is None and not t.is_blocked]
-        for t in neutrals[:4]:
+        for t in neutrals[:8]:
             t.owner = "p0"
             t.capture_count = 0  # never changed hands
 
         vp_after = compute_player_vp(game, "p0")
-        # 4 uncaptured non-base tiles / 4 = +1 VP from Warden
+        # 8 uncaptured non-base tiles / 8 = +1 VP from Warden
         assert vp_after >= vp_before + 1
 
     def test_warden_excludes_captured_tiles(self, card_registry):
