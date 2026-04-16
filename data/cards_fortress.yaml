@@ -21,8 +21,8 @@ cards:
     unplayable: true
     unique: true
     vp_formula: uncaptured_tiles_8
-    effect: "+1 VP for every 8 tiles you own that have never changed hands since you claimed them."
-    effect_upgraded: "+1 VP for every 6 tiles you own that have never changed hands since you claimed them."
+    effect: "+1 VP for every 8 non-base tiles you own that have never changed hands since you claimed them."
+    effect_upgraded: "+1 VP for every 6 non-base tiles you own that have never changed hands since you claimed them."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards holding ground permanently. Tiles lost and recaptured don't count. Takes up a hand slot when drawn."

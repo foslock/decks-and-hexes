@@ -739,11 +739,11 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
                 groups += 1
         return groups
 
-    elif formula == "uncaptured_tiles_4":
-        # Warden: 1 VP per 4 tiles (3 upgraded) that have never changed hands
+    elif formula == "uncaptured_tiles_8":
+        # Warden: 1 VP per 8 tiles (6 upgraded) that have never changed hands
         if not game.grid:
             return 0
-        divisor = 3 if is_upgraded else 4
+        divisor = 6 if is_upgraded else 8
         count = sum(
             1 for t in game.grid.tiles.values()
             if t.owner == player.id and not t.is_base and t.capture_count == 0
@@ -2000,6 +2000,7 @@ def execute_reveal(game: GameState) -> GameState:
                 "winner_id": None,
                 "previous_owner": tile.owner,
                 "outcome": "defense_held",
+                "is_base_raid": tile.is_base,
             })
             continue
 
@@ -2031,6 +2032,7 @@ def execute_reveal(game: GameState) -> GameState:
                 "winner_id": None,
                 "previous_owner": tile.owner,
                 "outcome": "tie",
+                "is_base_raid": tile.is_base,
             })
             continue
 
@@ -2059,6 +2061,7 @@ def execute_reveal(game: GameState) -> GameState:
             "winner_id": winner_id,
             "previous_owner": tile.owner,
             "outcome": "claimed" if winner_id != tile.owner else "defended",
+            "is_base_raid": tile.is_base,
         })
 
         if winner_id != tile.owner:
