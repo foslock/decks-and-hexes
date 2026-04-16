@@ -40,6 +40,7 @@ class SimConfig:
     grid_size: GridSize = GridSize.SMALL
     player_archetypes: list[Archetype] = field(default_factory=lambda: [Archetype.VANGUARD, Archetype.SWARM])
     cpu_noise: float = 0.0
+    cpu_difficulties: Optional[list[str]] = None  # parallel to player_archetypes
     seed: Optional[int] = None
     max_rounds: int = 20
     verbose: bool = False
@@ -128,10 +129,17 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
                            speed=config.speed, card_pack=config.card_pack,
                            max_rounds=config.max_rounds)
 
-        # Create CPU players
+        # Create CPU players. When cpu_difficulties is provided (parallel to
+        # player_archetypes), each CPU gets its own difficulty tier — used by
+        # head-to-head harnesses that pit Hard vs Easy.
         cpus: dict[str, CPUPlayer] = {}
-        for pid in game.player_order:
-            cpus[pid] = CPUPlayer(pid, noise=config.cpu_noise, rng=game.rng)
+        for idx, pid in enumerate(game.player_order):
+            difficulty: Optional[str] = None
+            if config.cpu_difficulties and idx < len(config.cpu_difficulties):
+                difficulty = config.cpu_difficulties[idx]
+            cpus[pid] = CPUPlayer(
+                pid, noise=config.cpu_noise, rng=game.rng, difficulty=difficulty
+            )
 
         # Initialize per-player tracking
         tracking: dict[str, PlayerResult] = {}

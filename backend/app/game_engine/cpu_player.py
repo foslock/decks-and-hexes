@@ -196,16 +196,232 @@ def _adapt_weights(weights: StrategyWeights, game: Any, player_id: str) -> Strat
     )
 
 
+# ── VP-pursuit helpers ────────────────────────────────────────────
+
+_VP_EFFECT_TYPES = frozenset({
+    EffectType.GAIN_VP,
+    EffectType.ENHANCE_VP_TILE,
+    EffectType.GRANT_LAND_GRANTS,
+    EffectType.VP_FROM_CONTESTED_WINS,
+})
+
+
+def _is_vp_card(card: Card) -> bool:
+    """True if the card directly produces VP — passive VP, formula VP, or
+    any of the VP-flavored effect types."""
+    if getattr(card, "passive_vp", 0) and card.passive_vp > 0:
+        return True
+    if getattr(card, "vp_formula", None):
+        return True
+    return any(e.type in _VP_EFFECT_TYPES for e in card.effects)
+
+
+def _cheapest_visible_vp_card(
+    game: Any, player: Any
+) -> Optional[tuple[Card, int, str]]:
+    """Return (card, dynamic_cost, source) for the cheapest VP card visible
+    to *player* in either the archetype market or shared market, or None.
+
+    Skips Unique cards the player already owns (they can't be bought).
+    """
+    from .game_state import calculate_dynamic_buy_cost, player_owns_card_by_name
+
+    best: Optional[tuple[Card, int, str]] = None
+    for card in player.archetype_market:
+        if not _is_vp_card(card):
+            continue
+        if card.unique and player_owns_card_by_name(player, card.name):
+            continue
+        cost = calculate_dynamic_buy_cost(game, player, card)
+        if best is None or cost < best[1]:
+            best = (card, cost, "archetype")
+
+    for base_id, copies in game.shared_market.stacks.items():
+        if not copies:
+            continue
+        card_obj = copies[0]
+        if not _is_vp_card(card_obj):
+            continue
+        if card_obj.unique and player_owns_card_by_name(player, card_obj.name):
+            continue
+        cost = calculate_dynamic_buy_cost(game, player, card_obj)
+        if best is None or cost < best[1]:
+            best = (card_obj, cost, "shared")
+
+    return best
+
+
+def _opponent_can_afford_shared(
+    game: Any, cost: int, self_pid: str
+) -> bool:
+    """True if any non-self player has enough resources to buy a shared-market
+    card at *cost*. Used for VP-card market denial."""
+    for pid, p in game.players.items():
+        if pid == self_pid:
+            continue
+        if getattr(p, "has_left", False):
+            continue
+        if p.resources >= cost:
+            return True
+    return False
+
+
+def _projected_formula_vp(card: Card, player: Any, game: Any) -> float:
+    """Estimate the VP a formula card will yield, including a small growth
+    projection for the rest of the game.
+
+    Uses _compute_formula_vp from game_state to read current VP, then adds a
+    heuristic for plausible growth based on the formula type and archetype.
+    Returns 0.0 if the card has no formula or game state is unavailable.
+    """
+    formula = getattr(card, "vp_formula", None)
+    if not formula or game is None:
+        return 0.0
+
+    from .game_state import _compute_formula_vp
+
+    current = _compute_formula_vp(card, player, game)
+    is_upgraded = getattr(card, "is_upgraded", False)
+    growth = 0.0
+
+    if formula == "deck_div_10":
+        # Assume ~6 more buys this game
+        all_cards = player.deck.cards + player.hand + player.deck.discard
+        divisor = 8 if is_upgraded else 10
+        projected_total = (len(all_cards) + 6) // divisor
+        growth = max(0, projected_total - current)
+    elif formula == "trash_div_5":
+        divisor = 4 if is_upgraded else 5
+        projected_total = (len(player.trash) + 4) // divisor
+        growth = max(0, projected_total - current)
+    elif formula == "disconnected_groups_3":
+        # Most relevant for Swarm (lots of small clusters)
+        if player.archetype == Archetype.SWARM:
+            growth = 1.0
+    elif formula == "fortified_tiles_3":
+        # Most relevant for Fortress (permanent defense)
+        if player.archetype == Archetype.FORTRESS:
+            growth = 1.0
+
+    return float(current) + growth
+
+
+# ── Difficulty tiers ──────────────────────────────────────────────
+
+EASY = "easy"
+MEDIUM = "medium"
+HARD = "hard"
+
+
+def _difficulty_from_noise(noise: float) -> str:
+    """Map the existing cpu_noise float (set by lobby.py) onto a tier name.
+
+    lobby.py uses easy=0.25 / medium=0.10 / hard=0.05; this mapping preserves
+    that contract while leaving room for intermediate values.
+    """
+    if noise >= 0.20:
+        return EASY
+    if noise >= 0.08:
+        return MEDIUM
+    return HARD
+
+
+@dataclass(frozen=True)
+class DifficultyProfile:
+    """Feature flags + multipliers gating the new VP-pursuit heuristics.
+
+    Easy CPUs fall back to the previous (pre-improvement) behavior at every
+    site so a learning player can win against them. Medium gets most
+    improvements with later activation and softer multipliers. Hard runs the
+    full set at full strength.
+    """
+    # Buy-phase scoring
+    raised_passive_vp_score: bool = True
+    formula_deck_state_scoring: bool = True
+    first_vp_priming: bool = True
+    first_vp_primer_probability: float = 1.0  # rolled when triggered
+    owned_vp_feedback_mult: float = 1.25      # 1.0 disables the bonus
+    soften_vp_cost_penalty: bool = True
+    soft_cost_penalty_coef_a: float = 0.15    # divisor = cost*a + b
+    soft_cost_penalty_coef_b: float = 1.0
+    bypass_low_score_cutoff_for_vp: bool = True
+    market_denial_mult: float = 1.4           # 1.0 disables denial bump
+    # Resource saving
+    resource_saving_gate: bool = True
+    saving_gate_min_progress: float = 0.25
+    # Reroll bias
+    reroll_for_vp: bool = True
+    reroll_min_progress: float = 0.3
+    # Play-phase VP hex double-down
+    vp_hex_double_down: bool = True
+    double_down_min_margin: int = -2          # power vs defense
+    # Adaptive weights
+    use_adaptive_weights: bool = True
+
+
+_EASY_PROFILE = DifficultyProfile(
+    raised_passive_vp_score=False,
+    formula_deck_state_scoring=False,
+    first_vp_priming=False,
+    first_vp_primer_probability=0.0,
+    owned_vp_feedback_mult=1.0,
+    soften_vp_cost_penalty=False,
+    bypass_low_score_cutoff_for_vp=False,
+    market_denial_mult=1.0,
+    resource_saving_gate=False,
+    reroll_for_vp=False,
+    vp_hex_double_down=False,
+    use_adaptive_weights=False,
+)
+
+_MEDIUM_PROFILE = DifficultyProfile(
+    first_vp_primer_probability=0.5,
+    owned_vp_feedback_mult=1.15,
+    soft_cost_penalty_coef_a=0.3,
+    soft_cost_penalty_coef_b=0.75,
+    market_denial_mult=1.2,
+    saving_gate_min_progress=0.5,
+    reroll_min_progress=0.5,
+    double_down_min_margin=-1,
+)
+
+_HARD_PROFILE = DifficultyProfile()
+
+
+def _profile_for(difficulty: str) -> DifficultyProfile:
+    if difficulty == EASY:
+        return _EASY_PROFILE
+    if difficulty == MEDIUM:
+        return _MEDIUM_PROFILE
+    return _HARD_PROFILE
+
+
 # ── CPU Player ────────────────────────────────────────────────────
 
 class CPUPlayer:
     """Heuristic CPU player that makes decisions for all game phases."""
 
     def __init__(self, player_id: str, noise: float = 0.0,
-                 rng: Optional[random.Random] = None):
+                 rng: Optional[random.Random] = None,
+                 difficulty: Optional[str] = None):
         self.player_id = player_id
         self.noise = max(0.0, min(1.0, noise))
         self.rng = rng or random.Random()
+        # Difficulty derives from noise unless explicitly set. lobby.py uses
+        # easy=0.25 / medium=0.10 / hard=0.05 — see _difficulty_from_noise.
+        self.difficulty = difficulty or _difficulty_from_noise(self.noise)
+        self.profile = _profile_for(self.difficulty)
+
+    # ── Weights helper ────────────────────────────────────────────
+
+    def _get_weights(self, player: Any, game: Any) -> StrategyWeights:
+        """Return strategy weights for *player*, applying _adapt_weights only
+        when the difficulty profile permits it. Easy CPUs skip adaptation so
+        they neither catch up nor lock down a lead."""
+        weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
+        if self.profile.use_adaptive_weights:
+            weights = _adapt_weights(weights, game, self.player_id)
+        return weights
 
     # ── Selection helper ──────────────────────────────────────────
 
@@ -281,8 +497,7 @@ class CPUPlayer:
               "trash_card_indices": list|None, "extra_targets": list|None}, ...]
         """
         player = game.players[self.player_id]
-        weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
-        weights = _adapt_weights(weights, game, self.player_id)
+        weights = self._get_weights(player, game)
         actions: list[dict[str, Any]] = []
 
         # Keep playing cards while we have actions and cards
@@ -315,8 +530,7 @@ class CPUPlayer:
             if not has_free:
                 return None
 
-        weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
-        weights = _adapt_weights(weights, game, self.player_id)
+        weights = self._get_weights(player, game)
         return self._pick_best_card(game, player, weights)
 
     def _pick_best_card(self, game: Any, player: Any,
@@ -575,6 +789,16 @@ class CPUPlayer:
             held_since = getattr(tile, "held_since_turn", None)
             if held_since is not None and held_since < game.current_round:
                 score += tile.vp_value * 4.0 * weights.vp_hex_priority
+            # Double-down: if a single claim won't break through but the margin
+            # is close, surface the contested VP hex as still the top target so
+            # a stackable second claim this turn can tip the balance.
+            if (
+                self.profile.vp_hex_double_down
+                and not can_win
+                and effective_power - tile.defense_power
+                    >= self.profile.double_down_min_margin
+            ):
+                score += tile.vp_value * 6.0 * weights.vp_hex_priority
 
         # Neutral vs enemy tile
         if tile.owner is None:
@@ -1394,8 +1618,7 @@ class CPUPlayer:
         if player.turn_modifiers.buy_locked:
             return []
 
-        weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
-        weights = _adapt_weights(weights, game, self.player_id)
+        weights = self._get_weights(player, game)
         purchases: list[dict[str, Any]] = []
 
         # Keep buying while we have resources and good options
@@ -1416,8 +1639,7 @@ class CPUPlayer:
         if player.turn_modifiers.buy_locked or player.resources <= 0:
             return None
 
-        weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
-        weights = _adapt_weights(weights, game, self.player_id)
+        weights = self._get_weights(player, game)
         return self._pick_best_purchase(game, player, weights)
 
     def _pick_best_purchase(self, game: Any, player: Any,
@@ -1439,7 +1661,9 @@ class CPUPlayer:
             cost = calculate_dynamic_buy_cost(game, player, card)
             if cost > player.resources:
                 continue
-            score = self._score_card_for_purchase(card, player, weights, cost, game, composition)
+            score = self._score_card_for_purchase(
+                card, player, weights, cost, game, composition, from_shared=False
+            )
             scored.append((score, {"source": "archetype", "card_id": card.id}))
 
         # Score neutral market cards (limit 1 copy per card per round)
@@ -1458,7 +1682,9 @@ class CPUPlayer:
             cost = calculate_dynamic_buy_cost(game, player, card_obj)
             if cost > player.resources:
                 continue
-            score = self._score_card_for_purchase(card_obj, player, weights, cost, game, composition)
+            score = self._score_card_for_purchase(
+                card_obj, player, weights, cost, game, composition, from_shared=True
+            )
             scored.append((score, {"source": "shared", "card_id": base_id}))
 
         # Score upgrade credits
@@ -1467,12 +1693,89 @@ class CPUPlayer:
             upgrade_score = 3.0
             scored.append((upgrade_score, {"source": "upgrade", "card_id": None}))
 
+        # Resource-saving gate: if a VP card is visible but only a few resources
+        # out of reach, skip cheap utility buys this turn so we can afford it
+        # next turn. Disabled on Easy; gated by progress on Medium.
+        if self._should_save_for_vp(game, player, scored):
+            scored = [
+                (s, action) for (s, action) in scored
+                if self._is_saving_compatible_purchase(game, player, action)
+            ]
+            if not scored:
+                return None
+
         return self._pick(scored)
+
+    def _should_save_for_vp(
+        self, game: Any, player: Any,
+        scored: list[tuple[float, dict[str, Any]]],
+    ) -> bool:
+        """True when the CPU should hold resources to afford a soon-reachable
+        VP card rather than spending on cheap utility buys.
+
+        Only triggers when (a) the difficulty profile enables saving, (b) game
+        progress has crossed the profile threshold, (c) a VP card is visible
+        within `current_resources + 3` but unaffordable now, and (d) the
+        deck's resource-gain ratio is healthy enough that we can refill
+        next turn.
+        """
+        profile = self.profile
+        if not profile.resource_saving_gate or game is None:
+            return False
+        if _game_progress(game) < profile.saving_gate_min_progress:
+            return False
+        composition = _deck_composition(player)
+        # Don't starve a thin economy by skipping resource gain buys.
+        if composition["total"] > 0 and composition["resource_gain_ratio"] < 0.2:
+            return False
+        target = _cheapest_visible_vp_card(game, player)
+        if target is None:
+            return False
+        _, target_cost, _ = target
+        if player.resources >= target_cost:
+            return False  # already affordable, no reason to save
+        if player.resources + 3 < target_cost:
+            return False  # too far away, save mode would idle too long
+        return True
+
+    def _is_saving_compatible_purchase(
+        self, game: Any, player: Any, action: dict[str, Any]
+    ) -> bool:
+        """When in saving mode, allow only buys that don't burn resources on
+        cheap non-VP, non-economy filler. VP cards always pass; resource-gain
+        engine cards pass; upgrade credits and cheap (cost <= 2) filler are
+        filtered out."""
+        from .game_state import calculate_dynamic_buy_cost
+        source = action["source"]
+        if source == "upgrade":
+            # Upgrade credits drain resources without progressing the VP buy.
+            return False
+        # Look up the card to inspect its properties
+        card_id = action["card_id"]
+        card_obj: Optional[Card] = None
+        if source == "archetype":
+            for c in player.archetype_market:
+                if c.id == card_id:
+                    card_obj = c
+                    break
+        else:  # shared
+            stack = game.shared_market.stacks.get(card_id)
+            if stack:
+                card_obj = stack[0]
+        if card_obj is None:
+            return True  # be conservative: don't filter unknowns
+        if _is_vp_card(card_obj):
+            return True
+        if card_obj.effective_resource_gain > 0:
+            return True
+        cost = calculate_dynamic_buy_cost(game, player, card_obj)
+        return cost > 2
 
     def _score_card_for_purchase(self, card: Card, player: Any,
                                  weights: StrategyWeights,
                                  cost: int, game: Any = None,
-                                 composition: Optional[dict[str, float]] = None) -> float:
+                                 composition: Optional[dict[str, float]] = None,
+                                 from_shared: bool = False) -> float:
         """Score a card for purchase.
 
         Tempo-sensitive: early game favors cheap cards and deck thinning,
@@ -1482,9 +1785,14 @@ class CPUPlayer:
         multiplier boost: decks with less than ~10% high-power claims favor
         high-power claim purchases, and decks with less than ~33% resource
         gain cards favor resource-gain engine purchases.
+
+        *from_shared* indicates the card is in the shared (public) market;
+        used to apply VP-card market denial when an opponent could grab it.
         """
         score = 0.0
         progress = _game_progress(game) if game else 0.5
+        profile = self.profile
+        is_vp = _is_vp_card(card)
 
         # Base value by card type
         if card.card_type == CardType.CLAIM:
@@ -1629,7 +1937,12 @@ class CPUPlayer:
 
         # Passive VP (Land Grant) — always valuable
         if card.passive_vp > 0:
-            score += card.passive_vp * 8.0
+            if profile.raised_passive_vp_score:
+                # Mid-game ~16/VP, late ~20/VP. The original 8.0 baseline left
+                # Land Grant unreachable after the cost-penalty divisor.
+                score += card.passive_vp * (12.0 + 8.0 * progress)
+            else:
+                score += card.passive_vp * 8.0
 
         # VP-related cards are high priority purchases
         for effect in card.effects:
@@ -1639,7 +1952,13 @@ class CPUPlayer:
 
         # Dynamic VP formula cards (passive VP generators)
         if card.vp_formula:
-            score += 5.0
+            if profile.formula_deck_state_scoring and game is not None:
+                # Score by current realized VP plus a small projection so a
+                # Swarm with a fat deck values Arsenal far more than a thin
+                # Fortress would.
+                score += _projected_formula_vp(card, player, game) * 10.0
+            else:
+                score += 5.0
 
         # Tempo-sensitive adjustments based on game progress
         if cost <= 2:
@@ -1684,47 +2003,96 @@ class CPUPlayer:
         # Passive-VP feedback loop: once we own at least one passive-VP card
         # (e.g. Land Grant), lean harder into VP-generating purchases — the
         # endgame plan becomes "finish the VP race", not "out-tempo the table".
-        if _owns_passive_vp(player):
-            has_vp_any = card.passive_vp > 0 or card.vp_formula or any(
-                e.type in (EffectType.GAIN_VP, EffectType.ENHANCE_VP_TILE,
-                           EffectType.GRANT_LAND_GRANTS,
-                           EffectType.VP_FROM_CONTESTED_WINS)
-                for e in card.effects
-            )
-            if has_vp_any:
-                score *= 1.25
+        owns_vp = _owns_passive_vp(player)
+        if is_vp and owns_vp and profile.owned_vp_feedback_mult != 1.0:
+            score *= profile.owned_vp_feedback_mult
 
-        # Cost efficiency: penalize expensive cards
+        # First-VP priming boost: break the chicken-and-egg by nudging the
+        # CPU toward its first passive/formula VP card when one is in reach.
+        if (
+            is_vp and not owns_vp and profile.first_vp_priming
+            and game is not None
+            and _game_progress(game) >= 0.35
+            and player.resources + 2 >= cost
+        ):
+            if profile.first_vp_primer_probability >= 1.0 or (
+                profile.first_vp_primer_probability > 0.0
+                and self.rng.random() < profile.first_vp_primer_probability
+            ):
+                score *= 1.6
+
+        # Market denial: if a shared-market VP card is within an opponent's
+        # reach, snipe it before they can grab it.
+        if (
+            is_vp and from_shared and profile.market_denial_mult != 1.0
+            and game is not None
+            and _opponent_can_afford_shared(game, cost, self.player_id)
+        ):
+            score *= profile.market_denial_mult
+
+        # Cost efficiency: penalize expensive cards. Use a softer divisor for
+        # VP cards so Land Grant (cost 7) isn't crushed by 4× while a Gather
+        # (cost 2) divides by only 1.5.
         if cost > 0:
-            score = score / (cost * 0.5 + 0.5)  # diminishing cost penalty
+            if is_vp and profile.soften_vp_cost_penalty:
+                divisor = (
+                    cost * profile.soft_cost_penalty_coef_a
+                    + profile.soft_cost_penalty_coef_b
+                )
+            else:
+                divisor = cost * 0.5 + 0.5
+            score = score / divisor
 
         # Don't buy cards that are much worse than what's in our deck
-        # (simple heuristic: penalize if cost is very low relative to our average)
+        # (simple heuristic: penalize if cost is very low relative to our average).
+        # VP cards bypass this cutoff — they should always at least be considered.
         if score < 1.0:
+            if is_vp and profile.bypass_low_score_cutoff_for_vp:
+                return score
             return 0.0  # not worth buying
 
         return score
 
     def should_reroll_market(self, game: Any) -> bool:
         """Decide whether to reroll the archetype market."""
-        from .game_state import REROLL_COST
+        from .game_state import REROLL_COST, calculate_dynamic_buy_cost
         player = game.players[self.player_id]
 
         if player.resources < REROLL_COST:
             return False
 
-        weights = ARCHETYPE_WEIGHTS.get(player.archetype, StrategyWeights())
-        weights = _adapt_weights(weights, game, self.player_id)
+        weights = self._get_weights(player, game)
+        profile = self.profile
 
         # Score current market offerings
         total_score = 0.0
         affordable_count = 0
+        has_affordable_vp = False
         for card in player.archetype_market:
-            from .game_state import calculate_dynamic_buy_cost
             cost = calculate_dynamic_buy_cost(game, player, card)
             if cost <= player.resources:
                 total_score += self._score_card_for_purchase(card, player, weights, cost, game)
                 affordable_count += 1
+                if _is_vp_card(card):
+                    has_affordable_vp = True
+
+        # If a VP card is already in the market and affordable, never spin —
+        # we'd risk losing it. Applies to all difficulties.
+        if has_affordable_vp:
+            return False
+
+        # VP-hunt reroll bias: when the CPU still has no passive-VP card and
+        # nothing in the current market produces VP, spend a resource to roll
+        # for one. Easy CPUs skip this and stick with whatever rolled.
+        if (
+            profile.reroll_for_vp
+            and not _owns_passive_vp(player)
+            and player.resources >= REROLL_COST + 2
+            and _game_progress(game) >= profile.reroll_min_progress
+        ):
+            market_has_vp = any(_is_vp_card(c) for c in player.archetype_market)
+            if not market_has_vp:
+                return True
 
         # Reroll if nothing affordable or nothing worth buying
         if affordable_count == 0:
