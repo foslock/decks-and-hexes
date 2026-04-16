@@ -47,7 +47,7 @@ interface ShopOverlayProps {
   /** Current player ID (to filter out own purchases from the history) */
   currentPlayerId?: string;
   /** Current-turn purchases by all players (from buy_phase_purchases) */
-  buyPhasePurchases?: Record<string, Array<{ card_id: string; card_name: string; source: string; cost: number }>>;
+  buyPhasePurchases?: Record<string, Array<{ card_id: string; definition_id?: string; card_name: string; source: string; cost: number }>>;
   /** Player map for looking up names */
   players?: Record<string, { name: string }>;
   /** Number of free re-rolls remaining (from Surveyor) */

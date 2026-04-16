@@ -15,7 +15,13 @@ export interface HexTile {
 }
 
 export interface Card {
+  // Per-instance identifier. Unique across all cards in a game session so
+  // individual copies can be tracked (e.g. when picking a target). Not
+  // stable across a card's definition — use `definition_id` for identity.
   id: string;
+  // Stable identifier for the card *definition*. Identical across every
+  // copy of the card. Use this for identity-based logic/lookups.
+  definition_id: string;
   name: string;
   archetype: string;
   card_type: string;
@@ -241,6 +247,7 @@ export interface GameState {
   players_done_buying: string[];
   buy_phase_purchases: Record<string, Array<{
     card_id: string;
+    definition_id?: string;
     card_name: string;
     source: string;
     cost: number;

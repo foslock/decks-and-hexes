@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 from .cards import (
     ARCHETYPE_SLOTS,
+    DEF_ID_DEBT,
+    DEF_ID_RUBBLE,
     HAND_SIZE,
     Archetype,
     Card,
@@ -319,7 +321,7 @@ class Player:
         """Count Rubble cards across deck, hand, and discard."""
         return sum(
             1 for c in self.deck.cards + self.hand + self.deck.discard
-            if c.name == "Rubble"
+            if c.definition_id == DEF_ID_RUBBLE
         )
 
     def to_dict(self, hide_hand: bool = False, game: Any = None) -> dict[str, Any]:
@@ -1121,7 +1123,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         return False, f"{card.name} cannot be played"
 
     # Debt card: requires 3 resources to play (self-trash)
-    if card.name == "Debt":
+    if card.definition_id == DEF_ID_DEBT:
         if player.resources < 3:
             return False, "Need 3 resources to play Debt"
 
@@ -1422,7 +1424,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
             if eff.type == EffectType.DRAW_PER_DEBT:
                 debt_count = sum(
                     1 for c in player.hand + player.deck.cards + player.deck.discard
-                    if c.name == "Debt"
+                    if c.definition_id == DEF_ID_DEBT
                 )
                 snapshotted_draw_cards = debt_count * eff.value
                 break
@@ -2362,19 +2364,19 @@ def _transition_to_buy(game: GameState) -> None:
     game._log("=== Buy Phase ===")
 
 
-def player_owns_card_by_name(player: "Player", card_name: str) -> bool:
+def player_owns_card_definition(player: "Player", definition_id: str) -> bool:
     """Return True if the player's deck (draw + hand + discard) already contains
-    a card with the given name. Trashed cards are excluded — they have been
-    removed from the deck.
+    a card with the given definition id. Trashed cards are excluded — they
+    have been removed from the deck.
     """
     for c in player.deck.cards:
-        if c.name == card_name:
+        if c.definition_id == definition_id:
             return True
     for c in player.hand:
-        if c.name == card_name:
+        if c.definition_id == definition_id:
             return True
     for c in player.deck.discard:
-        if c.name == card_name:
+        if c.definition_id == definition_id:
             return True
     return False
 
@@ -2407,7 +2409,9 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             player.resources -= UPGRADE_CREDIT_COST
         player.upgrade_credits += 1
         game.buy_phase_purchases.setdefault(player_id, []).append({
-            "card_id": "upgrade_credit", "card_name": "Upgrade Credit",
+            "card_id": "upgrade_credit",
+            "definition_id": "upgrade_credit",
+            "card_name": "Upgrade Credit",
             "source": "upgrade", "cost": UPGRADE_CREDIT_COST if not free else 0,
         })
         game._log(f"{player.name} buys upgrade credit ({player.upgrade_credits} total)")
@@ -2423,7 +2427,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             return False, "Card not in archetype market"
         # Unique cards: cannot be purchased if already in the player's deck
         # (draw pile, hand, or discard). Trashed copies don't count.
-        if target.unique and player_owns_card_by_name(player, target.name):
+        if target.unique and player_owns_card_definition(player, target.definition_id):
             return False, f"You already own a copy of {target.name} (Unique)"
         if not free:
             dynamic_cost = calculate_dynamic_buy_cost(game, player, target)
@@ -2439,7 +2443,9 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         # which should span natural rolls, re-rolls, AND purchases.
         player.deck.add_to_discard([target])
         game.buy_phase_purchases.setdefault(player_id, []).append({
-            "card_id": target.id, "card_name": target.name,
+            "card_id": target.id,
+            "definition_id": target.definition_id,
+            "card_name": target.name,
             "source": "archetype", "cost": effective_cost if not free else 0,
         })
         game._log(f"{player.name} buys {target.name} from archetype market")
@@ -2465,7 +2471,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 if base_id == card_id or card_id.startswith(base_id):
                     peek_card = game.shared_market.card_templates.get(base_id)
                     break
-        if peek_card is not None and peek_card.unique and player_owns_card_by_name(player, peek_card.name):
+        if peek_card is not None and peek_card.unique and player_owns_card_definition(player, peek_card.definition_id):
             return False, f"You already own a copy of {peek_card.name} (Unique)"
 
         result = game.shared_market.purchase(card_id, player_id)
@@ -2488,7 +2494,9 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
         game.buy_phase_purchases.setdefault(player_id, []).append({
-            "card_id": base_card_id, "card_name": purchased.name,
+            "card_id": base_card_id,
+            "definition_id": purchased.definition_id,
+            "card_name": purchased.name,
             "source": "shared", "cost": effective_cost if not free else 0,
         })
         game.shared_purchase_log.append({

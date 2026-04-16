@@ -720,8 +720,9 @@ class TestDifficultyHeadToHead:
         across many games than Easy's baseline behavior."""
         from app.game_engine.cpu_player import _is_vp_card
 
-        vp_card_names = {
-            card.name for card in card_registry.values() if _is_vp_card(card)
+        vp_card_defs = {
+            card.definition_id
+            for card in card_registry.values() if _is_vp_card(card)
         }
         pairings = [
             (Archetype.VANGUARD, Archetype.SWARM),
@@ -741,8 +742,8 @@ class TestDifficultyHeadToHead:
                     assert result.error is None
                     for pr in result.player_results:
                         n = sum(
-                            count for name, count in pr.cards_purchased.items()
-                            if name in vp_card_names
+                            count for def_id, count in pr.cards_purchased.items()
+                            if def_id in vp_card_defs
                         )
                         if pr.player_id == hard_seat:
                             hard_vp_buys += n

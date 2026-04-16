@@ -141,6 +141,7 @@ function VpStatTip({ breakdown, children }: { breakdown: VpBreakdown; children: 
 
 interface BuyPurchase {
   card_id: string;
+  definition_id?: string;
   card_name: string;
   source: string;
   cost: number;
@@ -159,7 +160,7 @@ interface PlayerHudProps {
   totalCards: number;
   tileCount: number;
   purchases?: BuyPurchase[];
-  onPurchaseHover?: (e: React.MouseEvent, cardId: string, cardName?: string) => void;
+  onPurchaseHover?: (e: React.MouseEvent, cardId: string, definitionId?: string) => void;
   onPurchaseLeave?: () => void;
   vpTarget?: number;
   vpBreakdown?: VpBreakdown;
@@ -353,7 +354,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           {purchases.map((p, i) => (
             <span
               key={i}
-              onMouseEnter={onPurchaseHover ? (e) => onPurchaseHover(e, p.card_id, p.card_name) : undefined}
+              onMouseEnter={onPurchaseHover ? (e) => onPurchaseHover(e, p.card_id, p.definition_id) : undefined}
               onMouseLeave={onPurchaseLeave}
               style={{
                 fontSize: 10,

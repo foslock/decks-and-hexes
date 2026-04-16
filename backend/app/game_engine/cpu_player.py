@@ -19,9 +19,23 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .cards import Archetype, Card, CardType, Timing
+from .cards import (
+    Archetype,
+    Card,
+    CardType,
+    DEF_ID_DEBT,
+    DEF_ID_RUBBLE,
+    DEF_ID_SPOILS,
+    Timing,
+)
 from .effects import ConditionType, EffectType
 from .hex_grid import HexGrid, HexTile
+
+# Stable definition IDs for the starter and thinning cards whose identity
+# matters to CPU decision logic. Display names are rendering-only.
+_DEF_ID_EXPLORE = "neutral_explore"
+_DEF_ID_GATHER = "neutral_gather"
+_DEF_ID_CULL = "neutral_reduce"
 
 
 # ── Archetype strategy weights ───────────────────────────────────
@@ -224,13 +238,13 @@ def _cheapest_visible_vp_card(
 
     Skips Unique cards the player already owns (they can't be bought).
     """
-    from .game_state import calculate_dynamic_buy_cost, player_owns_card_by_name
+    from .game_state import calculate_dynamic_buy_cost, player_owns_card_definition
 
     best: Optional[tuple[Card, int, str]] = None
     for card in player.archetype_market:
         if not _is_vp_card(card):
             continue
-        if card.unique and player_owns_card_by_name(player, card.name):
+        if card.unique and player_owns_card_definition(player, card.definition_id):
             continue
         cost = calculate_dynamic_buy_cost(game, player, card)
         if best is None or cost < best[1]:
@@ -242,7 +256,7 @@ def _cheapest_visible_vp_card(
         card_obj = copies[0]
         if not _is_vp_card(card_obj):
             continue
-        if card_obj.unique and player_owns_card_by_name(player, card_obj.name):
+        if card_obj.unique and player_owns_card_definition(player, card_obj.definition_id):
             continue
         cost = calculate_dynamic_buy_cost(game, player, card_obj)
         if best is None or cost < best[1]:
@@ -997,7 +1011,7 @@ class CPUPlayer:
         score = 0.0
 
         # Debt card: high priority to play if we can afford it (removes dead weight)
-        if card.name == "Debt":
+        if card.definition_id == DEF_ID_DEBT:
             action = {"type": "play_card", "card_index": card_index}
             if player.resources >= 3:
                 return (15.0, action)  # Always play Debt if affordable
@@ -1335,7 +1349,7 @@ class CPUPlayer:
         for i, card in enumerate(player.hand):
             score = 0.0
             # Debt and Rubble are always worst — discard first
-            if card.name in ("Debt", "Rubble"):
+            if card.definition_id in (DEF_ID_DEBT, DEF_ID_RUBBLE):
                 score = -10.0
             elif card.card_type == CardType.CLAIM:
                 score = card.effective_power + 2.0
@@ -1385,11 +1399,11 @@ class CPUPlayer:
                 continue  # can't gain resources from cards with no buy cost
             # Prefer trashing: Debt/Rubble > Explore > Gather > starters > cheap > expensive.
             score = 0.0
-            is_explore = card.starter and card.name == "Explore"
-            is_gather = card.starter and card.name == "Gather"
-            if card.name == "Debt":
+            is_explore = card.starter and card.definition_id == _DEF_ID_EXPLORE
+            is_gather = card.starter and card.definition_id == _DEF_ID_GATHER
+            if card.definition_id == DEF_ID_DEBT:
                 score += 20.0  # always trash Debt first — dead weight with -3 resources
-            elif card.name == "Rubble":
+            elif card.definition_id == DEF_ID_RUBBLE:
                 score += 18.0  # always trash Rubble — pure dead weight
             elif is_explore:
                 # Only favor trashing Explore while we have a claim surplus.
@@ -1428,13 +1442,13 @@ class CPUPlayer:
             if i == exclude_index:
                 continue
             score = 0.0
-            if card.name == "Debt":
+            if card.definition_id == DEF_ID_DEBT:
                 score -= 10.0  # always trash Debt first
-            elif card.name == "Rubble":
+            elif card.definition_id == DEF_ID_RUBBLE:
                 score -= 8.0  # always trash Rubble
             else:
-                is_explore = card.starter and card.name == "Explore"
-                is_gather = card.starter and card.name == "Gather"
+                is_explore = card.starter and card.definition_id == _DEF_ID_EXPLORE
+                is_gather = card.starter and card.definition_id == _DEF_ID_GATHER
                 if is_explore:
                     if total_claims - 1 >= self._MIN_CLAIMS_TO_KEEP_EXPLORE:
                         score -= 5.0  # strongly prefer trashing Explore
@@ -1459,11 +1473,11 @@ class CPUPlayer:
         Mirrors the inverse of _pick_cards_to_discard — cards we'd discard last
         are cards we'd tutor first.
         """
-        if card.name == "Debt":
+        if card.definition_id == DEF_ID_DEBT:
             return -20.0
-        if card.name == "Rubble":
+        if card.definition_id == DEF_ID_RUBBLE:
             return -15.0
-        if card.name == "Spoils":
+        if card.definition_id == DEF_ID_SPOILS:
             return -5.0  # pure vp, don't waste a tutor slot on it
         score = 0.0
         if card.card_type == CardType.CLAIM:
@@ -1515,7 +1529,7 @@ class CPUPlayer:
 
         def _choose_target(card: Any, score: float) -> str:
             # Debt/Rubble go to trash if possible, else discard, else whichever
-            if card.name in ("Debt", "Rubble"):
+            if card.definition_id in (DEF_ID_DEBT, DEF_ID_RUBBLE):
                 for pref in ("trash", "discard"):
                     if pref in targets:
                         return pref
@@ -1645,7 +1659,7 @@ class CPUPlayer:
     def _pick_best_purchase(self, game: Any, player: Any,
                             weights: StrategyWeights) -> Optional[dict[str, Any]]:
         """Score all available purchases and pick one."""
-        from .game_state import calculate_dynamic_buy_cost, UPGRADE_CREDIT_COST, player_owns_card_by_name
+        from .game_state import calculate_dynamic_buy_cost, UPGRADE_CREDIT_COST, player_owns_card_definition
 
         scored: list[tuple[float, dict[str, Any]]] = []
         # Compute deck composition once so per-card scoring can apply
@@ -1656,7 +1670,7 @@ class CPUPlayer:
         # Score archetype market cards
         for card in player.archetype_market:
             # Skip Unique cards the player already owns — buy_card() would reject them.
-            if card.unique and player_owns_card_by_name(player, card.name):
+            if card.unique and player_owns_card_definition(player, card.definition_id):
                 continue
             cost = calculate_dynamic_buy_cost(game, player, card)
             if cost > player.resources:
@@ -1664,7 +1678,11 @@ class CPUPlayer:
             score = self._score_card_for_purchase(
                 card, player, weights, cost, game, composition, from_shared=False
             )
-            scored.append((score, {"source": "archetype", "card_id": card.id}))
+            scored.append((score, {
+                "source": "archetype",
+                "card_id": card.id,
+                "definition_id": card.definition_id,
+            }))
 
         # Score neutral market cards (limit 1 copy per card per round)
         already_bought_neutral = {
@@ -1677,7 +1695,7 @@ class CPUPlayer:
             if base_id in already_bought_neutral:
                 continue
             card_obj = copies[0]
-            if card_obj.unique and player_owns_card_by_name(player, card_obj.name):
+            if card_obj.unique and player_owns_card_definition(player, card_obj.definition_id):
                 continue
             cost = calculate_dynamic_buy_cost(game, player, card_obj)
             if cost > player.resources:
@@ -1685,13 +1703,21 @@ class CPUPlayer:
             score = self._score_card_for_purchase(
                 card_obj, player, weights, cost, game, composition, from_shared=True
             )
-            scored.append((score, {"source": "shared", "card_id": base_id}))
+            scored.append((score, {
+                "source": "shared",
+                "card_id": base_id,
+                "definition_id": card_obj.definition_id,
+            }))
 
         # Score upgrade credits
         if player.resources >= UPGRADE_CREDIT_COST:
             # Value upgrade credits based on having good upgrade targets
             upgrade_score = 3.0
-            scored.append((upgrade_score, {"source": "upgrade", "card_id": None}))
+            scored.append((upgrade_score, {
+                "source": "upgrade",
+                "card_id": None,
+                "definition_id": None,
+            }))
 
         # Resource-saving gate: if a VP card is visible but only a few resources
         # out of reach, skip cheap utility buys this turn so we can afford it
@@ -1971,7 +1997,7 @@ class CPUPlayer:
         has_thinning = any(
             e.type in (EffectType.TRASH_GAIN_BUY_COST, EffectType.SELF_TRASH)
             for e in card.effects
-        ) or card.name == "Cull"
+        ) or card.definition_id == _DEF_ID_CULL
         if has_thinning:
             score *= 1.0 + 0.6 * (1.0 - progress)  # up to +60% early
         # VP effects get stronger as game progresses

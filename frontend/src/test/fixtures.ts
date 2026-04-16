@@ -3,6 +3,7 @@ import type { GameState, Player, Card, HexTile, MarketStack } from '../types/gam
 export function makeCard(overrides: Partial<Card> = {}): Card {
   return {
     id: 'test_card',
+    definition_id: 'test_card',
     name: 'Test Card',
     archetype: 'shared',
     card_type: 'claim',

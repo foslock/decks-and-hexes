@@ -51,9 +51,24 @@ function computeRecommendedVp(gridSizeId: string, playerCount: number = 2): numb
 }
 
 const DIFFICULTIES = [
-  { id: 'easy', name: 'Easy', short: 'E' },
-  { id: 'medium', name: 'Normal', short: 'N' },
-  { id: 'hard', name: 'Hard', short: 'H' },
+  {
+    id: 'easy',
+    name: 'Easy',
+    short: 'E',
+    desc: 'Plays casually and often misses VP opportunities. Good for learning the game.',
+  },
+  {
+    id: 'medium',
+    name: 'Normal',
+    short: 'N',
+    desc: 'Pursues VP cards and contests VP hexes later in the game. A fair match if you play reasonably well.',
+  },
+  {
+    id: 'hard',
+    name: 'Hard',
+    short: 'H',
+    desc: 'Actively hunts VP cards, saves resources for big buys, and double-downs on contested VP hexes. Requires near-optimal play to beat.',
+  },
 ];
 
 // ── Recent seeds (localStorage) ────────────────────────────
@@ -684,20 +699,21 @@ export default function LobbyScreen({
                 {p.is_cpu && isHost && (
                   <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
                     {DIFFICULTIES.map((d) => (
-                      <button
-                        key={d.id}
-                        onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
-                        style={{
-                          padding: '2px 6px', fontSize: 10,
-                          background: p.cpu_difficulty === d.id ? '#3a3a6e' : '#2a2a3e',
-                          border: p.cpu_difficulty === d.id ? '1px solid #4a9eff' : '1px solid #444',
-                          borderRadius: 4, color: p.cpu_difficulty === d.id ? '#fff' : '#888',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span className="diff-full">{d.name}</span>
-                        <span className="diff-short">{d.short}</span>
-                      </button>
+                      <Tooltip key={d.id} content={d.desc}>
+                        <button
+                          onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
+                          style={{
+                            padding: '2px 6px', fontSize: 10,
+                            background: p.cpu_difficulty === d.id ? '#3a3a6e' : '#2a2a3e',
+                            border: p.cpu_difficulty === d.id ? '1px solid #4a9eff' : '1px solid #444',
+                            borderRadius: 4, color: p.cpu_difficulty === d.id ? '#fff' : '#888',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <span className="diff-full">{d.name}</span>
+                          <span className="diff-short">{d.short}</span>
+                        </button>
+                      </Tooltip>
                     ))}
                   </div>
                 )}
