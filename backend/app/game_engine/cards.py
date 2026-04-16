@@ -389,5 +389,5 @@ def _copy_card(card: Card, instance_id: str) -> Card:
     c = copy.deepcopy(card)
     c.id = f"{card.id}_{instance_id}"
     if not c.definition_id:
-        c.definition_id = card.id
+        c.definition_id = card.definition_id
     return c
