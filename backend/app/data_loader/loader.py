@@ -228,6 +228,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
 
     card = Card(
         id=card_id,
+        definition_id=card_id,
         name=name,
         archetype=archetype,
         card_type=card_type,

@@ -317,6 +317,7 @@ def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
 
             source = purchase["source"]
             card_id = purchase.get("card_id", "")
+            definition_id = purchase.get("definition_id") or ""
 
             success, msg = buy_card(game, pid, source, card_id or "")
             if success:
@@ -324,10 +325,14 @@ def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
                 if verbose:
                     print(f"  {player.name} buys: {msg}")
 
-                # Track purchases
-                bought_name = msg.replace("Bought ", "").replace("Upgrade credit purchased", "upgrade_credit")
-                tracking[pid].cards_purchased[bought_name] = \
-                    tracking[pid].cards_purchased.get(bought_name, 0) + 1
+                # Track purchases keyed by stable definition_id so consumers
+                # (balance reports, tests) do identity-based analysis without
+                # ever relying on display names.
+                track_key = definition_id or (
+                    "upgrade_credit" if source == "upgrade" else (card_id or "")
+                )
+                tracking[pid].cards_purchased[track_key] = \
+                    tracking[pid].cards_purchased.get(track_key, 0) + 1
             else:
                 # Don't break entirely on failure — the CPU might have other
                 # purchases available (e.g. archetype cards after a shared failure).
