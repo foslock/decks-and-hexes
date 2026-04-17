@@ -26,7 +26,7 @@ import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from '
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
 import { useCardZoom } from './CardZoomContext';
-import { computeVpBreakdown } from '../utils/vpBreakdown';
+import { computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
 
 /** Check if an engine card needs an opponent target (forced discard or inject rubble). */
 function needsOpponentTarget(card: Card): boolean {
@@ -844,6 +844,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const prevPhaseRef = useRef<string>('');
   // Track previous tiles for resolve animation (needed for multiplayer WebSocket updates)
   const prevTilesRef = useRef(gameState.grid.tiles);
+  // Track previous player stats so we can freeze VP/resources during resolve animations
+  const prevPlayersRef = useRef(gameState.players);
+  // Card-only VP per player captured at resolve start; tile VP recomputed per step
+  const preResolveCardVpRef = useRef<Record<string, number>>({});
   // Review phase state (between resolve animations and buy phase)
   const handleDoneReviewingRef = useRef<(() => void) | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -1206,9 +1210,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   useLayoutEffect(() => {
     const prev = prevPhaseRef.current;
     const oldTiles = prevTilesRef.current;
+    const oldPlayers = prevPlayersRef.current;
     if (prev === phase) {
-      // Phase unchanged — still update tiles snapshot for future diffs
+      // Phase unchanged — still update tiles/players snapshot for future diffs
       prevTilesRef.current = gameState.grid.tiles;
+      prevPlayersRef.current = gameState.players;
       return;
     }
     // Don't show banner during intro overlay or intro animation sequence
@@ -1222,14 +1228,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // Commit: we're handling this phase transition now
     prevPhaseRef.current = phase;
     prevTilesRef.current = gameState.grid.tiles;
+    prevPlayersRef.current = gameState.players;
 
     // play → reveal: set up resolve animation
     if (prev === 'play' && phase === 'reveal') {
-      // Immediately freeze the grid at pre-resolve state so it doesn't flash post-resolve tiles
+      // Immediately freeze the grid AND player stats at pre-resolve state so
+      // players can't see updated VP/resources until animations have played out.
       const preResolveState: GameState = {
         ...gameState,
         grid: { ...gameState.grid, tiles: { ...oldTiles } },
+        players: { ...oldPlayers },
       };
+      // Capture each player's card-only VP so tile VP can be recomputed per step
+      const cardVpMap: Record<string, number> = {};
+      for (const pid of gameState.player_order) {
+        const { tileCount, bonusTiles } = computeTileBasedVp(oldTiles, pid);
+        cardVpMap[pid] = Math.max(0, (oldPlayers[pid]?.vp ?? 0) - tileCount - bonusTiles);
+      }
+      preResolveCardVpRef.current = cardVpMap;
       setResolveDisplayState(preResolveState);
 
       // Full reveal setup (banner, chevrons, VP paths, resolve overlay)
@@ -3499,6 +3515,21 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         }
       }
 
+      // Recompute tile-based VP for any player who gained or lost a tile this step
+      if (step.outcome === 'claimed' || step.outcome === 'auto_claim' || step.outcome === 'consecrate') {
+        const affectedPids = new Set<string>();
+        if (step.winner_id) affectedPids.add(step.winner_id);
+        if (step.previous_owner) affectedPids.add(step.previous_owner);
+        for (const pid of affectedPids) {
+          const cardVp = preResolveCardVpRef.current[pid] ?? 0;
+          const { tileCount, bonusTiles } = computeTileBasedVp(newTiles, pid);
+          const player = newPlayers[pid];
+          if (player) {
+            newPlayers[pid] = { ...player, vp: tileCount + bonusTiles + cardVp };
+          }
+        }
+      }
+
       return { ...prev, grid: { ...prev.grid, tiles: newTiles }, players: newPlayers };
     });
 
@@ -4543,10 +4574,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 /* Expanded: all players */
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
-                    const p = gameState.players[pid];
-                    const pInPlay = phase === 'play' ? (p.planned_action_count ?? 0) : 0;
+                    const p = displayState.players[pid];
+                    const pInPlay = phase === 'play' ? (p.planned_action_count ?? 0)
+                      : resolving ? (p.planned_actions?.length ?? 0) : 0;
                     const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
-                    const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
+                    const pTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === pid).length;
                     const isCpu = p.is_cpu;
                     return (
                       <div
@@ -4581,7 +4613,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                           onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                           vpTarget={gameState.vp_target}
-                          vpBreakdown={computeVpBreakdown(gameState, pid)}
+                          vpBreakdown={computeVpBreakdown(displayState, pid)}
                         />
                       </div>
                     );
@@ -4591,23 +4623,26 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 /* Collapsed: active player only */
                 <div style={{ padding: 6 }}>
                   {activePlayer && (() => {
-                    const pInPlay = phase === 'play' ? (activePlayer.planned_action_count ?? 0) : 0;
-                    const pTotal = activePlayer.hand_count + activePlayer.deck_size + activePlayer.discard_count + pInPlay;
+                    const displayPlayer = displayState.players[activePlayerId] ?? activePlayer;
+                    const pInPlay = phase === 'play' ? (displayPlayer.planned_action_count ?? 0)
+                      : resolving ? (displayPlayer.planned_actions?.length ?? 0) : 0;
+                    const pTotal = displayPlayer.hand_count + displayPlayer.deck_size + displayPlayer.discard_count + pInPlay;
+                    const pDisplayTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === activePlayerId).length;
                     return (
                       <PlayerHud
-                        player={activePlayer}
+                        player={displayPlayer}
                         isActive={true}
                         isCurrent={true}
                         isFirstPlayer={activePlayerIndex === gameState.first_player_index}
                         isCurrentBuyer={phase === 'buy' && !gameState.players_done_buying.includes(activePlayerId)}
                         phase={phase}
                         totalCards={pTotal}
-                        tileCount={playerTileCount}
+                        tileCount={pDisplayTiles}
                         purchases={phase === 'buy' ? enrichPurchases(gameState.buy_phase_purchases?.[activePlayerId]) : undefined}
                         onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                         onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                         vpTarget={gameState.vp_target}
-                        vpBreakdown={computeVpBreakdown(gameState, activePlayerId)}
+                        vpBreakdown={computeVpBreakdown(displayState, activePlayerId)}
                       />
                     );
                   })()}
