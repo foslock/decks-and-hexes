@@ -184,7 +184,7 @@ cards:
     name: Strength in Numbers
     name_upgraded: Strength in Numbers+
     type: Claim
-    buy_cost: 3
+    buy_cost: 4
     action_return: 0
     reversible: true
     power: 0
