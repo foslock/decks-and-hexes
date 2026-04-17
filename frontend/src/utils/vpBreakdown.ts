@@ -1,7 +1,43 @@
-import type { GameState } from '../types/game';
+import type { GameState, HexTile } from '../types/game';
 
 const HEX_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 const TILES_PER_VP = 3;
+
+/** Returns the tile-driven VP components for a player given an arbitrary tile map.
+ *  Does not require a full GameState — used during resolve animations to recompute
+ *  VP incrementally as tiles change hands. */
+export function computeTileBasedVp(
+  tiles: Record<string, HexTile>,
+  playerId: string,
+): { tileCount: number; bonusTiles: number } {
+  const ownedTiles = Object.values(tiles).filter(t => t.owner === playerId);
+  const tileCount = Math.floor(ownedTiles.length / TILES_PER_VP);
+
+  const baseKeys: string[] = [];
+  for (const [key, tile] of Object.entries(tiles)) {
+    if (tile.is_base && tile.owner === playerId) baseKeys.push(key);
+  }
+  const reachable = new Set<string>(baseKeys);
+  const queue = [...baseKeys];
+  while (queue.length > 0) {
+    const key = queue.shift()!;
+    const tile = tiles[key];
+    if (!tile) continue;
+    for (const [dq, dr] of HEX_DIRS) {
+      const nk = `${tile.q + dq},${tile.r + dr}`;
+      if (reachable.has(nk)) continue;
+      const neighbor = tiles[nk];
+      if (!neighbor || neighbor.owner !== playerId) continue;
+      reachable.add(nk);
+      queue.push(nk);
+    }
+  }
+  const bonusTiles = ownedTiles
+    .filter(t => t.is_vp && reachable.has(`${t.q},${t.r}`))
+    .reduce((sum, t) => sum + t.vp_value, 0);
+
+  return { tileCount, bonusTiles };
+}
 
 export interface VpBreakdown {
   tileCount: number;   // VP from owning tiles (tiles // 3)
