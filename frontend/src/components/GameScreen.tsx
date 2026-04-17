@@ -21,7 +21,6 @@ import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandl
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import CompactCard from './CompactCard';
-import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { renderSubtitlePart } from './SubtitlePartRenderer';
 import { useSound } from '../audio/useSound';
@@ -5332,48 +5331,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </button>
               </>
             )}
-            {/* Upgrade button — shown when a card is selected during play phase */}
-            {phase === 'play' && activePlayer && !resolving && selectedCard && selectedCardIndex !== null &&
-              !selectedCard.is_upgraded && hasUpgradePreview(selectedCard) &&
-              (activePlayer.upgrade_credits > 0 || gameState.test_mode) && multiTileCardIndex === null && !trashMode && (
-              <div
-                style={{ position: 'relative', display: 'inline-block' }}
-                onMouseEnter={() => setShowUpgradePreview(true)}
-                onMouseLeave={() => setShowUpgradePreview(false)}
-              >
-                {showUpgradePreview && (
-                  <div style={{
-                    position: 'absolute',
-                    bottom: '100%',
-                    right: 0,
-                    marginBottom: 8,
-                    zIndex: 100,
-                    pointerEvents: 'none',
-                  }}>
-                    <CardFull card={getUpgradedPreview(selectedCard)} />
-                  </div>
-                )}
-                <button
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => handleUpgradeCard(selectedCardIndex)}
-                  disabled={activePlayer.upgrade_credits < 1 && !gameState.test_mode}
-                  style={{
-                    padding: '6px 16px',
-                    background: (activePlayer.upgrade_credits > 0 || gameState.test_mode) ? '#7a4acc' : '#555',
-                    border: 'none',
-                    borderRadius: 6,
-                    color: '#fff',
-                    fontWeight: 'bold',
-                    cursor: (activePlayer.upgrade_credits > 0 || gameState.test_mode) ? 'pointer' : 'not-allowed',
-                    fontSize: 13,
-                    lineHeight: '1.2',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-                  }}
-                >
-                  Upgrade ({gameState.test_mode && activePlayer.upgrade_credits === 0 ? '∞' : activePlayer.upgrade_credits})
-                </button>
-              </div>
-            )}
             {/* Multi-tile confirm/cancel (Surge, Hive Mind, multi-target Defense, etc.) */}
             {phase === 'play' && multiTileCardIndex !== null && multiTilePrimaryTarget && (() => {
               const multiTileCard = activePlayer?.hand[multiTileCardIndex];
@@ -5786,6 +5743,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               suppressEnterAnimFor={searchSuppressedHandIds.size > 0 ? searchSuppressedHandIds : undefined}
               suppressShuffleDetection={tutorCommitInFlight}
               onOrderChange={(order) => { handVisualOrderRef.current = order; }}
+              upgradeCreditsAvailable={activePlayer?.upgrade_credits ?? 0}
+              onUpgradeCard={handleUpgradeCard}
+              isPlayPhase={phase === 'play' && !resolving && !playSubmitted}
             />
             </div>
           )}
