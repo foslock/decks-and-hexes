@@ -54,7 +54,7 @@ cards:
     name: Overwhelm
     name_upgraded: Overwhelm+
     type: Claim
-    buy_cost: 5
+    buy_cost: 4
     action_return: 0
     action_cost: 2
     reversible: true
@@ -184,7 +184,7 @@ cards:
     name: Strength in Numbers
     name_upgraded: Strength in Numbers+
     type: Claim
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     reversible: true
     power: 0
