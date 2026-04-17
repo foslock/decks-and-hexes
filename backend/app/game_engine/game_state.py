@@ -2004,6 +2004,14 @@ def execute_reveal(game: GameState) -> GameState:
     # Track claim results for on_resolution effects
     claim_results: dict[str, dict[str, bool]] = {}  # tile_key -> {pid -> succeeded}
 
+    # Capture original tile owners BEFORE any claim mutation, so on_resolution
+    # effects (e.g. Rapid Assault's resource_drain) can target the pre-claim
+    # defender even when the attacker wins and tile.owner is overwritten.
+    original_owners: dict[str, Optional[str]] = {
+        tk: (game.grid.tiles[tk].owner if tk in game.grid.tiles else None)
+        for tk in claims_by_tile.keys()
+    }
+
     # Resolve claims: highest power wins, ties to defender
     for tile_key, claims in claims_by_tile.items():
         tile = game.grid.tiles.get(tile_key)
@@ -2206,10 +2214,13 @@ def execute_reveal(game: GameState) -> GameState:
     # Resolve on_resolution effects for claim cards
     for tile_key, claims in claims_by_tile.items():
         tile = game.grid.tiles.get(tile_key)
+        # Use the pre-claim owner so drains/etc. target the actual defender,
+        # not the newly-installed owner after a successful capture.
+        pre_claim_owner = original_owners.get(tile_key)
         for pid, action in claims:
             player = game.players[pid]
             succeeded = claim_results.get(tile_key, {}).get(pid, False)
-            defender_id = tile.owner if tile and tile.owner != pid else None
+            defender_id = pre_claim_owner if pre_claim_owner and pre_claim_owner != pid else None
             # Resolve structured effects
             if action.card.effects:
                 resolve_on_resolution_effects(

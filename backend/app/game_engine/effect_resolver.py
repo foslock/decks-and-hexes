@@ -662,6 +662,14 @@ def _handle_draw_next_turn(effect: Effect, ctx: EffectContext) -> None:
     ctx.game._log(
         f"{ctx.player.name} will draw {effect.value} extra card(s) next turn from {ctx.card.name}",
         visible_to=[ctx.player.id], actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": f"+{effect.value} Card{'s' if effect.value > 1 else ''} next turn",
+        "effect_type": "draw_next_turn",
+        "value": effect.value,
+    })
 
 
 def _handle_auto_claim_adjacent_neutral(effect: Effect, ctx: EffectContext) -> None:
@@ -719,6 +727,14 @@ def _handle_on_defend_forced_discard(effect: Effect, ctx: EffectContext) -> None
             ctx.game._log(
                 f"{defender.name} draws {effect.value} fewer card(s) next turn (War of Attrition)",
                 actor=ctx.player.id)
+            ctx.game.player_effects.append({
+                "source_player_id": ctx.player.id,
+                "target_player_id": ctx.defender_id,
+                "card_name": ctx.card.name,
+                "effect": f"-{effect.value} Card{'s' if effect.value > 1 else ''} next turn",
+                "effect_type": "on_defend_forced_discard",
+                "value": effect.value,
+            })
 
 
 def _handle_auto_claim_if_neutral(effect: Effect, ctx: EffectContext) -> None:
@@ -1080,6 +1096,25 @@ def _handle_resource_drain(effect: Effect, ctx: EffectContext) -> None:
         ctx.game._log(
             f"{ctx.player.name}'s {ctx.card.name} drains {actual} resource(s) from {defender.name}",
             actor=ctx.player.id)
+    else:
+        ctx.game._log(
+            f"{ctx.player.name}'s {ctx.card.name} attempts to drain {defender.name}, but they have no resources",
+            actor=ctx.player.id)
+    # Always emit the popup so the players can see the card fired — even when
+    # the defender had no resources and nothing was actually taken.
+    effect_text = (
+        f"-{actual} Resource{'s' if actual != 1 else ''}"
+        if actual > 0
+        else "No Resources"
+    )
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.defender_id,
+        "card_name": ctx.card.name,
+        "effect": effect_text,
+        "effect_type": "resource_drain",
+        "value": actual,
+    })
 
 
 # Stubs for complex effects

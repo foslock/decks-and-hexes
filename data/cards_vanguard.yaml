@@ -98,13 +98,14 @@ cards:
     reversible: true
     power: 3
     effect: "Claim: Power 3. If successful against an opponent's tile, they lose 1 resource."
-    effect_upgraded: "Claim: Power 4. If successful against an opponent's tile, they lose 1 resource."
+    effect_upgraded: "Claim: Power 4. If successful against an opponent's tile, they lose 2 resources."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: resource_drain
         value: 1
+        upgraded_value: 2
         timing: on_resolution
         condition: if_successful
         target: defender
