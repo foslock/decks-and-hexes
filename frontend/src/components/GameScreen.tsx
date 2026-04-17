@@ -4582,8 +4582,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
                     const p = displayState.players[pid];
-                    const pInPlay = phase === 'play' ? (p.planned_action_count ?? 0)
-                      : resolving ? (p.planned_actions?.length ?? 0) : 0;
+                    const pInPlay = p.planned_actions?.length ?? p.planned_action_count ?? 0;
                     const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
                     const pTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === pid).length;
                     const isCpu = p.is_cpu;
@@ -4631,8 +4630,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <div style={{ padding: 6 }}>
                   {activePlayer && (() => {
                     const displayPlayer = displayState.players[activePlayerId] ?? activePlayer;
-                    const pInPlay = phase === 'play' ? (displayPlayer.planned_action_count ?? 0)
-                      : resolving ? (displayPlayer.planned_actions?.length ?? 0) : 0;
+                    const pInPlay = displayPlayer.planned_actions?.length ?? displayPlayer.planned_action_count ?? 0;
                     const pTotal = displayPlayer.hand_count + displayPlayer.deck_size + displayPlayer.discard_count + pInPlay;
                     const pDisplayTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === activePlayerId).length;
                     return (
