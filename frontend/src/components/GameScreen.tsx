@@ -4582,7 +4582,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
                     const p = displayState.players[pid];
-                    const pInPlay = p.planned_actions?.length ?? p.planned_action_count ?? 0;
+                    // planned_actions contribute to the total only during play phase (before
+                    // backend has moved cards to discard) or while viewing the frozen pre-resolve
+                    // snapshot (resolveDisplayState active — applyResolveStep decrements planned_actions
+                    // as discard grows). Otherwise the backend has already added those cards to discard
+                    // while leaving planned_actions populated until next round's upkeep — counting them
+                    // again would double-count.
+                    const includePlanned = phase === 'play' || resolveDisplayState !== null;
+                    const pInPlay = includePlanned ? (p.planned_actions?.length ?? p.planned_action_count ?? 0) : 0;
                     const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
                     const pTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === pid).length;
                     const isCpu = p.is_cpu;
@@ -4630,7 +4637,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <div style={{ padding: 6 }}>
                   {activePlayer && (() => {
                     const displayPlayer = displayState.players[activePlayerId] ?? activePlayer;
-                    const pInPlay = displayPlayer.planned_actions?.length ?? displayPlayer.planned_action_count ?? 0;
+                    const includePlanned = phase === 'play' || resolveDisplayState !== null;
+                    const pInPlay = includePlanned ? (displayPlayer.planned_actions?.length ?? displayPlayer.planned_action_count ?? 0) : 0;
                     const pTotal = displayPlayer.hand_count + displayPlayer.deck_size + displayPlayer.discard_count + pInPlay;
                     const pDisplayTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === activePlayerId).length;
                     return (
