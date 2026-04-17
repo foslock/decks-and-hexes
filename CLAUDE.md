@@ -27,6 +27,36 @@ Bump frontend version when frontend files change, backend version when backend f
 - Frontend typecheck: `cd frontend && npx tsc --noEmit`
 - Start frontend: `cd frontend && npm run dev`
 
+### Game Log Analysis
+When the user refers to a "game log" they mean a JSON file produced by
+`GET /api/games/{game_id}/log` or the in-app **Download Log** button — typically
+found at `~/Downloads/card-clash-game-<uuid>.json`. Use the
+`backend/parse_game_log.py` script to parse these structured logs instead of
+writing ad-hoc JSON readers.
+
+- Header + full summary (header, event counts, per-player plays/buys, per-round VP):
+  `cd backend && uv run python parse_game_log.py <path>`
+- Filter to specific event types (comma-separated — e.g. `card_played`,
+  `card_purchased`, `round_started`, `game_over`):
+  `uv run python parse_game_log.py <path> --events card_played,card_purchased`
+- Filter to one actor (player id like `player_0` / `cpu_0`):
+  `uv run python parse_game_log.py <path> --player player_1`
+- Combine filters, raise the event cap, or drop the summary blocks:
+  `uv run python parse_game_log.py <path> --events card_played --player player_1 --limit 0 --no-summary`
+
+For programmatic analysis, import `load_log(path)` / `iter_events(log, event_types=..., actor=...)`
+from `parse_game_log` — `ParsedLog.meta` holds the top-level fields (`map_seed`,
+`vp_target`, `grid_state`, `players`, `winners`, …) and `ParsedLog.entries` is the
+ordered event list. Each CPU `card_played` / `card_purchased` event's `data`
+carries a `cpu_reasoning` payload (`flags`, `context`, `score`) that exposes
+which `DifficultyProfile` flags drove the decision.
+
+To rebuild the exact hex grid for a given log (VP tile locations, blocked
+terrain, bases), pass the log's `map_seed`, `grid_size`, `card_pack`, and
+`vp_target` to `create_game(...)` from `app.game_engine.game_state`. VP tiles
+are the ones with `tile.is_vp == True` — do **not** filter by `vp_value > 0`
+since `vp_value` defaults to 1 for every tile.
+
 ## Repository Structure
 ```
 /rules/          # Core game rules (machine-readable markdown)

@@ -3,6 +3,7 @@ import type { GameState, Player, Card, HexTile } from '../types/game';
 import { CardViewPopup } from './CardHand';
 import { useSound } from '../audio/useSound';
 import { computeVpBreakdown, type VpBreakdown } from '../utils/vpBreakdown';
+import { downloadGameLog } from '../utils/downloadGameLog';
 
 interface LeaderboardEntry {
   playerId: string;
@@ -44,6 +45,7 @@ export default function GameOverOverlay({
   const sound = useSound();
 
   const [returnedToLobby, setReturnedToLobby] = useState(false);
+  const [downloadingLog, setDownloadingLog] = useState(false);
 
   // Toggle overlay visibility with Escape key
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -342,6 +344,34 @@ export default function GameOverOverlay({
             </button>
           );
         })()}
+        <button
+          className="go-btn"
+          onClick={async () => {
+            if (downloadingLog) return;
+            setDownloadingLog(true);
+            try {
+              await downloadGameLog(gameState.id);
+            } catch (e) {
+              console.warn('downloadGameLog failed:', e);
+            } finally {
+              setDownloadingLog(false);
+            }
+          }}
+          disabled={downloadingLog}
+          style={{
+            padding: '12px 24px',
+            fontSize: 14,
+            fontWeight: 'bold',
+            background: '#1f2a44',
+            border: '1px solid #3a4a6a',
+            borderRadius: 8,
+            color: '#cfd8ea',
+            cursor: downloadingLog ? 'default' : 'pointer',
+          }}
+          title="Download the structured JSON log of this game"
+        >
+          {downloadingLog ? 'Preparing…' : 'Download Game Log'}
+        </button>
         <button
           className="go-btn"
           onClick={onExitGame}

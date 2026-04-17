@@ -1242,6 +1242,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           const rewritten = steps.map(s => ({
             ...s,
             claimants: s.claimants.map(c => {
+              // auto_claim (e.g. Breakthrough) originates from the tile the
+              // card was played on, not a pre-existing owned tile. The backend
+              // sets source_q/source_r to that played-on tile — preserve it.
+              if (s.outcome === 'auto_claim') {
+                return c;
+              }
               const src = findNearestOwnedTile(s.q, s.r, oldTiles, c.player_id);
               return {
                 ...c,
@@ -4952,6 +4958,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     isMultiplayer={isMultiplayer}
                     isHost={mpIsHost}
                     mapSeed={gameState.map_seed}
+                    gameId={gameState.id}
+                    playerId={mpPlayerId || undefined}
                     onRotateGrid={resolving ? undefined : handleRotateGrid}
                     onLeaveGame={isMultiplayer && onLeaveGame ? async () => {
                       if (mpPlayerId && mpToken) {

@@ -182,13 +182,17 @@ async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
             archetype = Archetype(p["archetype"])
         except (KeyError, ValueError):
             raise HTTPException(400, f"Invalid archetype for player {i}")
-        player_configs.append({
+        cfg = {
             "id": p.get("id", f"player_{i}"),
             "name": p.get("name", f"Player {i + 1}"),
             "archetype": p["archetype"],
             "is_cpu": p.get("is_cpu", False),
-            "cpu_noise": p.get("cpu_noise", 0.15),
-        })
+        }
+        if "cpu_difficulty" in p:
+            cfg["cpu_difficulty"] = p["cpu_difficulty"]
+        if "cpu_noise" in p:
+            cfg["cpu_noise"] = p["cpu_noise"]
+        player_configs.append(cfg)
 
     game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode, speed=req.speed)
     # Auto-execute start of turn for round 1
@@ -568,7 +572,7 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
         return
 
     player = game.players[pid]
-    cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
+    cpu = CPUPlayer(pid, difficulty=player.cpu_difficulty, rng=game.rng)
 
     # Random time budget: uniform [2*avg - max, max] so the mean is ~avg
     budget = random.uniform(
@@ -662,6 +666,7 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
                 return
             success, _msg = buy_card(
                 game, pid, purchase["source"], purchase.get("card_id", ""),
+                cpu_reasoning=purchase.get("cpu_reasoning"),
             )
             if success:
                 if purchase["source"] == "shared":
@@ -772,7 +777,14 @@ async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
 
 @router.get("/games/{game_id}/log")
 async def get_game_log(game_id: str, player_id: Optional[str] = None) -> dict[str, Any]:
-    """Get the full game log, filtered by player visibility."""
+    """Get the full structured game log, filtered by player visibility.
+
+    The response includes game-level metadata (players, archetypes, grid
+    size, winners, final VP) alongside the ordered list of log entries.
+    Structured entries carry an ``event_type`` discriminator and a ``data``
+    payload (see `LogEntry`) suitable for offline analysis.
+    """
+    from app.game_engine.game_state import compute_player_vp
     game = await _get_store().get(game_id)
     if not game:
         raise HTTPException(404, "Game not found")
@@ -782,7 +794,83 @@ async def get_game_log(game_id: str, player_id: Optional[str] = None) -> dict[st
     else:
         entries = game.get_full_log()
 
-    return {"game_id": game_id, "entries": entries}
+    players_meta = {
+        pid: {
+            "id": pid,
+            "name": p.name,
+            "archetype": p.archetype.value if p.archetype else None,
+            "is_cpu": p.is_cpu,
+            "cpu_difficulty": p.cpu_difficulty if p.is_cpu else None,
+            "final_vp": compute_player_vp(game, pid),
+            "resources": p.resources,
+            "tiles_owned": (
+                sum(1 for t in game.grid.tiles.values() if t.owner == pid)
+                if game.grid else 0
+            ),
+            "vp_tiles_owned": (
+                sum(1 for t in game.grid.tiles.values() if t.owner == pid and t.is_vp)
+                if game.grid else 0
+            ),
+        }
+        for pid, p in game.players.items()
+    }
+
+    grid_snapshot: dict[str, Any] | None = None
+    if game.grid:
+        tiles: list[dict[str, Any]] = []
+        for key, tile in game.grid.tiles.items():
+            entry: dict[str, Any] = {
+                "key": key,
+                "q": tile.q,
+                "r": tile.r,
+            }
+            if tile.is_blocked:
+                entry["is_blocked"] = True
+            if tile.is_vp:
+                entry["is_vp"] = True
+                entry["vp_value"] = tile.vp_value
+            if tile.owner:
+                entry["owner"] = tile.owner
+            if tile.defense_power:
+                entry["defense_power"] = tile.defense_power
+            if tile.base_defense:
+                entry["base_defense"] = tile.base_defense
+            if tile.permanent_defense_bonus:
+                entry["permanent_defense_bonus"] = tile.permanent_defense_bonus
+            if tile.held_since_turn is not None:
+                entry["held_since_turn"] = tile.held_since_turn
+            if tile.capture_count:
+                entry["capture_count"] = tile.capture_count
+            if tile.is_base:
+                entry["is_base"] = True
+                entry["base_owner"] = tile.base_owner
+            tiles.append(entry)
+        grid_snapshot = {
+            "size": game.grid.size.value,
+            "tile_count": len(game.grid.tiles),
+            "vp_tile_count": sum(1 for t in game.grid.tiles.values() if t.is_vp),
+            "blocked_tile_count": sum(1 for t in game.grid.tiles.values() if t.is_blocked),
+            "starting_positions": game.grid.starting_positions,
+            "tiles": tiles,
+        }
+
+    return {
+        "game_id": game_id,
+        "version": "1",
+        "phase": game.current_phase.value,
+        "round": game.current_round,
+        "max_rounds": game.max_rounds,
+        "vp_target": game.vp_target,
+        "map_seed": game.map_seed,
+        "grid_size": game.grid.size.value if game.grid else None,
+        "card_pack": game.card_pack,
+        "winner": game.winner,
+        "winners": game.winners,
+        "player_order": game.player_order,
+        "players": players_meta,
+        "grid_state": grid_snapshot,
+        "entries": entries,
+    }
 
 
 @router.get("/card-packs")

@@ -171,7 +171,7 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 3 resources."
+    effect: "Gain 4 resources."
     effect_upgraded: "Gain 5 resources."
     trash_on_use: false
 
@@ -518,14 +518,14 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 2 resources for each VP tile you own that is connected to your base."
-    effect_upgraded: "Gain 3 resources for each VP tile you own that is connected to your base."
+    effect: "Gain 3 resources for each VP tile you own that is connected to your base."
+    effect_upgraded: "Gain 5 resources for each VP tile you own that is connected to your base."
     trash_on_use: false
     effects:
       - type: resource_per_vp_hex
         timing: immediate
-        value: 2
-        upgraded_value: 3
+        value: 3
+        upgraded_value: 5
     note: "Converts board dominance into economy. Holding even 2 VP hexes makes this better than Prospector."
 
   - id: neutral_mobilize

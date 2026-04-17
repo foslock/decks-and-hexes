@@ -360,6 +360,7 @@ def _serialize_player(player: Player, registry: dict[str, Card]) -> dict[str, An
         "turn_modifiers": _serialize_turn_modifiers(player.turn_modifiers),
         "trash": _serialize_card_list(player.trash, registry),
         "is_cpu": player.is_cpu,
+        "cpu_difficulty": player.cpu_difficulty,
         "cpu_noise": player.cpu_noise,
         "has_left": player.has_left,
         "left_vp": player.left_vp,
@@ -436,7 +437,8 @@ def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Play
         turn_modifiers=turn_modifiers,
         trash=trash,
         is_cpu=data.get("is_cpu", False),
-        cpu_noise=data.get("cpu_noise", 0.15),
+        cpu_difficulty=data.get("cpu_difficulty", "medium"),
+        cpu_noise=data.get("cpu_noise", 0.10),
         has_left=data.get("has_left", False),
         left_vp=data.get("left_vp", 0),
         claims_won_last_round=data.get("claims_won_last_round", 0),
@@ -577,6 +579,10 @@ def _serialize_log_entry(entry: LogEntry) -> dict[str, Any]:
         d["visible_to"] = entry.visible_to
     if entry.actor:
         d["actor"] = entry.actor
+    if entry.event_type and entry.event_type != "info":
+        d["event_type"] = entry.event_type
+    if entry.data:
+        d["data"] = entry.data
     return d
 
 
@@ -587,6 +593,8 @@ def _deserialize_log_entry(data: dict[str, Any]) -> LogEntry:
         phase=data.get("phase", ""),
         visible_to=data.get("visible_to", []),
         actor=data.get("actor"),
+        event_type=data.get("event_type", "info"),
+        data=data.get("data", {}),
     )
 
 

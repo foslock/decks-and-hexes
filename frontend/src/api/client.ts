@@ -439,12 +439,32 @@ export interface LogEntry {
   round: number;
   phase: string;
   actor: string | null;
+  event_type?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface GameLogResponse {
+  game_id: string;
+  version: string;
+  phase: string;
+  round: number;
+  max_rounds: number;
+  vp_target: number;
+  map_seed: string | null;
+  grid_size: string | null;
+  card_pack: string | null;
+  winner: string | null;
+  winners: string[] | null;
+  player_order: string[];
+  players: Record<string, Record<string, unknown>>;
+  grid_state: Record<string, unknown> | null;
+  entries: LogEntry[];
 }
 
 export async function getGameLog(
   gameId: string,
   playerId?: string,
-): Promise<{ game_id: string; entries: LogEntry[] }> {
+): Promise<GameLogResponse> {
   const params = playerId ? `?player_id=${playerId}` : '';
   return request(`/games/${gameId}/log${params}`);
 }
