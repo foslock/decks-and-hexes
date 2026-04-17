@@ -12,6 +12,7 @@ import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import PhaseBanner from './PhaseBanner';
 import ResolveOverlay from './ResolveOverlay';
+import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
 import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
@@ -135,8 +136,11 @@ function canClaimCaptureTile(
   return effectivePower > effectiveDefense;
 }
 
-// Hex geometry constants (must match HexGrid.tsx)
-const HEX_SIZE = 32;
+// Hex geometry helpers moved to `../utils/hexGeometry` so sibling components
+// (and animation preview tooling) can import them without pulling the entire
+// GameScreen dependency tree. Re-exported here for existing callers.
+import { HEX_SIZE, axialToPixel, localToScreen } from '../utils/hexGeometry';
+export { HEX_SIZE, axialToPixel, localToScreen };
 
 interface GameScreenProps {
   gameState: GameState;
@@ -150,12 +154,6 @@ interface GameScreenProps {
   removedFromLobby?: boolean;  // player was kicked from lobby while viewing game over
   wsSend?: (data: object) => void;  // WebSocket send for cursor broadcasting
   wsMessage?: { type: string; [key: string]: unknown } | null;  // WS messages for cursor/purchase events
-}
-
-function axialToPixel(q: number, r: number): { x: number; y: number } {
-  const x = HEX_SIZE * (3 / 2) * q;
-  const y = HEX_SIZE * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
-  return { x, y };
 }
 
 function pixelToAxial(px: number, py: number): { q: number; r: number } {
@@ -184,18 +182,6 @@ function screenToLocal(canvasX: number, canvasY: number, transform: GridTransfor
   return {
     x: (dx * cos - dy * sin) / transform.scale + transform.pivotX,
     y: (dx * sin + dy * cos) / transform.scale + transform.pivotY,
-  };
-}
-
-/** Convert hex-local coordinates to screen coordinates, accounting for grid rotation. */
-function localToScreen(localX: number, localY: number, transform: GridTransform, containerW: number, containerH: number, gRect: DOMRect): { x: number; y: number } {
-  const relX = (localX - transform.pivotX) * transform.scale;
-  const relY = (localY - transform.pivotY) * transform.scale;
-  const cos = Math.cos(transform.rotation);
-  const sin = Math.sin(transform.rotation);
-  return {
-    x: relX * cos - relY * sin + containerW / 2 + gRect.left,
-    y: relX * sin + relY * cos + containerH / 2 + gRect.top,
   };
 }
 
@@ -906,7 +892,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const vpPathFadeStartAlphaRef = useRef(0); // alpha at start of fade-out
   // Client-side resolve log entries (VP path disruptions, etc.)
   const [resolveLogEntries, setResolveLogEntries] = useState<string[]>([]);
-  // Player effect popups (shown over base tiles after resolve steps)
+  // Player effect popups (shown over base tiles after resolve steps).
+  //
+  // Lifecycle:
+  //   - Set when the reveal/resolve flow produces popup effects (the popups'
+  //     own intro animation runs on mount).
+  //   - Persist through the entire reveal phase, including the post-Done-Reviewing
+  //     wait in multiplayer — players want to keep glancing at them while other
+  //     players are still reviewing.
+  //   - Cleared by the effect below the moment the game phase transitions
+  //     away from `reveal` (typically → `buy`). PlayerEffectPopups then plays
+  //     its own fade-out when `effects` goes empty.
   const [activePlayerEffects, setActivePlayerEffects] = useState<PlayerEffect[]>([]);
 
   // Auto-dismiss error toast after 4 seconds
@@ -919,6 +915,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+  // Clear player-effect popups once the game phase leaves `reveal` (usually
+  // → `buy`). This covers both the single-player immediate-transition path
+  // and the multiplayer case where the phase change arrives later via
+  // WebSocket after other players finish reviewing. PlayerEffectPopups runs
+  // its own fade-out animation when the prop goes empty.
+  useEffect(() => {
+    if (phase !== 'reveal' && activePlayerEffects.length > 0) {
+      setActivePlayerEffects([]);
+    }
+  }, [phase, activePlayerEffects.length]);
 
   // Names of Unique cards the active player currently owns (draw pile + hand + discard).
   // Trashed cards do NOT count, so they can be re-purchased after trashing.
@@ -3169,9 +3176,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setReviewFullCards(null);
   }, []);
 
-  // Advance through resolve to buy phase, then show the buy banner
+  // Advance through resolve to buy phase, then show the buy banner.
+  // Note: we intentionally do NOT clear `activePlayerEffects` here. The popups
+  // should remain visible while the player waits for other players to finish
+  // reviewing (multiplayer) so the player can keep referencing them. A
+  // dedicated effect below clears the popups once the game phase actually
+  // transitions away from `reveal`.
   const advanceAndShowBuy = useCallback(() => {
-    setActivePlayerEffects([]);
     api.advanceResolve(gameState.id, activePlayerId).then(result => {
       onStateUpdate(result.state);
       prevPhaseRef.current = result.state.current_phase;
@@ -3274,10 +3285,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const targetCounts: Record<string, number> = {};
         for (const e of effects) targetCounts[e.target_player_id] = (targetCounts[e.target_player_id] ?? 0) + 1;
         const maxStack = Math.max(...Object.values(targetCounts));
-        const totalDuration = 2500 + (maxStack - 1) * 300;
+        // Popups handle their own intro+settle+stack timeline internally and
+        // persist until `activePlayerEffects` is cleared. Enter review mode
+        // right after the intro animation + a short buffer so the player can
+        // read the stack and press Done Reviewing to dismiss.
+        const introDuration = 650 + (maxStack - 1) * 300 + 400;
         setTimeout(() => {
           enterReviewMode();
-        }, totalDuration);
+        }, introDuration);
         return;
       }
 
@@ -5955,186 +5970,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         </div>
       )}
 
-      {/* Player effect popups (e.g. Sabotage forced discard) — shown over target base tiles */}
-      {activePlayerEffects.length > 0 && (() => {
-        const transform = gridTransformRef.current;
-        const rect = gridContainerRef.current?.getBoundingClientRect();
-        if (!transform || !rect) return null;
-        const tiles = gameState.grid?.tiles ?? {};
-        // Compute per-target stacking index (how many effects already shown for this target)
-        const targetCounts: Record<string, number> = {};
-        const stackIndices = activePlayerEffects.map(e => {
-          const idx = targetCounts[e.target_player_id] ?? 0;
-          targetCounts[e.target_player_id] = idx + 1;
-          return idx;
-        });
-        const STACK_OFFSET = 50; // px between stacked popups
-        const STAGGER_DELAY = 300; // ms between each popup on same target
-
-        // Helper: compute screen position from axial tile coords
-        const tileToScreen = (q: number, r: number) => {
-          const local = axialToPixel(q, r);
-          return localToScreen(local.x, local.y, transform, rect.width, rect.height, rect);
-        };
-
-        // Collect flying card elements
-        const flyingCards: React.ReactNode[] = [];
-        const FLY_DURATION = Math.round(800 * animSpeed);
-        const FLY_CARD_STAGGER = 120; // ms between each card in a batch
-
-        for (let i = 0; i < activePlayerEffects.length; i++) {
-          const effect = activePlayerEffects[i];
-          if (!effect.added_card_name || !effect.added_card_count || effect.source_q == null || effect.source_r == null) continue;
-          // Base raids use the Raided/Spoils popup only — skip the flying
-          // rubble/spoils card animation.
-          if (effect.effect_type === 'base_raid_rubble' || effect.effect_type === 'base_raid_spoils') continue;
-
-          const stackIdx = stackIndices[i];
-          const effectDelay = stackIdx * STAGGER_DELAY;
-          const src = tileToScreen(effect.source_q, effect.source_r);
-
-          // Determine destination: home player → discard pile, others → their HUD card
-          const isHomePlayer = effect.target_player_id === activePlayerId;
-          let destX: number, destY: number;
-          if (isHomePlayer) {
-            const discardEl = document.querySelector('[data-discard-pile]');
-            if (discardEl) {
-              const dr = discardEl.getBoundingClientRect();
-              destX = dr.left + dr.width / 2;
-              destY = dr.top + dr.height / 2;
-            } else {
-              destX = window.innerWidth - 60;
-              destY = window.innerHeight - 60;
-            }
-          } else {
-            const hudEl = document.querySelector(`[data-player-hud="${effect.target_player_id}"]`);
-            if (hudEl) {
-              const hr = hudEl.getBoundingClientRect();
-              destX = hr.left + hr.width / 2;
-              destY = hr.top + hr.height / 2;
-            } else {
-              // Fallback: target's base tile
-              const baseTile = Object.values(tiles).find(t => t.is_base && t.base_owner === effect.target_player_id);
-              if (baseTile) {
-                const bp = tileToScreen(baseTile.q, baseTile.r);
-                destX = bp.x;
-                destY = bp.y;
-              } else {
-                continue;
-              }
-            }
-          }
-
-          const isRubble = effect.added_card_name === 'Rubble';
-          const cardColor = isRubble ? '#ff6666' : '#ffd700';
-          const cardEmoji = isRubble ? '🪨' : '★';
-
-          for (let c = 0; c < effect.added_card_count; c++) {
-            const cardDelay = effectDelay + c * FLY_CARD_STAGGER;
-            const dx = destX - src.x;
-            const dy = destY - src.y;
-            // Slight random spread so multiple cards don't overlap exactly
-            const spreadX = (Math.random() - 0.5) * 20;
-            const spreadY = (Math.random() - 0.5) * 20;
-            const keyName = `flyCard_${i}_${c}`;
-
-            flyingCards.push(
-              <div key={keyName}>
-                <style>{`
-                  @keyframes ${keyName} {
-                    0% {
-                      transform: translate(0, 0) scale(1);
-                      opacity: 1;
-                    }
-                    20% {
-                      transform: translate(0, -20px) scale(1.1);
-                      opacity: 1;
-                    }
-                    100% {
-                      transform: translate(${dx + spreadX}px, ${dy + spreadY}px) scale(0.3);
-                      opacity: 0.2;
-                    }
-                  }
-                `}</style>
-                <div style={{
-                  position: 'fixed',
-                  left: src.x,
-                  top: src.y,
-                  transform: 'translate(-50%, -50%)',
-                  zIndex: 16000,
-                  pointerEvents: 'none',
-                  opacity: 0,
-                  animation: `${keyName} ${FLY_DURATION}ms ease-in ${cardDelay}ms forwards`,
-                }}>
-                  <div style={{
-                    background: 'rgba(15, 15, 35, 0.95)',
-                    border: `2px solid ${cardColor}`,
-                    borderRadius: 6,
-                    padding: '3px 8px',
-                    fontSize: 12,
-                    fontWeight: 'bold',
-                    color: cardColor,
-                    whiteSpace: 'nowrap',
-                    boxShadow: `0 0 12px ${cardColor}66`,
-                  }}>
-                    {cardEmoji} {effect.added_card_name}
-                  </div>
-                </div>
-              </div>
-            );
-          }
-        }
-
-        return (
-          <>
-            {activePlayerEffects.map((effect, i) => {
-              const baseTile = Object.values(tiles).find(t => t.is_base && t.base_owner === effect.target_player_id);
-              if (!baseTile) return null;
-              const screenPos = tileToScreen(baseTile.q, baseTile.r);
-              const sourceColor = PLAYER_COLORS[effect.source_player_id];
-              const colorStr = sourceColor !== undefined
-                ? `#${sourceColor.toString(16).padStart(6, '0')}`
-                : '#fff';
-              const stackIdx = stackIndices[i];
-              const yOffset = stackIdx * STACK_OFFSET;
-              const delay = stackIdx * STAGGER_DELAY;
-              return (
-                <div
-                  key={`popup_${i}`}
-                  style={{
-                    position: 'fixed',
-                    left: screenPos.x,
-                    top: screenPos.y - 40 - yOffset,
-                    transform: 'translateX(-50%)',
-                    zIndex: 15000 + stackIdx,
-                    pointerEvents: 'none',
-                    opacity: 0,
-                    animation: `playerEffectPopup 2.5s ease-out ${delay}ms forwards`,
-                  }}
-                >
-                  <div style={{
-                    background: 'rgba(15, 15, 35, 0.95)',
-                    border: `2px solid ${colorStr}`,
-                    borderRadius: 10,
-                    padding: '8px 14px',
-                    textAlign: 'center',
-                    boxShadow: `0 0 20px ${colorStr}44, 0 4px 16px rgba(0,0,0,0.6)`,
-                    whiteSpace: 'nowrap',
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 'bold', color: '#fff', marginBottom: 2 }}>
-                      {effect.card_name}
-                    </div>
-                    <div style={{ fontSize: 12, color: ['grant_actions_next_turn', 'free_reroll', 'grant_land_grants', 'cease_fire', 'next_turn_bonus', 'cost_reduction', 'base_raid_spoils', 'base_raid_defended'].includes(effect.effect_type) ? '#4aff6a' : effect.effect_type === 'buy_restriction' ? '#ffaa44' : '#ff6666', fontWeight: 'bold' }}>
-                      {effect.effect}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            {flyingCards}
-          </>
-        );
-      })()}
+      {/* Player effect popups (e.g. Sabotage forced discard) — shown over target base tiles.
+          Lifecycle is self-managed by the component: intro fade-in → settle into stack
+          above each target's base → expand into a vertical list on hover, collapse on
+          unhover. No auto fade-out; dismissed when `activePlayerEffects` is cleared. */}
+      {activePlayerEffects.length > 0 && (
+        <PlayerEffectPopups
+          effects={activePlayerEffects}
+          gridTransform={gridTransformRef.current}
+          gridRect={gridContainerRef.current?.getBoundingClientRect() ?? null}
+          tiles={gameState.grid?.tiles ?? {}}
+          playerNames={Object.fromEntries(
+            Object.entries(gameState.players).map(([id, p]) => [id, p.name]),
+          )}
+          activePlayerId={activePlayerId}
+          animSpeed={animSpeed}
+          gridTransformRef={gridTransformRef}
+          gridContainerRef={gridContainerRef}
+        />
+      )}
 
       {/* Game intro overlay */}
       {showIntro && (

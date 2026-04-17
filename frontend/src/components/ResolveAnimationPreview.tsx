@@ -1,8 +1,9 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import type { HexTile, ResolutionStep, ResolutionClaimant } from '../types/game';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import type { HexTile, PlayerEffect, ResolutionStep, ResolutionClaimant } from '../types/game';
 import HexGrid, { type GridTransform, type PixiContainer, PLAYER_COLORS } from './HexGrid';
 import ResolveOverlay from './ResolveOverlay';
-import { useSettings, type AnimationMode } from './SettingsContext';
+import PlayerEffectPopups from './PlayerEffectPopups';
+import { useSettings, useAnimationSpeed, type AnimationMode } from './SettingsContext';
 
 /**
  * Iteration sandbox for tile-battle resolution animations.
@@ -28,8 +29,14 @@ const APPROACH_DIRS: [number, number][] = [
   [0, 1],    // S  → player_5
 ];
 
-const RADIUS = 5;
+const RADIUS = 7;
 const CONTESTED_KEY = '0,0';
+// Base tiles live at the 6 corners of the radius-7 hex grid so the stack
+// offset logic has room to breathe.
+const BASE_STEP = RADIUS;
+// Territory starts this many tiles inward from each corner base — gives a
+// visible owned chain between the base and the contested center.
+const TERRITORY_FIRST_STEP = 4;
 
 function makeBlankTile(q: number, r: number): HexTile {
   return {
@@ -55,15 +62,17 @@ function buildDemoTiles(centralOwner: string | null, centerIsBase: boolean = fal
       tiles[`${q},${r}`] = makeBlankTile(q, r);
     }
   }
-  // Territory for each player: base at step 4, chain inward to step 1 (frontier)
+  // Territory for each player: base at a corner (step BASE_STEP), chain inward
+  // to TERRITORY_FIRST_STEP. Leaves the inner hexes neutral so claims still
+  // need to travel across empty ground.
   for (let i = 0; i < PLAYERS.length; i++) {
     const pid = PLAYERS[i];
     const [dq, dr] = APPROACH_DIRS[i];
-    for (let step = 1; step <= 4; step++) {
+    for (let step = TERRITORY_FIRST_STEP; step <= BASE_STEP; step++) {
       const k = `${dq * step},${dr * step}`;
       if (tiles[k]) {
         tiles[k].owner = pid;
-        if (step === 4) {
+        if (step === BASE_STEP) {
           tiles[k].is_base = true;
           tiles[k].base_owner = pid;
         }
@@ -132,8 +141,10 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
     claimants.push({
       player_id: pid,
       power,
-      source_q: dq,  // frontier tile adjacent to the center
-      source_r: dr,
+      // Nearest owned tile to the center (step TERRITORY_FIRST_STEP along
+      // the approach direction). Cards fly from here to the contested hex.
+      source_q: dq * TERRITORY_FIRST_STEP,
+      source_r: dr * TERRITORY_FIRST_STEP,
     });
   }
 
@@ -154,11 +165,11 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
       // staying a single digit so the centered number renders identically to normal play.
       defenderPower = forceDefended ? 9 : 1;
     }
-    // Defender sits one hex along their approach direction — this lets the overlay anchor
-    // the defense number to the edge closest to the defender's territory.
+    // Defender's nearest owned tile — used by the overlay to anchor the
+    // defense number to the edge closest to the defender's territory.
     const [dq, dr] = APPROACH_DIRS[s.numAttackers];
-    defenderSourceQ = dq;
-    defenderSourceR = dr;
+    defenderSourceQ = dq * TERRITORY_FIRST_STEP;
+    defenderSourceR = dr * TERRITORY_FIRST_STEP;
   }
 
   // Winner: strongest attacker if they beat defender outright; otherwise defender holds.
@@ -202,6 +213,115 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
   };
 }
 
+// ── Popup simulation scenarios ──────────────────────────────────────────────
+// These build sample `PlayerEffect[]` payloads so you can iterate on the
+// post-resolution popup animation (intro → stack → hover-expand) without
+// playing a real game. Each scenario targets one or more player base tiles;
+// the preview uses the same base-tile layout as the resolve scenarios above.
+
+interface PopupScenario {
+  id: string;
+  label: string;
+  build: () => PlayerEffect[];
+  description: string;
+}
+
+function fx(
+  sourceIdx: number,
+  targetIdx: number,
+  cardName: string,
+  effectText: string,
+  effectType: string,
+  value: number = 1,
+): PlayerEffect {
+  return {
+    source_player_id: PLAYERS[sourceIdx],
+    target_player_id: PLAYERS[targetIdx],
+    card_name: cardName,
+    effect: effectText,
+    effect_type: effectType,
+    value,
+  };
+}
+
+const POPUP_SCENARIOS: PopupScenario[] = [
+  {
+    id: 'single',
+    label: 'Single popup',
+    description: '1 effect on one base — simplest case',
+    build: () => [fx(1, 0, 'Sabotage', '-2 resources', 'resource_loss', 2)],
+  },
+  {
+    id: 'stack-3',
+    label: '3-stack on one base',
+    description: '3 effects stacked over a single base tile',
+    build: () => [
+      fx(1, 0, 'Sabotage', '-2 resources', 'resource_loss', 2),
+      fx(2, 0, 'Embargo', 'Cannot buy next turn', 'buy_restriction'),
+      fx(3, 0, 'Raze', '-1 action next turn', 'action_loss', 1),
+    ],
+  },
+  {
+    id: 'multi-target',
+    label: 'Multi-target (2×2)',
+    description: '2 effects on player 0 + 2 on player 3 — two stacks side by side',
+    build: () => [
+      fx(1, 0, 'Sabotage', '-2 resources', 'resource_loss', 2),
+      fx(2, 0, 'Embargo', 'Cannot buy next turn', 'buy_restriction'),
+      fx(4, 3, 'Raze', '-1 action next turn', 'action_loss', 1),
+      fx(5, 3, 'Spoils', '+1 Land Grant', 'grant_land_grants', 1),
+    ],
+  },
+  {
+    id: 'stack-5',
+    label: '5-stack (tall)',
+    description: '5 effects on one base — tests offscreen-flip for small viewports',
+    build: () => [
+      fx(1, 0, 'Sabotage', '-2 resources', 'resource_loss', 2),
+      fx(2, 0, 'Embargo', 'Cannot buy next turn', 'buy_restriction'),
+      fx(3, 0, 'Raze', '-1 action next turn', 'action_loss', 1),
+      fx(4, 0, 'Cease Fire', '+1 free reroll', 'free_reroll', 1),
+      fx(5, 0, 'Base Raid', 'Defended!', 'base_raid_defended', 1),
+    ],
+  },
+  {
+    id: 'all-six',
+    label: '1 each on 6 bases',
+    description: '1 effect on every base — tests all six hex directions',
+    build: () => [
+      fx(1, 0, 'Sabotage', '-2 resources', 'resource_loss', 2),
+      fx(2, 1, 'Embargo', 'Cannot buy', 'buy_restriction'),
+      fx(3, 2, 'Raze', '-1 action', 'action_loss', 1),
+      fx(4, 3, 'Cease Fire', '+1 free reroll', 'free_reroll', 1),
+      fx(5, 4, 'Spoils', '+1 Land Grant', 'grant_land_grants', 1),
+      fx(0, 5, 'Base Raid', 'Defended!', 'base_raid_defended', 1),
+    ],
+  },
+  {
+    id: 'stack-5-all',
+    label: '5-stack on all bases',
+    description: '5 effects on every base — stress-tests offscreen clamping and stacking at every corner',
+    build: () => {
+      const effects: PlayerEffect[] = [];
+      const templates: Array<{ name: string; effect: string; type: string; value: number }> = [
+        { name: 'Sabotage',  effect: '-2 resources',         type: 'resource_loss', value: 2 },
+        { name: 'Embargo',   effect: 'Cannot buy next turn', type: 'buy_restriction', value: 1 },
+        { name: 'Raze',      effect: '-1 action next turn',  type: 'action_loss',   value: 1 },
+        { name: 'Cease Fire',effect: '+1 free reroll',       type: 'free_reroll',   value: 1 },
+        { name: 'Base Raid', effect: 'Defended!',            type: 'base_raid_defended', value: 1 },
+      ];
+      for (let target = 0; target < PLAYERS.length; target++) {
+        for (let i = 0; i < templates.length; i++) {
+          const source = (target + i + 1) % PLAYERS.length; // don't target self
+          const t = templates[i];
+          effects.push(fx(source, target, t.name, t.effect, t.type, t.value));
+        }
+      }
+      return effects;
+    },
+  },
+];
+
 export default function ResolveAnimationPreview() {
   const [tiles, setTiles] = useState<Record<string, HexTile>>(() => buildDemoTiles(null));
   const [resolving, setResolving] = useState(false);
@@ -213,11 +333,22 @@ export default function ResolveAnimationPreview() {
   /** When on, owned-tile scenarios force the defender to win so the attacker-shrink-back plays. */
   const [forceDefended, setForceDefended] = useState(false);
 
+  // Popup simulation state — keyed on `popupRunId` so re-triggering the same
+  // scenario remounts the component and replays the intro animation.
+  const [popupEffects, setPopupEffects] = useState<PlayerEffect[]>([]);
+  const [popupRunId, setPopupRunId] = useState(0);
+  const [lastPopupScenario, setLastPopupScenario] = useState<PopupScenario | null>(null);
+
+  // Grid rotation — mirrors GameScreen's r / shift+r shortcuts so the preview
+  // can exercise the same rotation animation that the real game uses.
+  const [gridRotation, setGridRotation] = useState(0);
+
   const transformRef = useRef<GridTransform | null>(null);
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
   const resolveLayerRef = useRef<PixiContainer | null>(null);
 
   const { settings, setAnimationMode } = useSettings();
+  const animSpeed = useAnimationSpeed();
 
   const playScenario = useCallback((s: Scenario) => {
     const { step, defenderId } = buildScenarioStep(s, forceDefended);
@@ -241,6 +372,23 @@ export default function ResolveAnimationPreview() {
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
+  }, [resolving]);
+
+  /** r / shift+r to rotate the grid (matches GameScreen's shortcut).
+   *  Ignored while a rotation-sensitive resolve animation is running or when
+   *  an input element has focus. */
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'r') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (resolving) return;
+      e.preventDefault();
+      setGridRotation(prev => prev + (e.shiftKey ? -1 : 1) * (Math.PI / 6));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [resolving]);
 
   /** Called by ResolveOverlay when each step begins — apply ownership change. */
@@ -271,7 +419,32 @@ export default function ResolveAnimationPreview() {
 
   const handleTileClick = useCallback(() => {/* no-op */}, []);
 
-  const desc = lastScenario?.description ?? 'Click a scenario to play an animation';
+  const playPopupScenario = useCallback((s: PopupScenario) => {
+    // Make sure we have a fresh transform snapshot so popups position correctly
+    // even if the user just resized or scrolled.
+    setSnapshotTransform(transformRef.current);
+    setSnapshotRect(gridContainerRef.current?.getBoundingClientRect() ?? null);
+    // Ensure the grid layout matches expectations (all 6 bases present, neutral center).
+    setTiles(buildDemoTiles(null));
+    setPopupEffects(s.build());
+    setLastPopupScenario(s);
+    setPopupRunId(x => x + 1);
+  }, []);
+
+  const clearPopups = useCallback(() => {
+    setPopupEffects([]);
+    setLastPopupScenario(null);
+  }, []);
+
+  const desc = lastScenario?.description
+    ?? lastPopupScenario?.description
+    ?? 'Click a scenario to play an animation';
+
+  // Build a player-name map from the demo PLAYERS/PLAYER_LABELS arrays.
+  const playerNames = useMemo(
+    () => Object.fromEntries(PLAYERS.map((p, i) => [p, PLAYER_LABELS[i]])),
+    [],
+  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#1a1a2e', color: '#fff' }}>
@@ -296,6 +469,41 @@ export default function ResolveAnimationPreview() {
               {s.label}
             </button>
           ))}
+        </div>
+
+        {/* Row 2: popup-simulation scenarios. These trigger the PlayerEffectPopups
+            component directly so you can iterate on the intro → stacked → hover-expand
+            lifecycle without playing a full game. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: '#aaa', marginRight: 4 }}>Popups:</span>
+          {POPUP_SCENARIOS.map(s => (
+            <button
+              key={s.id}
+              onClick={() => playPopupScenario(s)}
+              disabled={resolving}
+              style={{
+                ...btnStyle,
+                background: resolving ? '#2a2a3e' : (lastPopupScenario?.id === s.id ? '#c77dff' : '#8a4fff'),
+                opacity: resolving ? 0.5 : 1,
+                cursor: resolving ? 'not-allowed' : 'pointer',
+              }}
+              title={s.description}
+            >
+              {s.label}
+            </button>
+          ))}
+          <button
+            onClick={clearPopups}
+            disabled={popupEffects.length === 0}
+            style={{
+              ...btnStyle,
+              background: popupEffects.length === 0 ? '#2a2a3e' : '#555',
+              opacity: popupEffects.length === 0 ? 0.5 : 1,
+              cursor: popupEffects.length === 0 ? 'not-allowed' : 'pointer',
+            }}
+          >
+            Clear popups
+          </button>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 28 }}>
@@ -361,6 +569,7 @@ export default function ResolveAnimationPreview() {
           transformRef={transformRef}
           resolveLayerRef={resolveLayerRef}
           activePlayerId={lastScenario ? PLAYERS[0] : undefined}
+          gridRotation={gridRotation}
         />
       </div>
 
@@ -387,6 +596,24 @@ export default function ResolveAnimationPreview() {
           resolveLayerRef={resolveLayerRef}
           onStepApply={applyStep}
           onComplete={handleComplete}
+        />
+      )}
+
+      {/* Keep the component mounted once a scenario has played so clearing
+          popups triggers the built-in fade-out instead of instantly unmounting.
+          The `key` resets the component when a new scenario is triggered. */}
+      {popupRunId > 0 && (
+        <PlayerEffectPopups
+          key={popupRunId}
+          effects={popupEffects}
+          gridTransform={snapshotTransform}
+          gridRect={snapshotRect}
+          tiles={tiles}
+          playerNames={playerNames}
+          activePlayerId={PLAYERS[0]}
+          animSpeed={animSpeed}
+          gridTransformRef={transformRef}
+          gridContainerRef={gridContainerRef}
         />
       )}
     </div>
