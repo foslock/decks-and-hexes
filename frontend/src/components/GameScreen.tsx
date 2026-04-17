@@ -844,6 +844,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const prevPhaseRef = useRef<string>('');
   // Track previous tiles for resolve animation (needed for multiplayer WebSocket updates)
   const prevTilesRef = useRef(gameState.grid.tiles);
+  // Track previous player stats so we can freeze VP/resources during resolve animations
+  const prevPlayersRef = useRef(gameState.players);
   // Review phase state (between resolve animations and buy phase)
   const handleDoneReviewingRef = useRef<(() => void) | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -1206,9 +1208,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   useLayoutEffect(() => {
     const prev = prevPhaseRef.current;
     const oldTiles = prevTilesRef.current;
+    const oldPlayers = prevPlayersRef.current;
     if (prev === phase) {
-      // Phase unchanged — still update tiles snapshot for future diffs
+      // Phase unchanged — still update tiles/players snapshot for future diffs
       prevTilesRef.current = gameState.grid.tiles;
+      prevPlayersRef.current = gameState.players;
       return;
     }
     // Don't show banner during intro overlay or intro animation sequence
@@ -1222,13 +1226,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // Commit: we're handling this phase transition now
     prevPhaseRef.current = phase;
     prevTilesRef.current = gameState.grid.tiles;
+    prevPlayersRef.current = gameState.players;
 
     // play → reveal: set up resolve animation
     if (prev === 'play' && phase === 'reveal') {
-      // Immediately freeze the grid at pre-resolve state so it doesn't flash post-resolve tiles
+      // Immediately freeze the grid AND player stats at pre-resolve state so
+      // players can't see updated VP/resources until animations have played out.
       const preResolveState: GameState = {
         ...gameState,
         grid: { ...gameState.grid, tiles: { ...oldTiles } },
+        players: { ...oldPlayers },
       };
       setResolveDisplayState(preResolveState);
 
@@ -4543,10 +4550,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 /* Expanded: all players */
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
-                    const p = gameState.players[pid];
+                    const p = displayState.players[pid];
                     const pInPlay = phase === 'play' ? (p.planned_action_count ?? 0) : 0;
                     const pTotal = p.hand_count + p.deck_size + p.discard_count + pInPlay;
-                    const pTiles = Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length;
+                    const pTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === pid).length;
                     const isCpu = p.is_cpu;
                     return (
                       <div
@@ -4581,7 +4588,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                           onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                           vpTarget={gameState.vp_target}
-                          vpBreakdown={computeVpBreakdown(gameState, pid)}
+                          vpBreakdown={computeVpBreakdown(displayState, pid)}
                         />
                       </div>
                     );
@@ -4591,23 +4598,25 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 /* Collapsed: active player only */
                 <div style={{ padding: 6 }}>
                   {activePlayer && (() => {
-                    const pInPlay = phase === 'play' ? (activePlayer.planned_action_count ?? 0) : 0;
-                    const pTotal = activePlayer.hand_count + activePlayer.deck_size + activePlayer.discard_count + pInPlay;
+                    const displayPlayer = displayState.players[activePlayerId] ?? activePlayer;
+                    const pInPlay = phase === 'play' ? (displayPlayer.planned_action_count ?? 0) : 0;
+                    const pTotal = displayPlayer.hand_count + displayPlayer.deck_size + displayPlayer.discard_count + pInPlay;
+                    const pDisplayTiles = Object.values(displayState.grid.tiles).filter(t => t.owner === activePlayerId).length;
                     return (
                       <PlayerHud
-                        player={activePlayer}
+                        player={displayPlayer}
                         isActive={true}
                         isCurrent={true}
                         isFirstPlayer={activePlayerIndex === gameState.first_player_index}
                         isCurrentBuyer={phase === 'buy' && !gameState.players_done_buying.includes(activePlayerId)}
                         phase={phase}
                         totalCards={pTotal}
-                        tileCount={playerTileCount}
+                        tileCount={pDisplayTiles}
                         purchases={phase === 'buy' ? enrichPurchases(gameState.buy_phase_purchases?.[activePlayerId]) : undefined}
                         onPurchaseHover={phase === 'buy' ? handlePurchaseHover : undefined}
                         onPurchaseLeave={phase === 'buy' ? handlePurchaseLeave : undefined}
                         vpTarget={gameState.vp_target}
-                        vpBreakdown={computeVpBreakdown(gameState, activePlayerId)}
+                        vpBreakdown={computeVpBreakdown(displayState, activePlayerId)}
                       />
                     );
                   })()}
