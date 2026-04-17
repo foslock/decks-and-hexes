@@ -97,6 +97,8 @@ interface CardHandProps {
    * the commit window and clears it after the state update lands.
    */
   suppressShuffleDetection?: boolean;
+  /** Called whenever the visual card order changes (indices into the `cards` prop). */
+  onOrderChange?: (order: number[]) => void;
 }
 
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
@@ -492,6 +494,7 @@ export default function CardHand({
   onCardHover,
   suppressEnterAnimFor,
   suppressShuffleDetection,
+  onOrderChange,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -538,6 +541,13 @@ export default function CardHand({
       return remapped;
     });
   }, [cards]);
+
+  // Notify parent whenever visual order changes
+  const onOrderChangeRef = useRef(onOrderChange);
+  onOrderChangeRef.current = onOrderChange;
+  useEffect(() => {
+    onOrderChangeRef.current?.(localOrder);
+  }, [localOrder]);
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredRect, setHoveredRect] = useState<DOMRect | null>(null);

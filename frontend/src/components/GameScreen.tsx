@@ -848,6 +848,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const prevPlayersRef = useRef(gameState.players);
   // Card-only VP per player captured at resolve start; tile VP recomputed per step
   const preResolveCardVpRef = useRef<Record<string, number>>({});
+  // Visual order of the active player's hand (indices into activePlayer.hand), kept in sync via CardHand's onOrderChange
+  const handVisualOrderRef = useRef<number[]>([]);
   // Review phase state (between resolve animations and buy phase)
   const handleDoneReviewingRef = useRef<(() => void) | null>(null);
   const [reviewing, setReviewing] = useState(false);
@@ -2947,7 +2949,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         return;
       }
 
-      // Tab: cycle through cards in hand during Play phase
+      // Tab: cycle through cards in hand during Play phase (follows visual order)
       if (e.key === 'Tab') {
         e.preventDefault();
         if (
@@ -2956,17 +2958,21 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           multiTileCardIndex === null && !trashMode
         ) {
           const len = activePlayer.hand.length;
-          if (e.shiftKey) {
-            // Shift+Tab: cycle backward
-            setSelectedCardIndex(prev =>
-              prev === null || prev === 0 ? len - 1 : prev - 1
-            );
-          } else {
-            // Tab: cycle forward
-            setSelectedCardIndex(prev =>
-              prev === null || prev >= len - 1 ? 0 : prev + 1
-            );
-          }
+          const visualOrder = handVisualOrderRef.current;
+          const useVisual = visualOrder.length === len;
+          setSelectedCardIndex(prev => {
+            // Find current visual position
+            const curVisualPos = prev === null ? -1
+              : useVisual ? visualOrder.indexOf(prev)
+              : prev;
+            let nextVisualPos: number;
+            if (e.shiftKey) {
+              nextVisualPos = curVisualPos <= 0 ? len - 1 : curVisualPos - 1;
+            } else {
+              nextVisualPos = curVisualPos >= len - 1 ? 0 : curVisualPos + 1;
+            }
+            return useVisual ? visualOrder[nextVisualPos] : nextVisualPos;
+          });
         }
         return;
       }
@@ -3075,14 +3081,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         return;
       }
 
-      // 1-9: select card by position
-      const digit = parseInt(e.key, 10);
-      if (digit < 1 || digit > 9 || isNaN(digit)) return;
+      // 1-9, 0: select card by visual position (0 = 10th card)
+      if (!/^[0-9]$/.test(e.key)) return;
       if (!activePlayer) return;
       const handLength = activePlayer.hand.length;
       if (handLength === 0) return;
-      const cardIndex = digit - 1;
-      if (cardIndex >= handLength) return;
+      const visualPos = e.key === '0' ? 9 : parseInt(e.key, 10) - 1;
+      if (visualPos >= handLength) return;
+      const visualOrder = handVisualOrderRef.current;
+      const cardIndex = visualOrder.length === handLength ? visualOrder[visualPos] : visualPos;
 
       if (trashMode) {
         handleTrashToggle(cardIndex);
@@ -5772,6 +5779,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onCardHover={setHoveredCardIndex}
               suppressEnterAnimFor={searchSuppressedHandIds.size > 0 ? searchSuppressedHandIds : undefined}
               suppressShuffleDetection={tutorCommitInFlight}
+              onOrderChange={(order) => { handVisualOrderRef.current = order; }}
             />
             </div>
           )}
