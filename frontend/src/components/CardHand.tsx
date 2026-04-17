@@ -99,6 +99,15 @@ interface CardHandProps {
   suppressShuffleDetection?: boolean;
   /** Called whenever the visual card order changes (indices into the `cards` prop). */
   onOrderChange?: (order: number[]) => void;
+  /** Number of unspent upgrade credits the player has. When > 0, upgradeable cards
+   *  in hand show a "Hold to Upgrade" badge on select/hover. */
+  upgradeCreditsAvailable?: number;
+  /** Called when the player completes a press-and-hold on the upgrade badge for
+   *  a card (1.5s hold). Receives the raw hand-card index. */
+  onUpgradeCard?: (cardIndex: number) => void;
+  /** True when the game is in the Play phase. The upgrade badge only shows
+   *  during Play — upgrading is not a legal action in Reveal/Buy/Upkeep. */
+  isPlayPhase?: boolean;
 }
 
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
@@ -134,7 +143,7 @@ function ActionReturnBadge({ value }: { value: number }) {
 }
 
 // Floating card preview shown above/below a hovered hand card
-function CardPreview({ card, anchorRect, exiting }: { card: Card; anchorRect: DOMRect; exiting?: boolean }) {
+function CardPreview({ card, anchorRect, exiting, extraOffset = 0 }: { card: Card; anchorRect: DOMRect; exiting?: boolean; extraOffset?: number }) {
   const animMode = useAnimationMode();
   const [visible, setVisible] = useState(animMode !== 'normal');
 
@@ -150,7 +159,7 @@ function CardPreview({ card, anchorRect, exiting }: { card: Card; anchorRect: DO
     <div style={{
       position: 'fixed',
       left: Math.max(8, Math.min(anchorRect.left + anchorRect.width / 2 - CARD_FULL_WIDTH / 2, window.innerWidth - CARD_FULL_WIDTH - 8)),
-      bottom: window.innerHeight - anchorRect.top + 8,
+      bottom: window.innerHeight - anchorRect.top + 8 + extraOffset,
       pointerEvents: 'none',
       zIndex: 9999,
       opacity: show ? 1 : 0,
@@ -158,6 +167,117 @@ function CardPreview({ card, anchorRect, exiting }: { card: Card; anchorRect: DO
       transition: animMode !== 'off' ? `opacity ${animMode === 'fast' ? 0.06 : 0.12}s ease, transform ${animMode === 'fast' ? 0.06 : 0.12}s ease` : 'none',
     }}>
       <CardFull card={card} showKeywordHints />
+    </div>
+  );
+}
+
+// Press-and-hold "Hold to Upgrade" pill rendered above upgradeable hand cards.
+// Fills left-to-right over HOLD_MS; completing fires onComplete().
+function UpgradeHoldBadge({
+  label,
+  animated,
+  onHoverChange,
+  onComplete,
+}: {
+  label: string;
+  animated: boolean;
+  onHoverChange: (hovering: boolean) => void;
+  onComplete: () => void;
+}) {
+  const HOLD_MS = 1500;
+  // Fill animation completes slightly before the upgrade fires so the user
+  // gets to see the bar fully filled before the card transforms.
+  const FILL_MS = 1300;
+  const [pressing, setPressing] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => clearTimer(), [clearTimer]);
+
+  const startPress = useCallback((e: ReactPointerEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (timerRef.current) return;
+    setPressing(true);
+    const duration = animated ? HOLD_MS : 0;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      setPressing(false);
+      onComplete();
+    }, duration);
+  }, [animated, onComplete]);
+
+  const cancelPress = useCallback(() => {
+    clearTimer();
+    setPressing(false);
+  }, [clearTimer]);
+
+  return (
+    <div
+      onPointerEnter={() => onHoverChange(true)}
+      onPointerLeave={() => { onHoverChange(false); cancelPress(); }}
+      onPointerDown={startPress}
+      onPointerUp={cancelPress}
+      onPointerCancel={cancelPress}
+      style={{
+        position: 'absolute',
+        left: '50%',
+        bottom: 'calc(100% + 4px)',
+        transform: 'translateX(-50%)',
+        padding: '2px 8px',
+        background: '#3a2f00',
+        border: '1px solid #ffd84a',
+        borderRadius: 6,
+        color: '#ffe566',
+        fontSize: 10,
+        fontWeight: 'bold',
+        letterSpacing: 0.3,
+        whiteSpace: 'nowrap',
+        cursor: 'pointer',
+        zIndex: 20,
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        touchAction: 'none',
+        animation: animated && !pressing ? 'upgradeBadgePulse 1.8s ease-in-out infinite' : 'none',
+      }}
+    >
+      {/* Fill bar — sweeps left→right while held. Inner wrapper clips the fill
+          to the badge's rounded corners without clipping the bridge element. */}
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        borderRadius: 'inherit',
+        overflow: 'hidden',
+        pointerEvents: 'none',
+      }}>
+        <div style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: pressing ? '100%' : '0%',
+          background: 'rgba(255, 216, 74, 0.55)',
+          transition: animated
+            ? (pressing ? `width ${FILL_MS}ms linear` : 'width 120ms ease-out')
+            : 'none',
+        }} />
+      </div>
+      <span style={{ position: 'relative' }}>{label}</span>
+      {/* Transparent hit-area bridge covering the 4px gap to the card top, so
+          the card+badge hover state survives slow mouse transits. */}
+      <div style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: '100%',
+        height: 6,
+      }} />
     </div>
   );
 }
@@ -495,6 +615,9 @@ export default function CardHand({
   suppressEnterAnimFor,
   suppressShuffleDetection,
   onOrderChange,
+  upgradeCreditsAvailable = 0,
+  onUpgradeCard,
+  isPlayPhase = false,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -551,6 +674,9 @@ export default function CardHand({
 
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [hoveredRect, setHoveredRect] = useState<DOMRect | null>(null);
+  /** When non-null, the user is hovering the "Upgradeable" badge on this localIdx.
+   *  Makes the floating preview show the upgraded version of the card. */
+  const [hoveredUpgradeBadgeIdx, setHoveredUpgradeBadgeIdx] = useState<number | null>(null);
   // Delayed preview state for exit animation
   const [displayedPreview, setDisplayedPreview] = useState<{ card: Card; rect: DOMRect } | null>(null);
   const [previewExiting, setPreviewExiting] = useState(false);
@@ -576,7 +702,8 @@ export default function CardHand({
     if (isHoveringPreview && hoveredIndex !== null && hoveredRect && cards[localOrder[hoveredIndex]]) {
       setPreviewExiting(false);
       const rawCard = cards[localOrder[hoveredIndex]];
-      setDisplayedPreview({ card: shiftHeld ? getUpgradedPreview(rawCard) : rawCard, rect: hoveredRect });
+      const showUpgraded = shiftHeld || hoveredUpgradeBadgeIdx === hoveredIndex;
+      setDisplayedPreview({ card: showUpgraded ? getUpgradedPreview(rawCard) : rawCard, rect: hoveredRect });
     } else if (displayedPreview) {
       setPreviewExiting(true);
       const duration = animMode === 'off' ? 0 : animMode === 'fast' ? 60 : 120;
@@ -586,7 +713,7 @@ export default function CardHand({
       }, duration);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isHoveringPreview, hoveredIndex, hoveredRect, cards, shiftHeld]);
+  }, [isHoveringPreview, hoveredIndex, hoveredRect, cards, shiftHeld, hoveredUpgradeBadgeIdx]);
 
   // Card reflow animation is handled via direct DOM manipulation — see useLayoutEffect blocks.
 
@@ -1732,7 +1859,7 @@ export default function CardHand({
                   animation: cardAnimation ?? 'none',
                   userSelect: 'none' as const,
                   WebkitUserSelect: 'none' as const,
-                  overflow: 'hidden',
+                  overflow: 'visible',
                   boxSizing: 'border-box' as const,
                   position: 'relative' as const,
                   zIndex: hoveredIndex === localIdx ? 100 : isSelected ? 10 : localIdx + 1,
@@ -1817,6 +1944,24 @@ export default function CardHand({
                   opacity: (disabled && !isDiscardingAll && !trashMode) ? 1 : 0,
                   transition: animated ? 'opacity 0.25s ease' : 'none',
                 }} />
+                {isPlayPhase
+                  && upgradeCreditsAvailable > 0
+                  && hasUpgradePreview(card)
+                  && (isSelected || isHovered)
+                  && !isBeingDragged
+                  && !isAnimating
+                  && !trashMode
+                  && !disabled && (
+                  <UpgradeHoldBadge
+                    label={upgradeCreditsAvailable > 1 ? `Hold to Upgrade (${upgradeCreditsAvailable})` : 'Hold to Upgrade'}
+                    animated={animated}
+                    onHoverChange={(hov) => {
+                      if (hov) setHoveredUpgradeBadgeIdx(localIdx);
+                      else setHoveredUpgradeBadgeIdx(prev => prev === localIdx ? null : prev);
+                    }}
+                    onComplete={() => onUpgradeCard?.(cardIdx)}
+                  />
+                )}
               </div>
             );
           })}
@@ -1837,9 +1982,25 @@ export default function CardHand({
       </div>
 
       {/* Hover preview — appears above the hovered card */}
-      {displayedPreview && (
-        <CardPreview card={displayedPreview.card} anchorRect={displayedPreview.rect} exiting={previewExiting} />
-      )}
+      {displayedPreview && (() => {
+        // When the "Upgradeable" badge is visible above the hovered card,
+        // shift the preview up so the badge isn't covered.
+        const hoveredCard = hoveredIndex !== null ? cards[localOrder[hoveredIndex]] : undefined;
+        const badgeVisible = isPlayPhase
+          && !disabled
+          && !trashMode
+          && upgradeCreditsAvailable > 0
+          && hoveredCard != null
+          && hasUpgradePreview(hoveredCard);
+        return (
+          <CardPreview
+            card={displayedPreview.card}
+            anchorRect={displayedPreview.rect}
+            exiting={previewExiting}
+            extraOffset={badgeVisible ? 26 : 0}
+          />
+        );
+      })()}
 
       {/* Drag ghost */}
       {draggingIndex !== null && dragPos && cards[localOrder[draggingIndex]] && (() => {
@@ -2034,6 +2195,14 @@ export default function CardHand({
         @keyframes cardPreviewIn {
           from { opacity: 0; transform: scale(0.9); }
           to { opacity: 1; transform: scale(1); }
+        }
+        @keyframes upgradeBadgePulse {
+          0%, 100% {
+            box-shadow: 0 0 4px rgba(255,216,74,0.35), 0 0 8px rgba(255,216,74,0.15);
+          }
+          50% {
+            box-shadow: 0 0 8px rgba(255,216,74,0.85), 0 0 16px rgba(255,200,0,0.45);
+          }
         }
         .dynamic-value {
           animation: dynamicGlow 2s ease-in-out infinite;
