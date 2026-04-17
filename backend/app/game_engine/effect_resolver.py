@@ -10,7 +10,14 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from .cards import Card, CardType, Timing, make_land_grant_card, make_rubble_card
+from .cards import (
+    Card,
+    CardType,
+    DEF_ID_DEBT,
+    Timing,
+    make_land_grant_card,
+    make_rubble_card,
+)
 from .effects import ConditionType, Effect, EffectType
 
 if TYPE_CHECKING:
@@ -1174,13 +1181,13 @@ def _handle_draw_per_debt(effect: Effect, ctx: EffectContext) -> None:
     """Financier: draw 1 card for each Debt card in draw pile, hand, and discard."""
     debt_count = 0
     for c in ctx.player.hand:
-        if c.name == "Debt":
+        if c.definition_id == DEF_ID_DEBT:
             debt_count += 1
     for c in ctx.player.deck.cards:
-        if c.name == "Debt":
+        if c.definition_id == DEF_ID_DEBT:
             debt_count += 1
     for c in ctx.player.deck.discard:
-        if c.name == "Debt":
+        if c.definition_id == DEF_ID_DEBT:
             debt_count += 1
     draw_per = effect.effective_value(ctx.card.is_upgraded)
     total_draw = debt_count * draw_per

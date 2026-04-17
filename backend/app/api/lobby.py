@@ -88,7 +88,8 @@ class LobbyPlayer:
     archetype: str
     color: str = ""  # CSS hex color, assigned on join
     is_cpu: bool = False
-    cpu_noise: float = 0.15
+    cpu_difficulty: str = "medium"  # canonical tier for CPU players
+    cpu_noise: float = 0.10         # derived from cpu_difficulty
     is_host: bool = False
     has_returned: bool = True  # True by default; False when returning from a game
     token: str = ""
@@ -102,11 +103,7 @@ class LobbyPlayer:
             "is_cpu": self.is_cpu,
             "is_host": self.is_host,
             "has_returned": self.has_returned,
-            "cpu_difficulty": (
-                "easy" if self.cpu_noise >= 0.25 else
-                "medium" if self.cpu_noise >= 0.10 else
-                "hard"
-            ) if self.is_cpu else None,
+            "cpu_difficulty": self.cpu_difficulty if self.is_cpu else None,
         }
 
 
@@ -578,10 +575,11 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
         player.archetype = req.archetype
 
     if req.difficulty is not None and player.is_cpu:
-        noise_map = {"easy": 0.25, "medium": 0.10, "hard": 0.05}
-        if req.difficulty not in noise_map:
+        from app.game_engine.cpu_player import NOISE_FOR_DIFFICULTY
+        if req.difficulty not in NOISE_FOR_DIFFICULTY:
             raise HTTPException(400, f"Invalid difficulty: {req.difficulty}")
-        player.cpu_noise = noise_map[req.difficulty]
+        player.cpu_difficulty = req.difficulty
+        player.cpu_noise = NOISE_FOR_DIFFICULTY[req.difficulty]
 
     if req.color is not None:
         if req.color not in PLAYER_COLOR_OPTIONS:
@@ -612,8 +610,9 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
     if len(lobby.players) >= 6:
         raise HTTPException(400, "Lobby is full (max 6 players)")
 
-    noise_map = {"easy": 0.25, "medium": 0.10, "hard": 0.05}
-    noise = noise_map.get(req.difficulty, 0.15)
+    from app.game_engine.cpu_player import NOISE_FOR_DIFFICULTY
+    difficulty = req.difficulty if req.difficulty in NOISE_FOR_DIFFICULTY else "medium"
+    noise = NOISE_FOR_DIFFICULTY[difficulty]
 
     # Assign next player_id
     existing_ids = {int(p.id.split("_")[1]) for p in lobby.players.values() if p.id.startswith("player_")}
@@ -632,6 +631,7 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
         archetype=req.archetype,
         color=_next_available_color(lobby),
         is_cpu=True,
+        cpu_difficulty=difficulty,
         cpu_noise=noise,
     )
     lobby.players[player_id] = cpu
@@ -754,6 +754,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
             "archetype": p.archetype,
             "color": p.color,
             "is_cpu": p.is_cpu,
+            "cpu_difficulty": p.cpu_difficulty,
             "cpu_noise": p.cpu_noise,
         })
 

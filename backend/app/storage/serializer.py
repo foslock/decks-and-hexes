@@ -22,6 +22,7 @@ from app.game_engine.cards import (
     Card,
     CardType,
     Deck,
+    GENERATED_CARD_DEFINITION_IDS,
     Timing,
 )
 from app.game_engine.effects import (
@@ -46,34 +47,13 @@ from app.game_engine.hex_grid import GridSize, HexGrid, HexTile
 # deserialize_game() should handle migrations for older versions.
 _SCHEMA_VERSION = 1
 
-# Cards that are generated at runtime (not in the card registry).
-_GENERATED_CARD_NAMES = frozenset({"Land Grant", "Rubble", "Spoils", "Debt"})
+# Generated-card detection is centralised in `cards.GENERATED_CARD_DEFINITION_IDS`;
+# identity checks below use the stable `definition_id`, never the display name.
 
 
 # ---------------------------------------------------------------------------
 # Helpers: extract base_id from an instance id
 # ---------------------------------------------------------------------------
-
-def _base_id_from_instance(inst_id: str, card: Card) -> str:
-    """Derive the base (registry) card ID from an instance card.
-
-    Instance IDs are formatted as ``{base_id}_{suffix}`` where suffix was
-    provided by ``_copy_card``.  For generated cards the entire id *is* the
-    base id (e.g. "land_grant_3").
-    """
-    if card.name in _GENERATED_CARD_NAMES:
-        # Generated cards are not in the registry — return inst_id as-is
-        return inst_id
-
-    # Registry card IDs are like "neutral_explore", "vanguard_assault", etc.
-    # Instance IDs append a suffix: "neutral_explore_start_adv_0"
-    # We need to figure out the base_id.  The safest approach is to try
-    # progressively shorter prefixes until we find one that matches a known
-    # pattern.  But since we don't have access to the registry here, we
-    # store the base_id explicitly in the card ref.  The caller must provide
-    # it via _serialize_card_ref.
-    return inst_id  # fallback — overridden by _serialize_card_ref
-
 
 def _find_base_id(inst_id: str, registry: dict[str, Card]) -> str:
     """Find the registry base_id for an instance card ID.
@@ -106,10 +86,10 @@ def _serialize_card_ref(card: Card, registry: dict[str, Card]) -> dict[str, Any]
     Registry cards are stored as {base_id, inst_id, is_upgraded}.
     Generated cards are stored with full inline data.
     """
-    if card.name in _GENERATED_CARD_NAMES:
+    if card.definition_id in GENERATED_CARD_DEFINITION_IDS:
         return _serialize_card_inline(card)
 
-    base_id = _find_base_id(card.id, registry)
+    base_id = card.definition_id or _find_base_id(card.id, registry)
     ref: dict[str, Any] = {
         "base_id": base_id,
         "inst_id": card.id,
@@ -127,6 +107,7 @@ def _serialize_card_inline(card: Card) -> dict[str, Any]:
     return {
         "inline": True,
         "inst_id": card.id,
+        "definition_id": card.definition_id,
         "name": card.name,
         "archetype": card.archetype.value,
         "card_type": card.card_type.value,
@@ -195,6 +176,7 @@ def _deserialize_card_inline(ref: dict[str, Any]) -> Card:
     effects = [_deserialize_effect(e) for e in ref.get("effects", [])]
     return Card(
         id=ref["inst_id"],
+        definition_id=ref.get("definition_id", ""),
         name=ref["name"],
         archetype=Archetype(ref["archetype"]),
         card_type=CardType(ref["card_type"]),
@@ -378,6 +360,7 @@ def _serialize_player(player: Player, registry: dict[str, Card]) -> dict[str, An
         "turn_modifiers": _serialize_turn_modifiers(player.turn_modifiers),
         "trash": _serialize_card_list(player.trash, registry),
         "is_cpu": player.is_cpu,
+        "cpu_difficulty": player.cpu_difficulty,
         "cpu_noise": player.cpu_noise,
         "has_left": player.has_left,
         "left_vp": player.left_vp,
@@ -454,7 +437,8 @@ def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Play
         turn_modifiers=turn_modifiers,
         trash=trash,
         is_cpu=data.get("is_cpu", False),
-        cpu_noise=data.get("cpu_noise", 0.15),
+        cpu_difficulty=data.get("cpu_difficulty", "medium"),
+        cpu_noise=data.get("cpu_noise", 0.10),
         has_left=data.get("has_left", False),
         left_vp=data.get("left_vp", 0),
         claims_won_last_round=data.get("claims_won_last_round", 0),
@@ -595,6 +579,10 @@ def _serialize_log_entry(entry: LogEntry) -> dict[str, Any]:
         d["visible_to"] = entry.visible_to
     if entry.actor:
         d["actor"] = entry.actor
+    if entry.event_type and entry.event_type != "info":
+        d["event_type"] = entry.event_type
+    if entry.data:
+        d["data"] = entry.data
     return d
 
 
@@ -605,6 +593,8 @@ def _deserialize_log_entry(data: dict[str, Any]) -> LogEntry:
         phase=data.get("phase", ""),
         visible_to=data.get("visible_to", []),
         actor=data.get("actor"),
+        event_type=data.get("event_type", "info"),
+        data=data.get("data", {}),
     )
 
 

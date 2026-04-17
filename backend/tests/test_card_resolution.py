@@ -296,8 +296,8 @@ class TestNeutralMercenary:
 
 
 class TestNeutralProspector:
-    def test_prospector_gain_3(self, card_registry):
-        """Prospector: gain 3 resources immediately."""
+    def test_prospector_gain_4(self, card_registry):
+        """Prospector: gain 4 resources immediately."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         prosp = _copy_card(card_registry["neutral_prospector"], "test_prosp")
@@ -306,7 +306,7 @@ class TestNeutralProspector:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial + 3
+        assert player.resources == initial + 4
 
 
 class TestNeutralSabotage:
@@ -2986,11 +2986,11 @@ class TestNeutralTaxCollector:
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.RESOURCE_PER_VP_HEX
-        assert eff.value == 2
-        assert eff.upgraded_value == 3
+        assert eff.value == 3
+        assert eff.upgraded_value == 5
 
     def test_tax_collector_with_vp_hexes(self, card_registry):
-        """Tax Collector gains 2 resources per connected VP hex owned."""
+        """Tax Collector gains 3 resources per connected VP hex owned."""
         card = card_registry.get("neutral_tax_collector")
         if not card:
             pytest.skip("Card not in registry")
@@ -3025,7 +3025,7 @@ class TestNeutralTaxCollector:
         initial_resources = player.resources
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        assert player.resources == initial_resources + (vp_count * 2)
+        assert player.resources == initial_resources + (vp_count * 3)
 
     def test_tax_collector_zero_vp_hexes(self, card_registry):
         """Tax Collector gains 0 with no VP hexes."""

@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 from .cards import (
     ARCHETYPE_SLOTS,
+    DEF_ID_DEBT,
+    DEF_ID_RUBBLE,
     HAND_SIZE,
     Archetype,
     Card,
@@ -291,7 +293,8 @@ class Player:
     turn_modifiers: TurnModifiers = field(default_factory=TurnModifiers)
     trash: list[Card] = field(default_factory=list)
     is_cpu: bool = False
-    cpu_noise: float = 0.10  # default Medium difficulty
+    cpu_difficulty: str = "medium"  # canonical CPU tier: easy | medium | hard
+    cpu_noise: float = 0.10  # derived from cpu_difficulty; kept for save-compat
     has_left: bool = False  # player disconnected/left mid-game
     left_vp: int = 0  # frozen VP at time of leaving (for leaderboard)
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
@@ -319,7 +322,7 @@ class Player:
         """Count Rubble cards across deck, hand, and discard."""
         return sum(
             1 for c in self.deck.cards + self.hand + self.deck.discard
-            if c.name == "Rubble"
+            if c.definition_id == DEF_ID_RUBBLE
         )
 
     def to_dict(self, hide_hand: bool = False, game: Any = None) -> dict[str, Any]:
@@ -366,11 +369,7 @@ class Player:
             "tile_count": len(game.grid.get_player_tiles(self.id)) if game and game.grid else 0,
             "rubble_count": self.rubble_count,
             "is_cpu": self.is_cpu,
-            "cpu_difficulty": (
-                "easy" if self.cpu_noise >= 0.25 else
-                "medium" if self.cpu_noise >= 0.10 else
-                "hard"
-            ) if self.is_cpu else None,
+            "cpu_difficulty": self.cpu_difficulty if self.is_cpu else None,
             "has_left": self.has_left,
             "free_rerolls": self.turn_modifiers.free_rerolls,
             "buy_locked": self.turn_modifiers.buy_locked,
@@ -477,21 +476,34 @@ class SharedMarket:
 
 @dataclass
 class LogEntry:
-    """A single game log entry with visibility rules."""
+    """A single game log entry with visibility rules.
+
+    ``event_type`` is a short machine-readable discriminator (e.g.
+    ``card_played``, ``card_purchased``, ``vp_scored``). ``data`` is an
+    open-schema dict keyed by event_type carrying the structured payload a
+    parser would want: card ids, tile coords, costs, scores. The free-form
+    ``message`` is kept for human-readable rendering.
+    """
     message: str
     round: int
     phase: str
     # Which players can see this entry. Empty list = visible to all.
     visible_to: list[str] = field(default_factory=list)
     actor: Optional[str] = None  # player who caused this action
+    event_type: str = "info"
+    data: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d: dict[str, Any] = {
             "message": self.message,
             "round": self.round,
             "phase": self.phase,
             "actor": self.actor,
+            "event_type": self.event_type,
         }
+        if self.data:
+            d["data"] = self.data
+        return d
 
 
 @dataclass
@@ -529,7 +541,9 @@ class GameState:
     winners: list[str] = field(default_factory=list)  # all winners (for tied victories)
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
-             actor: Optional[str] = None) -> None:
+             actor: Optional[str] = None,
+             event_type: str = "info",
+             data: Optional[dict[str, Any]] = None) -> None:
         self.log.append(msg)
         self.game_log.append(LogEntry(
             message=msg,
@@ -537,6 +551,8 @@ class GameState:
             phase=self.current_phase.value,
             visible_to=visible_to or [],
             actor=actor,
+            event_type=event_type,
+            data=data or {},
         ))
 
     def get_log_for_player(self, player_id: str) -> list[dict[str, Any]]:
@@ -808,13 +824,27 @@ def create_game(
         player_id = config.get("id", str(uuid.uuid4()))
         archetype = Archetype(config["archetype"])
 
+        # Resolve CPU difficulty + derived noise. Prefer explicit difficulty;
+        # fall back to a raw noise float (legacy config path).
+        from .cpu_player import NOISE_FOR_DIFFICULTY, _difficulty_from_noise
+        cpu_difficulty = config.get("cpu_difficulty")
+        if cpu_difficulty is None:
+            if "cpu_noise" in config:
+                cpu_difficulty = _difficulty_from_noise(float(config["cpu_noise"]))
+            else:
+                cpu_difficulty = "medium"
+        cpu_noise = float(
+            config.get("cpu_noise", NOISE_FOR_DIFFICULTY.get(cpu_difficulty, 0.10))
+        )
+
         player = Player(
             id=player_id,
             name=config.get("name", f"Player {i + 1}"),
             archetype=archetype,
             color=config.get("color", "#666666"),
             is_cpu=bool(config.get("is_cpu", False)),
-            cpu_noise=float(config.get("cpu_noise", 0.10)),
+            cpu_difficulty=cpu_difficulty,
+            cpu_noise=cpu_noise,
         )
 
         # Build starting deck
@@ -899,7 +929,18 @@ def _setup_shared_market(
 def execute_start_of_turn(game: GameState) -> GameState:
     """Phase 1: Start of Turn."""
     game.current_phase = Phase.START_OF_TURN
-    game._log(f"=== Round {game.current_round}, Start of Turn ===")
+    game._log(
+        f"=== Round {game.current_round}, Start of Turn ===",
+        event_type="round_started",
+        data={
+            "round": game.current_round,
+            "vp_target": game.vp_target,
+            "vp_standings": {
+                pid: compute_player_vp(game, pid)
+                for pid in game.player_order
+            },
+        },
+    )
 
     # Log global claim ban (Snowy Holiday) — decrement happens at end of turn
     if game.claim_ban_rounds > 0:
@@ -1093,6 +1134,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
               trash_card_indices: Optional[list[int]] = None,
               extra_targets: Optional[list[tuple[int, int]]] = None,
               search_selections: Optional[list[dict[str, Any]]] = None,
+              cpu_reasoning: Optional[dict[str, Any]] = None,
               ) -> tuple[bool, str]:
     """Play a card from hand during Play phase. Returns (success, message).
 
@@ -1121,7 +1163,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         return False, f"{card.name} cannot be played"
 
     # Debt card: requires 3 resources to play (self-trash)
-    if card.name == "Debt":
+    if card.definition_id == DEF_ID_DEBT:
         if player.resources < 3:
             return False, "Need 3 resources to play Debt"
 
@@ -1422,7 +1464,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
             if eff.type == EffectType.DRAW_PER_DEBT:
                 debt_count = sum(
                     1 for c in player.hand + player.deck.cards + player.deck.discard
-                    if c.name == "Debt"
+                    if c.definition_id == DEF_ID_DEBT
                 )
                 snapshotted_draw_cards = debt_count * eff.value
                 break
@@ -1510,8 +1552,31 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 game._log(f"{player.name} must discard {required} card(s)",
                           visible_to=[player_id], actor=player_id)
 
-    game._log(f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})",
-              visible_to=[player_id], actor=player_id)
+    play_data: dict[str, Any] = {
+        "card_id": card.id,
+        "definition_id": card.definition_id,
+        "card_name": card.name,
+        "card_type": card.card_type.value,
+        "is_upgraded": card.is_upgraded,
+        "target_q": target_q,
+        "target_r": target_r,
+        "target_player_id": target_player_id,
+        "effective_power": snapshotted_power,
+        "effective_resource_gain": snapshotted_resource_gain,
+        "effective_draw_cards": snapshotted_draw_cards,
+        "actions_used": player.actions_used,
+        "actions_available": player.actions_available,
+        "extra_targets": validated_extra if has_extra else [],
+    }
+    if cpu_reasoning is not None:
+        play_data["cpu_reasoning"] = cpu_reasoning
+    game._log(
+        f"{player.name} plays {card.name} (actions: {player.actions_used}/{player.actions_available})",
+        visible_to=[player_id],
+        actor=player_id,
+        event_type="card_played",
+        data=play_data,
+    )
     return True, f"Played {card.name}"
 
 
@@ -2362,24 +2427,25 @@ def _transition_to_buy(game: GameState) -> None:
     game._log("=== Buy Phase ===")
 
 
-def player_owns_card_by_name(player: "Player", card_name: str) -> bool:
+def player_owns_card_definition(player: "Player", definition_id: str) -> bool:
     """Return True if the player's deck (draw + hand + discard) already contains
-    a card with the given name. Trashed cards are excluded — they have been
-    removed from the deck.
+    a card with the given definition id. Trashed cards are excluded — they
+    have been removed from the deck.
     """
     for c in player.deck.cards:
-        if c.name == card_name:
+        if c.definition_id == definition_id:
             return True
     for c in player.hand:
-        if c.name == card_name:
+        if c.definition_id == definition_id:
             return True
     for c in player.deck.discard:
-        if c.name == card_name:
+        if c.definition_id == definition_id:
             return True
     return False
 
 
-def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tuple[bool, str]:
+def buy_card(game: GameState, player_id: str, source: str, card_id: str,
+             cpu_reasoning: Optional[dict[str, Any]] = None) -> tuple[bool, str]:
     """Buy a card during Buy phase.
 
     source: "archetype", "shared", or "upgrade"
@@ -2407,10 +2473,26 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             player.resources -= UPGRADE_CREDIT_COST
         player.upgrade_credits += 1
         game.buy_phase_purchases.setdefault(player_id, []).append({
-            "card_id": "upgrade_credit", "card_name": "Upgrade Credit",
+            "card_id": "upgrade_credit",
+            "definition_id": "upgrade_credit",
+            "card_name": "Upgrade Credit",
             "source": "upgrade", "cost": UPGRADE_CREDIT_COST if not free else 0,
         })
-        game._log(f"{player.name} buys upgrade credit ({player.upgrade_credits} total)")
+        _upgrade_data: dict[str, Any] = {
+            "source": "upgrade",
+            "cost": UPGRADE_CREDIT_COST if not free else 0,
+            "card_id": "upgrade_credit",
+            "upgrade_credits_after": player.upgrade_credits,
+            "resources_after": player.resources,
+        }
+        if cpu_reasoning is not None:
+            _upgrade_data["cpu_reasoning"] = cpu_reasoning
+        game._log(
+            f"{player.name} buys upgrade credit ({player.upgrade_credits} total)",
+            actor=player_id,
+            event_type="card_purchased",
+            data=_upgrade_data,
+        )
         return True, "Upgrade credit purchased"
 
     if source == "archetype":
@@ -2423,7 +2505,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             return False, "Card not in archetype market"
         # Unique cards: cannot be purchased if already in the player's deck
         # (draw pile, hand, or discard). Trashed copies don't count.
-        if target.unique and player_owns_card_by_name(player, target.name):
+        if target.unique and player_owns_card_definition(player, target.definition_id):
             return False, f"You already own a copy of {target.name} (Unique)"
         if not free:
             dynamic_cost = calculate_dynamic_buy_cost(game, player, target)
@@ -2439,10 +2521,27 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
         # which should span natural rolls, re-rolls, AND purchases.
         player.deck.add_to_discard([target])
         game.buy_phase_purchases.setdefault(player_id, []).append({
-            "card_id": target.id, "card_name": target.name,
+            "card_id": target.id,
+            "definition_id": target.definition_id,
+            "card_name": target.name,
             "source": "archetype", "cost": effective_cost if not free else 0,
         })
-        game._log(f"{player.name} buys {target.name} from archetype market")
+        _arch_data: dict[str, Any] = {
+            "source": "archetype",
+            "card_id": target.id,
+            "definition_id": target.definition_id,
+            "card_name": target.name,
+            "cost": effective_cost if not free else 0,
+            "resources_after": player.resources,
+        }
+        if cpu_reasoning is not None:
+            _arch_data["cpu_reasoning"] = cpu_reasoning
+        game._log(
+            f"{player.name} buys {target.name} from archetype market",
+            actor=player_id,
+            event_type="card_purchased",
+            data=_arch_data,
+        )
         return True, f"Bought {target.name}"
 
     if source == "shared":
@@ -2465,7 +2564,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 if base_id == card_id or card_id.startswith(base_id):
                     peek_card = game.shared_market.card_templates.get(base_id)
                     break
-        if peek_card is not None and peek_card.unique and player_owns_card_by_name(player, peek_card.name):
+        if peek_card is not None and peek_card.unique and player_owns_card_definition(player, peek_card.definition_id):
             return False, f"You already own a copy of {peek_card.name} (Unique)"
 
         result = game.shared_market.purchase(card_id, player_id)
@@ -2488,7 +2587,9 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
         game.buy_phase_purchases.setdefault(player_id, []).append({
-            "card_id": base_card_id, "card_name": purchased.name,
+            "card_id": base_card_id,
+            "definition_id": purchased.definition_id,
+            "card_name": purchased.name,
             "source": "shared", "cost": effective_cost if not free else 0,
         })
         game.shared_purchase_log.append({
@@ -2499,7 +2600,22 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str) -> tupl
             "round": game.current_round,
         })
         # Note: passive_vp cards (e.g. Land Grant) contribute to derived VP automatically
-        game._log(f"{player.name} buys {purchased.name} from shared market")
+        _shared_data: dict[str, Any] = {
+            "source": "shared",
+            "card_id": base_card_id,
+            "definition_id": purchased.definition_id,
+            "card_name": purchased.name,
+            "cost": effective_cost if not free else 0,
+            "resources_after": player.resources,
+        }
+        if cpu_reasoning is not None:
+            _shared_data["cpu_reasoning"] = cpu_reasoning
+        game._log(
+            f"{player.name} buys {purchased.name} from shared market",
+            actor=player_id,
+            event_type="card_purchased",
+            data=_shared_data,
+        )
         return True, f"Bought {purchased.name}"
 
     return False, "Invalid source"
@@ -2736,7 +2852,19 @@ def execute_end_of_turn(game: GameState) -> GameState:
             game.winner = pid
             game.winners = [pid]
             game.current_phase = Phase.GAME_OVER
-            game._log(f"{player.name} wins with {current_vp} VP!")
+            game._log(
+                f"{player.name} wins with {current_vp} VP!",
+                event_type="game_over",
+                data={
+                    "reason": "vp_target",
+                    "winner": pid,
+                    "winners": [pid],
+                    "final_vp": {
+                        p: compute_player_vp(game, p) for p in game.player_order
+                    },
+                    "round": game.current_round,
+                },
+            )
             return game
 
     # --- Round limit check ---
@@ -2748,11 +2876,26 @@ def execute_end_of_turn(game: GameState) -> GameState:
         game.winner = winners[0] if winners else None
         game.winners = winners
         game.current_phase = Phase.GAME_OVER
+        game_over_data = {
+            "reason": "round_limit",
+            "winner": game.winner,
+            "winners": winners,
+            "final_vp": vp_scores,
+            "round": game.current_round,
+        }
         if len(winners) > 1:
             names = ", ".join(game.players[pid].name for pid in winners)
-            game._log(f"Round limit reached ({game.max_rounds} rounds). Tied victory: {names} with {max_vp} VP!")
+            game._log(
+                f"Round limit reached ({game.max_rounds} rounds). Tied victory: {names} with {max_vp} VP!",
+                event_type="game_over",
+                data=game_over_data,
+            )
         elif winners:
-            game._log(f"Round limit reached ({game.max_rounds} rounds). {game.players[winners[0]].name} wins with {max_vp} VP!")
+            game._log(
+                f"Round limit reached ({game.max_rounds} rounds). {game.players[winners[0]].name} wins with {max_vp} VP!",
+                event_type="game_over",
+                data=game_over_data,
+            )
         return game
 
     # Rotate first player (skip left players)
@@ -2783,24 +2926,28 @@ def auto_play_cpu_plays(game: GameState) -> None:
         if not player.is_cpu or player.has_submitted_play:
             continue
 
-        cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
+        cpu = CPUPlayer(pid, difficulty=player.cpu_difficulty, rng=game.rng)
 
         # Play cards (same loop pattern as simulation._run_play_phase)
-        for _ in range(20):  # safety limit
-            action = cpu.pick_next_action(game)
+        failed_card_ids: set[str] = set()
+        for _ in range(30):  # safety limit
+            action = cpu.pick_next_action(game, skip_card_ids=failed_card_ids)
             if action is None:
                 break
+            card_index = action["card_index"]
             success, _msg = play_card(
-                game, pid, action["card_index"],
+                game, pid, card_index,
                 target_q=action.get("target_q"),
                 target_r=action.get("target_r"),
                 target_player_id=action.get("target_player_id"),
                 discard_card_indices=action.get("discard_card_indices"),
                 trash_card_indices=action.get("trash_card_indices"),
                 extra_targets=action.get("extra_targets"),
+                cpu_reasoning=action.get("cpu_reasoning"),
             )
             if not success:
-                break
+                failed_card_ids.add(player.hand[card_index].id)
+                continue
             # Auto-resolve deferred discard for CPU players
             if player.pending_discard > 0:
                 discard_indices = cpu._pick_cards_to_discard(player, player.pending_discard)
@@ -2825,7 +2972,7 @@ def auto_play_cpu_buys(game: GameState) -> None:
         if not player.is_cpu or player.has_left or pid in game.players_done_buying:
             continue
 
-        cpu = CPUPlayer(pid, noise=player.cpu_noise, rng=game.rng)
+        cpu = CPUPlayer(pid, difficulty=player.cpu_difficulty, rng=game.rng)
 
         # Reroll market if desirable
         if cpu.should_reroll_market(game):
@@ -2838,6 +2985,7 @@ def auto_play_cpu_buys(game: GameState) -> None:
                 break
             success, _msg = buy_card(
                 game, pid, purchase["source"], purchase.get("card_id", ""),
+                cpu_reasoning=purchase.get("cpu_reasoning"),
             )
             if not success:
                 break

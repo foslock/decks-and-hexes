@@ -40,6 +40,7 @@ class SimConfig:
     grid_size: GridSize = GridSize.SMALL
     player_archetypes: list[Archetype] = field(default_factory=lambda: [Archetype.VANGUARD, Archetype.SWARM])
     cpu_noise: float = 0.0
+    cpu_difficulties: Optional[list[str]] = None  # parallel to player_archetypes
     seed: Optional[int] = None
     max_rounds: int = 20
     verbose: bool = False
@@ -128,10 +129,17 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
                            speed=config.speed, card_pack=config.card_pack,
                            max_rounds=config.max_rounds)
 
-        # Create CPU players
+        # Create CPU players. When cpu_difficulties is provided (parallel to
+        # player_archetypes), each CPU gets its own difficulty tier — used by
+        # head-to-head harnesses that pit Hard vs Easy.
         cpus: dict[str, CPUPlayer] = {}
-        for pid in game.player_order:
-            cpus[pid] = CPUPlayer(pid, noise=config.cpu_noise, rng=game.rng)
+        for idx, pid in enumerate(game.player_order):
+            difficulty: Optional[str] = None
+            if config.cpu_difficulties and idx < len(config.cpu_difficulties):
+                difficulty = config.cpu_difficulties[idx]
+            cpus[pid] = CPUPlayer(
+                pid, difficulty=difficulty, noise=config.cpu_noise, rng=game.rng,
+            )
 
         # Initialize per-player tracking
         tracking: dict[str, PlayerResult] = {}
@@ -229,13 +237,14 @@ def _run_play_phase(game: GameState, cpus: dict[str, CPUPlayer],
             continue
 
         actions_this_turn = 0
+        failed_card_ids: set[str] = set()
 
         # Keep playing cards until CPU decides to stop
-        max_iterations = 20  # safety limit
+        max_iterations = 30  # safety limit
         iterations = 0
         while iterations < max_iterations:
             iterations += 1
-            action = cpu.pick_next_action(game)
+            action = cpu.pick_next_action(game, skip_card_ids=failed_card_ids)
             if action is None:
                 break
 
@@ -248,6 +257,7 @@ def _run_play_phase(game: GameState, cpus: dict[str, CPUPlayer],
                 discard_card_indices=action.get("discard_card_indices"),
                 trash_card_indices=action.get("trash_card_indices"),
                 extra_targets=action.get("extra_targets"),
+                cpu_reasoning=action.get("cpu_reasoning"),
             )
 
             if success:
@@ -269,9 +279,10 @@ def _run_play_phase(game: GameState, cpus: dict[str, CPUPlayer],
                 if action.get("target_q") is not None:
                     tracking[pid].total_claims_made += 1
             else:
+                # Skip this card for the rest of the turn and try others
+                failed_card_ids.add(player.hand[card_index].id)
                 if verbose:
                     print(f"  {player.name} failed to play card: {msg}")
-                break
 
         tracking[pid].actions_per_turn.append(actions_this_turn)
 
@@ -309,17 +320,25 @@ def _run_buy_phase(game: GameState, cpus: dict[str, CPUPlayer],
 
             source = purchase["source"]
             card_id = purchase.get("card_id", "")
+            definition_id = purchase.get("definition_id") or ""
 
-            success, msg = buy_card(game, pid, source, card_id or "")
+            success, msg = buy_card(
+                game, pid, source, card_id or "",
+                cpu_reasoning=purchase.get("cpu_reasoning"),
+            )
             if success:
                 purchases += 1
                 if verbose:
                     print(f"  {player.name} buys: {msg}")
 
-                # Track purchases
-                bought_name = msg.replace("Bought ", "").replace("Upgrade credit purchased", "upgrade_credit")
-                tracking[pid].cards_purchased[bought_name] = \
-                    tracking[pid].cards_purchased.get(bought_name, 0) + 1
+                # Track purchases keyed by stable definition_id so consumers
+                # (balance reports, tests) do identity-based analysis without
+                # ever relying on display names.
+                track_key = definition_id or (
+                    "upgrade_credit" if source == "upgrade" else (card_id or "")
+                )
+                tracking[pid].cards_purchased[track_key] = \
+                    tracking[pid].cards_purchased.get(track_key, 0) + 1
             else:
                 # Don't break entirely on failure — the CPU might have other
                 # purchases available (e.g. archetype cards after a shared failure).

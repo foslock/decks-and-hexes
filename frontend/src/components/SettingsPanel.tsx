@@ -2,22 +2,26 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useSettings, type AnimationMode } from './SettingsContext';
 import { KEYWORDS } from './Keywords';
+import { downloadGameLog } from '../utils/downloadGameLog';
 
 interface SettingsPanelProps {
   isMultiplayer?: boolean;
   isHost?: boolean;
   mapSeed?: string;
+  gameId?: string;
+  playerId?: string;
   onLeaveGame?: () => void;
   onEndGame?: () => void;
   onRotateGrid?: () => void;
 }
 
-export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, onLeaveGame, onEndGame, onRotateGrid }: SettingsPanelProps) {
+export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, playerId, onLeaveGame, onEndGame, onRotateGrid }: SettingsPanelProps) {
   const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setBackgroundImages } = useSettings();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
   const [glossarySearch, setGlossarySearch] = useState('');
+  const [downloading, setDownloading] = useState(false);
 
   return (
     <div style={{ padding: 0 }}>
@@ -179,6 +183,39 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, onLeaveG
             Keyword Glossary
           </button>
         </div>
+
+        {/* Download game log */}
+        {gameId && (
+          <div>
+            <button
+              onClick={async () => {
+                if (downloading) return;
+                setDownloading(true);
+                try {
+                  await downloadGameLog(gameId, playerId);
+                } catch (e) {
+                  console.warn('downloadGameLog failed:', e);
+                } finally {
+                  setDownloading(false);
+                }
+              }}
+              disabled={downloading}
+              style={{
+                padding: '4px 10px',
+                fontSize: 11,
+                background: '#2a2a3e',
+                border: '1px solid #555',
+                borderRadius: 4,
+                color: '#aaa',
+                cursor: downloading ? 'default' : 'pointer',
+                width: '100%',
+              }}
+              title="Download the full structured game log as JSON"
+            >
+              {downloading ? 'Preparing…' : 'Download Game Log (JSON)'}
+            </button>
+          </div>
+        )}
         {showGlossary && createPortal(
           <div
             onClick={() => { setShowGlossary(false); setGlossarySearch(''); }}

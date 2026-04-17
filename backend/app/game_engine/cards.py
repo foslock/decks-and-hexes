@@ -55,6 +55,11 @@ class Card:
     name: str
     archetype: Archetype
     card_type: CardType
+    # Stable identifier for the card *definition*. Unique per YAML card
+    # entry (or dynamic factory), and identical across every copy/instance
+    # of that card. Use this for all identity-based logic; `id` is a
+    # per-instance identifier that differs between copies.
+    definition_id: str = ""
     power: int = 0
     resource_gain: int = 0
     action_return: int = 0  # 0=standard, 1=net-neutral(↺), 2=net-positive(↑)
@@ -158,6 +163,7 @@ class Card:
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
+            "definition_id": self.definition_id,
             "name": self.name,
             "archetype": self.archetype.value,
             "card_type": self.card_type.value,
@@ -223,6 +229,24 @@ class Card:
         return {}
 
 
+# Stable definition IDs for cards that are generated at runtime. These match
+# the YAML convention (`neutral_*`) so identity-based logic treats dynamic
+# and loaded copies uniformly. Land Grant also exists in the YAML shared
+# market under the same id; both kinds of Land Grant are functionally
+# identical.
+DEF_ID_LAND_GRANT = "neutral_land_grant"
+DEF_ID_RUBBLE = "neutral_rubble"
+DEF_ID_SPOILS = "neutral_spoils"
+DEF_ID_DEBT = "neutral_debt"
+
+GENERATED_CARD_DEFINITION_IDS = frozenset({
+    DEF_ID_LAND_GRANT,
+    DEF_ID_RUBBLE,
+    DEF_ID_SPOILS,
+    DEF_ID_DEBT,
+})
+
+
 _land_grant_counter = 0
 
 
@@ -232,6 +256,7 @@ def make_land_grant_card() -> Card:
     _land_grant_counter += 1
     return Card(
         id=f"land_grant_{_land_grant_counter}",
+        definition_id=DEF_ID_LAND_GRANT,
         name="Land Grant",
         archetype=Archetype.SHARED,
         card_type=CardType.PASSIVE,
@@ -250,6 +275,7 @@ def make_rubble_card() -> Card:
     _rubble_counter += 1
     return Card(
         id=f"rubble_{_rubble_counter}",
+        definition_id=DEF_ID_RUBBLE,
         name="Rubble",
         archetype=Archetype.SHARED,
         card_type=CardType.PASSIVE,
@@ -268,6 +294,7 @@ def make_spoils_card() -> Card:
     _spoils_counter += 1
     return Card(
         id=f"spoils_{_spoils_counter}",
+        definition_id=DEF_ID_SPOILS,
         name="Spoils",
         archetype=Archetype.SHARED,
         card_type=CardType.PASSIVE,
@@ -287,6 +314,7 @@ def make_debt_card() -> Card:
     _debt_counter += 1
     return Card(
         id=f"debt_{_debt_counter}",
+        definition_id=DEF_ID_DEBT,
         name="Debt",
         archetype=Archetype.SHARED,
         card_type=CardType.ENGINE,
@@ -352,7 +380,11 @@ def build_starting_deck(archetype: Archetype, card_registry: dict[str, Card]) ->
 
 
 def _copy_card(card: Card, instance_id: str) -> Card:
-    """Create a copy of a card with a unique instance ID."""
+    """Create a copy of a card with a unique instance ID.
+
+    `definition_id` is preserved from the source via deepcopy so identity
+    checks against the original definition continue to match.
+    """
     import copy
     c = copy.deepcopy(card)
     c.id = f"{card.id}_{instance_id}"

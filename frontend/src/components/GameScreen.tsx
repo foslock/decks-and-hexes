@@ -543,6 +543,7 @@ const DEBT_FLY_CARD_H = CARD_FULL_MIN_HEIGHT * DEBT_FLY_SCALE;
 /** A representative Debt card object for rendering in CardFull. */
 const DEBT_CARD_OBJ: Card = {
   id: 'debt_fly',
+  definition_id: 'neutral_debt',
   name: 'Debt',
   archetype: 'shared',
   card_type: 'engine',
@@ -1090,42 +1091,45 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setSelectedCardIndex(null);
   }, [activePlayer?.pending_discard]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Card lookup maps for purchase hover previews
-  const { cardById, cardByName } = useMemo(() => {
+  // Card lookup maps for purchase hover previews. We index by both per-instance
+  // `id` and stable `definition_id` so purchase records (which may have been
+  // recorded under either) resolve without falling back to display names.
+  const { cardById, cardByDefinition } = useMemo(() => {
     const byId = new Map<string, import('../types/game').Card>();
-    const byName = new Map<string, import('../types/game').Card>();
-    // Neutral market cards
-    for (const stack of gameState.shared_market) {
-      byId.set(stack.card.id, stack.card);
-      byName.set(stack.card.name, stack.card);
-    }
-    // All players' visible cards (hand, discard, deck, archetype market)
+    const byDef = new Map<string, import('../types/game').Card>();
+    const register = (c: import('../types/game').Card) => {
+      byId.set(c.id, c);
+      if (c.definition_id) byDef.set(c.definition_id, c);
+    };
+    for (const stack of gameState.shared_market) register(stack.card);
     for (const p of Object.values(gameState.players)) {
-      for (const c of p.hand) { byId.set(c.id, c); byName.set(c.name, c); }
-      for (const c of p.discard) { byId.set(c.id, c); byName.set(c.name, c); }
-      for (const c of p.deck_cards) { byId.set(c.id, c); byName.set(c.name, c); }
-      for (const c of p.archetype_market) { byId.set(c.id, c); byName.set(c.name, c); }
-      for (const c of p.trash ?? []) { byId.set(c.id, c); byName.set(c.name, c); }
+      for (const c of p.hand) register(c);
+      for (const c of p.discard) register(c);
+      for (const c of p.deck_cards) register(c);
+      for (const c of p.archetype_market) register(c);
+      for (const c of p.trash ?? []) register(c);
     }
-    return { cardById: byId, cardByName: byName };
+    return { cardById: byId, cardByDefinition: byDef };
   }, [gameState.shared_market, gameState.players]);
 
   // Enrich purchase records with card_type for pill border colors
-  const enrichPurchases = useCallback((purchases?: Array<{ card_id: string; card_name: string; source: string; cost: number }>) => {
+  const enrichPurchases = useCallback((purchases?: Array<{ card_id: string; definition_id?: string; card_name: string; source: string; cost: number }>) => {
     if (!purchases) return undefined;
     return purchases.map(p => {
-      const card = cardById.get(p.card_id) ?? cardByName.get(p.card_name);
+      const card = cardById.get(p.card_id)
+        ?? (p.definition_id ? cardByDefinition.get(p.definition_id) : undefined);
       return { ...p, card_type: card?.card_type };
     });
-  }, [cardById, cardByName]);
+  }, [cardById, cardByDefinition]);
 
-  const handlePurchaseHover = useCallback((e: React.MouseEvent, cardId: string, cardName?: string) => {
-    const card = cardById.get(cardId) ?? (cardName ? cardByName.get(cardName) : undefined);
+  const handlePurchaseHover = useCallback((e: React.MouseEvent, cardId: string, definitionId?: string) => {
+    const card = cardById.get(cardId)
+      ?? (definitionId ? cardByDefinition.get(definitionId) : undefined);
     if (!card) return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setPurchaseHoverVisible(false);
     setPurchaseHover({ card, rect });
-  }, [cardById, cardByName]);
+  }, [cardById, cardByDefinition]);
 
   const handlePurchaseLeave = useCallback(() => {
     setPurchaseHover(null);
@@ -1238,6 +1242,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           const rewritten = steps.map(s => ({
             ...s,
             claimants: s.claimants.map(c => {
+              // auto_claim (e.g. Breakthrough) originates from the tile the
+              // card was played on, not a pre-existing owned tile. The backend
+              // sets source_q/source_r to that played-on tile — preserve it.
+              if (s.outcome === 'auto_claim') {
+                return c;
+              }
               const src = findNearestOwnedTile(s.q, s.r, oldTiles, c.player_id);
               return {
                 ...c,
@@ -2813,7 +2823,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [wsMessage, isMultiplayer]);
 
   // Detect purchases via buy_phase_purchases state diff
-  const prevBuyPhasePurchasesRef = useRef<Record<string, Array<{ card_id: string; card_name: string; source: string; cost: number }>>>({});
+  const prevBuyPhasePurchasesRef = useRef<Record<string, Array<{ card_id: string; definition_id?: string; card_name: string; source: string; cost: number }>>>({});
   const prevArchMarketRef = useRef<Card[] | null>(null);
   useEffect(() => {
     if (gameState.current_phase !== 'buy') {
@@ -2836,7 +2846,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       for (const p of newPurchases) {
         if (p.source === 'shared') {
           const player = gameState.players[pid];
-          const stack = gameState.shared_market.find(s => s.card.id === p.card_id || s.card.name === p.card_name);
+          const stack = gameState.shared_market.find(
+            s => s.card.id === p.card_id
+              || (!!p.definition_id && s.card.definition_id === p.definition_id),
+          );
           if (!stack) continue;
           setSharedPurchaseEvents(evts => [...evts, {
             player_id: pid,
@@ -2850,7 +2863,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         } else if (p.source === 'archetype' && isSelf) {
           const player = gameState.players[pid];
           // Find the card in the previous archetype market (it's been removed after purchase)
-          const card = prevArchMarketRef.current?.find(c => c.id === p.card_id || c.name === p.card_name);
+          const card = prevArchMarketRef.current?.find(
+            c => c.id === p.card_id
+              || (!!p.definition_id && c.definition_id === p.definition_id),
+          );
           if (!card) continue;
           setSharedPurchaseEvents(evts => [...evts, {
             player_id: pid,
@@ -4942,6 +4958,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     isMultiplayer={isMultiplayer}
                     isHost={mpIsHost}
                     mapSeed={gameState.map_seed}
+                    gameId={gameState.id}
+                    playerId={mpPlayerId || undefined}
                     onRotateGrid={resolving ? undefined : handleRotateGrid}
                     onLeaveGame={isMultiplayer && onLeaveGame ? async () => {
                       if (mpPlayerId && mpToken) {
