@@ -1778,7 +1778,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         // Auto-select the next card in hand (card to the right, or left if last)
         const newHand = updatedPlayer?.hand;
         if (newHand && newHand.length > 0) {
-          setSelectedCardIndex(Math.min(cardIndex, newHand.length - 1));
+          const visualOrder = handVisualOrderRef.current;
+          const oldHandLength = newHand.length + 1;
+          if (visualOrder.length === oldHandLength) {
+            const visualPos = visualOrder.indexOf(cardIndex);
+            if (visualPos !== -1) {
+              // Pick the right neighbor, or left neighbor if this was the rightmost card
+              const targetVisualPos = visualPos < oldHandLength - 1 ? visualPos : visualPos - 1;
+              const oldIdx = visualOrder[targetVisualPos];
+              // Adjust for the removed card shifting all higher indices down by 1
+              setSelectedCardIndex(oldIdx > cardIndex ? oldIdx - 1 : oldIdx);
+            } else {
+              setSelectedCardIndex(Math.min(cardIndex, newHand.length - 1));
+            }
+          } else {
+            setSelectedCardIndex(Math.min(cardIndex, newHand.length - 1));
+          }
         } else {
           setSelectedCardIndex(null);
         }
@@ -3056,8 +3071,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           !resolving && activePlayerEffects.length === 0 &&
           multiTileCardIndex === null && !trashMode
         ) {
-          const hasPlayableEngine = selectedCardIndex !== null &&
-            activePlayer.hand[selectedCardIndex]?.card_type === 'engine';
+          const hasPlayableEngine = selectedCardIndex !== null && (() => {
+            const c = activePlayer.hand[selectedCardIndex];
+            return !!c && c.card_type === 'engine' && c.name !== 'Debt' && !needsOpponentTarget(c) && !c.target_own_tile;
+          })();
           if (!hasPlayableEngine) {
             if (submitCanStillPlay) {
               submitPlayRef.current?.startKeyboardHold();
