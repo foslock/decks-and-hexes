@@ -231,7 +231,7 @@ cards:
     type: Claim
     buy_cost: 4
     action_return: 0
-    reversible: true
+    reversible: false
     power: 3
     effect: "Claim: Power 3. Stackable. If the target tile is neutral, gain 2 resources."
     effect_upgraded: "Claim: Power 4. Stackable. If the target tile is neutral, gain 3 resources."
