@@ -2560,7 +2560,7 @@ class CPUPlayer:
         trash_indices: Optional[list[int]] = None
         for effect in card.effects:
             if effect.type == EffectType.SELF_DISCARD and effect.requires_choice:
-                discard_indices = self._pick_cards_to_discard(player, effect.value)
+                discard_indices = self._pick_cards_to_discard(player, effect.value, card_index)
                 action_dict["discard_card_indices"] = discard_indices
             if effect.type == EffectType.SELF_TRASH and effect.requires_choice:
                 trash_indices = self._pick_cards_to_trash(player, effect.value, card_index)
@@ -2582,11 +2582,20 @@ class CPUPlayer:
                 best_pid = pid
         return best_pid
 
-    def _pick_cards_to_discard(self, player: Any, count: int) -> list[int]:
-        """Pick the worst cards in hand to discard."""
+    def _pick_cards_to_discard(self, player: Any, count: int,
+                               exclude_index: Optional[int] = None) -> list[int]:
+        """Pick the worst cards in hand to discard.
+
+        `exclude_index` is the hand index of the card being played (which will
+        be popped from hand before SELF_DISCARD resolves). It's excluded from
+        candidates AND the returned indices are translated to the post-pop
+        frame expected by _handle_self_discard.
+        """
         # Score each card — lower score = discard first
         scored = []
         for i, card in enumerate(player.hand):
+            if exclude_index is not None and i == exclude_index:
+                continue
             score = 0.0
             # Debt and Rubble are always worst — discard first
             if card.definition_id in (DEF_ID_DEBT, DEF_ID_RUBBLE):
@@ -2602,7 +2611,10 @@ class CPUPlayer:
             scored.append((score, i))
 
         scored.sort(key=lambda x: x[0])
-        return [idx for _, idx in scored[:count]]
+        if exclude_index is None:
+            return [idx for _, idx in scored[:count]]
+        return [idx - 1 if idx > exclude_index else idx
+                for _, idx in scored[:count]]
 
     def _pick_diplomacy_target(self, game: Any, player: Any) -> Optional[str]:
         """Pick the opponent to target with Diplomacy (lowest VP — least threatening)."""
@@ -2662,7 +2674,11 @@ class CPUPlayer:
             scored.append((score, i))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [idx for _, idx in scored[:count]]
+        # Convert pre-pop hand indices to post-pop: the card being played
+        # (at exclude_index) is popped before SELF_TRASH resolves, so any
+        # picked index above it shifts down by 1.
+        return [idx - 1 if idx > exclude_index else idx
+                for _, idx in scored[:count]]
 
     def _pick_cards_to_trash(self, player: Any, count: int,
                              exclude_index: int) -> list[int]:
@@ -2705,7 +2721,9 @@ class CPUPlayer:
             scored.append((score, i))
 
         scored.sort(key=lambda x: x[0])
-        return [idx for _, idx in scored[:count]]
+        # Convert pre-pop hand indices to post-pop (see _pick_cards_to_trash_for_value).
+        return [idx - 1 if idx > exclude_index else idx
+                for _, idx in scored[:count]]
 
     def _score_card_for_tutor(self, card: Card) -> float:
         """Rate how desirable a card is to retrieve from a pile (higher = pick first).
