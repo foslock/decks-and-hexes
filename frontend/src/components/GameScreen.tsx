@@ -5218,6 +5218,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onClose={() => setShowShopOverlay(false)}
               testMode={!!gameState.test_mode}
               effectiveBuyCosts={activePlayer?.effective_buy_costs}
+              effectiveRerollCost={activePlayer?.effective_reroll_cost}
+              effectiveUpgradeCreditCost={activePlayer?.effective_upgrade_credit_cost}
               neutralPurchasesLastRound={gameState.shared_purchases_last_round}
               currentPlayerId={activePlayerId}
               buyPhasePurchases={gameState.buy_phase_purchases}

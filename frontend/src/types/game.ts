@@ -125,6 +125,8 @@ export interface Player {
   has_acknowledged_resolve: boolean;
   has_ended_turn: boolean;
   effective_buy_costs?: Record<string, number>;
+  effective_reroll_cost?: number;
+  effective_upgrade_credit_cost?: number;
   trash: Card[];
   rubble_count: number;
   claims_won_last_round: number;

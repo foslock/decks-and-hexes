@@ -598,6 +598,8 @@ class GameState:
                     dynamic = calculate_dynamic_buy_cost(self, p, stack[0])
                     effective_costs[base_id] = _preview_cost_reductions(p, stack[0], base_cost_override=dynamic) if has_reductions else dynamic
             pdata["effective_buy_costs"] = effective_costs
+            pdata["effective_reroll_cost"] = _preview_cost_reductions_flat(p, REROLL_COST) if has_reductions else REROLL_COST
+            pdata["effective_upgrade_credit_cost"] = _preview_cost_reductions_flat(p, UPGRADE_CREDIT_COST) if has_reductions else UPGRADE_CREDIT_COST
             players_dict[pid] = pdata
 
         # Compute immune tiles from all players' turn modifiers
@@ -2478,20 +2480,22 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str,
     free = False  # resource costs always apply
 
     if source == "upgrade":
-        if not free and player.resources < UPGRADE_CREDIT_COST:
-            return False, f"Need {UPGRADE_CREDIT_COST} resources for upgrade credit"
+        # Apply any active cost reductions (e.g. Supply Line) to upgrade credits.
+        effective_cost = 0 if free else _apply_cost_reductions_flat(player, UPGRADE_CREDIT_COST)
+        if not free and player.resources < effective_cost:
+            return False, f"Need {effective_cost} resources for upgrade credit"
         if not free:
-            player.resources -= UPGRADE_CREDIT_COST
+            player.resources -= effective_cost
         player.upgrade_credits += 1
         game.buy_phase_purchases.setdefault(player_id, []).append({
             "card_id": "upgrade_credit",
             "definition_id": "upgrade_credit",
             "card_name": "Upgrade Credit",
-            "source": "upgrade", "cost": UPGRADE_CREDIT_COST if not free else 0,
+            "source": "upgrade", "cost": effective_cost,
         })
         _upgrade_data: dict[str, Any] = {
             "source": "upgrade",
-            "cost": UPGRADE_CREDIT_COST if not free else 0,
+            "cost": effective_cost,
             "card_id": "upgrade_credit",
             "upgrade_credits_after": player.upgrade_credits,
             "resources_after": player.resources,
@@ -2744,6 +2748,49 @@ def _apply_cost_reductions(player: Player, card: Card, base_cost_override: Optio
     return max(0, base_cost - discount)
 
 
+def _apply_cost_reductions_flat(player: Player, base_cost: int) -> int:
+    """Apply any-one-card cost reductions to a flat-cost purchase (re-roll,
+    upgrade credit) and consume one reduction use. Returns effective cost.
+
+    "next_defense" scope does not apply since there's no card involved.
+    """
+    discount = 0
+    reductions_to_remove = []
+    for i, reduction in enumerate(player.turn_modifiers.cost_reductions):
+        if reduction.get("scope", "any_one_card") != "any_one_card":
+            continue
+        remaining = reduction.get("remaining", 1)
+        if remaining <= 0:
+            continue
+        amount = reduction.get("amount", 0)
+        if amount == 0:
+            discount = base_cost
+        else:
+            discount += amount
+        reduction["remaining"] = remaining - 1
+        if reduction["remaining"] <= 0:
+            reductions_to_remove.append(i)
+    for i in sorted(reductions_to_remove, reverse=True):
+        player.turn_modifiers.cost_reductions.pop(i)
+    return max(0, base_cost - discount)
+
+
+def _preview_cost_reductions_flat(player: Player, base_cost: int) -> int:
+    """Preview any-one-card cost reductions without consuming them."""
+    discount = 0
+    for reduction in player.turn_modifiers.cost_reductions:
+        if reduction.get("scope", "any_one_card") != "any_one_card":
+            continue
+        if reduction.get("remaining", 1) <= 0:
+            continue
+        amount = reduction.get("amount", 0)
+        if amount == 0:
+            discount = base_cost
+        else:
+            discount += amount
+    return max(0, base_cost - discount)
+
+
 def _preview_cost_reductions(player: Player, card: Card, base_cost_override: Optional[int] = None) -> int:
     """Preview the effective cost after reductions WITHOUT consuming them."""
     base_cost = base_cost_override if base_cost_override is not None else (card.buy_cost if card.buy_cost is not None else 0)
@@ -2780,12 +2827,14 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
         return False, "Already done buying"
 
     # Use free rerolls first (from Surveyor), otherwise charge resources
+    # (applying any active cost reductions, e.g. Supply Line).
     if player.turn_modifiers.free_rerolls > 0:
         player.turn_modifiers.free_rerolls -= 1
     else:
-        if player.resources < REROLL_COST:
-            return False, f"Need {REROLL_COST} resources"
-        player.resources -= REROLL_COST
+        effective_cost = _apply_cost_reductions_flat(player, REROLL_COST)
+        if player.resources < effective_cost:
+            return False, f"Need {effective_cost} resources"
+        player.resources -= effective_cost
 
     # Shuffle current market back, draw affordable N
     remaining_deck = [c for c in player.archetype_deck if c not in player.archetype_market]

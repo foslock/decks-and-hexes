@@ -52,6 +52,10 @@ interface ShopOverlayProps {
   players?: Record<string, { name: string }>;
   /** Number of free re-rolls remaining (from Surveyor) */
   freeRerolls?: number;
+  /** Effective re-roll cost after active cost reductions (e.g. Supply Line). */
+  effectiveRerollCost?: number;
+  /** Effective upgrade-credit cost after active cost reductions. */
+  effectiveUpgradeCreditCost?: number;
   /** Names of Unique cards the player already owns (draw pile + hand + discard). */
   ownedUniqueCardNames?: Set<string>;
   /** Other players' cursor positions (for live hover indicators) */
@@ -376,6 +380,8 @@ export default function ShopOverlay({
   buyPhasePurchases,
   players,
   freeRerolls = 0,
+  effectiveRerollCost = 1,
+  effectiveUpgradeCreditCost = 5,
   ownedUniqueCardNames,
   otherPlayerCursors,
   cursorClicks,
@@ -800,25 +806,40 @@ export default function ShopOverlay({
                         {`Re-roll (${freeRerolls} free)`}
                       </button>
                     </Tooltip>
-                  ) : (
-                    <button
-                      onClick={onReroll}
-                      disabled={disabled || playerResources < 1}
-                      style={{
-                        fontSize: 14,
-                        padding: '8px 16px',
-                        background: playerResources >= 2 && !disabled ? '#cc7a2a' : '#333',
-                        border: `1px solid ${playerResources >= 2 && !disabled ? '#cc7a2a' : '#555'}`,
-                        borderRadius: 6,
-                        color: playerResources >= 2 && !disabled ? '#fff' : '#555',
-                        cursor: disabled || playerResources < 1 ? 'not-allowed' : 'pointer',
-                        whiteSpace: 'nowrap',
-                        flexShrink: 0,
-                      }}
-                    >
-                      Re-roll · 1 💰
-                    </button>
-                  )}
+                  ) : (() => {
+                    const rerollDiscounted = effectiveRerollCost < 1;
+                    const canAffordReroll = playerResources >= effectiveRerollCost;
+                    const rerollButton = (
+                      <button
+                        onClick={onReroll}
+                        disabled={disabled || !canAffordReroll}
+                        style={{
+                          fontSize: 14,
+                          padding: '8px 16px',
+                          background: rerollDiscounted && !disabled ? '#2a5a2e' : (canAffordReroll && !disabled ? '#cc7a2a' : '#333'),
+                          border: `1px solid ${rerollDiscounted && !disabled ? '#4aff6a' : (canAffordReroll && !disabled ? '#cc7a2a' : '#555')}`,
+                          borderRadius: 6,
+                          color: canAffordReroll && !disabled ? '#fff' : '#555',
+                          cursor: disabled || !canAffordReroll ? 'not-allowed' : 'pointer',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                          ...(rerollDiscounted && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
+                        }}
+                      >
+                        {rerollDiscounted ? (
+                          <>
+                            Re-roll · <span style={{ textDecoration: 'line-through', opacity: 0.6, marginRight: 4 }}>1</span>
+                            <span style={{ color: '#ffd700', fontWeight: 'bold' }}>{effectiveRerollCost} 💰</span>
+                          </>
+                        ) : `Re-roll · ${effectiveRerollCost} 💰`}
+                      </button>
+                    );
+                    return rerollDiscounted ? (
+                      <Tooltip content={`Discounted from 1 💰 to ${effectiveRerollCost} 💰 by an active cost reduction.`}>
+                        {rerollButton}
+                      </Tooltip>
+                    ) : rerollButton;
+                  })()}
                 </div>
                 <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
                   Cards given from a re-roll are guaranteed to be different from existing cards.
@@ -947,30 +968,48 @@ export default function ShopOverlay({
                   </>
                 )}
               {(() => {
+                const upgDiscounted = effectiveUpgradeCreditCost < 5;
+                const canAffordUpg = playerResources >= effectiveUpgradeCreditCost;
                 const upgradeButton = (
                   <button
                     onClick={buyUpgradeWithSound}
-                    disabled={disabled || !!buyLocked || playerResources < 5}
+                    disabled={disabled || !!buyLocked || !canAffordUpg}
                     style={{
                       fontSize: 14,
                       padding: '8px 16px',
-                      background: playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#333',
-                      border: `1px solid ${playerResources >= 5 && !disabled && !buyLocked ? '#cc7a2a' : '#555'}`,
+                      background: upgDiscounted && canAffordUpg && !disabled && !buyLocked ? '#2a5a2e' : (canAffordUpg && !disabled && !buyLocked ? '#cc7a2a' : '#333'),
+                      border: `1px solid ${upgDiscounted && canAffordUpg && !disabled && !buyLocked ? '#4aff6a' : (canAffordUpg && !disabled && !buyLocked ? '#cc7a2a' : '#555')}`,
                       borderRadius: 6,
-                      color: playerResources >= 5 && !disabled && !buyLocked ? '#fff' : '#555',
-                      cursor: disabled || buyLocked || playerResources < 5 ? 'not-allowed' : 'pointer',
+                      color: canAffordUpg && !disabled && !buyLocked ? '#fff' : '#555',
+                      cursor: disabled || buyLocked || !canAffordUpg ? 'not-allowed' : 'pointer',
                       whiteSpace: 'nowrap',
                       flexShrink: 0,
+                      ...(upgDiscounted && canAffordUpg && !disabled && !buyLocked ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
                     }}
                   >
-                    Buy Upgrade Credit · 5 💰
+                    {upgDiscounted ? (
+                      <>
+                        Buy Upgrade Credit · <span style={{ textDecoration: 'line-through', opacity: 0.6, marginRight: 4 }}>5</span>
+                        <span style={{ color: '#ffd700', fontWeight: 'bold' }}>{effectiveUpgradeCreditCost} 💰</span>
+                      </>
+                    ) : `Buy Upgrade Credit · ${effectiveUpgradeCreditCost} 💰`}
                   </button>
                 );
-                return buyLocked ? (
-                  <Tooltip content="Cannot buy — Grand Strategy was played this round.">
-                    {upgradeButton}
-                  </Tooltip>
-                ) : upgradeButton;
+                if (buyLocked) {
+                  return (
+                    <Tooltip content="Cannot buy — Grand Strategy was played this round.">
+                      {upgradeButton}
+                    </Tooltip>
+                  );
+                }
+                if (upgDiscounted) {
+                  return (
+                    <Tooltip content={`Discounted from 5 💰 to ${effectiveUpgradeCreditCost} 💰 by an active cost reduction.`}>
+                      {upgradeButton}
+                    </Tooltip>
+                  );
+                }
+                return upgradeButton;
               })()}
               </div>
               <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
