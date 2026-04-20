@@ -89,12 +89,22 @@ export default function HeroAnimation() {
     const CANVAS_W = 400;
     const CANVAS_H = 320;
 
+    // Cap resolution on phones to avoid DPR-3 + 4x antialias blowing up the
+    // WebGL backbuffer on iOS Safari. iPadOS (incl. its Macintosh UA) and
+    // macOS get full DPR for crisp output.
+    const rawDpr = window.devicePixelRatio || 1;
+    const ua = navigator.userAgent;
+    const isPhone = /iPhone|iPod/.test(ua)
+      || (/Android/.test(ua) && /Mobile/.test(ua))
+      || /webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    const resolution = isPhone ? Math.min(rawDpr, 2) : rawDpr;
+
     app.init({
       backgroundAlpha: 0,
       width: CANVAS_W,
       height: CANVAS_H,
       antialias: true,
-      resolution: window.devicePixelRatio || 1,
+      resolution,
       autoDensity: true,
     }).then(() => {
       if (destroyed) { app.destroy(); return; }
