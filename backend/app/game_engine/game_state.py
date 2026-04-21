@@ -707,14 +707,14 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
         return len(player.trash) // divisor
 
     elif formula == "fortified_tiles_3":
-        # Fortified Position: 1 VP per non-base tile with permanent defense >= 3 (>= 2 upgraded)
+        # Fortified Position: 1 VP per non-base tile with total permanent defense >= 3 (>= 2 upgraded)
         if not game.grid:
             return 0
         threshold = 2 if is_upgraded else 3
         return sum(
             1 for t in game.grid.tiles.values()
             if t.owner == player.id and not t.is_base
-            and t.permanent_defense_bonus >= threshold
+            and t.base_defense + t.permanent_defense_bonus >= threshold
         )
 
     elif formula == "deck_div_10":
