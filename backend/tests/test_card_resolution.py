@@ -1955,7 +1955,7 @@ class TestFortressFortifiedPosition:
         assert card.unplayable is True
 
     def test_fortified_position_vp_computation(self, card_registry):
-        """Fortified Position: tiles with permanent_defense_bonus >= 3 give VP."""
+        """Fortified Position: tiles with total permanent defense (base + entrench) >= 3 give VP."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
 
@@ -3551,7 +3551,7 @@ class TestFortressScorchedRetreat:
         assert eff.type == EffectType.ABANDON_AND_BLOCK
 
     def test_scorched_retreat_blocks_tile(self, card_registry):
-        """Scorched Retreat abandons tile and makes it blocked at resolve, gains 2 resources."""
+        """Scorched Retreat abandons tile and makes it blocked at resolve, gains 8 resources."""
         card = card_registry.get("fortress_scorched_retreat")
         if not card:
             pytest.skip("Card not in registry")
@@ -3583,7 +3583,7 @@ class TestFortressScorchedRetreat:
         # Now tile should be blocked with no owner
         assert target.is_blocked is True
         assert target.owner is None
-        assert player.resources == initial_resources + 3
+        assert player.resources == initial_resources + 8
 
     def test_scorched_retreat_cannot_target_base(self, card_registry):
         """Scorched Retreat cannot target a base tile."""

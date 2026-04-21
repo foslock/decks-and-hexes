@@ -332,7 +332,7 @@ cards:
     action_return: 1
     power: 0
     effect: "Gain 2 resources. Draw 1 card. Gain 1 action."
-    effect_upgraded: "Gain 3 resources. Draw 1 card. Gain 1 action."
+    effect_upgraded: "Gain 3 resources. Draw 2 cards. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -347,8 +347,8 @@ cards:
     unplayable: true
     unique: true
     vp_formula: fortified_tiles_3
-    effect: "+1 VP for every non-base tile you own with a permanent defense bonus of 3 or higher."
-    effect_upgraded: "+1 VP for every non-base tile you own with a permanent defense bonus of 2 or higher."
+    effect: "+1 VP for every non-base tile you own with a total permanent defense of 3 or higher."
+    effect_upgraded: "+1 VP for every non-base tile you own with a total permanent defense of 2 or higher."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards Entrench investment. Fluctuates as tiles are lost or captured. Takes up a hand slot when drawn."
@@ -437,16 +437,16 @@ cards:
     power: 0
     trash_on_use: true
     target_own_tile: true
-    effect: "Abandon a tile you own. It becomes blocked terrain. Gain 3 resources. Trash this card."
-    effect_upgraded: "Abandon a tile you own. It becomes blocked terrain. Gain 4 resources. Trash this card."
+    effect: "Abandon a tile you own. It becomes blocked terrain. Gain 8 resources. Trash this card."
+    effect_upgraded: "Abandon a tile you own. It becomes blocked terrain. Gain 12 resources. Trash this card."
     secondary_effect: null
     secondary_timing: null
     note: "Strategic denial — if you can't hold it, nobody gets it. One-time use prevents abuse."
 
     effects:
       - type: abandon_and_block
-        value: 3
-        upgraded_value: 4
+        value: 8
+        upgraded_value: 12
         timing: on_resolution
 
   - id: fortress_snowy_holiday

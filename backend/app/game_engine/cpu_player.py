@@ -2667,7 +2667,7 @@ class CPUPlayer:
                 score += 5.5 + (card.buy_cost or 0)  # still a fine trash target
             elif card.starter:
                 score += 5.0 + (card.buy_cost or 0)
-            elif card.unplayable and card.passive_vp <= 0:
+            elif card.unplayable and card.passive_vp <= 0 and not card.vp_formula:
                 score += 4.0 + (card.buy_cost or 0)  # dead weight
             else:
                 score += (card.buy_cost or 0) * 0.3  # low priority for good cards
