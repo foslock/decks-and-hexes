@@ -125,7 +125,7 @@ class TestCommander:
 
 
 class TestPursuit:
-    """Resources per tile captured from opponent last round (capped).
+    """Resources per tile captured from opponent last round.
     Timing is immediate — snapshot_resource_gain applies at play time."""
 
     def test_no_captures_no_resources(self, small_2p_game, card_registry):
@@ -140,18 +140,18 @@ class TestPursuit:
         assert ok
         assert player.resources == initial_res
 
-    def test_base_scaling_with_cap(self, small_2p_game, card_registry):
+    def test_base_scaling(self, small_2p_game, card_registry):
         game = small_2p_game
         player = game.players["p0"]
-        player.tiles_captured_from_opponents_last_round = 10  # more than cap
+        player.tiles_captured_from_opponents_last_round = 10
         pursuit = _copy_card(card_registry["vanguard_pursuit"], "t_pur1")
         player.hand = [pursuit] + player.hand[1:]
 
         initial_res = player.resources
         ok, _ = play_card(game, "p0", 0)
         assert ok
-        # Base: 1 per tile, max 3
-        assert player.resources == initial_res + 3
+        # Base: 1 per tile × 10 = 10 (no cap)
+        assert player.resources == initial_res + 10
 
     def test_upgraded_scaling_and_draw(self, small_2p_game, card_registry):
         game = small_2p_game
@@ -165,7 +165,7 @@ class TestPursuit:
         initial_hand = len(player.hand)
         ok, _ = play_card(game, "p0", 0)
         assert ok
-        # Upgraded: 2 per tile × 2 = 4 (under cap 6)
+        # Upgraded: 2 per tile × 2 = 4
         assert player.resources == initial_res + 4
         # +1 draw: hand = initial - 1 (played) + 1 (draw) = initial
         assert len(player.hand) == initial_hand

@@ -2501,13 +2501,11 @@ class CPUPlayer:
                     score += draws * 0.8 * weights.card_draw_value
 
             elif effect.type == EffectType.RESOURCES_PER_TILES_CAPTURED_LAST_ROUND:
-                # Pursuit: resources per tile captured last round (capped).
+                # Pursuit: resources per tile captured last round.
                 # Snapshotted at play time — mirror the backend calculation.
                 per_tile = effect.effective_value(card.is_upgraded)
-                cap_key = "upgraded_max_resources" if card.is_upgraded else "max_resources"
-                max_res = effect.metadata.get(cap_key, 999)
                 captured = getattr(player, "tiles_captured_from_opponents_last_round", 0)
-                gain = min(captured * per_tile, max_res)
+                gain = captured * per_tile
                 score += gain * 1.5 * weights.resource_value
                 if captured == 0:
                     # Still playable for the +2 actions alone, but the momentum
