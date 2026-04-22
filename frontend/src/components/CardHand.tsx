@@ -125,6 +125,9 @@ const CARD_GAP = 6;
 // Approximate rendered height of a hand card (padding + border + content)
 // so the hand area stays consistent when empty
 const CARD_MIN_HEIGHT = 52;
+// Distance (in px) the drag ghost must travel above the hand's top edge to
+// fully morph from the compact in-hand card into the full card preview.
+const DRAG_MORPH_DISTANCE = 110;
 
 function ActionReturnBadge({ value }: { value: number }) {
   if (value === 0) return null;
@@ -579,6 +582,9 @@ interface DepartingAnim {
   shrink: boolean;
   /** Whether the card is being trashed (tear-apart animation) */
   trash: boolean;
+  /** When true, render the trash tear on the full-card preview
+   *  (because the drag ghost had morphed to CardFull at release). */
+  trashFull: boolean;
   /** Random end rotation (degrees) for discard animations */
   endRotation: number;
 }
@@ -1009,8 +1015,24 @@ export default function CardHand({
           const isPlayed = lastPlayedTarget && lastPlayedTarget.cardId === card.id;
           const hasDrag = isPlayed && lastPlayedTarget.dragX != null && lastPlayedTarget.dragY != null;
 
+          // If a trashed card was dragged out of the hand, the drag ghost may
+          // have morphed into the full-card preview. Tear that form apart
+          // instead of the compact hand-card box.
+          let trashFull = false;
+          if (isTrashed && hasDrag) {
+            const handRect = handContainerRef.current?.getBoundingClientRect();
+            const handTop = handRect?.top ?? window.innerHeight;
+            const distAboveHand = Math.max(0, handTop - lastPlayedTarget!.dragY!);
+            const morph = Math.min(1, distAboveHand / DRAG_MORPH_DISTANCE);
+            trashFull = morph >= 0.5;
+          }
+
+          // Ghost dimensions at release reflect the form on screen.
+          const ghostW = trashFull ? CARD_FULL_WIDTH : rect.width;
+          const ghostH = trashFull ? CARD_FULL_MIN_HEIGHT : rect.height;
+
           // Start position: from drag ghost if dragged, otherwise from hand
-          const startX = hasDrag ? lastPlayedTarget.dragX! - rect.width / 2 : rect.left;
+          const startX = hasDrag ? lastPlayedTarget.dragX! - ghostW / 2 : rect.left;
           const startY = hasDrag ? lastPlayedTarget.dragY! - 6 : rect.top;
 
           if (isTrashed) {
@@ -1042,10 +1064,12 @@ export default function CardHand({
             card,
             startX, startY,
             toX, toY,
-            width: rect.width, height: rect.height,
+            width: trashFull ? ghostW : rect.width,
+            height: trashFull ? ghostH : rect.height,
             active: false,
             shrink,
             trash: isTrashed,
+            trashFull,
             endRotation,
           });
         });
@@ -1263,6 +1287,7 @@ export default function CardHand({
         active: false,
         shrink: false,
         trash: false,
+        trashFull: false,
         endRotation: (Math.random() - 0.5) * 20,
       });
     });
@@ -2002,31 +2027,58 @@ export default function CardHand({
         );
       })()}
 
-      {/* Drag ghost */}
+      {/* Drag ghost — morphs from compact in-hand card to full card preview
+          as it's dragged away from the hand section. Anchor point is top-center
+          of both forms so the hold position stays consistent through the morph. */}
       {draggingIndex !== null && dragPos && cards[localOrder[draggingIndex]] && (() => {
         const dragCard = cards[localOrder[draggingIndex]];
         const dragColor = getCardDisplayColor(dragCard);
+        const handRect = handContainerRef.current?.getBoundingClientRect();
+        const handTop = handRect?.top ?? window.innerHeight;
+        const distAboveHand = Math.max(0, handTop - dragPos.y);
+        const morph = Math.min(1, distAboveHand / DRAG_MORPH_DISTANCE);
         return (
           <div style={{
             position: 'fixed',
-            left: dragPos.x - CARD_WIDTH / 2,
+            left: dragPos.x,
             top: dragPos.y - 6,
-            width: CARD_WIDTH,
-            height: CARD_MIN_HEIGHT,
-            padding: 6,
-            background: '#3a3a6ecc',
-            border: `2px solid ${dragColor}`,
-            borderRadius: 6,
-            color: '#fff',
             pointerEvents: 'none',
             zIndex: 9999,
             transformOrigin: 'top center',
             transform: `rotate(${dragSwingAngle}deg) scale(1.05)`,
-            boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
-            boxSizing: 'border-box',
-            overflow: 'hidden',
+            filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.5))',
           }}>
-            <CompactCardContent card={dragCard} titleSize={12} subtitleSize={12} subtitleCtx={subtitleContext} />
+            {/* Compact ghost — fades out as the card leaves the hand */}
+            {morph < 1 && (
+              <div style={{
+                position: 'absolute',
+                left: -CARD_WIDTH / 2,
+                top: 0,
+                width: CARD_WIDTH,
+                height: CARD_MIN_HEIGHT,
+                padding: 6,
+                background: '#3a3a6ecc',
+                border: `2px solid ${dragColor}`,
+                borderRadius: 6,
+                color: '#fff',
+                boxSizing: 'border-box',
+                overflow: 'hidden',
+                opacity: 1 - morph,
+              }}>
+                <CompactCardContent card={dragCard} titleSize={12} subtitleSize={12} subtitleCtx={subtitleContext} />
+              </div>
+            )}
+            {/* Full ghost — fades in as the card leaves the hand */}
+            {morph > 0 && (
+              <div style={{
+                position: 'absolute',
+                left: -CARD_FULL_WIDTH / 2,
+                top: 0,
+                opacity: morph,
+              }}>
+                <CardFull card={dragCard} />
+              </div>
+            )}
           </div>
         );
       })()}
@@ -2066,7 +2118,9 @@ export default function CardHand({
               // Trash tear animation: two halves split apart, rotate outward, rise up, fade out
               const dy = d.active ? d.toY - d.startY : 0;
               const halfW = d.width / 2;
-              const cardContent = (
+              const cardContent = d.trashFull ? (
+                <CardFull card={d.card} />
+              ) : (
                 <div style={{
                   width: d.width, padding: 6, background: '#2a2a3e',
                   border: `2px solid ${typeColor}`, borderRadius: 6,

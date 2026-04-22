@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
-import { renderWithKeywords, extractKeywordsFromText, KEYWORDS } from './Keywords';
+import { extractKeywordsFromText, KEYWORDS } from './Keywords';
+import { renderDescription } from './renderDescription';
+import { useCardCatalog } from '../cardCatalog';
 import { useTooltips } from './SettingsContext';
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor, getCardDisplayType } from '../constants/cardColors';
 
@@ -364,6 +366,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
   const typeColor = getCardDisplayColor(card);
   const displayCost = effectiveCost ?? card.buy_cost;
   const tooltipsEnabled = useTooltips();
+  const catalog = useCardCatalog();
 
   // Keyword hints state — fade in after delay
   const keywords = useMemo(() => extractKeywords(card), [card]);
@@ -399,7 +402,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
   const statNotes = buildStatNotes(card);
 
   return (
-    <div ref={cardRef} style={{
+    <div ref={cardRef} data-card-full="true" data-hints-side={hintsOnLeft ? 'left' : 'right'} style={{
       width: CARD_FULL_WIDTH,
       position: 'relative',
       background: '#1e1e3a',
@@ -526,7 +529,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
         flex: 1,
       }}>
         {abilityParts.map((text, i) => (
-          <div key={i}>{renderWithKeywords(text)}</div>
+          <div key={i}>{renderDescription(text, catalog, card.definition_id)}</div>
         ))}
         {statNotes.length > 0 && (
           <div style={{
