@@ -366,6 +366,7 @@ def _serialize_player(player: Player, registry: dict[str, Card]) -> dict[str, An
         "left_vp": player.left_vp,
         "claims_won_last_round": player.claims_won_last_round,
         "tiles_lost_last_round": player.tiles_lost_last_round,
+        "tiles_captured_from_opponents_last_round": player.tiles_captured_from_opponents_last_round,
         "pending_discard": player.pending_discard,
         "pending_search": player.pending_search.to_dict() if player.pending_search else None,
         "_prev_market_ids": player._prev_market_ids,
@@ -443,6 +444,7 @@ def _deserialize_player(data: dict[str, Any], registry: dict[str, Card]) -> Play
         left_vp=data.get("left_vp", 0),
         claims_won_last_round=data.get("claims_won_last_round", 0),
         tiles_lost_last_round=data.get("tiles_lost_last_round", 0),
+        tiles_captured_from_opponents_last_round=data.get("tiles_captured_from_opponents_last_round", 0),
         pending_discard=data.get("pending_discard", 0),
         pending_search=_deserialize_pending_search(data.get("pending_search")),
     )

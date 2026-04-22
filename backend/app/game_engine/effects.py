@@ -141,6 +141,18 @@ class EffectType(str, Enum):
     # ── Tutor / search effects (browse a pile and move cards to another zone) ──
     SEARCH_ZONE = "search_zone"                            # Search discard/draw/trash for N cards; move each to hand/top_of_draw/discard/trash
 
+    # ── Engine/combo balance-pass effects ─────────────────────────
+    GRANT_ACTIONS_IF_STACKED = "grant_actions_if_stacked"              # Coordinated Push+
+    CONDITIONAL_DRAW_NEXT_ROUND = "conditional_draw_next_round"        # Commander
+    CLAIM_BUFF_NEXT_N = "claim_buff_next_n"                            # War Banner
+    RESOURCES_PER_TILES_CAPTURED_LAST_ROUND = "resources_per_tiles_captured_last_round"  # Pursuit
+    CONDITIONAL_DRAW = "conditional_draw"                              # Chatter
+    DRAW_PER_TILES_OWNED = "draw_per_tiles_owned"                      # Drone Wave
+    CREATE_CARDS_TO_DISCARD = "create_cards_to_discard"                # Hatching Grounds, Master Engineer
+    GAIN_RESOURCES_PER_CARD_IN_HAND = "gain_resources_per_card_in_hand"  # Quartermaster
+    DRAW_PER_TILES_WITH_DEFENSE_BONUS = "draw_per_tiles_with_defense_bonus"  # Watchful Keep
+    GRANT_ACTIONS_NEXT_ROUND_PER_SUCCESSFUL_CLAIM = "grant_actions_next_round_per_successful_claim"  # Surge+
+
 
 class ConditionType(str, Enum):
     """Conditions that gate whether an effect fires."""
@@ -161,6 +173,8 @@ class ConditionType(str, Enum):
     IF_TARGET_HAS_DEFENSE = "if_target_has_defense"
     IF_CONTESTED = "if_contested"                    # Ambush: target tile also claimed by opponent
     HAND_SIZE_LTE = "hand_size_lte"                  # Spyglass: hand size <= threshold after draw
+    IF_CARDS_PLAYED_THIS_ROUND_GTE = "if_cards_played_this_round_gte"  # Chatter
+    IF_SUCCESSFUL_AND_STACKED_GTE = "if_successful_and_stacked_gte"    # Dog Pile+
 
 
 @dataclass
@@ -232,6 +246,9 @@ class TurnModifiers:
     ignore_defense_override_tiles: set[str] = field(default_factory=set)
     # Plague: number of random cards to trash from hand at start of next turn
     plague_trash_next_turn: int = 0
+    # War Banner: queued +power buffs consumed by the next Claim(s) played this round.
+    # Each entry: {"power_bonus": int, "draw_on_success": int}. Cleared at turn end.
+    claim_buffs: list[dict[str, Any]] = field(default_factory=list)
 
     def reset_for_new_turn(self) -> None:
         """Clear single-round modifiers. Decrement multi-round ones."""
@@ -240,6 +257,7 @@ class TurnModifiers:
         self.ignore_defense_tiles.clear()
         self.immediate_resolve_tiles.clear()
         self.ignore_defense_override_tiles.clear()
+        self.claim_buffs.clear()
         # Decrement immune tiles; remove expired
         expired = []
         for tile_key, rounds in self.immune_tiles.items():

@@ -80,6 +80,16 @@ export interface PlannedAction {
   effective_resource_gain?: number;
   /** Dynamic draw count snapshotted at play time (e.g. Financier: draw per Debt) */
   effective_draw_cards?: number;
+  /** War Banner: the claim_buff consumed by this Claim. When multiple War
+   *  Banners stack onto a single Claim, power_bonus/draw_on_success are
+   *  aggregated and source_card_ids lists every contributing banner. The
+   *  singular source_card_id is retained (first consumed) for back-compat. */
+  consumed_claim_buff?: {
+    power_bonus: number;
+    draw_on_success?: number;
+    source_card_id?: string;
+    source_card_ids?: string[];
+  };
 }
 
 export type SearchZoneSource = 'discard' | 'draw' | 'trash';
@@ -131,12 +141,18 @@ export interface Player {
   rubble_count: number;
   claims_won_last_round: number;
   tiles_lost_last_round: number;
+  tiles_captured_from_opponents_last_round: number;
   tile_count: number;
   is_cpu: boolean;
   cpu_difficulty: 'easy' | 'medium' | 'hard' | null;
   has_left: boolean;
   free_rerolls: number;
   buy_locked: boolean;
+  /** War Banner: queued +power bonuses the next Claim(s) will consume.
+   *  source_card_id ties each buff back to the originating War Banner card
+   *  instance so the UI can pulse a specific War Banner in the In Play list
+   *  while its buff is still unconsumed. */
+  claim_buffs?: { power_bonus: number; draw_on_success?: number; source_card_id?: string }[];
   pending_discard: number;
   pending_search?: PendingSearch | null;
 }
@@ -215,6 +231,8 @@ export interface PlayerEffect {
   added_card_name?: string;
   /** Number of cards being added */
   added_card_count?: number;
+  /** Full serialized card definition for fly animations (Hatching Grounds, Master Engineer) */
+  added_card?: Card;
 }
 
 export interface SharedPurchaseRecord {

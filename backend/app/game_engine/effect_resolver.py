@@ -391,6 +391,41 @@ def check_condition(
         # Spyglass: condition evaluated inside handler (after draw resolves)
         return True
 
+    if condition == ConditionType.IF_CARDS_PLAYED_THIS_ROUND_GTE:
+        # Chatter: true if player has played >= threshold cards this round
+        # (including this one — counting *this* card as the Nth play).
+        threshold = 0
+        for eff in card.effects:
+            if eff.condition == ConditionType.IF_CARDS_PLAYED_THIS_ROUND_GTE:
+                threshold = eff.condition_threshold
+                break
+        played = sum(1 for a in player.planned_actions)
+        return played >= threshold
+
+    if condition == ConditionType.IF_SUCCESSFUL_AND_STACKED_GTE:
+        # Dog Pile+: true if claim succeeded AND >= threshold claims were played
+        # on this tile (by this player) this round.
+        if claim_succeeded is not True:
+            return False
+        if action.target_q is None:
+            return False
+        tr = action.target_r if action.target_r is not None else 0
+        count = 0
+        for a in player.planned_actions:
+            if a.card.card_type != CardType.CLAIM:
+                continue
+            if a.target_q is None:
+                continue
+            a_r = a.target_r if a.target_r is not None else 0
+            if a.target_q == action.target_q and a_r == tr:
+                count += 1
+        threshold = 0
+        for eff in card.effects:
+            if eff.condition == ConditionType.IF_SUCCESSFUL_AND_STACKED_GTE:
+                threshold = eff.condition_threshold
+                break
+        return count >= threshold
+
     if condition == ConditionType.IF_CONTESTED:
         # Ambush: true if the target tile is also claimed by another player this round.
         # At play time we don't know yet (other players haven't revealed), so return False.
@@ -425,12 +460,25 @@ def check_condition(
 
 
 def _handle_gain_resources(effect: Effect, ctx: EffectContext) -> None:
-    """Catch Up: gain resources (conditionally)."""
+    """Catch Up / Proliferate+ / Garrison+: gain resources (conditionally)."""
     amount = effect.effective_value(ctx.card.is_upgraded)
+    if amount <= 0:
+        return
     ctx.player.resources += amount
     ctx.game._log(
         f"{ctx.player.name} gains {amount} resource(s) from {ctx.card.name}",
         visible_to=[ctx.player.id], actor=ctx.player.id)
+    # On_resolution gains fire during the animated resolve phase — surface a
+    # popup so the player can't miss the reward (Proliferate+, Garrison+).
+    if effect.timing == Timing.ON_RESOLUTION:
+        ctx.game.player_effects.append({
+            "source_player_id": ctx.player.id,
+            "target_player_id": ctx.player.id,
+            "card_name": ctx.card.name,
+            "effect": f"+{amount} Resource{'s' if amount > 1 else ''}",
+            "effect_type": "gain_resources",
+            "value": amount,
+        })
 
 
 def _handle_self_discard(effect: Effect, ctx: EffectContext) -> None:
@@ -624,6 +672,22 @@ def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
 def _handle_grant_actions_next_turn(effect: Effect, ctx: EffectContext) -> None:
     """Battle Cry / Forced March: give other players extra actions next turn."""
     ev = effect.effective_value(ctx.card.is_upgraded)
+    if ev <= 0:
+        return
+    if effect.target == "self":
+        ctx.player.turn_modifiers.extra_actions_next_turn += ev
+        ctx.game._log(
+            f"{ctx.player.name} will gain {ev} extra action(s) next round from {ctx.card.name}",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+        ctx.game.player_effects.append({
+            "source_player_id": ctx.player.id,
+            "target_player_id": ctx.player.id,
+            "card_name": ctx.card.name,
+            "effect": f"+{ev} Action{'s' if ev > 1 else ''} next round",
+            "effect_type": "grant_actions_next_turn",
+            "value": ev,
+        })
+        return
     if effect.target == "all_others":
         for pid, other in ctx.game.players.items():
             if pid != ctx.player.id:
@@ -658,17 +722,20 @@ def _handle_grant_actions_next_turn(effect: Effect, ctx: EffectContext) -> None:
 
 def _handle_draw_next_turn(effect: Effect, ctx: EffectContext) -> None:
     """Blitz / Forward March secondary: draw extra cards next turn."""
-    ctx.player.turn_modifiers.extra_draws_next_turn += effect.value
+    ev = effect.effective_value(ctx.card.is_upgraded)
+    if ev <= 0:
+        return
+    ctx.player.turn_modifiers.extra_draws_next_turn += ev
     ctx.game._log(
-        f"{ctx.player.name} will draw {effect.value} extra card(s) next turn from {ctx.card.name}",
+        f"{ctx.player.name} will draw {ev} extra card(s) next turn from {ctx.card.name}",
         visible_to=[ctx.player.id], actor=ctx.player.id)
     ctx.game.player_effects.append({
         "source_player_id": ctx.player.id,
         "target_player_id": ctx.player.id,
         "card_name": ctx.card.name,
-        "effect": f"+{effect.value} Card{'s' if effect.value > 1 else ''} next turn",
+        "effect": f"+{ev} Card{'s' if ev > 1 else ''} next turn",
         "effect_type": "draw_next_turn",
-        "value": effect.value,
+        "value": ev,
     })
 
 
@@ -1859,3 +1926,295 @@ _matches_card_filter = matches_card_filter
 
 
 register_handler(EffectType.SEARCH_ZONE, _handle_search_zone)
+
+
+# ── Engine/combo balance-pass handlers ────────────────────────────
+
+
+def _handle_grant_actions_if_stacked(effect: Effect, ctx: EffectContext) -> None:
+    """Coordinated Push+: if another Claim has already been played on this
+    tile by this player (before this card), gain 1 action immediately."""
+    ev = effect.effective_value(ctx.card.is_upgraded)
+    if ev <= 0:
+        return
+    if ctx.action.target_q is None:
+        return
+    tr = ctx.action.target_r if ctx.action.target_r is not None else 0
+    for other in ctx.player.planned_actions:
+        if other is ctx.action:
+            continue
+        if other.card.card_type != CardType.CLAIM:
+            continue
+        other_r = other.target_r if other.target_r is not None else 0
+        if other.target_q == ctx.action.target_q and other_r == tr:
+            ctx.player.actions_available += ev
+            ctx.game._log(
+                f"{ctx.player.name} gains {ev} action(s) from {ctx.card.name} "
+                f"(stacked on tile {ctx.target_tile_key})",
+                visible_to=[ctx.player.id], actor=ctx.player.id)
+            return
+
+
+def _handle_conditional_draw_next_round(effect: Effect, ctx: EffectContext) -> None:
+    """Commander: if player has played a Claim this round, queue draws next round."""
+    ev = effect.effective_value(ctx.card.is_upgraded)
+    if ev <= 0:
+        return
+    played_claim = any(
+        a.card.card_type == CardType.CLAIM and a is not ctx.action
+        for a in ctx.player.planned_actions
+    )
+    if not played_claim:
+        return
+    ctx.player.turn_modifiers.extra_draws_next_turn += ev
+    ctx.game._log(
+        f"{ctx.player.name} will draw {ev} extra card(s) next round from {ctx.card.name}",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": f"+{ev} Card{'s' if ev > 1 else ''} next round",
+        "effect_type": "draw_next_turn",
+        "value": ev,
+    })
+
+
+def _handle_conditional_draw(effect: Effect, ctx: EffectContext) -> None:
+    """Chatter: if condition is met (N+ cards played this round), draw N immediate cards."""
+    # Condition gate is evaluated by resolve_immediate_effects using check_condition.
+    ev = effect.effective_value(ctx.card.is_upgraded)
+    if ev <= 0:
+        return
+    drawn = ctx.player.deck.draw(ev, ctx.game.rng)
+    ctx.player.hand.extend(drawn)
+    if drawn:
+        ctx.game._log(
+            f"{ctx.player.name} draws {len(drawn)} extra card(s) from {ctx.card.name}",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_claim_buff_next_n(effect: Effect, ctx: EffectContext) -> None:
+    """War Banner: buff the next N Claim(s) played this round by +P power and
+    queue +D draws next round for each that succeeds.
+
+    Stored on the player as pending_claim_buffs (list of dicts consumed by
+    future claims). Here we just register the buff.
+    """
+    ev = effect.effective_value(ctx.card.is_upgraded)
+    if ev <= 0:
+        return
+    power_bonus = int(effect.metadata.get("power_bonus", 2))
+    draw_on_success = int(effect.metadata.get("draw_next_round_on_success", 0))
+    buffs = ctx.player.turn_modifiers.claim_buffs
+    # Tag each buff with the source card's instance id so the frontend can map
+    # a buffed Claim back to the specific War Banner that originated it.
+    source_card_id = ctx.card.id
+    for _ in range(ev):
+        buffs.append({
+            "power_bonus": power_bonus,
+            "draw_on_success": draw_on_success,
+            "source_card_id": source_card_id,
+        })
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} buffs next {ev} Claim(s) by +{power_bonus} power",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_resources_per_tiles_captured_last_round(
+    effect: Effect, ctx: EffectContext
+) -> None:
+    """Pursuit: resources for each tile captured from an opponent last round (capped)."""
+    per_tile = effect.effective_value(ctx.card.is_upgraded)
+    captured = ctx.player.tiles_captured_from_opponents_last_round
+    cap_key = "upgraded_max_resources" if ctx.card.is_upgraded else "max_resources"
+    max_res = int(effect.metadata.get(cap_key, 999))
+    gained = min(captured * per_tile, max_res)
+    if gained > 0:
+        ctx.player.resources += gained
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
+        f"({captured} tile(s) captured last round × {per_tile}, max {max_res})",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    if ctx.card.is_upgraded:
+        extra_draw = int(effect.metadata.get("upgraded_draw", 0))
+        if extra_draw > 0:
+            drawn = ctx.player.deck.draw(extra_draw, ctx.game.rng)
+            ctx.player.hand.extend(drawn)
+            if drawn:
+                ctx.game._log(
+                    f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
+                    visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_draw_per_tiles_owned(effect: Effect, ctx: EffectContext) -> None:
+    """Drone Wave: draw 1 card per N tiles owned (capped)."""
+    divisor = effect.effective_value(ctx.card.is_upgraded)
+    if divisor <= 0:
+        divisor = 3
+    tile_count = 0
+    if ctx.game.grid:
+        tile_count = len(ctx.game.grid.get_player_tiles(ctx.player.id))
+    draws = tile_count // divisor
+    cap_key = "upgraded_max_draws" if ctx.card.is_upgraded else "max_draws"
+    max_draws = int(effect.metadata.get(cap_key, 999))
+    draws = min(draws, max_draws)
+    if draws > 0:
+        drawn = ctx.player.deck.draw(draws, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        ctx.game._log(
+            f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name} "
+            f"({tile_count} tiles owned)",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_create_cards_to_discard(effect: Effect, ctx: EffectContext) -> None:
+    """Hatching Grounds / Master Engineer: add N copies of a card to discard pile."""
+    count = effect.effective_value(ctx.card.is_upgraded)
+    if count <= 0:
+        return
+    card_id = effect.metadata.get("card_id")
+    if not card_id:
+        return
+    template = ctx.game.card_registry.get(str(card_id))
+    if not template:
+        ctx.game._log(
+            f"[create_cards_to_discard] card_id={card_id} not in registry")
+        return
+    import copy as _copy
+    for _ in range(count):
+        clone = _copy.deepcopy(template)
+        ctx.player.deck.discard.append(clone)
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} adds {count} {template.name} "
+        f"card(s) to their discard pile",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": f"+{count} {template.name}",
+        "effect_type": "create_cards_to_discard",
+        "value": count,
+        "added_card_name": template.name,
+        "added_card_count": count,
+        "added_card": template.to_dict(),
+    })
+
+
+def _handle_gain_resources_per_card_in_hand(effect: Effect, ctx: EffectContext) -> None:
+    """Quartermaster: resources per matching card in hand (capped)."""
+    per = effect.effective_value(ctx.card.is_upgraded)
+    filter_type = effect.metadata.get("filter", "")
+    cap_key = "upgraded_max_counted" if ctx.card.is_upgraded else "max_counted"
+    max_counted = int(effect.metadata.get(cap_key, 999))
+    matching = 0
+    for c in ctx.player.hand:
+        if c is ctx.card:
+            continue
+        if filter_type and c.card_type.value.lower() != str(filter_type).lower():
+            continue
+        matching += 1
+    counted = min(matching, max_counted)
+    gained = counted * per
+    if gained > 0:
+        ctx.player.resources += gained
+    ctx.game._log(
+        f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
+        f"({counted} {filter_type or 'card(s)'} in hand × {per})",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    if ctx.card.is_upgraded:
+        extra_draw = int(effect.metadata.get("upgraded_draw", 0))
+        if extra_draw > 0:
+            drawn = ctx.player.deck.draw(extra_draw, ctx.game.rng)
+            ctx.player.hand.extend(drawn)
+            if drawn:
+                ctx.game._log(
+                    f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
+                    visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_draw_per_tiles_with_defense_bonus(
+    effect: Effect, ctx: EffectContext
+) -> None:
+    """Watchful Keep: draw 1 card per owned tile with any defense bonus (capped)."""
+    per = effect.effective_value(ctx.card.is_upgraded)
+    tiles_with_def = 0
+    if ctx.game.grid:
+        for tile in ctx.game.grid.get_player_tiles(ctx.player.id):
+            if tile.permanent_defense_bonus > 0 or tile.defense_power > 0:
+                tiles_with_def += 1
+    cap_key = "upgraded_max_draws" if ctx.card.is_upgraded else "max_draws"
+    max_draws = int(effect.metadata.get(cap_key, 999))
+    draws = min(tiles_with_def * per, max_draws)
+    if draws > 0:
+        drawn = ctx.player.deck.draw(draws, ctx.game.rng)
+        ctx.player.hand.extend(drawn)
+        ctx.game._log(
+            f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name} "
+            f"({tiles_with_def} fortified tile(s))",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
+def _handle_grant_actions_next_round_per_successful_claim(
+    effect: Effect, ctx: EffectContext
+) -> None:
+    """Surge+: gain 1 action next round per tile successfully claimed by this
+    card (capped). Evaluated during on_resolution; inspects claim_results.
+    """
+    per = effect.effective_value(ctx.card.is_upgraded)
+    if per <= 0:
+        return
+    max_actions = int(effect.metadata.get("max_actions", 999))
+    successes = 0
+    if ctx.claim_results and ctx.action.target_q is not None:
+        # Primary target
+        tr = ctx.action.target_r if ctx.action.target_r is not None else 0
+        key = f"{ctx.action.target_q},{tr}"
+        if ctx.claim_results.get(key, {}).get(ctx.player.id):
+            successes += 1
+        # Multi-target (Surge extra targets)
+        for (eq, er) in ctx.action.extra_targets:
+            ekey = f"{eq},{er}"
+            if ctx.claim_results.get(ekey, {}).get(ctx.player.id):
+                successes += 1
+    actions = min(successes * per, max_actions)
+    if actions <= 0:
+        return
+    ctx.player.turn_modifiers.extra_actions_next_turn += actions
+    ctx.game._log(
+        f"{ctx.player.name} will gain {actions} extra action(s) next round from "
+        f"{ctx.card.name} ({successes} successful claim(s))",
+        visible_to=[ctx.player.id], actor=ctx.player.id)
+    ctx.game.player_effects.append({
+        "source_player_id": ctx.player.id,
+        "target_player_id": ctx.player.id,
+        "card_name": ctx.card.name,
+        "effect": f"+{actions} Action{'s' if actions > 1 else ''} next round",
+        "effect_type": "grant_actions_next_turn",
+        "value": actions,
+    })
+
+
+register_handler(EffectType.GRANT_ACTIONS_IF_STACKED, _handle_grant_actions_if_stacked)
+register_handler(EffectType.CONDITIONAL_DRAW_NEXT_ROUND, _handle_conditional_draw_next_round)
+register_handler(EffectType.CONDITIONAL_DRAW, _handle_conditional_draw)
+register_handler(EffectType.CLAIM_BUFF_NEXT_N, _handle_claim_buff_next_n)
+register_handler(
+    EffectType.RESOURCES_PER_TILES_CAPTURED_LAST_ROUND,
+    _handle_resources_per_tiles_captured_last_round,
+)
+register_handler(EffectType.DRAW_PER_TILES_OWNED, _handle_draw_per_tiles_owned)
+register_handler(EffectType.CREATE_CARDS_TO_DISCARD, _handle_create_cards_to_discard)
+register_handler(
+    EffectType.GAIN_RESOURCES_PER_CARD_IN_HAND,
+    _handle_gain_resources_per_card_in_hand,
+)
+register_handler(
+    EffectType.DRAW_PER_TILES_WITH_DEFENSE_BONUS,
+    _handle_draw_per_tiles_with_defense_bonus,
+)
+register_handler(
+    EffectType.GRANT_ACTIONS_NEXT_ROUND_PER_SUCCESSFUL_CLAIM,
+    _handle_grant_actions_next_round_per_successful_claim,
+)

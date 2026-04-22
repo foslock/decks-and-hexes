@@ -45,9 +45,16 @@ cards:
     multi_target_count: 1
     upgraded_multi_target_count: 2
     effect: "Claim: Power 1 on up to 2 adjacent tiles simultaneously."
-    effect_upgraded: "Claim: Power 1 on up to 3 adjacent tiles simultaneously."
+    effect_upgraded: "Claim: Power 1 on up to 3 adjacent tiles simultaneously. For each tile successfully claimed, gain 1 action next round (max 2)."
     secondary_effect: null
     secondary_timing: null
+
+    effects:
+      - type: grant_actions_next_round_per_successful_claim
+        value: 0
+        upgraded_value: 1
+        timing: on_resolution
+        metadata: {max_actions: 2}
 
 
   - id: swarm_overwhelm
@@ -99,9 +106,16 @@ cards:
     adjacency_required: false
     unoccupied_only: true
     effect: "Claim: Power 1 on any neutral tile on the board, ignoring adjacency restrictions."
-    effect_upgraded: "Claim: Power 2 on any neutral tile on the board, ignoring adjacency restrictions."
+    effect_upgraded: "Claim: Power 2 on any neutral tile on the board, ignoring adjacency restrictions. If successful, gain 1 resource."
     secondary_effect: null
     secondary_timing: null
+
+    effects:
+      - type: gain_resources
+        value: 0
+        upgraded_value: 1
+        timing: on_resolution
+        condition: if_successful
 
 
   - id: swarm_flood
@@ -242,10 +256,11 @@ cards:
     name_upgraded: Stampede+
     type: Engine
     buy_cost: 4
-    action_return: 2
+    action_return: 3
+    upgraded_action_return: 4
     power: 0
-    effect: "Gain 2 actions. You cannot purchase any cards during the Buy Phase this round."
-    effect_upgraded: "Gain 3 actions. You cannot purchase any cards during the Buy Phase this round."
+    effect: "Gain 3 actions. You cannot purchase any cards during the Buy Phase this round."
+    effect_upgraded: "Gain 4 actions. You cannot purchase any cards during the Buy Phase this round."
     secondary_effect: null
     secondary_timing: null
 
@@ -281,8 +296,9 @@ cards:
     action_return: 0
     reversible: true
     power: 0
-    effect: "One tile you own gains +1 defense this round for each other tile you own adjacent to it."
-    effect_upgraded: "One tile you own gains +2 defense per adjacent owned tile."
+    draw_cards: 1
+    effect: "One tile you own gains +1 defense this round for each other tile you own adjacent to it. Draw 1 card."
+    effect_upgraded: "One tile you own gains +2 defense per adjacent owned tile. Draw 1 card."
     secondary_effect: null
     secondary_timing: null
 
@@ -291,6 +307,9 @@ cards:
         value: 1
         upgraded_value: 2
         timing: on_resolution
+      - type: draw
+        value: 1
+        timing: immediate
 
   - id: swarm_safety_in_numbers
     name: Phalanx
@@ -527,3 +546,70 @@ cards:
           source: draw
           targets: [hand, discard]
           min: 0
+
+  # ── NEW ENGINE CARDS ─────────────────────────────────────────────────
+
+  - id: swarm_chatter
+    name: Chatter
+    name_upgraded: Chatter+
+    type: Engine
+    buy_cost: 2
+    action_return: 1
+    power: 0
+    draw_cards: 1
+    upgraded_draw_cards: 1
+    effect: "Draw 1 card. Gain 1 action. If this is your 3rd or later card played this round, draw 1 additional card."
+    effect_upgraded: "Draw 1 card. Gain 1 action. If this is your 3rd or later card played this round, draw 2 additional cards."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Cheap volume-rewarding engine. Fires after you've built tempo, keeping the chain alive."
+
+    effects:
+      - type: conditional_draw
+        value: 1
+        upgraded_value: 2
+        timing: immediate
+        condition: if_cards_played_this_round_gte
+        condition_threshold: 3
+
+  - id: swarm_drone_wave
+    name: Drone Wave
+    name_upgraded: Drone Wave+
+    type: Engine
+    buy_cost: 4
+    action_return: 2
+    power: 0
+    effect: "Draw 1 card for every 3 tiles you own (max 3). Gain 2 actions."
+    effect_upgraded: "Draw 1 card for every 2 tiles you own (max 4). Gain 2 actions."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Territory-scaling refuel. The more Swarm has spread, the bigger the draw."
+
+    effects:
+      - type: draw_per_tiles_owned
+        value: 3
+        upgraded_value: 2
+        timing: immediate
+        metadata: {divisor_based: true, max_draws: 3, upgraded_max_draws: 4}
+
+  - id: swarm_hatching_grounds
+    name: Hatching Grounds
+    name_upgraded: Hatching Grounds+
+    type: Engine
+    buy_cost: 6
+    action_return: 0
+    upgraded_action_return: 1
+    power: 0
+    trash_on_use: true
+    effect: "Add 3 Rabble cards to your discard pile. Trash this card."
+    effect_upgraded: "Add 5 Rabble cards to your discard pile. Gain 1 action. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Deck-bloat-as-engine. Rabble floods to discard — payoff deferred until reshuffle. Gated by 6-cost and trash-on-use; upgrade adds breath for the chain."
+
+    effects:
+      - type: create_cards_to_discard
+        value: 3
+        upgraded_value: 5
+        timing: immediate
+        metadata: {card_id: swarm_rabble}

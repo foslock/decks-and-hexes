@@ -41,11 +41,12 @@ cards:
 
     starter: true
     action_return: 0
+    upgraded_action_return: 1
     power: 0
     effect: "Gain 2 resources."
-    effect_upgraded: "Gain 4 resources."
+    effect_upgraded: "Gain 3 resources. Gain 1 action."
     resource_gain: 2
-    upgraded_resource_gain: 4
+    upgraded_resource_gain: 3
     trash_on_use: false
     note: "The baseline economy card. Every archetype starts with copies of this card."
 
@@ -250,14 +251,14 @@ cards:
     name: Palisade
     name_upgraded: Palisade+
     type: Defense
-    buy_cost: 2
+    buy_cost: 3
 
     action_return: 1
     power: 0
-    defense_bonus: 1
-    upgraded_defense_bonus: 3
-    effect: "One tile you own gains +1 defense this round. Gain 1 action."
-    effect_upgraded: "One tile you own gains +3 defense this round. Gain 1 action."
+    defense_bonus: 3
+    upgraded_defense_bonus: 5
+    effect: "One tile you own gains +3 defense this round. Gain 1 action."
+    effect_upgraded: "One tile you own gains +5 defense this round. Gain 1 action."
     trash_on_use: false
 
   - id: neutral_moat
@@ -318,8 +319,12 @@ cards:
 
     action_return: 1
     power: 0
-    effect: "Gain 3 resources. Gain 1 action."
-    effect_upgraded: "Gain 4 resources. Gain 1 action."
+    draw_cards: 1
+    upgraded_draw_cards: 1
+    effect: "Gain 3 resources. Draw 1 card. Gain 1 action."
+    effect_upgraded: "Gain 5 resources. Draw 1 card. Gain 1 action."
+    resource_gain: 3
+    upgraded_resource_gain: 5
     trash_on_use: false
 
   - id: neutral_reduce
@@ -359,12 +364,12 @@ cards:
     type: Engine
     buy_cost: 4
 
-    action_return: 0
+    action_return: 1
     power: 0
     draw_cards: 2
     upgraded_draw_cards: 3
-    effect: "Draw 2 cards."
-    effect_upgraded: "Draw 3 cards."
+    effect: "Draw 2 cards. Gain 1 action."
+    effect_upgraded: "Draw 3 cards. Gain 1 action."
     trash_on_use: false
 
   - id: neutral_watchtower
@@ -373,14 +378,14 @@ cards:
     type: Defense
     buy_cost: 2
 
-    action_return: 0
+    action_return: 1
     power: 0
     defense_bonus: 2
     upgraded_defense_bonus: 3
-    draw_cards: 1
+    draw_cards: 0
     upgraded_draw_cards: 1
-    effect: "One tile you own gains +2 defense this round. Draw 1 card."
-    effect_upgraded: "One tile you own gains +3 defense this round. Draw 1 card."
+    effect: "One tile you own gains +2 defense this round. Gain 1 action."
+    effect_upgraded: "One tile you own gains +3 defense this round. Draw 1 card. Gain 1 action."
     trash_on_use: false
 
   - id: neutral_siege_tower
@@ -537,13 +542,13 @@ cards:
     action_return: 0
     power: 0
     effect: "Gain 1 action for each other card you've played this round (max 3). Trash this card."
-    effect_upgraded: "Gain 1 action for each other card you've played this round (max 4). Draw 1 card. Trash this card."
+    effect_upgraded: "Gain 1 action for each other card you've played this round (max 3). Draw 1 card. Trash this card."
     trash_on_use: true
     effects:
       - type: actions_per_cards_played
         timing: immediate
         value: 1
-        metadata: {max: 3, upgraded_max: 4}
+        metadata: {max: 3, upgraded_max: 3}
     note: "The combo payoff card. Set up with cheap action-neutral cards, then Mobilize for an explosive round. Trash-on-use prevents recurring abuse."
 
   - id: neutral_ambush
@@ -649,6 +654,7 @@ cards:
     action_return: 0
     power: 0
     trash_on_use: true
+    upgraded_draw_cards: 1
     effect: "Search your trash for 1 card and put it into your hand. Trash this card."
     effect_upgraded: "Search your trash for 1 card and put it into your hand. Draw 1 card. Trash this card."
     effects:
@@ -684,6 +690,26 @@ cards:
           targets: [top_of_draw]
           min: 0
     note: "Cheap recursion that doesn't refill your hand this turn — sets up a guaranteed draw next round. Pairs with deck-thinning to lock in your best openers."
+
+  - id: neutral_caravan
+    name: Caravan
+    name_upgraded: Caravan+
+    type: Engine
+    buy_cost: 4
+
+    action_return: 2
+    power: 0
+    effect: "Discard 1 card. Gain 2 actions."
+    effect_upgraded: "Discard 1 card. Draw 1 card. Gain 2 actions."
+    upgraded_draw_cards: 1
+    trash_on_use: false
+    effects:
+      - type: self_discard
+        value: 1
+        timing: immediate
+        requires_choice: true
+        metadata: {discard_first: true}
+    note: "A second shared AR2 without Forced March's opponent-gift downside. Costs a card from hand as tempo tax."
 
   - id: neutral_sift
     name: Sift

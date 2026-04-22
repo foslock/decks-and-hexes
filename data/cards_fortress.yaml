@@ -40,12 +40,13 @@ cards:
     type: Defense
     buy_cost: 2
     action_return: 1
+    upgraded_action_return: 2
     power: 0
     defense_bonus: 3
     defense_target_count: 1
     upgraded_defense_target_count: 2
     effect: "One tile you own gains +3 defense this round. Gain 1 action."
-    effect_upgraded: "Two tiles you own each gain +3 defense this round. Gain 1 action."
+    effect_upgraded: "Two tiles you own each gain +3 defense this round. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
 
@@ -61,8 +62,9 @@ cards:
     defense_bonus: 2
     defense_target_count: 2
     upgraded_defense_target_count: 3
+    upgraded_draw_cards: 1
     effect: "Two tiles you own each gain +2 defense this round."
-    effect_upgraded: "Three tiles you own each gain +2 defense this round."
+    effect_upgraded: "Three tiles you own each gain +2 defense this round. Draw 1 card."
     secondary_effect: null
     secondary_timing: null
 
@@ -114,7 +116,7 @@ cards:
     reversible: true
     power: 4
     effect: "Claim: Power 4. If defending an owned tile, power is 6 instead."
-    effect_upgraded: "Claim: Power 5. If defending an owned tile, power is 8 instead."
+    effect_upgraded: "Claim: Power 5. If defending an owned tile, power is 8 instead. If this claim wins, gain 2 resources."
     secondary_effect: null
     secondary_timing: null
 
@@ -124,6 +126,11 @@ cards:
         upgraded_value: 3
         timing: on_resolution
         condition: if_defending_owned
+      - type: gain_resources
+        value: 0
+        upgraded_value: 2
+        timing: on_resolution
+        condition: if_successful
 
   - id: fortress_slow_advance
     name: Mountaineer
@@ -169,12 +176,12 @@ cards:
     name_upgraded: Entrench+
     type: Defense
     buy_cost: 1
-    action_return: 0
+    action_return: 1
     reversible: true
     power: 0
     defense_bonus: 0
-    effect: "One tile you own permanently gains +1 defense until it is captured."
-    effect_upgraded: "One tile you own permanently gains +2 defense until it is captured."
+    effect: "One tile you own permanently gains +1 defense until it is captured. Gain 1 action."
+    effect_upgraded: "One tile you own permanently gains +2 defense until it is captured. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -330,9 +337,10 @@ cards:
     type: Engine
     buy_cost: 3
     action_return: 1
+    upgraded_action_return: 2
     power: 0
     effect: "Gain 2 resources. Draw 1 card. Gain 1 action."
-    effect_upgraded: "Gain 3 resources. Draw 2 cards. Gain 1 action."
+    effect_upgraded: "Gain 3 resources. Draw 2 cards. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
 
@@ -495,10 +503,10 @@ cards:
     name_upgraded: Stockroom+
     type: Engine
     buy_cost: 4
-    action_return: 0
+    action_return: 1
     power: 0
-    effect: "Search your discard pile for up to 2 cards; put them on top of your draw pile."
-    effect_upgraded: "Search your discard pile for up to 3 cards; put them on top of your draw pile."
+    effect: "Search your discard pile for up to 2 cards; put them on top of your draw pile. Gain 1 action."
+    effect_upgraded: "Search your discard pile for up to 3 cards; put them on top of your draw pile. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
     note: "Quiet, methodical setup. Doesn't help this turn but guarantees the right cards come up first next round — perfect for Fortress's slow, deliberate cycle."
@@ -539,4 +547,73 @@ cards:
           targets: [hand]
           min: 0
           filter: {card_type: defense}
+
+  # ── NEW ENGINE CARDS ─────────────────────────────────────────────────
+
+  - id: fortress_quartermaster
+    name: Quartermaster
+    name_upgraded: Quartermaster+
+    type: Engine
+    buy_cost: 3
+    action_return: 1
+    upgraded_action_return: 2
+    power: 0
+    effect: "Gain 2 resources per Defense card in your hand (max 3 Defense counted). Gain 1 action."
+    effect_upgraded: "Gain 3 resources per Defense card in your hand (max 6 Defense counted). Draw 1 card. Gain 2 actions."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Rewards Fortress for clogging hand with Defense cards. Pays for the next big fortification push."
+
+    effects:
+      - type: gain_resources_per_card_in_hand
+        value: 2
+        upgraded_value: 3
+        timing: immediate
+        metadata: {filter: defense, max_counted: 3, upgraded_max_counted: 6}
+
+  - id: fortress_watchful_keep
+    name: Watchful Keep
+    name_upgraded: Watchful Keep+
+    type: Engine
+    buy_cost: 5
+    action_return: 0
+    upgraded_action_return: 2
+    power: 0
+    effect: "Draw 1 card for every tile you own with any defense bonus (max 3). Next round, draw 1 additional card."
+    effect_upgraded: "Draw 1 card for every tile you own with any defense bonus (max 4). Next round, draw 2 additional cards. Gain 2 actions."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Turns Entrench/Iron Wall investment into sustained card draw. Watchtower with depth."
+
+    effects:
+      - type: draw_per_tiles_with_defense_bonus
+        value: 1
+        upgraded_value: 1
+        timing: immediate
+        metadata: {max_draws: 3, upgraded_max_draws: 4}
+      - type: draw_next_turn
+        value: 1
+        upgraded_value: 2
+        timing: on_resolution
+
+  - id: fortress_master_engineer
+    name: Master Engineer
+    name_upgraded: Master Engineer+
+    type: Engine
+    buy_cost: 7
+    action_return: 1
+    power: 0
+    trash_on_use: true
+    effect: "Add 3 Entrench cards to your discard pile. Gain 1 action. Trash this card."
+    effect_upgraded: "Add 5 Entrench cards to your discard pile. Gain 1 action. Trash this card."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Deck-bloats the Ironclad plan. Entrench floods to discard — payoff comes on reshuffle. Gated by 7-cost and trash-on-use."
+
+    effects:
+      - type: create_cards_to_discard
+        value: 3
+        upgraded_value: 5
+        timing: immediate
+        metadata: {card_id: fortress_entrench}
 

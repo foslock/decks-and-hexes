@@ -12,6 +12,10 @@ export interface CardSubtitleContext {
   tileCount?: number;
   /** Number of cards currently in the player's hand */
   handSize?: number;
+  /** Number of Defense cards currently in the player's hand (for Quartermaster) */
+  defenseCardsInHand?: number;
+  /** Number of the player's owned tiles with any defense bonus (for Watchful Keep) */
+  tilesWithDefenseOwned?: number;
   /** Number of cards in the player's trash pile */
   trashCount?: number;
   /** Total cards in the player's deck (draw + hand + discard) */
@@ -20,6 +24,8 @@ export interface CardSubtitleContext {
   resourcesHeld?: number;
   /** Tiles captured from the player last round */
   tilesLostLastRound?: number;
+  /** Tiles the player captured from opponents last round (for Pursuit) */
+  tilesCapturedFromOpponentsLastRound?: number;
   /** When true, card.power is already the frozen effective value — skip dynamic power resolution */
   powerFrozen?: boolean;
   /** Override for dynamic resource gain (e.g. War Tithe), snapshotted at play time */
@@ -68,19 +74,18 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
 
   // VP
   if (card.passive_vp !== undefined && card.passive_vp !== 0) {
-    parts.push(p(`${card.passive_vp > 0 ? '+' : ''}${card.passive_vp}★`));
+    parts.push({ text: `${card.passive_vp}★`, glow: card.passive_vp > 0 });
   } else if (card.vp_formula) {
     // Prefer authoritative backend-computed current_vp (glowing yellow);
     // fall back to client-side resolution, then generic placeholder.
     if (card.current_vp !== undefined) {
-      const sign = card.current_vp > 0 ? '+' : '';
-      parts.push({ text: `${sign}${card.current_vp}★`, glow: true });
+      parts.push({ text: `${card.current_vp}★`, glow: card.current_vp > 0 });
     } else {
       const resolvedVP = ctx ? _resolveVPFormula(card, ctx) : undefined;
       if (resolvedVP !== undefined && resolvedVP > 0) {
         parts.push(p(`${resolvedVP}★`, true));
       } else {
-        parts.push(p('+★'));
+        parts.push(p('★'));
       }
     }
   }
@@ -197,10 +202,24 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
 
   // Stat icons (defer resource_gain for self_discard cards — shown after discard+action)
   const hasSelfDiscard = card.effects?.some(e => e.type === 'self_discard');
+  // When self_discard marks `discard_first` (e.g. Caravan+: "Discard 1. Draw 1. Gain 2 actions."),
+  // defer draw_cards so the 🃏↘ icon renders before the +🃏 icon.
+  const discardFirst = card.effects?.some(
+    e => e.type === 'self_discard' && e.metadata?.discard_first === true
+  );
   // Juggernaut's "gain 2 resources if neutral" is auto-extracted to resource_gain by the loader;
   // the resource_refund_if_neutral handler below emits "(+X💰)" — skip the flat render to avoid duplication.
   const hasResourceRefund = card.effects?.some(e => e.type === 'resource_refund_if_neutral');
-  if (card.resource_gain > 0 && !hasSelfDiscard && !hasResourceRefund) parts.push(p(`+${card.resource_gain}💰`));
+  // Pursuit / Quartermaster: dynamic resource effects below render their own +💰 —
+  // suppress the flat resource_gain parsed from the description to avoid duplication.
+  const hasDynamicResource = card.effects?.some(e =>
+    e.type === 'resources_per_tiles_captured_last_round' ||
+    e.type === 'gain_resources_per_card_in_hand'
+  );
+  // Second Wave / Redemption+: search_zone is described first ("Search your discard pile..."),
+  // so defer the flat resource/draw/action icons so they render after 🔎.
+  const hasSearchZone = card.effects?.some(e => e.type === 'search_zone');
+  if (card.resource_gain > 0 && !hasSelfDiscard && !hasResourceRefund && !hasDynamicResource && !hasSearchZone) parts.push(p(`+${card.resource_gain}💰`));
 
   // Dynamic resource gain (War Tithe: resources per claims last round)
   if (card.effects) {
@@ -244,11 +263,66 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
   // both draw and action so they render after the 🔷↘ icon.
   const hasAbandonTile = card.effects?.some(e => e.type === 'abandon_tile');
   const hasResourcesPerTiles = card.effects?.some(e => e.type === 'resources_per_tiles_owned');
-  const deferAction = hasDelayedDraw || hasSelfDiscard || hasMulligan || hasActionsPerCards || hasAbandonTile;
-  const deferDraw = hasAbandonTile || hasResourcesPerTiles;
-  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan && !deferDraw) parts.push(p(`+${card.draw_cards}🃏`));
+  // Pursuit: text leads with "For each tile captured last round, gain X resources…"
+  // then follows with draw / action — defer both so they render after +💰.
+  const hasResourcesPerTilesCapturedLastRound = card.effects?.some(e => e.type === 'resources_per_tiles_captured_last_round');
+  // War Banner: text leads with "next N Claim(s) +2 power" and ends with "Gain 1 action" (upgraded) —
+  // defer the action icon so it renders last.
+  const hasClaimBuffNextN = card.effects?.some(e => e.type === 'claim_buff_next_n');
+  // Quartermaster: "Gain X resources per Defense… Gain X action(s)" — defer action so it renders last.
+  const hasGainResourcesPerCardInHand = card.effects?.some(e => e.type === 'gain_resources_per_card_in_hand');
+  // Hatching Grounds / Master Engineer: text leads with "Add N cards to discard" — defer the action
+  // icon so "N↓🃏" renders first.
+  const hasCreateCardsToDiscard = card.effects?.some(e => e.type === 'create_cards_to_discard');
+  // Drone Wave: dynamic draw scaling with tiles owned — suppress the flat draw_cards parsed from
+  // the description and let the per-tile effect render the dynamic +🃏 value first.
+  const hasDrawPerTilesOwned = card.effects?.some(e => e.type === 'draw_per_tiles_owned');
+  const deferAction = hasDelayedDraw || hasSelfDiscard || hasMulligan || hasActionsPerCards || hasAbandonTile || hasResourcesPerTilesCapturedLastRound || hasClaimBuffNextN || hasGainResourcesPerCardInHand || hasCreateCardsToDiscard || hasDrawPerTilesOwned || hasSearchZone;
+  const deferDraw = hasAbandonTile || hasResourcesPerTiles || discardFirst || hasResourcesPerTilesCapturedLastRound || hasGainResourcesPerCardInHand || hasSearchZone;
+  if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan && !deferDraw && !hasDrawPerTilesOwned) parts.push(p(`+${card.draw_cards}🃏`));
   if (card.action_return > 0 && !hasTrashConditional && !deferAction) parts.push(p(`+${card.action_return}⚡`));
   if (card.forced_discard > 0) parts.push(p(`🎯-${card.forced_discard}🃏`));
+
+  // Watchful Keep: dynamic draw per owned tile with any defense bonus (capped).
+  // Rendered first — before other effect icons — to lead the subtitle with the main payoff.
+  const drawPerDefTiles = card.effects?.find(e => e.type === 'draw_per_tiles_with_defense_bonus');
+  if (drawPerDefTiles) {
+    const per = isUpgraded && drawPerDefTiles.upgraded_value != null ? drawPerDefTiles.upgraded_value : drawPerDefTiles.value;
+    const maxDraws = (isUpgraded
+      ? (drawPerDefTiles.metadata?.upgraded_max_draws as number)
+      : (drawPerDefTiles.metadata?.max_draws as number)) ?? 999;
+    if (ctx?.effectiveDrawCards !== undefined) {
+      parts.push(p(`+${ctx.effectiveDrawCards}🃏`, ctx.effectiveDrawCards > 0));
+    } else if (ctx?.tilesWithDefenseOwned !== undefined) {
+      const drawn = Math.min(ctx.tilesWithDefenseOwned * per, maxDraws);
+      parts.push(p(`+${drawn}🃏`, drawn > 0));
+    } else {
+      parts.push(p('+🃏'));
+    }
+  }
+
+  // Drone Wave: dynamic draw per N tiles owned (capped).
+  // Rendered first so the dynamic +🃏 leads the subtitle; action icon follows.
+  const drawPerTilesOwnedEff = card.effects?.find(e => e.type === 'draw_per_tiles_owned');
+  if (drawPerTilesOwnedEff) {
+    const divisor = isUpgraded && drawPerTilesOwnedEff.upgraded_value != null
+      ? drawPerTilesOwnedEff.upgraded_value
+      : drawPerTilesOwnedEff.value;
+    const maxDraws = (isUpgraded
+      ? (drawPerTilesOwnedEff.metadata?.upgraded_max_draws as number)
+      : (drawPerTilesOwnedEff.metadata?.max_draws as number)) ?? 999;
+    if (ctx?.effectiveDrawCards !== undefined) {
+      parts.push(p(`+${ctx.effectiveDrawCards}🃏`, ctx.effectiveDrawCards > 0));
+    } else if (ctx?.tileCount !== undefined && divisor > 0) {
+      const drawn = Math.min(Math.floor(ctx.tileCount / divisor), maxDraws);
+      parts.push(p(`+${drawn}🃏`, drawn > 0));
+    } else {
+      parts.push(p('+🃏'));
+    }
+    if (card.action_return > 0) {
+      parts.push(p(`+${card.action_return}⚡`));
+    }
+  }
 
   // Effect-based icons
   if (card.effects) {
@@ -279,6 +353,11 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'self_discard') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`🃏↘${val}`));
+        // When discard is declared first (Caravan+: "Discard 1. Draw 1. Gain 2 actions."),
+        // emit the deferred draw before the deferred action to match description order.
+        if (discardFirst && card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan) {
+          parts.push(p(`+${card.draw_cards}🃏`));
+        }
         // Emit deferred action + resource icons after discard (e.g. Regroup: +2🃏 · 🃏↘1 · +1⚡)
         if (card.action_return > 0 && !hasTrashConditional) {
           parts.push(p(`+${card.action_return}⚡`));
@@ -522,6 +601,17 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
           t === 'hand' ? '✋' : t === 'top_of_draw' ? '📥' : t === 'discard' ? '♻️' : '🗑️'
         ).join('/');
         parts.push(p(`${srcIcon}🔎${count}→${targetIcons}`));
+        // Emit deferred icons after the search icon so they render in description order
+        // (Redemption+: 🗑️🔎→✋ · +1🃏; Second Wave+: ♻️🔎→✋ · +1⚡ · +1💰).
+        if (card.draw_cards > 0 && !hasTrashConditional && !hasDrawPerVP && !hasDrawPerDebt && !hasMulligan) {
+          parts.push(p(`+${card.draw_cards}🃏`));
+        }
+        if (card.action_return > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.action_return}⚡`));
+        }
+        if (card.resource_gain > 0 && !hasResourceRefund && !hasDynamicResource) {
+          parts.push(p(`+${card.resource_gain}💰`));
+        }
       }
       if (eff.type === 'adjacency_bridge') {
         // Road Builder: must connect two of your disconnected territory groups
@@ -535,6 +625,85 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'play_resource_cost') {
         const cost = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`-${cost}💰`));
+      }
+      if (eff.type === 'conditional_draw_next_round') {
+        // Commander: "If you played a Claim this round, draw N cards next round."
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(p(`(+${val}⏰🃏)`));
+      }
+      if (eff.type === 'conditional_draw') {
+        // Chatter: "If 3+ cards played this round, draw N additional card(s)."
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(p(`(+${val}🃏)`));
+      }
+      if (eff.type === 'resources_per_tiles_captured_last_round') {
+        // Pursuit: resources scale with tiles captured from opponents last round.
+        const perTile = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        const maxRes = (isUpgraded
+          ? (eff.metadata?.upgraded_max_resources as number)
+          : (eff.metadata?.max_resources as number)) ?? 999;
+        if (ctx?.effectiveResourceGain !== undefined) {
+          // Frozen snapshot at play time
+          parts.push(p(`+${ctx.effectiveResourceGain}💰`, ctx.effectiveResourceGain > 0));
+        } else if (ctx?.tilesCapturedFromOpponentsLastRound !== undefined) {
+          // Live: in-hand/in-play dynamic value
+          const gained = Math.min(ctx.tilesCapturedFromOpponentsLastRound * perTile, maxRes);
+          parts.push(p(`+${gained}💰`, gained > 0));
+        } else {
+          parts.push(p('+💰'));
+        }
+        // Emit deferred draw + action after the dynamic resource icon
+        // (Pursuit+: "…gain 2 resources (max 6). Draw 1 card. Gain 2 actions.")
+        if (card.draw_cards > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.draw_cards}🃏`));
+        }
+        if (card.action_return > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.action_return}⚡`));
+        }
+      }
+      if (eff.type === 'create_cards_to_discard') {
+        // Hatching Grounds / Master Engineer: add N copies of another card to your discard.
+        const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        parts.push(p(`${count}↓🃏`));
+        // Emit deferred action after the add-cards icon (Master Engineer: "3↓🃏 · +1⚡").
+        if (card.action_return > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.action_return}⚡`));
+        }
+      }
+      if (eff.type === 'gain_resources_per_card_in_hand') {
+        // Quartermaster: resources per Defense card in hand (capped).
+        const perCard = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        const maxCounted = (isUpgraded
+          ? (eff.metadata?.upgraded_max_counted as number)
+          : (eff.metadata?.max_counted as number)) ?? 999;
+        if (ctx?.effectiveResourceGain !== undefined) {
+          parts.push(p(`+${ctx.effectiveResourceGain}💰`, ctx.effectiveResourceGain > 0));
+        } else if (ctx?.defenseCardsInHand !== undefined) {
+          const counted = Math.min(ctx.defenseCardsInHand, maxCounted);
+          const gained = counted * perCard;
+          parts.push(p(`+${gained}💰`, gained > 0));
+        } else {
+          parts.push(p('+💰'));
+        }
+        // Emit deferred draw + action after the dynamic resource icon
+        if (card.draw_cards > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.draw_cards}🃏`));
+        }
+        if (card.action_return > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.action_return}⚡`));
+        }
+      }
+      if (eff.type === 'claim_buff_next_n') {
+        // War Banner: "The next N Claim(s) get +2 power. If successful, draw 1 card next round."
+        // The conditional delayed draw renders in parens to signal "only if the buffed Claim wins".
+        const powerBonus = (eff.metadata?.power_bonus as number) ?? 0;
+        const drawNextRound = (eff.metadata?.draw_next_round_on_success as number) ?? 0;
+        if (powerBonus > 0) parts.push(p(`+${powerBonus}⚔️`));
+        if (drawNextRound > 0) parts.push(p(`(+${drawNextRound}⏰🃏)`));
+        // Emit deferred action icon last (Upgraded War Banner: "…Gain 1 action.")
+        if (card.action_return > 0 && !hasTrashConditional) {
+          parts.push(p(`+${card.action_return}⚡`));
+        }
       }
     }
   }
