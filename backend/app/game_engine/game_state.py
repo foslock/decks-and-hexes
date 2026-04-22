@@ -217,6 +217,14 @@ class PlannedAction:
     # Dynamic draw count snapshotted at play time (e.g. Financier: draw per Debt).
     # None when the card has no dynamic draw effects.
     effective_draw_cards: Optional[int] = None
+    # War Banner: the claim_buff consumed when this Claim was played. This is
+    # the AGGREGATED record (sum of power_bonus/draw_on_success across every
+    # buff consumed) used for display and for post-resolution draw payouts.
+    consumed_claim_buff: Optional[dict[str, Any]] = None
+    # War Banner: the raw individual buffs consumed (one dict per buff). Used
+    # by undo to restore each buff separately to the front of the queue.
+    # Not serialized — kept server-side only.
+    consumed_claim_buff_sources: Optional[list[dict[str, Any]]] = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -233,6 +241,8 @@ class PlannedAction:
             d["effective_resource_gain"] = self.effective_resource_gain
         if self.effective_draw_cards is not None:
             d["effective_draw_cards"] = self.effective_draw_cards
+        if self.consumed_claim_buff is not None:
+            d["consumed_claim_buff"] = dict(self.consumed_claim_buff)
         return d
 
 
@@ -299,6 +309,7 @@ class Player:
     left_vp: int = 0  # frozen VP at time of leaving (for leaderboard)
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
     tiles_lost_last_round: int = 0  # tiles captured from this player last round (for Robin Hood)
+    tiles_captured_from_opponents_last_round: int = 0  # tiles taken from opponents last round (for Pursuit)
     pending_discard: int = 0  # deferred discard count (e.g. Regroup: draw first, then discard)
     pending_search: Optional[PendingSearch] = None  # deferred tutor/search (SEARCH_ZONE effects)
     # Smart roll state — hidden heuristics for archetype market draws.
@@ -334,10 +345,12 @@ class Player:
             """Serialize a card, enriching with current_vp when game context exists."""
             d = card.to_dict()
             if game and (card.passive_vp or card.vp_formula):
-                if card.vp_formula:
-                    d["current_vp"] = _gs._compute_formula_vp(card, self, game)
-                else:
-                    d["current_vp"] = card.passive_vp
+                # Combine both sources so cards that accumulate VP onto
+                # passive_vp (Battle Glory) AND cards whose VP is purely
+                # formula-derived (Scorched Earth, Arsenal, etc.) report the
+                # correct running total.
+                formula_val = _gs._compute_formula_vp(card, self, game) if card.vp_formula else 0
+                d["current_vp"] = card.passive_vp + formula_val
             return d
 
         return {
@@ -366,6 +379,7 @@ class Player:
             "trash": [c.to_dict() for c in self.trash],
             "claims_won_last_round": self.claims_won_last_round,
             "tiles_lost_last_round": self.tiles_lost_last_round,
+            "tiles_captured_from_opponents_last_round": self.tiles_captured_from_opponents_last_round,
             "tile_count": len(game.grid.get_player_tiles(self.id)) if game and game.grid else 0,
             "rubble_count": self.rubble_count,
             "is_cpu": self.is_cpu,
@@ -373,6 +387,9 @@ class Player:
             "has_left": self.has_left,
             "free_rerolls": self.turn_modifiers.free_rerolls,
             "buy_locked": self.turn_modifiers.buy_locked,
+            # War Banner queues buffs here; the frontend reads the first entry's
+            # power_bonus to preview the +power on the next Claim the player plays.
+            "claim_buffs": list(getattr(self.turn_modifiers, "claim_buffs", []) or []),
             "pending_discard": self.pending_discard,
             # pending_search reveals private info (deck contents for tutor effects)
             # so it's only serialized when the recipient is this player
@@ -767,6 +784,13 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
             if t.owner == player.id and not t.is_base and t.capture_count == 0
         )
         return count // divisor
+
+    elif formula == "contested_wins":
+        # Battle Glory: VP accumulates directly on the card's passive_vp via
+        # its VP_FROM_CONTESTED_WINS handler. That passive_vp is already
+        # summed in compute_player_vp, so the formula contributes 0 here to
+        # avoid double-counting.
+        return 0
 
     return 0
 
@@ -1376,8 +1400,11 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 return False, f"{card.name} requires trashing {required} card(s)"
         if effect.type == _EffectType.SELF_DISCARD:
             # If the card also draws, defer the discard until after the draw
-            # so the player can choose from their expanded hand
-            if card.effective_draw_cards > 0:
+            # so the player can choose from their expanded hand — unless the
+            # effect is flagged discard_first (Caravan+), in which case the
+            # player discards from their current hand before drawing.
+            discard_first = bool(effect.metadata.get("discard_first"))
+            if card.effective_draw_cards > 0 and not discard_first:
                 defer_discard = True
                 continue
             max_discardable = len(player.hand) - 1
@@ -1406,13 +1433,15 @@ def play_card(game: GameState, player_id: str, card_index: int,
     # (hand size, tile count, adjacency) reflect the game state at play time.
     # This value is frozen for the rest of the turn.
     snapshotted_power: Optional[int] = None
+    consumed_claim_buff: Optional[dict[str, Any]] = None
+    consumed_claim_buff_sources: Optional[list[dict[str, Any]]] = None
     # Skip snapshotting for cards with IF_CONTESTED power modifiers (Ambush) —
     # contest status isn't known until reveal phase when all claims are visible.
     has_contested_modifier = any(
         e.type == EffectType.POWER_MODIFIER and e.condition == ConditionType.IF_CONTESTED
         for e in card.effects
     )
-    if card.card_type in (CardType.CLAIM, CardType.DEFENSE) and card.effects and not has_contested_modifier:
+    if card.card_type in (CardType.CLAIM, CardType.DEFENSE) and not has_contested_modifier:
         # Build a temporary action to pass to calculate_effective_power
         _tmp_action = PlannedAction(
             card=card,
@@ -1429,8 +1458,49 @@ def play_card(game: GameState, player_id: str, card_index: int,
         # be played on this tile after this snapshot is taken.
         computed = calculate_effective_power(
             game, player, card, _tmp_action, include_stacking_bonus=False,
-        )
-        # Only store if it differs from the base power (i.e. a dynamic modifier applied)
+        ) if card.effects else (card.effective_power or 0)
+        # War Banner: each queued War Banner contributes at most one charge to
+        # this Claim. Multiple War Banners stack additively; War Banner+ (2
+        # charges) spreads its second charge onto a later Claim. Charges
+        # within the same banner are consumed one per Claim (FIFO).
+        if card.card_type == CardType.CLAIM:
+            buffs = player.turn_modifiers.claim_buffs
+            if buffs:
+                consumed: list[dict[str, Any]] = []
+                remaining: list[dict[str, Any]] = []
+                seen_sources: set[Any] = set()
+                for buff in buffs:
+                    src = buff.get("source_card_id")
+                    if src not in seen_sources:
+                        seen_sources.add(src)
+                        consumed.append(buff)
+                    else:
+                        remaining.append(buff)
+                if consumed:
+                    player.turn_modifiers.claim_buffs = remaining
+                    total_bonus = sum(int(b.get("power_bonus", 0)) for b in consumed)
+                    total_draws = sum(int(b.get("draw_on_success", 0)) for b in consumed)
+                    # Preserve a single aggregated record on the action so the
+                    # UI can still map the Claim back to a War Banner source
+                    # (picks the first consumed buff's source id).
+                    consumed_claim_buff = {
+                        "power_bonus": total_bonus,
+                        "draw_on_success": total_draws,
+                        "source_card_id": consumed[0].get("source_card_id"),
+                        "source_card_ids": [b.get("source_card_id") for b in consumed],
+                    }
+                    # Keep the raw per-buff list so undo can restore each buff
+                    # separately to the queue (the aggregated dict can't be
+                    # un-merged without losing per-banner source ids).
+                    consumed_claim_buff_sources = [dict(b) for b in consumed]
+                    if total_bonus:
+                        computed = computed + total_bonus
+                        game._log(
+                            f"{player.name}'s War Banner(s) buff {card.name} by "
+                            f"+{total_bonus} power ({len(consumed)} banner(s))",
+                            visible_to=[player.id], actor=player.id)
+        # Only store if it differs from the base power (i.e. a dynamic modifier
+        # applied, or a claim_buff was consumed).
         if computed != card.effective_power:
             snapshotted_power = computed
 
@@ -1452,6 +1522,27 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 per_tile = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
                 snapshotted_resource_gain = player.tiles_lost_last_round * per_tile
                 break
+            if eff.type == EffectType.RESOURCES_PER_TILES_CAPTURED_LAST_ROUND:
+                per_tile = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
+                cap_key = "upgraded_max_resources" if card.is_upgraded else "max_resources"
+                max_res = eff.metadata.get(cap_key, 999)
+                snapshotted_resource_gain = min(
+                    player.tiles_captured_from_opponents_last_round * per_tile, max_res
+                )
+                break
+            if eff.type == EffectType.GAIN_RESOURCES_PER_CARD_IN_HAND:
+                per_card = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
+                cap_key = "upgraded_max_counted" if card.is_upgraded else "max_counted"
+                max_counted = eff.metadata.get(cap_key, 999)
+                card_filter = eff.metadata.get("filter", "")
+                # Count matching cards remaining in hand (this card is still in hand at snapshot time,
+                # but it's an engine card itself, so won't match a defense filter).
+                matching = sum(
+                    1 for c in player.hand
+                    if card_filter == "defense" and c.card_type == CardType.DEFENSE
+                )
+                snapshotted_resource_gain = min(matching, max_counted) * per_card
+                break
             if eff.type == EffectType.RESOURCE_PER_VP_HEX and game.grid is not None:
                 per_hex = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
                 connected_coords = game.grid.get_connected_tiles(player_id)
@@ -1470,6 +1561,23 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 )
                 snapshotted_draw_cards = debt_count * eff.value
                 break
+            if eff.type == EffectType.DRAW_PER_TILES_WITH_DEFENSE_BONUS and game.grid is not None:
+                per = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
+                cap_key = "upgraded_max_draws" if card.is_upgraded else "max_draws"
+                max_draws = eff.metadata.get(cap_key, 999)
+                tiles_with_def = sum(
+                    1 for t in game.grid.get_player_tiles(player_id)
+                    if t.permanent_defense_bonus > 0 or t.defense_power > 0
+                )
+                snapshotted_draw_cards = min(tiles_with_def * per, max_draws)
+                break
+            if eff.type == EffectType.DRAW_PER_TILES_OWNED and game.grid is not None:
+                divisor = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
+                cap_key = "upgraded_max_draws" if card.is_upgraded else "max_draws"
+                max_draws = eff.metadata.get(cap_key, 999)
+                tile_count = len(game.grid.get_player_tiles(player_id))
+                snapshotted_draw_cards = min(tile_count // max(1, divisor), max_draws)
+                break
 
     player.hand.pop(card_index)
     has_extra = (
@@ -1485,6 +1593,8 @@ def play_card(game: GameState, player_id: str, card_index: int,
         effective_power=snapshotted_power,
         effective_resource_gain=snapshotted_resource_gain,
         effective_draw_cards=snapshotted_draw_cards,
+        consumed_claim_buff=consumed_claim_buff,
+        consumed_claim_buff_sources=consumed_claim_buff_sources,
     )
     player.planned_actions.append(action)
     player.actions_used += card.action_cost
@@ -1511,7 +1621,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
         for e in card.effects
     )
     should_draw = not draw_gated or bool(trash_card_indices)
-    if card.timing == Timing.IMMEDIATE and card.effective_draw_cards > 0 and should_draw:
+    # Caravan+: discard before drawing so the player picks from the pre-draw
+    # hand and the drawn card can't be immediately cycled.
+    draw_after_effects = any(
+        e.type == _EffectType.SELF_DISCARD and e.metadata.get("discard_first")
+        for e in card.effects
+    )
+    if (card.timing == Timing.IMMEDIATE and card.effective_draw_cards > 0
+            and should_draw and not draw_after_effects):
         drawn = player.deck.draw(card.effective_draw_cards, game.rng)
         player.hand.extend(drawn)
         game._log(f"{player.name} draws {len(drawn)} cards from {card.name}",
@@ -1526,6 +1643,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
             extra_targets=[(t[0], t[1]) for t in (extra_targets or [])],
             skip_discard=defer_discard,
         )
+
+    # Post-effects draw (Caravan+ discard-then-draw flow)
+    if (card.timing == Timing.IMMEDIATE and card.effective_draw_cards > 0
+            and should_draw and draw_after_effects):
+        drawn = player.deck.draw(card.effective_draw_cards, game.rng)
+        player.hand.extend(drawn)
+        game._log(f"{player.name} draws {len(drawn)} cards from {card.name}",
+                  visible_to=[player_id], actor=player_id)
 
     # Inline SEARCH_ZONE resolution: if the effect set pending_search AND the
     # caller provided selections (human UI commits them with the play), resolve
@@ -1610,6 +1735,16 @@ def undo_planned_action(
 
     # Reverse: give back the action cost
     player.actions_used -= card.action_cost
+
+    # War Banner: restore any consumed claim_buffs to the front of the queue
+    # so the next Claim the player plays gets the bonuses instead. When
+    # multiple banners stacked onto this Claim, each buff is restored
+    # individually so later Claims can re-consume them one per source.
+    if action.consumed_claim_buff_sources:
+        for buff in reversed(action.consumed_claim_buff_sources):
+            player.turn_modifiers.claim_buffs.insert(0, dict(buff))
+    elif action.consumed_claim_buff is not None:
+        player.turn_modifiers.claim_buffs.insert(0, action.consumed_claim_buff)
 
     # Return card to hand
     player.hand.append(card)
@@ -2230,6 +2365,24 @@ def execute_reveal(game: GameState) -> GameState:
                     claim_succeeded=succeeded,
                     defender_id=defender_id,
                 )
+            # War Banner: if this Claim consumed a buff and succeeded, apply
+            # the queued draw_on_success reward and surface a popup.
+            if succeeded and action.consumed_claim_buff is not None:
+                draw_on_success = int(action.consumed_claim_buff.get("draw_on_success", 0) or 0)
+                if draw_on_success > 0:
+                    player.turn_modifiers.extra_draws_next_turn += draw_on_success
+                    game._log(
+                        f"{player.name}'s War Banner buff grants +{draw_on_success} "
+                        f"card(s) next round ({action.card.name} succeeded)",
+                        visible_to=[pid], actor=pid)
+                    game.player_effects.append({
+                        "source_player_id": pid,
+                        "target_player_id": pid,
+                        "card_name": "War Banner",
+                        "effect": f"+{draw_on_success} Card{'s' if draw_on_success > 1 else ''} next round",
+                        "effect_type": "draw_next_turn",
+                        "value": draw_on_success,
+                    })
 
     # Resolve non-claim, non-defense actions (on_resolution effects)
     # (Defense cards were already resolved before claims above.)
@@ -2381,12 +2534,17 @@ def execute_reveal(game: GameState) -> GameState:
 
     # Track tiles lost this round (for Robin Hood next round)
     tiles_lost: dict[str, int] = {pid: 0 for pid in game.player_order}
+    tiles_captured: dict[str, int] = {pid: 0 for pid in game.player_order}
     for step in game.resolution_steps:
         prev = step.get("previous_owner")
+        winner = step.get("winner_id")
         if prev and prev in tiles_lost:
             tiles_lost[prev] += 1
+        if winner and prev and winner != prev and winner in tiles_captured:
+            tiles_captured[winner] += 1
     for pid in game.player_order:
         game.players[pid].tiles_lost_last_round = tiles_lost[pid]
+        game.players[pid].tiles_captured_from_opponents_last_round = tiles_captured[pid]
 
     # Discard planned claim cards (or trash if trash_on_use)
     for pid in game.player_order:

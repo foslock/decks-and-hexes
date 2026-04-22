@@ -242,8 +242,8 @@ class TestNeutralGather:
         assert success
         assert player.resources == initial_resources + 2
 
-    def test_gather_upgraded_gives_4(self, card_registry):
-        """Gather+: gain 4 resources."""
+    def test_gather_upgraded_gives_3(self, card_registry):
+        """Gather+: gain 3 resources, gain 1 action."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         gather = _copy_card(card_registry["neutral_gather"], "test_gather_up")
@@ -253,7 +253,7 @@ class TestNeutralGather:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_resources + 4
+        assert player.resources == initial_resources + 3
 
 
 class TestNeutralMercenary:
@@ -1497,7 +1497,7 @@ class TestSwarmBlitzRush:
 
     def test_blitz_rush_action_return(self, card_registry):
         card = card_registry["swarm_blitz_rush"]
-        assert card.action_return == 2
+        assert card.action_return == 3
 
 
 class TestSwarmScavenge:
@@ -3060,7 +3060,7 @@ class TestNeutralMobilize:
         eff = card.effects[0]
         assert eff.type == EffectType.ACTIONS_PER_CARDS_PLAYED
         assert eff.metadata.get("max") == 3
-        assert eff.metadata.get("upgraded_max") == 4
+        assert eff.metadata.get("upgraded_max") == 3
 
     def test_mobilize_action_gain_scales(self, card_registry):
         """Mobilize gains 1 action per other card played this turn."""

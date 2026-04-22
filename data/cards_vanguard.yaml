@@ -64,9 +64,17 @@ cards:
     power: 4
     claim_range: 2
     effect: "Claim: Power 4. May target a tile up to 2 steps away from any tile you own. Costs 2 actions to play."
-    effect_upgraded: "Claim: Power 6. May target a tile up to 2 steps away from any tile you own. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 6. If successful, gain 1 action next round. May target a tile up to 2 steps away from any tile you own. Costs 2 actions to play."
     secondary_effect: null
     secondary_timing: null
+
+    effects:
+      - type: grant_actions_next_turn
+        value: 0
+        upgraded_value: 1
+        timing: on_resolution
+        condition: if_successful
+        target: self
 
 
   - id: vanguard_strike_team
@@ -142,10 +150,16 @@ cards:
     reversible: true
     power: 3
     effect: "Claim: Power 3. Stackable."
-    effect_upgraded: "Claim: Power 4. Stackable."
+    effect_upgraded: "Claim: Power 4. Stackable. If you've already played another Claim on this tile this round, gain 1 action."
     secondary_effect: null
     secondary_timing: null
     stackable: true
+
+    effects:
+      - type: grant_actions_if_stacked
+        value: 0
+        upgraded_value: 1
+        timing: immediate
 
   - id: vanguard_double_time
     name: Double Time
@@ -166,9 +180,10 @@ cards:
     type: Engine
     buy_cost: 4
     action_return: 1
+    upgraded_action_return: 2
     power: 0
     effect: "Draw 2 cards. Discard 1 card. Gain 1 action."
-    effect_upgraded: "Draw 3 cards. Discard 1 card. Gain 1 action."
+    effect_upgraded: "Draw 3 cards. Discard 1 card. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
 
@@ -190,13 +205,14 @@ cards:
     unoccupied_only: true
     upgraded_unoccupied_only: false
     effect: "Claim: Power 1 on any adjacent neutral tile."
-    effect_upgraded: "Claim: Power 3 on any adjacent tile."
+    effect_upgraded: "Claim: Power 3 on any adjacent tile. If successful, draw 2 cards next round."
     secondary_effect: "If successful, draw 1 card next round."
     secondary_timing: on_resolution
 
     effects:
       - type: draw_next_turn
         value: 1
+        upgraded_value: 2
         timing: on_resolution
         condition: if_successful
 
@@ -225,13 +241,18 @@ cards:
     action_return: 0
     power: 3
     effect: "Claim: Power 3. If successful, randomly claim up to one available adjacent neutral tile automatically."
-    effect_upgraded: "Claim: Power 5. If successful, randomly claim up to one available adjacent neutral tile automatically."
+    effect_upgraded: "Claim: Power 5. If successful, randomly claim up to one available adjacent neutral tile automatically. Draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: auto_claim_adjacent_neutral
         value: 1
+        timing: on_resolution
+        condition: if_successful
+      - type: draw_next_turn
+        value: 0
+        upgraded_value: 1
         timing: on_resolution
         condition: if_successful
 
@@ -320,8 +341,8 @@ cards:
     unplayable: true
     unique: true
     vp_formula: contested_wins
-    effect: "Passive: While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +1 VP."
-    effect_upgraded: "Passive: While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +2 VP."
+    effect: "While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +1 VP."
+    effect_upgraded: "While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +2 VP."
     secondary_effect: null
     secondary_timing: null
     note: "Escalating VP engine — grows each round you hit the threshold while in hand. Takes up a hand slot when drawn."
@@ -544,3 +565,67 @@ cards:
           source: draw
           targets: [hand, top_of_draw]
           min: 0
+
+  # ── NEW ENGINE CARDS ─────────────────────────────────────────────────
+
+  - id: vanguard_commander
+    name: Commander
+    name_upgraded: Commander+
+    type: Engine
+    buy_cost: 3
+    action_return: 1
+    upgraded_action_return: 2
+    power: 0
+    effect: "Gain 1 action. If you played a Claim this round, draw 1 card next round."
+    effect_upgraded: "Gain 2 actions. If you played a Claim this round, draw 2 cards next round."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Rewards Vanguard for leading with Claims before activating support engines. Net-neutral action economy at base, net-positive at upgraded, with card draw keyed to aggression."
+
+    effects:
+      - type: conditional_draw_next_round
+        value: 1
+        upgraded_value: 2
+        timing: on_resolution
+        condition: if_played_claim_this_turn
+
+  - id: vanguard_pursuit
+    name: Pursuit
+    name_upgraded: Pursuit+
+    type: Engine
+    buy_cost: 5
+    action_return: 2
+    power: 0
+    effect: "For each tile you captured from an opponent last round, gain 1 resource (max 3). Gain 2 actions."
+    effect_upgraded: "For each tile you captured from an opponent last round, gain 2 resources (max 6). Draw 1 card. Gain 2 actions."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Momentum card: rewards successful aggression with resources to fuel next assault. Scales with opposition play, not neutral expansion."
+
+    effects:
+      - type: resources_per_tiles_captured_last_round
+        value: 1
+        upgraded_value: 2
+        timing: immediate
+        metadata: {max_resources: 3, upgraded_max_resources: 6}
+
+  - id: vanguard_war_banner
+    name: War Banner
+    name_upgraded: War Banner+
+    type: Engine
+    buy_cost: 7
+    action_return: 0
+    upgraded_action_return: 1
+    power: 0
+    effect: "The next Claim you play this round gets +2 power. If successful, draw 1 card next round."
+    effect_upgraded: "The next 2 Claims you play this round each get +2 power and, if successful, draw 1 card next round. Gain 1 action."
+    secondary_effect: null
+    secondary_timing: null
+    note: "Pre-buff a key Claim. Combos with Elite Vanguard, Ultimatum, Spearhead for decisive pushes."
+
+    effects:
+      - type: claim_buff_next_n
+        value: 1
+        upgraded_value: 2
+        timing: immediate
+        metadata: {power_bonus: 2, draw_next_round_on_success: 1}

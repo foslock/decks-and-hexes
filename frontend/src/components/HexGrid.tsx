@@ -133,6 +133,8 @@ interface HexGridProps {
   previewCard?: Card | null;
   /** All tiles the preview card can legally be played on (superset of highlightTiles — includes own tiles for defensive claims) */
   previewValidTiles?: Set<string>;
+  /** War Banner: +power the active player's next Claim will consume (preview only). */
+  previewClaimBuffBonus?: number;
   /** Claim direction chevrons shown during play/reveal phases */
   claimChevrons?: ClaimChevron[];
   /** VP connection paths shown during resolve phase */
@@ -452,7 +454,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles, resolveLayerRef }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles, resolveLayerRef }: HexGridProps) {
   const bgEnabled = useBackgroundImages();
   const bgEnabledRef = useRef(bgEnabled);
   bgEnabledRef.current = bgEnabled;
@@ -472,6 +474,7 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
   const multiTileTargetsRef = useRef(multiTileTargets);
   const previewCardRef = useRef(previewCard);
   const previewValidTilesRef = useRef(previewValidTiles);
+  const previewClaimBuffBonusRef = useRef(previewClaimBuffBonus);
   const claimChevronsRef = useRef(claimChevrons);
   const vpPathsRef = useRef(vpPaths);
   const connectedVpRef = useRef(connectedVpTiles);
@@ -549,6 +552,7 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
   multiTileTargetsRef.current = multiTileTargets;
   previewCardRef.current = previewCard;
   previewValidTilesRef.current = previewValidTiles;
+  previewClaimBuffBonusRef.current = previewClaimBuffBonus;
   claimChevronsRef.current = claimChevrons;
   vpPathsRef.current = vpPaths;
   connectedVpRef.current = connectedVpTiles;
@@ -966,7 +970,11 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
               }
             }
             previewPower = basePower;
+            // War Banner: preview the +power bonus the next Claim will consume.
+            const claimBuffBonus = pCard.card_type === 'claim' ? (previewClaimBuffBonusRef.current ?? 0) : 0;
+            previewPower += claimBuffBonus;
             const existingPlanned = plannedActionsRef.current?.get(key);
+            let addsToExistingClaim = false;
             if (existingPlanned && pCard.card_type === 'claim') {
               // When a claim lands on a tile with prior planned claims (legal either because
               // pCard is stackable OR because every prior claim is stackable — see backend
@@ -975,8 +983,11 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
               const existingClaims = existingPlanned.allCards
                 .filter(ac => ac.card.card_type === 'claim')
                 .map(ac => ac.card);
-              const combinedClaims = [...existingClaims, pCard];
-              previewPower = existingPlanned.power + basePower + computeStackingPowerBonus(combinedClaims);
+              if (existingClaims.length > 0) {
+                addsToExistingClaim = true;
+                const combinedClaims = [...existingClaims, pCard];
+                previewPower = basePower + claimBuffBonus + computeStackingPowerBonus(combinedClaims);
+              }
             }
 
             if (isImmunityPreview) {
@@ -989,7 +1000,7 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
                 previewColor = 0x66ccff;
               }
             } else if (!isDefensive) {
-              previewText = `⚔ ${previewPower}`;
+              previewText = addsToExistingClaim ? `⚔ +${previewPower}` : `⚔ ${previewPower}`;
               previewColor = 0xffffff;
             } else if (isPermanentDefense) {
               const existingPersistent = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
@@ -1139,8 +1150,12 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
           }
         }
 
-        // Review mode: notify parent of tile hover with screen coords
-        if (reviewPulseTilesRef.current?.has(key)) {
+        // Notify parent of tile hover. In review mode we only want to fire
+        // for review-pulse tiles (keeps the review popup gated to claim tiles);
+        // outside review mode, fire on every hover so callers like the
+        // play-phase War Banner pulse can react to any hovered tile.
+        const isReviewing = (reviewPulseTilesRef.current?.size ?? 0) > 0;
+        if (!isReviewing || reviewPulseTilesRef.current?.has(key)) {
           onTileHoverRef.current?.(tile.q, tile.r, e.global.x, e.global.y);
         }
       });
@@ -2015,13 +2030,18 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
         // or every prior planned claim here is stackable. Either way the resolve-time power
         // is the sum of all intrinsic claim powers + any stacking bonus.
         const existingPlanned = planned?.get(sKey);
-        let previewPower = cardPower;
+        // War Banner: buff applies to the Claim card's power, so all targets
+        // of a multi-target Claim (e.g. Surge) share the +N bonus.
+        const mtClaimBuffBonus = multiTilePreviewCard.card_type === 'claim'
+          ? (previewClaimBuffBonusRef.current ?? 0)
+          : 0;
+        let previewPower = cardPower + mtClaimBuffBonus;
         if (existingPlanned && multiTilePreviewCard.card_type === 'claim') {
           const existingClaims = existingPlanned.allCards
             .filter(ac => ac.card.card_type === 'claim')
             .map(ac => ac.card);
           const combinedClaims = [...existingClaims, multiTilePreviewCard];
-          previewPower = existingPlanned.power + cardPower + computeStackingPowerBonus(combinedClaims);
+          previewPower = existingPlanned.power + cardPower + mtClaimBuffBonus + computeStackingPowerBonus(combinedClaims);
         }
 
         const isDefensivePlay = isDefenseCard || sTile.owner === activePlayer;

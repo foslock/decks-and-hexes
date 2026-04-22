@@ -67,6 +67,7 @@ export function makePlayer(overrides: Partial<Player> = {}): Player {
     rubble_count: 0,
     claims_won_last_round: 0,
     tiles_lost_last_round: 0,
+    tiles_captured_from_opponents_last_round: 0,
     tile_count: 0,
     is_cpu: false,
     cpu_difficulty: null,

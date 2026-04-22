@@ -85,10 +85,13 @@ function computeClaimPowerOnTile(
   activePlayerId: string,
   handSize: number,
   ownedTileCount: number,
+  claimBuffBonus: number = 0,
 ): number {
   // Start from base power, then apply tile-count / hand-size scaling that
   // doesn't depend on the target tile.
   let power = withEffectivePower(card, handSize, ownedTileCount).power;
+  // War Banner: preview the +power bonus the next Claim will consume.
+  power += claimBuffBonus;
   if (!card.effects) return power;
   const isUpgraded = card.is_upgraded;
   for (const eff of card.effects) {
@@ -231,8 +234,11 @@ function getCardChoiceRequirement(card: Card): {
       };
     }
     if (effect.type === 'self_discard') {
-      // If the card also draws cards, discard is deferred (draw first, then pick discard)
-      if (card.draw_cards > 0) return null;
+      // If the card also draws cards, discard is normally deferred (draw first,
+      // then pick discard) — UNLESS the effect is flagged discard_first
+      // (Caravan+), in which case we prompt before the draw.
+      const discardFirst = Boolean(effect.metadata?.discard_first);
+      if (card.draw_cards > 0 && !discardFirst) return null;
       const count = card.is_upgraded && effect.upgraded_value != null ? effect.upgraded_value : effect.value;
       // Discarding is required if there are cards in hand
       return {
@@ -558,17 +564,31 @@ const DEBT_CARD_OBJ: Card = {
   effects: [],
 };
 
-/** Animated Debt card that flies from screen center to a target element. */
-function DebtCardFlyAnimation({
+/** Animated card that flies from screen center to a target element.
+ * Reused by Debt (upkeep delivery) and create_cards_to_discard
+ * (Hatching Grounds, Master Engineer). */
+function CardFlyToTargetAnimation({
+  card,
   targetRect,
   onComplete,
   speed = 1,
+  glow = 'rgba(204, 102, 34, 0.5)',
+  delayMs = 0,
+  holdMs = 0,
+  spread = false,
 }: {
+  card: Card;
   targetRect: DOMRect;
   onComplete: () => void;
   speed?: number;
+  glow?: string;
+  delayMs?: number;
+  /** Milliseconds to pause in the center (with a glowing outline) before flying. Scales with `speed`. */
+  holdMs?: number;
+  /** When true, add a small random X/Y offset so batched flights fan out instead of stacking. */
+  spread?: boolean;
 }) {
-  const [stage, setStage] = useState<'mount' | 'grow' | 'fly'>('mount');
+  const [stage, setStage] = useState<'wait' | 'mount' | 'grow' | 'hold' | 'fly'>(delayMs > 0 ? 'wait' : 'mount');
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
@@ -577,31 +597,53 @@ function DebtCardFlyAnimation({
     startRot: (Math.random() - 0.5) * 6,    // ±3° initial wobble
     growRot: (Math.random() - 0.5) * 10,     // ±5° during grow
     flyRot: (Math.random() - 0.5) * 30 + (Math.random() > 0.5 ? 15 : -15), // 15-30° spin during fly
+    // Small horizontal/vertical spread so stacked flights fan out slightly
+    // in the center (only applied when holdMs > 0, so Debt is unaffected)
+    spreadX: (Math.random() - 0.5) * 90,
+    spreadY: (Math.random() - 0.5) * 30,
   });
 
-  const startX = window.innerWidth / 2 - DEBT_FLY_CARD_W / 2;
-  const startY = window.innerHeight / 2 - DEBT_FLY_CARD_H - 60;
+  const spreadX = spread ? jitterRef.current.spreadX : 0;
+  const spreadY = spread ? jitterRef.current.spreadY : 0;
+  const startX = window.innerWidth / 2 - DEBT_FLY_CARD_W / 2 + spreadX;
+  const startY = window.innerHeight / 2 - DEBT_FLY_CARD_H - 60 + spreadY;
 
   const targetX = targetRect.left + targetRect.width / 2 - DEBT_FLY_CARD_W / 2;
   const targetY = targetRect.top + targetRect.height / 2 - DEBT_FLY_CARD_H / 2;
 
   const growMs = Math.round(350 * speed);
+  const scaledHoldMs = Math.round(holdMs * speed);
   const flyMs = Math.round(660 * speed);
+
+  // wait → mount (stagger delay for batched flights)
+  useEffect(() => {
+    if (stage !== 'wait') return;
+    const t = setTimeout(() => setStage('mount'), delayMs);
+    return () => clearTimeout(t);
+  }, [stage, delayMs]);
 
   // mount → grow (double-rAF to ensure initial paint)
   useEffect(() => {
+    if (stage !== 'mount') return;
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(() => setStage('grow'));
     });
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [stage]);
 
-  // grow → fly
+  // grow → hold (or fly directly if no hold)
   useEffect(() => {
     if (stage !== 'grow') return;
-    const t = setTimeout(() => setStage('fly'), growMs);
+    const t = setTimeout(() => setStage(scaledHoldMs > 0 ? 'hold' : 'fly'), growMs);
     return () => clearTimeout(t);
-  }, [stage, growMs]);
+  }, [stage, growMs, scaledHoldMs]);
+
+  // hold → fly
+  useEffect(() => {
+    if (stage !== 'hold') return;
+    const t = setTimeout(() => setStage('fly'), scaledHoldMs);
+    return () => clearTimeout(t);
+  }, [stage, scaledHoldMs]);
 
   // fly → complete
   useEffect(() => {
@@ -613,6 +655,11 @@ function DebtCardFlyAnimation({
   const j = jitterRef.current;
   let left: number, top: number, scale: number, rotate: number, opacity: number, transition: string;
   switch (stage) {
+    case 'wait':
+      left = startX; top = startY;
+      scale = 1; rotate = j.startRot; opacity = 0;
+      transition = 'none';
+      break;
     case 'mount':
       left = startX; top = startY;
       scale = 1; rotate = j.startRot; opacity = 1;
@@ -622,6 +669,11 @@ function DebtCardFlyAnimation({
       left = startX; top = startY;
       scale = 1.15; rotate = j.growRot; opacity = 1;
       transition = `all ${growMs}ms ease-out`;
+      break;
+    case 'hold':
+      left = startX; top = startY;
+      scale = 1.15; rotate = j.growRot; opacity = 1;
+      transition = 'none';
       break;
     case 'fly': {
       const fadeDelay = Math.round(flyMs * 0.95);
@@ -633,27 +685,69 @@ function DebtCardFlyAnimation({
     }
   }
 
+  // During the hold stage, add a pulsing bright outline so the player can
+  // recognize the card before it flies away.
+  const isHolding = stage === 'hold';
+  const dropShadow = isHolding
+    ? `drop-shadow(0 0 14px ${glow}) drop-shadow(0 0 28px ${glow})`
+    : `drop-shadow(0 4px 20px ${glow})`;
+
   return createPortal(
-    <div style={{
-      position: 'fixed',
-      left, top,
-      width: DEBT_FLY_CARD_W,
-      height: DEBT_FLY_CARD_H,
-      transform: `scale(${scale}) rotate(${rotate}deg)`,
-      opacity,
-      transition,
-      zIndex: 31000,
-      pointerEvents: 'none',
-      filter: 'drop-shadow(0 4px 20px rgba(204, 102, 34, 0.5))',
-    }}>
+    <>
+      {isHolding && (
+        <style>{`
+          @keyframes cardFlyHoldPulse {
+            0%, 100% { filter: drop-shadow(0 0 10px ${glow}) drop-shadow(0 0 20px ${glow}); }
+            50%      { filter: drop-shadow(0 0 18px ${glow}) drop-shadow(0 0 36px ${glow}); }
+          }
+        `}</style>
+      )}
       <div style={{
-        transform: `scale(${DEBT_FLY_SCALE})`,
-        transformOrigin: 'top left',
+        position: 'fixed',
+        left, top,
+        width: DEBT_FLY_CARD_W,
+        height: DEBT_FLY_CARD_H,
+        transform: `scale(${scale}) rotate(${rotate}deg)`,
+        opacity,
+        transition,
+        zIndex: 31000,
+        pointerEvents: 'none',
+        filter: dropShadow,
+        animation: isHolding
+          ? `cardFlyHoldPulse ${Math.max(400, scaledHoldMs)}ms ease-in-out infinite`
+          : undefined,
       }}>
-        <CardFull card={DEBT_CARD_OBJ} />
+        <div style={{
+          transform: `scale(${DEBT_FLY_SCALE})`,
+          transformOrigin: 'top left',
+        }}>
+          <CardFull card={card} />
+        </div>
       </div>
-    </div>,
+    </>,
     document.body
+  );
+}
+
+/** Thin wrapper: flies the Debt card to a target element (used at upkeep). */
+function DebtCardFlyAnimation({
+  targetRect,
+  onComplete,
+  speed = 1,
+}: {
+  targetRect: DOMRect;
+  onComplete: () => void;
+  speed?: number;
+}) {
+  return (
+    <CardFlyToTargetAnimation
+      card={DEBT_CARD_OBJ}
+      targetRect={targetRect}
+      onComplete={onComplete}
+      speed={speed}
+      glow="rgba(204, 102, 34, 0.5)"
+      holdMs={800}
+    />
   );
 }
 
@@ -723,6 +817,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       setMultiTileTargets([]);
     }
   }, [selectedCardIndex, multiTileCardIndex]);
+
+  // Deselect any in-hand card when leaving the Play phase
+  useEffect(() => {
+    if (gameState.current_phase !== 'play') {
+      setSelectedCardIndex(null);
+      setMultiTileCardIndex(null);
+      setMultiTilePrimaryTarget(null);
+      setMultiTileTargets([]);
+    }
+  }, [gameState.current_phase]);
 
   // Trash/discard selection mode (for cards like Thin the Herd, Consolidate, Reduce)
   const [trashMode, setTrashMode] = useState<{
@@ -818,6 +922,19 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [debtFlyTarget, setDebtFlyTarget] = useState<DOMRect | null>(null);
   const [forcePlayerPanelExpanded, setForcePlayerPanelExpanded] = useState(false);
   const debtFlyPendingRef = useRef<string | null>(null);
+  // Hatching Grounds / Master Engineer: center-screen card flights toward the discard pile
+  const [createdCardFlights, setCreatedCardFlights] = useState<{
+    id: number;
+    card: Card;
+    targetRect: DOMRect;
+    delayMs: number;
+    glow: string;
+  }[]>([]);
+  const createdCardFlightIdRef = useRef(0);
+  // Tracks which (create_cards_to_discard) effect entries have already spawned
+  // flights, keyed by a stable signature. Prevents re-triggering on re-renders
+  // or duplicate game-state updates.
+  const spawnedCreatedFlightKeysRef = useRef<Set<string>>(new Set());
   // Test mode: override debt recipient for animation testing
   const testDebtRecipientRef = useRef<{ id: string; name: string } | null>(null);
   const testDebtBannerRef = useRef(false); // true when banner is from test "Give Debt" button
@@ -857,6 +974,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const revealedActionsRef = useRef<Record<string, import('../types/game').PlannedAction[]> | null>(null);
   const [reviewHoveredTile, setReviewHoveredTile] = useState<string | null>(null);
   const [reviewTilePopupPos, setReviewTilePopupPos] = useState<{ x: number; y: number } | null>(null);
+  // Play-phase tile hover, used to pulse the War Banner in the In-Play list
+  // that originated the buff consumed by the Claim planned on the hovered tile.
+  const [playHoveredTileKey, setPlayHoveredTileKey] = useState<string | null>(null);
   const [reviewHoveredPlayer, setReviewHoveredPlayer] = useState<string | null>(null);
   const [reviewFullCards, setReviewFullCards] = useState<{ playerId: string; playerName: string; card: Card }[] | null>(null);
   const playerRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -1069,10 +1189,17 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       claimsWonLastRound: activePlayer.claims_won_last_round,
       tileCount: activePlayer.tile_count,
       handSize: activePlayer.hand.length,
+      defenseCardsInHand: activePlayer.hand.filter(c => c.card_type === 'defense').length,
+      tilesWithDefenseOwned: gameState.grid
+        ? Object.values(gameState.grid.tiles).filter(t =>
+            t.owner === activePlayerId && (t.defense_power > 0 || t.permanent_defense_bonus > 0)
+          ).length
+        : 0,
       trashCount: activePlayer.trash?.length ?? 0,
       totalDeckCards: activePlayer.deck_size + activePlayer.hand.length + activePlayer.discard_count,
       resourcesHeld: activePlayer.resources,
       tilesLostLastRound: activePlayer.tiles_lost_last_round,
+      tilesCapturedFromOpponentsLastRound: activePlayer.tiles_captured_from_opponents_last_round,
       vpHexCount: gameState.grid ? countConnectedVpTiles(gameState.grid.tiles, activePlayerId) : 0,
       debtCount,
       playedCardNames,
@@ -3396,6 +3523,63 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return () => clearTimeout(t);
   }, [forcePlayerPanelExpanded]);
 
+  // Hatching Grounds / Master Engineer: spawn card flights for any new
+  // create_cards_to_discard player_effects targeting the active player.
+  // Fires during Play phase (effects cleared at REVEAL start).
+  useEffect(() => {
+    if (animationOff) return;
+    const effects = gameState.player_effects;
+    if (!effects || effects.length === 0) return;
+    const discardEl = document.querySelector('[data-discard-pile]');
+    if (!discardEl) return;
+    const targetRect = discardEl.getBoundingClientRect();
+
+    const newFlights: typeof createdCardFlights = [];
+    for (let i = 0; i < effects.length; i++) {
+      const effect = effects[i];
+      if (effect.effect_type !== 'create_cards_to_discard') continue;
+      if (effect.target_player_id !== activePlayerId) continue;
+      if (!effect.added_card || !effect.added_card_count) continue;
+      const key = `${i}:${effect.source_player_id}:${effect.card_name}:${effect.added_card_name}:${effect.added_card_count}`;
+      if (spawnedCreatedFlightKeysRef.current.has(key)) continue;
+      spawnedCreatedFlightKeysRef.current.add(key);
+
+      const archetype = effect.added_card.archetype;
+      const glow =
+        archetype === 'swarm' ? 'rgba(106, 200, 120, 0.55)' :
+        archetype === 'fortress' ? 'rgba(120, 155, 220, 0.55)' :
+        archetype === 'vanguard' ? 'rgba(220, 110, 90, 0.55)' :
+        'rgba(204, 204, 204, 0.5)';
+      for (let c = 0; c < effect.added_card_count; c++) {
+        const id = ++createdCardFlightIdRef.current;
+        newFlights.push({
+          id,
+          card: effect.added_card,
+          targetRect,
+          delayMs: c * 120,
+          glow,
+        });
+      }
+    }
+    if (newFlights.length > 0) {
+      setCreatedCardFlights(prev => [...prev, ...newFlights]);
+    }
+    // Intentional: createdCardFlights excluded — spawning reads the ref set, not state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState.player_effects, activePlayerId, animationOff]);
+
+  // Drop spawned-flight keys when player_effects is cleared (REVEAL start)
+  // so a future round's effects can re-spawn correctly.
+  useEffect(() => {
+    if (!gameState.player_effects || gameState.player_effects.length === 0) {
+      spawnedCreatedFlightKeysRef.current.clear();
+    }
+  }, [gameState.player_effects]);
+
+  const handleCreatedCardFlightComplete = useCallback((id: number) => {
+    setCreatedCardFlights(prev => prev.filter(f => f.id !== id));
+  }, []);
+
   // Phase banner midpoint — start debt card fly animation if applicable
   const handleBannerMidpoint = useCallback(() => {
     if (phaseBanner !== 'upkeep') return;
@@ -3911,7 +4095,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (groups < 2) continue;
       }
       // Classify: strong (power sufficient) vs weak (power insufficient)
-      let effectivePower = computeClaimPowerOnTile(card, tile, tiles, activePlayerId, handSize, playerTileCount);
+      const claimBuffBonus = card.card_type === 'claim' && activePlayer?.claim_buffs?.[0]
+        ? activePlayer.claim_buffs[0].power_bonus
+        : 0;
+      let effectivePower = computeClaimPowerOnTile(card, tile, tiles, activePlayerId, handSize, playerTileCount, claimBuffBonus);
       // For stackable cards, add power from existing planned claims on this tile
       if (card.stackable && activePlayer?.planned_actions) {
         const combinedClaims: Card[] = [card];
@@ -4510,6 +4697,21 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   : null;
                 return card ? getAllValidPlayTiles(card) : undefined;
               })()}
+              previewClaimBuffBonus={phase === 'play' ? (() => {
+                // The next Claim consumes one buff per distinct source_card_id
+                // (FIFO within each source). Sum power_bonus across those to
+                // match backend consumption semantics.
+                const buffs = activePlayer?.claim_buffs ?? [];
+                const seen = new Set<string | undefined>();
+                let total = 0;
+                for (const b of buffs) {
+                  const src = b.source_card_id;
+                  if (seen.has(src)) continue;
+                  seen.add(src);
+                  total += b.power_bonus ?? 0;
+                }
+                return total;
+              })() : 0}
               claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
               vpPaths={vpPaths.length > 0 && !resolving ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
@@ -4519,8 +4721,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onTileHover={reviewing ? (q, r, sx, sy) => {
                 setReviewHoveredTile(`${q},${r}`);
                 setReviewTilePopupPos({ x: sx, y: sy });
-              } : undefined}
-              onTileHoverEnd={reviewing ? () => setReviewHoveredTile(null) : undefined}
+              } : (phase === 'play' ? (q, r) => setPlayHoveredTileKey(`${q},${r}`) : undefined)}
+              onTileHoverEnd={reviewing ? () => setReviewHoveredTile(null) : (phase === 'play' ? () => setPlayHoveredTileKey(null) : undefined)}
               paused={showShopOverlay || showCardBrowser || showDeckViewer || showUpgradePreview || showGameOver}
               onLongPress={handleTileLongPress}
               undoableTiles={undoableTileSet}
@@ -4688,6 +4890,38 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               // Fade out while the player is dragging any card so they can drop
               // on tiles hidden beneath the list.
               const isDraggingCard = draggingCardIndex !== null;
+              // War Banner pulse: triggers in two scenarios.
+              //  1) Player hovers a tile that has a planned Claim which
+              //     consumed a buff → pulse the specific War Banner that
+              //     originated that buff (via consumed_claim_buff.source_card_id).
+              //  2) Player is about to play a Claim (a Claim card is
+              //     selected or hovered in-hand) → pulse every War Banner in
+              //     the list whose buff is still unconsumed, so the player
+              //     sees which Claim-targeted plays will still be boosted.
+              const warBannerPulseIdx = new Set<number>();
+              if (playHoveredTileKey) {
+                for (const a of actions) {
+                  if (a.target_q == null || a.target_r == null) continue;
+                  if (`${a.target_q},${a.target_r}` !== playHoveredTileKey) continue;
+                  const ids = a.consumed_claim_buff?.source_card_ids
+                    ?? (a.consumed_claim_buff?.source_card_id ? [a.consumed_claim_buff.source_card_id] : []);
+                  for (const src of ids) {
+                    const srcIdx = actions.findIndex(b => b.card.id === src);
+                    if (srcIdx >= 0) warBannerPulseIdx.add(srcIdx);
+                  }
+                }
+              }
+              const handClaimActive = (hoveredCard?.card_type === 'claim') || (selectedCard?.card_type === 'claim');
+              if (handClaimActive && activePlayer.claim_buffs && activePlayer.claim_buffs.length > 0) {
+                const unclaimedSources = new Set(
+                  activePlayer.claim_buffs
+                    .map(b => b.source_card_id)
+                    .filter((id): id is string => !!id)
+                );
+                actions.forEach((a, idx) => {
+                  if (unclaimedSources.has(a.card.id)) warBannerPulseIdx.add(idx);
+                });
+              }
               return (
                 <div
                   ref={inPlayContainerRef}
@@ -4713,6 +4947,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     .in-play-list::-webkit-scrollbar-track { background: transparent; }
                     .in-play-list::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
                     .in-play-list { scrollbar-width: thin; scrollbar-color: #555 transparent; }
+                    @keyframes warBannerPulse {
+                      0%, 100% { box-shadow: 0 0 4px 1px rgba(255, 215, 0, 0.3); }
+                      50% { box-shadow: 0 0 10px 2px rgba(255, 215, 0, 0.85); }
+                    }
+                    .war-banner-pulse { animation: warBannerPulse 1.8s ease-in-out infinite; }
                   `}</style>
                   <div style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
                     In Play ({actions.length})
@@ -4727,12 +4966,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       const priorNames = actions.slice(0, i).map(a => a.card.name);
                       const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
                       const statParts = buildCardSubtitle(c, ctx);
+                      const pulseBanner = warBannerPulseIdx.has(i);
                       return (
                         <div
                           key={i}
                           ref={(el) => { if (el) inPlayCardRefs.current.set(i, el); else inPlayCardRefs.current.delete(i); }}
                           onPointerEnter={() => setInPlayHoverIndex(i)}
                           onPointerLeave={() => setInPlayHoverIndex(null)}
+                          className={pulseBanner ? 'war-banner-pulse' : undefined}
                           style={{
                             width: COL_W,
                             padding: '3px 6px',
@@ -5724,7 +5965,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               playerId={activePlayerId}
               cards={introSequence !== 'done' && !introHandReady ? [] : activePlayer.hand}
               selectedIndex={selectedCardIndex}
-              onSelect={(idx) => { setSelectedCardIndex(idx); }}
+              onSelect={(idx) => {
+                if (phase !== 'play' || resolving || playSubmitted) return;
+                setSelectedCardIndex(idx);
+              }}
               onDragPlay={handleDragPlay}
               onDoubleClick={isMobile ? undefined : (idx) => {
                 if (trashMode) return; // disable double-click during trash/discard selection
@@ -6046,6 +6290,21 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           speed={animationMode === 'fast' ? 0.5 : 1}
         />
       )}
+
+      {/* Hatching Grounds / Master Engineer: cards fly from center to discard */}
+      {createdCardFlights.map(flight => (
+        <CardFlyToTargetAnimation
+          key={flight.id}
+          card={flight.card}
+          targetRect={flight.targetRect}
+          delayMs={flight.delayMs}
+          glow={flight.glow}
+          holdMs={800}
+          spread
+          speed={animationMode === 'fast' ? 0.5 : 1}
+          onComplete={() => handleCreatedCardFlightComplete(flight.id)}
+        />
+      ))}
 
       {/* Pile search modal (SEARCH_ZONE tutor effects). Hidden while the fly
           animation plays so the cards aren't obscured by the overlay.

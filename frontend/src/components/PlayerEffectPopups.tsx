@@ -55,6 +55,7 @@ const POSITIVE_EFFECT_TYPES = new Set([
   'base_raid_spoils',
   'base_raid_defended',
   'draw_next_turn',
+  'gain_resources',
 ]);
 
 function effectColor(effectType: string): string {

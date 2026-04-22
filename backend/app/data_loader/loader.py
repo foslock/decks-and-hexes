@@ -91,7 +91,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     resource_gain = _safe_int(entry.get("resource_gain", 0))
     effect = str(entry.get("effect", ""))
     has_gain_resources_effect = any(
-        e.get("type") in ("gain_resources", "resources_per_claims_last_round", "resource_scaling", "resource_per_vp_hex", "resources_per_tiles_lost", "resources_per_tiles_owned", "next_turn_bonus", "abandon_and_block")
+        e.get("type") in (
+            "gain_resources", "resources_per_claims_last_round", "resource_scaling",
+            "resource_per_vp_hex", "resources_per_tiles_lost", "resources_per_tiles_owned",
+            "resources_per_tiles_captured_last_round", "gain_resources_per_card_in_hand",
+            "next_turn_bonus", "abandon_and_block",
+        )
         for e in entry.get("effects", [])
     )
     if resource_gain == 0 and "gain" in effect.lower() and "resource" in effect.lower() and not has_gain_resources_effect:
@@ -103,7 +108,11 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     # Skip if draw is delayed ("next turn") or handled by a cycle/draw effect
     draw_cards = _safe_int(entry.get("draw_cards", 0))
     has_cycle_effect = any(
-        e.get("type") in ("cycle", "actions_per_cards_played", "mulligan", "global_claim_ban", "swap_draw_discard", "draw_per_debt", "draw_per_connected_vp") for e in entry.get("effects", [])
+        e.get("type") in (
+            "cycle", "actions_per_cards_played", "mulligan", "global_claim_ban",
+            "swap_draw_discard", "draw_per_debt", "draw_per_connected_vp",
+            "draw_per_tiles_owned", "draw_per_tiles_with_defense_bonus", "conditional_draw",
+        ) for e in entry.get("effects", [])
     )
     if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower() and "next round" not in effect.lower() and not has_cycle_effect:
         match = re.search(r'[Dd]raw\s+(\d+)\s+card', effect)
