@@ -79,7 +79,7 @@ cards:
     power: 0
     passive_vp: 1
     unplayable: true
-    effect: "Spoils of a successful base raid. +1 VP per copy."
+    effect: "Spoils of a successful base raid. Worth 1 VP."
     effect_upgraded: null
     trash_on_use: false
     note: "Awarded to the attacker when they successfully raid an opponent's base. Worth 1 VP but clogs your deck."
@@ -112,7 +112,7 @@ cards:
     power: 0
     unplayable: true
     passive_vp: 1
-    effect: "+1 VP per copy."
+    effect: "Worth 1 VP."
     trash_on_use: false
     note: "Awards VP on purchase but clogs your deck permanently. Finite stack makes buying multiples a real investment. Not upgradable."
 
