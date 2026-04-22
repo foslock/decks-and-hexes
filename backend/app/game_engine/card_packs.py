@@ -124,6 +124,64 @@ CARD_PACKS: dict[str, CardPack] = {
         archetype_card_ids=None,  # all archetype cards
     ),
 
+    "grand_strategy": CardPack(
+        id="grand_strategy",
+        name="Grand Strategy",
+        # Theme: Engine & sculpt. Draw, cycle, and manipulate your deck so
+        # every round plays a long chain of archetype cards into the perfect
+        # finish. The only pack anchored by Muster, Caravan, and Foresight.
+        # Synergies:
+        #   1. Cull + Sift + Cartographer → shape the top of the deck, guaranteeing key draws
+        #   2. Muster + Caravan → generate actions AND cards, chain huge turns
+        #   3. Foresight → on a big turn, pull 2–3 key archetype cards straight into hand
+        #   4. Forced March + Mobilize → two different action multipliers for turn-by-turn flex
+        #   5. Supply Depot + sculpt tools → invest in a front-loaded next round
+        #   6. Spyglass → cheap cantrip that becomes a cantrip-plus-action when drawing down
+        #   7. Caravan (discard 1) + Salvage (not in pack) forces players to lean on
+        #      Redemption-style archetype trash recovery instead — keeps the pack lean
+        shared_card_ids=[
+            "neutral_reduce",          # Cull: deck thinning (1💰)
+            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
+            "neutral_cartographer",    # Cartographer: discard 2, draw 2 (3💰)
+            "neutral_sift",            # Sift: filter top of draw pile (3💰)
+            "neutral_forced_march",    # Forced March: 2 actions (3💰)
+            "neutral_conscription",    # Muster: draw 2/3 + 1 action (4💰)
+            "neutral_caravan",         # Caravan: discard 1 + 2 actions (4💰)
+            "neutral_mobilize",        # Mobilize: actions per cards played, trash (4💰)
+            "neutral_supply_depot",    # Supply Depot: next-turn draw + resource (6💰)
+            "neutral_foresight",       # Foresight: pick top-of-deck cards (7💰)
+        ],
+        archetype_card_ids=None,  # all archetype cards
+    ),
+
+    "second_wind": CardPack(
+        id="second_wind",
+        name="Second Wind",
+        # Theme: Risk, recur, rebuild. Commit big cards, absorb losses, and
+        # return your best plays from discard and trash. The only pack
+        # anchored by Redemption alongside Salvage.
+        # Synergies:
+        #   1. Mobilize (trash) + Redemption → sacrifice Mobilize for a big turn, then bring it back
+        #   2. Siege Tower / Conqueror / Mercenary + Salvage → recur your premium claim
+        #   3. Ambush + contested tiles → lean into fights, reward bravery
+        #   4. Watchtower + Spyglass → draw fuel to find the pieces after a recurring turn
+        #   5. Cull + Redemption → intentionally trash a finisher to free a slot, then recur it
+        #   6. Spyglass (conditional action) → thrives when your hand has been recycled thin
+        shared_card_ids=[
+            "neutral_reduce",          # Cull: deck thinning (1💰)
+            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
+            "neutral_salvage",         # Salvage: recur a card from discard (3💰)
+            "neutral_watchtower",      # Watchtower: +2 defense + draw + 1 action (3💰)
+            "neutral_ambush",          # Ambush: contested power boost (4💰)
+            "neutral_mobilize",        # Mobilize: actions per cards played, trash (4💰)
+            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
+            "neutral_redemption",      # Redemption: recur a card from trash, trash self (5💰)
+            "neutral_conqueror",       # Conqueror: P5 anti-defense, 2 actions (7💰)
+            "neutral_siege_tower",     # Siege Tower: power 6 finisher (8💰)
+        ],
+        archetype_card_ids=None,  # all archetype cards
+    ),
+
     "hold_the_line": CardPack(
         id="hold_the_line",
         name="Hold the Line",
@@ -173,6 +231,26 @@ CARD_PACKS: dict[str, CardPack] = {
             "neutral_reclaim",         # Reclaim: trash for resources (2💰)
             "neutral_sift",            # Sift: filter top of draw pile (3💰)
             "neutral_cartographer",    # Cartographer: discard 2, draw 2 (3💰)
+        ],
+        archetype_card_ids=None,  # all archetype cards
+    ),
+    "mini_rapid_advance": CardPack(
+        id="mini_rapid_advance",
+        name="Mini: Rapid Advance",
+        # Theme: Every neutral card pumps actions — chain a long turn out of
+        # the shared market alone. Pairs well with action-hungry archetypes.
+        # Synergies:
+        #   1. Muster + Caravan back-to-back → draw 2/3, gain 2 actions, sculpt, keep chaining
+        #   2. Palisade on a newly claimed tile → defense that doesn't cost the turn's tempo
+        #   3. Forced March early → unlocks 2-cost Conqueror / Siege Tower-style archetype finishers
+        #   4. Spyglass on low hand → conditional +1 action, chain continuation
+        #   5. Pair with Vanguard Regroup+ / Fortress Iron Discipline+ for monster actions rounds
+        shared_card_ids=[
+            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
+            "neutral_palisade",        # Palisade: +1 defense + 1 action (2💰)
+            "neutral_forced_march",    # Forced March: 2 actions (3💰)
+            "neutral_conscription",    # Muster: draw 2/3 + 1 action (4💰)
+            "neutral_caravan",         # Caravan: discard 1 + 2 actions (4💰)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
