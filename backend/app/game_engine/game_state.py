@@ -1510,9 +1510,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
         for eff in card.effects:
             if eff.type == EffectType.RESOURCES_PER_CLAIMS_LAST_ROUND:
                 per_claim = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
-                max_key = "upgraded_max_resources" if card.is_upgraded else "max_resources"
-                max_res = eff.metadata.get(max_key, 999)
-                snapshotted_resource_gain = min(player.claims_won_last_round * per_claim, max_res)
+                snapshotted_resource_gain = player.claims_won_last_round * per_claim
                 break
             if eff.type == EffectType.RESOURCE_SCALING:
                 divisor = eff.value or 2
@@ -1524,11 +1522,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 break
             if eff.type == EffectType.RESOURCES_PER_TILES_CAPTURED_LAST_ROUND:
                 per_tile = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
-                cap_key = "upgraded_max_resources" if card.is_upgraded else "max_resources"
-                max_res = eff.metadata.get(cap_key, 999)
-                snapshotted_resource_gain = min(
-                    player.tiles_captured_from_opponents_last_round * per_tile, max_res
-                )
+                snapshotted_resource_gain = player.tiles_captured_from_opponents_last_round * per_tile
                 break
             if eff.type == EffectType.GAIN_RESOURCES_PER_CARD_IN_HAND:
                 per_card = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value

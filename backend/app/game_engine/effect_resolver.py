@@ -1244,8 +1244,7 @@ def _handle_resources_per_claims_last_round(effect: Effect, ctx: EffectContext) 
     """War Tithe: gain resources based on tiles claimed last round."""
     claims = ctx.player.claims_won_last_round
     per_claim = effect.upgraded_value if ctx.card.is_upgraded and effect.upgraded_value else effect.value
-    max_res = effect.metadata.get("upgraded_max_resources" if ctx.card.is_upgraded else "max_resources", 999)
-    gained = min(claims * per_claim, max_res)
+    gained = claims * per_claim
     if gained > 0:
         ctx.player.resources += gained
         ctx.game._log(f"{ctx.player.name} gains {gained} resources from War Tithe ({claims} tiles claimed last round)")
@@ -2024,27 +2023,16 @@ def _handle_claim_buff_next_n(effect: Effect, ctx: EffectContext) -> None:
 def _handle_resources_per_tiles_captured_last_round(
     effect: Effect, ctx: EffectContext
 ) -> None:
-    """Pursuit: resources for each tile captured from an opponent last round (capped)."""
+    """Pursuit: resources for each tile captured from an opponent last round."""
     per_tile = effect.effective_value(ctx.card.is_upgraded)
     captured = ctx.player.tiles_captured_from_opponents_last_round
-    cap_key = "upgraded_max_resources" if ctx.card.is_upgraded else "max_resources"
-    max_res = int(effect.metadata.get(cap_key, 999))
-    gained = min(captured * per_tile, max_res)
+    gained = captured * per_tile
     if gained > 0:
         ctx.player.resources += gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
-        f"({captured} tile(s) captured last round × {per_tile}, max {max_res})",
+        f"({captured} tile(s) captured last round × {per_tile})",
         visible_to=[ctx.player.id], actor=ctx.player.id)
-    if ctx.card.is_upgraded:
-        extra_draw = int(effect.metadata.get("upgraded_draw", 0))
-        if extra_draw > 0:
-            drawn = ctx.player.deck.draw(extra_draw, ctx.game.rng)
-            ctx.player.hand.extend(drawn)
-            if drawn:
-                ctx.game._log(
-                    f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
-                    visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
 def _handle_draw_per_tiles_owned(effect: Effect, ctx: EffectContext) -> None:

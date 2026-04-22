@@ -1185,6 +1185,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       .filter(c => c.name === 'Debt').length;
     // Names of cards already played this round (for conditional_action_return)
     const playedCardNames = activePlayer.planned_actions?.map(a => a.card.name) ?? [];
+    // Strike Team: whether any Claim has already been played this round
+    const hasPlayedClaimThisRound = (activePlayer.planned_actions ?? [])
+      .some(a => a.card.card_type === 'claim');
     return {
       claimsWonLastRound: activePlayer.claims_won_last_round,
       tileCount: activePlayer.tile_count,

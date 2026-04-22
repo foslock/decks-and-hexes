@@ -2452,7 +2452,6 @@ class TestVanguardWarTithe:
         assert len(matching) >= 1
         assert matching[0].value == 1
         assert matching[0].upgraded_value == 2
-        assert matching[0].metadata.get("max_resources") == 4
 
     def test_war_tithe_playable(self, card_registry):
         """War Tithe: can be played as an engine card (costs 1 action)."""
@@ -2479,24 +2478,23 @@ class TestVanguardWarTithe:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        # 3 claims × 1 resource each = 3 (capped at max_resources=4)
+        # 3 claims × 1 resource each = 3 (no cap)
         assert player.resources == initial + 3
 
-    def test_war_tithe_respects_max_cap(self, card_registry):
-        """War Tithe: resource gain is capped at max_resources."""
+    def test_war_tithe_scales_without_cap(self, card_registry):
+        """War Tithe: resource gain scales linearly with claims (no cap)."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         wt = _copy_card(card_registry["vanguard_war_tithe"], "test_wt")
         player.hand = [wt] + player.hand[1:]
 
-        # Simulate having claimed 5 tiles (exceeds max of 4)
         player.claims_won_last_round = 5
         initial = player.resources
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        # 5 × 1 = 5, but capped at 4
-        assert player.resources == initial + 4
+        # 5 × 1 = 5 with no cap
+        assert player.resources == initial + 5
 
     def test_war_tithe_zero_claims(self, card_registry):
         """War Tithe: no resources if no tiles claimed last round."""

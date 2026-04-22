@@ -50,6 +50,9 @@ const CARD_ART: Record<string, string> = {
   vanguard_war_tithe: '💸',
   vanguard_mobilize_forces: '📯',
   vanguard_forward_scout: '🦅',
+  vanguard_commander: '🎖️',
+  vanguard_pursuit: '🏃',
+  vanguard_war_banner: '🎌',
 
   // ── Swarm ──
   swarm_scout: '👁️',
@@ -80,6 +83,9 @@ const CARD_ART: Record<string, string> = {
   swarm_plague: '☠️',
   swarm_second_wave: '↩️',
   swarm_brood_memory: '🪺',
+  swarm_chatter: '💬',
+  swarm_drone_wave: '🪰',
+  swarm_hatching_grounds: '🥚',
 
   // ── Fortress ──
   fortress_fortify: '🧱',
@@ -110,6 +116,9 @@ const CARD_ART: Record<string, string> = {
   fortress_warden: '💂',
   fortress_stockroom: '🗄️',
   fortress_reserve_forces: '🪖',
+  fortress_master_engineer: '👷',
+  fortress_quartermaster: '📋',
+  fortress_watchful_keep: '👀',
 
   // ── Neutral ──
   neutral_explore: '🧭',
@@ -149,11 +158,12 @@ const CARD_ART: Record<string, string> = {
   neutral_redemption: '🌅',
   neutral_recall: '⏪',
   neutral_sift: '⚗️',
+  neutral_caravan: '🐪',
 
   // ── Special ──
-  debt: '⛓️',
-  rubble: '🪨',
-  spoils: '💎',
+  neutral_debt: '⛓️',
+  neutral_rubble: '🪨',
+  neutral_spoils: '💎',
 };
 
 const ARCHETYPE_LABEL: Record<string, string> = {
@@ -170,43 +180,14 @@ const TYPE_LABEL: Record<string, string> = {
   passive: 'Passive',
 };
 
-/** Resolve the art emoji for a card, handling instance ID suffixes. */
-function getCardArt(id: string, cardType: string): string {
-  if (CARD_ART[id]) return CARD_ART[id];
-  // Strip instance suffixes: e.g. "neutral_explore_start_adv_0" → try progressively shorter prefixes
-  let key = id;
-  while (key.includes('_')) {
-    key = key.substring(0, key.lastIndexOf('_'));
-    if (CARD_ART[key]) return CARD_ART[key];
-  }
-  return TYPE_EMOJI[cardType] || '📄';
+/** Resolve the art emoji for a card. Keyed by `definition_id` (stable across instances). */
+function getCardArt(definitionId: string, cardType: string): string {
+  return CARD_ART[definitionId] ?? (TYPE_EMOJI[cardType] || '📄');
 }
 
-/** Resolve the image URL for a card, stripping instance suffixes.
- *  Images are auto-detected: just drop a .png in /public/cards/ named by base card ID. */
-function getCardImageUrl(id: string): string {
-  // Strip instance suffixes to get the base card ID
-  let key = id;
-  // Try exact ID first, then progressively shorter prefixes
-  // The <img> onError handler falls back to emoji if the file doesn't exist
-  while (key.includes('_')) {
-    key = key.substring(0, key.lastIndexOf('_'));
-  }
-  // Use the longest matching prefix that looks like a card ID
-  // For cards like "neutral_explore_start_adv_0", we want "neutral_explore"
-  // For cards like "debt", we want "debt"
-  return `/cards/${getBaseCardId(id)}.png`;
-}
-
-/** Strip instance suffixes to get the base card ID (e.g. "neutral_explore_start_adv_0" → "neutral_explore") */
-function getBaseCardId(id: string): string {
-  if (CARD_ART[id]) return id;
-  let key = id;
-  while (key.includes('_')) {
-    key = key.substring(0, key.lastIndexOf('_'));
-    if (CARD_ART[key]) return key;
-  }
-  return id;
+/** Resolve the image URL for a card. Images in /public/cards/ are named by `definition_id`. */
+function getCardImageUrl(definitionId: string): string {
+  return `/cards/${definitionId}.png`;
 }
 
 /** Standard card width for all full card views */
@@ -489,7 +470,7 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
       </div>
 
       {/* Card art — tries image file, falls back to emoji */}
-      <CardArtSlot key={getCardImageUrl(card.id)} cardId={card.id} cardName={card.name} cardType={card.card_type} typeColor={typeColor} />
+      <CardArtSlot key={card.definition_id} cardId={card.definition_id} cardName={card.name} cardType={card.card_type} typeColor={typeColor} />
 
       {/* Archetype — Type line */}
       <div style={{

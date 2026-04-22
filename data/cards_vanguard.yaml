@@ -20,8 +20,8 @@ cards:
     power: 0
     resource_gain: 0
     upgraded_resource_gain: 0
-    effect: "Gain 1 resource for each tile you successfully claimed last round (max 4)."
-    effect_upgraded: "Gain 2 resources for each tile you successfully claimed last round (max 8). Draw 1 card."
+    effect: "Gain 1 resource for each tile you successfully claimed last round."
+    effect_upgraded: "Gain 2 resources for each tile you successfully claimed last round. Draw 1 card."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards sustained aggression across rounds. Creates a virtuous cycle: claim tiles → fund more claims."
@@ -31,7 +31,7 @@ cards:
         value: 1
         upgraded_value: 2
         timing: immediate
-        metadata: {max_resources: 4, upgraded_max_resources: 8, upgraded_draw: 1}
+        metadata: {upgraded_draw: 1}
 
   - id: vanguard_blitz
     name: Blitz
@@ -596,8 +596,8 @@ cards:
     buy_cost: 5
     action_return: 2
     power: 0
-    effect: "For each tile you captured from an opponent last round, gain 1 resource (max 3). Gain 2 actions."
-    effect_upgraded: "For each tile you captured from an opponent last round, gain 2 resources (max 6). Draw 1 card. Gain 2 actions."
+    effect: "Gain 1 resource for each tile you successfully captured from an opponent last round. Gain 2 actions."
+    effect_upgraded: "Gain 2 resources for each tile you successfully captured from an opponent last round. Draw 1 card. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
     note: "Momentum card: rewards successful aggression with resources to fuel next assault. Scales with opposition play, not neutral expansion."
@@ -607,7 +607,6 @@ cards:
         value: 1
         upgraded_value: 2
         timing: immediate
-        metadata: {max_resources: 3, upgraded_max_resources: 6}
 
   - id: vanguard_war_banner
     name: War Banner
