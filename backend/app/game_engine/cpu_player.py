@@ -2486,6 +2486,141 @@ class CPUPlayer:
                     else:
                         score += 1.0  # ahead — slows us too
 
+            elif effect.type == EffectType.CONDITIONAL_DRAW_NEXT_ROUND:
+                # Commander: draw N next round if we've already played a Claim
+                # this round. Condition is checked on_resolution, but at play
+                # time we can tell whether the condition is currently met.
+                draws = effect.effective_value(card.is_upgraded)
+                claim_played = any(
+                    a.card.card_type == CardType.CLAIM for a in player.planned_actions
+                )
+                if claim_played:
+                    score += draws * 1.5 * weights.card_draw_value
+                else:
+                    # We might still play a Claim before end of round. Half-credit.
+                    score += draws * 0.8 * weights.card_draw_value
+
+            elif effect.type == EffectType.RESOURCES_PER_TILES_CAPTURED_LAST_ROUND:
+                # Pursuit: resources per tile captured last round (capped).
+                # Snapshotted at play time — mirror the backend calculation.
+                per_tile = effect.effective_value(card.is_upgraded)
+                cap_key = "upgraded_max_resources" if card.is_upgraded else "max_resources"
+                max_res = effect.metadata.get(cap_key, 999)
+                captured = getattr(player, "tiles_captured_from_opponents_last_round", 0)
+                gain = min(captured * per_tile, max_res)
+                score += gain * 1.5 * weights.resource_value
+                if captured == 0:
+                    # Still playable for the +2 actions alone, but the momentum
+                    # kicker is dormant — keep the baseline low.
+                    score += 0.3
+
+            elif effect.type == EffectType.CLAIM_BUFF_NEXT_N:
+                # War Banner: queue +power buffs for next N Claim(s). Score the
+                # buff based on the Claims we have available to spend it on.
+                charges = effect.effective_value(card.is_upgraded)
+                power_bonus = effect.metadata.get("power_bonus", 0)
+                draw_on_success = effect.metadata.get("draw_next_round_on_success", 0)
+                claim_count = sum(1 for c in player.hand if c.card_type == CardType.CLAIM)
+                # Also count Claims already planned but not yet resolved? No —
+                # buffs only apply to FUTURE claim plays, so planned Claims
+                # don't benefit. Use hand claims only.
+                usable_charges = min(charges, claim_count)
+                # +2 power turns a likely loss into a likely win, worth ≈3pts.
+                score += usable_charges * power_bonus * 1.2 * weights.aggression
+                score += usable_charges * draw_on_success * 1.5 * weights.card_draw_value
+                if claim_count == 0:
+                    # No claims in hand to consume the buff — waste of an action.
+                    score += 0.2
+                else:
+                    score += 1.0  # baseline: we'll land at least one buffed claim
+
+            elif effect.type == EffectType.CONDITIONAL_DRAW:
+                # Chatter: bonus draw if cards_played >= threshold. Cards
+                # already played this round are counted; Chatter itself is
+                # the (len(planned_actions)+1)-th card.
+                threshold = effect.condition_threshold or 3
+                cards_played_incl = len(player.planned_actions) + 1
+                bonus = effect.effective_value(card.is_upgraded)
+                if cards_played_incl >= threshold:
+                    score += bonus * 2.0 * weights.card_draw_value
+                else:
+                    # Could still trigger if we chain more cards after this.
+                    score += bonus * 0.5 * weights.card_draw_value
+
+            elif effect.type == EffectType.DRAW_PER_TILES_OWNED:
+                # Drone Wave: draw per tiles owned / divisor, capped.
+                divisor = max(1, effect.effective_value(card.is_upgraded))
+                cap_key = "upgraded_max_draws" if card.is_upgraded else "max_draws"
+                max_draws = effect.metadata.get(cap_key, 999)
+                tile_count = len(game.grid.get_player_tiles(self.player_id)) if game.grid else 0
+                draws = min(tile_count // divisor, max_draws)
+                score += draws * 2.0 * weights.card_draw_value
+                if draws == 0:
+                    score += 0.3  # still worth the action return
+
+            elif effect.type == EffectType.DRAW_PER_TILES_WITH_DEFENSE_BONUS:
+                # Watchful Keep: draw per defended tile, capped.
+                per = effect.effective_value(card.is_upgraded)
+                cap_key = "upgraded_max_draws" if card.is_upgraded else "max_draws"
+                max_draws = effect.metadata.get(cap_key, 999)
+                tiles_with_def = 0
+                if game.grid:
+                    for t in game.grid.get_player_tiles(self.player_id):
+                        if t.permanent_defense_bonus > 0 or t.defense_power > 0:
+                            tiles_with_def += 1
+                draws = min(tiles_with_def * per, max_draws)
+                score += draws * 2.0 * weights.card_draw_value
+                if draws == 0:
+                    score += 0.3
+
+            elif effect.type == EffectType.GAIN_RESOURCES_PER_CARD_IN_HAND:
+                # Quartermaster: resources per Defense card in hand (capped).
+                per_card = effect.effective_value(card.is_upgraded)
+                cap_key = "upgraded_max_counted" if card.is_upgraded else "max_counted"
+                max_counted = effect.metadata.get(cap_key, 999)
+                card_filter = effect.metadata.get("filter", "")
+                matching = sum(
+                    1 for c in player.hand
+                    if c is not card and (
+                        (card_filter == "defense" and c.card_type == CardType.DEFENSE)
+                    )
+                )
+                gain = min(matching, max_counted) * per_card
+                score += gain * 1.5 * weights.resource_value
+                if matching == 0:
+                    score += 0.3
+
+            elif effect.type == EffectType.CREATE_CARDS_TO_DISCARD:
+                # Hatching Grounds / Master Engineer: seed N cards into discard.
+                # Payoff is deferred until reshuffle — deck-bulk engine. Value
+                # scales with the count and (loosely) the archetype's appetite
+                # for that card's type.
+                count = effect.effective_value(card.is_upgraded)
+                target_id = effect.metadata.get("card_id", "")
+                # Rabble = cheap Claim → expansion value for Swarm.
+                # Entrench = Defense → defense value for Fortress.
+                if target_id == "swarm_rabble":
+                    per_card_value = 1.5 * weights.expansion
+                elif target_id == "fortress_entrench":
+                    per_card_value = 1.3 * weights.defense
+                else:
+                    per_card_value = 1.0
+                score += count * per_card_value
+                # Small premium for deck-bloat engine synergy with VP-from-
+                # trash or spoils-hoard strategies (not modeled precisely).
+                score += 1.0
+
+            elif effect.type == EffectType.GRANT_ACTIONS_NEXT_ROUND_PER_SUCCESSFUL_CLAIM:
+                # Surge+: delayed action return per successful claim this round.
+                per_claim = effect.effective_value(card.is_upgraded)
+                # Count claims already planned; assume ~half succeed.
+                planned_claims = sum(
+                    1 for a in player.planned_actions
+                    if a.card.card_type == CardType.CLAIM
+                )
+                expected = planned_claims * 0.6 * per_claim
+                score += expected * 2.0
+
         # Cost reduction
         for effect in card.effects:
             if effect.type == EffectType.COST_REDUCTION:
@@ -3218,6 +3353,41 @@ class CPUPlayer:
                     score += 1.5  # niche but denial is good
                 elif effect.type == EffectType.MANDATORY_SELF_TRASH:
                     score += 3.0  # high power ceiling, conditional
+                elif effect.type == EffectType.CONDITIONAL_DRAW_NEXT_ROUND:
+                    # Commander: deferred draw on aggressive turns
+                    score += 2.0 * weights.card_draw_value
+                elif effect.type == EffectType.RESOURCES_PER_TILES_CAPTURED_LAST_ROUND:
+                    # Pursuit: aggressive momentum resources
+                    score += 2.0 * weights.aggression * weights.resource_value
+                elif effect.type == EffectType.CLAIM_BUFF_NEXT_N:
+                    # War Banner: pre-buff a Claim, stronger for aggressive decks
+                    score += 3.0 * weights.aggression
+                elif effect.type == EffectType.CONDITIONAL_DRAW:
+                    # Chatter: volume-reward draw — Swarm loves it
+                    score += 2.0 * weights.card_draw_value
+                elif effect.type == EffectType.DRAW_PER_TILES_OWNED:
+                    # Drone Wave: territory-scaling draw
+                    score += 2.5 * weights.expansion * weights.card_draw_value
+                elif effect.type == EffectType.DRAW_PER_TILES_WITH_DEFENSE_BONUS:
+                    # Watchful Keep: pays off for fortified decks
+                    score += 2.5 * weights.defense * weights.card_draw_value
+                elif effect.type == EffectType.GAIN_RESOURCES_PER_CARD_IN_HAND:
+                    # Quartermaster: rewards defensive hands with resources
+                    score += 2.5 * weights.defense * weights.resource_value
+                elif effect.type == EffectType.CREATE_CARDS_TO_DISCARD:
+                    # Hatching Grounds / Master Engineer: deferred deck bulk.
+                    # Value depends on what's being added.
+                    count = effect.effective_value(card.is_upgraded)
+                    target_id = effect.metadata.get("card_id", "")
+                    if target_id == "swarm_rabble":
+                        score += count * 0.8 * weights.expansion
+                    elif target_id == "fortress_entrench":
+                        score += count * 0.8 * weights.defense
+                    else:
+                        score += count * 0.5
+                elif effect.type == EffectType.GRANT_ACTIONS_NEXT_ROUND_PER_SUCCESSFUL_CLAIM:
+                    # Surge+ etc — delayed action payoff
+                    score += 2.0 * weights.aggression
 
         # VP-tile awareness: boost claim cards whose power could capture
         # adjacent VP hexes (especially enemy-owned ones).
