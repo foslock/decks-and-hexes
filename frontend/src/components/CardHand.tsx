@@ -46,6 +46,10 @@ interface CardHandProps {
   onDoubleClick?: (cardIndex: number) => void;
   onDragStart?: (cardIndex: number) => void;
   onDragEnd?: () => void;
+  /** Fires on every drag move with the effective cursor position (after any
+   *  touch-input vertical offset has been applied). Lets the parent drive the
+   *  hex highlight from the same coordinates the drop will use. */
+  onDragMove?: (clientX: number, clientY: number) => void;
   disabled: boolean;
   // Deck / discard data
   deckSize: number;
@@ -128,6 +132,10 @@ const CARD_MIN_HEIGHT = 52;
 // Distance (in px) the drag ghost must travel above the hand's top edge to
 // fully morph from the compact in-hand card into the full card preview.
 const DRAG_MORPH_DISTANCE = 110;
+// On touch input, lift the effective drag cursor above the finger so the
+// targeted hex isn't hidden under the player's fingertip. Both the drop
+// target and the hex highlight use this offset so they stay in sync.
+const TOUCH_DRAG_Y_OFFSET = 56;
 
 function ActionReturnBadge({ value }: { value: number }) {
   if (value === 0) return null;
@@ -598,6 +606,7 @@ export default function CardHand({
   onDoubleClick,
   onDragStart,
   onDragEnd,
+  onDragMove,
   disabled,
   deckSize,
   discardCount,
@@ -733,7 +742,7 @@ export default function CardHand({
   const [cardMarginLeft, setCardMarginLeft] = useState(CARD_GAP);
 
   const handContainerRef = useRef<HTMLDivElement>(null);
-  const dragStartRef = useRef<{ x: number; y: number; index: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; index: number; pointerType: string } | null>(null);
   const isDraggingRef = useRef(false);
 
   // Drag swing physics — simulates card hanging from cursor top-center
@@ -1409,7 +1418,7 @@ export default function CardHand({
   const handlePointerDown = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (disabled && !trashMode) return;
     e.preventDefault();
-    dragStartRef.current = { x: e.clientX, y: e.clientY, index: localIdx };
+    dragStartRef.current = { x: e.clientX, y: e.clientY, index: localIdx, pointerType: e.pointerType };
     isDraggingRef.current = false;
   }, [disabled, trashMode]);
 
@@ -1425,8 +1434,11 @@ export default function CardHand({
         setHoveredIndex(null);
         setHoveredRect(null);
       }
+      const isTouch = dragStartRef.current.pointerType === 'touch';
+      const effectiveY = isTouch ? clientY - TOUCH_DRAG_Y_OFFSET : clientY;
       setDraggingIndex(dragStartRef.current.index);
-      setDragPos({ x: clientX, y: clientY });
+      setDragPos({ x: clientX, y: effectiveY });
+      onDragMove?.(clientX, effectiveY);
 
       // Feed horizontal cursor velocity into swing physics
       {
@@ -1441,11 +1453,12 @@ export default function CardHand({
         s.lastTime = now;
       }
 
-      // Compute drop target index for reordering
+      // Compute drop target index for reordering. Hand drop test uses the
+      // raw finger position so touch users can still drop back into the hand.
       const { isOverHand, dropIdx } = computeDropTarget(clientX, clientY);
       setDropTargetIndex(isOverHand ? dropIdx : null);
     }
-  }, [onDragStart, localOrder, computeDropTarget, setDropTargetIndex]);
+  }, [onDragStart, onDragMove, localOrder, computeDropTarget, setDropTargetIndex]);
 
   const handlePointerMove = useCallback((e: ReactPointerEvent) => {
     if (trashMode) return; // Disable dragging in trash selection mode
@@ -1494,7 +1507,10 @@ export default function CardHand({
         const now = performance.now();
         const dt = now - s.lastTime;
         const vx = dt > 0 && dt < 200 ? (e.clientX - s.lastX) / dt : 0;
-        onDragPlay(localOrder[localIdx], e.clientX, e.clientY, vx, 0);
+        // Apply the same touch offset to the drop position the highlight uses.
+        const isTouch = dragStartRef.current?.pointerType === 'touch';
+        const effectiveY = isTouch ? e.clientY - TOUCH_DRAG_Y_OFFSET : e.clientY;
+        onDragPlay(localOrder[localIdx], e.clientX, effectiveY, vx, 0);
       }
     } else {
       const cardIdx = localOrder[localIdx];
@@ -1549,7 +1565,10 @@ export default function CardHand({
           const now = performance.now();
           const dt = now - s.lastTime;
           const vx = dt > 0 && dt < 200 ? (e.clientX - s.lastX) / dt : 0;
-          onDragPlay(localOrder[localIdx], e.clientX, e.clientY, vx, 0);
+          // Apply the same touch offset to the drop position the highlight uses.
+          const isTouch = dragStartRef.current?.pointerType === 'touch';
+          const effectiveY = isTouch ? e.clientY - TOUCH_DRAG_Y_OFFSET : e.clientY;
+          onDragPlay(localOrder[localIdx], e.clientX, effectiveY, vx, 0);
         }
       }
       resetDragState();
