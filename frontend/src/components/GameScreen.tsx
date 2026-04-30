@@ -6018,6 +6018,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               upgradeCreditsAvailable={activePlayer?.upgrade_credits ?? 0}
               onUpgradeCard={handleUpgradeCard}
               isPlayPhase={phase === 'play' && !resolving && !playSubmitted}
+              cardTargetsTile={(card) => (
+                card.card_type === 'claim'
+                || card.card_type === 'defense'
+                || (card.card_type === 'engine' && (needsOpponentTarget(card) || card.target_own_tile))
+              )}
             />
             </div>
           )}
