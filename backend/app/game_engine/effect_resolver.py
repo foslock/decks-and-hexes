@@ -465,6 +465,7 @@ def _handle_gain_resources(effect: Effect, ctx: EffectContext) -> None:
     if amount <= 0:
         return
     ctx.player.resources += amount
+    ctx.player.cumulative_resources_gained += amount
     ctx.game._log(
         f"{ctx.player.name} gains {amount} resource(s) from {ctx.card.name}",
         visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -579,6 +580,8 @@ def _handle_trash_gain_buy_cost(effect: Effect, ctx: EffectContext) -> None:
             upgrade_bonus = int(effect.metadata.get("upgrade_bonus", 0))
             refund += upgrade_bonus
         ctx.player.resources += refund
+        if refund > 0:
+            ctx.player.cumulative_resources_gained += refund
         ctx.game._log(
             f"{ctx.player.name} trashes {trashed_card.name} and gains {refund} resources",
             visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -651,6 +654,8 @@ def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
     """Grant actions to self or other players this turn."""
     if effect.target == "self":
         ctx.player.actions_available += effect.value
+        if effect.value > 0:
+            ctx.player.cumulative_bonus_actions_gained += effect.value
         ctx.game._log(
             f"{ctx.player.name} gains {effect.value} action(s) from {ctx.card.name}",
             visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -658,12 +663,16 @@ def _handle_grant_actions(effect: Effect, ctx: EffectContext) -> None:
         for pid, other in ctx.game.players.items():
             if pid != ctx.player.id:
                 other.actions_available += effect.value
+                if effect.value > 0:
+                    other.cumulative_bonus_actions_gained += effect.value
         ctx.game._log(f"{ctx.player.name} grants {effect.value} action(s) to all other players",
                       actor=ctx.player.id)
     elif effect.target == "chosen_player" and ctx.action.target_player_id:
         other_player = ctx.game.players.get(ctx.action.target_player_id)
         if other_player:
             other_player.actions_available += effect.value
+            if effect.value > 0:
+                other_player.cumulative_bonus_actions_gained += effect.value
             ctx.game._log(
                 f"{ctx.player.name} grants {effect.value} action(s) to {other_player.name}",
                 actor=ctx.player.id)
@@ -824,6 +833,8 @@ def _handle_resource_refund_if_neutral(effect: Effect, ctx: EffectContext) -> No
     """Overwhelming Force: gain resource refund if target tile was neutral."""
     ev = effect.effective_value(ctx.card.is_upgraded)
     ctx.player.resources += ev
+    if ev > 0:
+        ctx.player.cumulative_resources_gained += ev
     ctx.game._log(
         f"{ctx.player.name} gains {ev} resource refund (neutral tile)",
         visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -839,6 +850,8 @@ def _handle_stacking_power_bonus(effect: Effect, ctx: EffectContext) -> None:
 def _handle_conditional_action_return(effect: Effect, ctx: EffectContext) -> None:
     """Rabble: gain action back if another Rabble was played."""
     ctx.player.actions_available += effect.value
+    if effect.value > 0:
+        ctx.player.cumulative_bonus_actions_gained += effect.value
     ctx.game._log(
         f"{ctx.player.name} gains {effect.value} action(s) back from {ctx.card.name} synergy",
         visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -1247,6 +1260,7 @@ def _handle_resources_per_claims_last_round(effect: Effect, ctx: EffectContext) 
     gained = claims * per_claim
     if gained > 0:
         ctx.player.resources += gained
+        ctx.player.cumulative_resources_gained += gained
         ctx.game._log(f"{ctx.player.name} gains {gained} resources from War Tithe ({claims} tiles claimed last round)")
     # Upgraded: draw 1 card
     if ctx.card.is_upgraded and effect.metadata.get("upgraded_draw"):
@@ -1321,6 +1335,8 @@ def _handle_conditional_action(effect: Effect, ctx: EffectContext) -> None:
     if len(ctx.player.hand) <= threshold:
         actions = effect.effective_value(ctx.card.is_upgraded)
         ctx.player.actions_available += actions
+        if actions > 0:
+            ctx.player.cumulative_bonus_actions_gained += actions
         ctx.game._log(
             f"{ctx.player.name}'s {ctx.card.name} grants {actions} action(s) "
             f"(hand size {len(ctx.player.hand)} <= {threshold})",
@@ -1328,6 +1344,7 @@ def _handle_conditional_action(effect: Effect, ctx: EffectContext) -> None:
         # Upgraded Spyglass also grants 1 resource
         if ctx.card.is_upgraded:
             ctx.player.resources += 1
+            ctx.player.cumulative_resources_gained += 1
             ctx.game._log(
                 f"{ctx.player.name} gains 1 resource from {ctx.card.name}+",
                 visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -1343,6 +1360,7 @@ def _handle_resource_scaling(effect: Effect, ctx: EffectContext) -> None:
     divisor = effect.value  # e.g. 2 = gain 1 per 2 held
     gained = max(1, ctx.player.resources // divisor)
     ctx.player.resources += gained
+    ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
         f"(had {ctx.player.resources - gained}, 1 per {divisor} held)",
@@ -1398,6 +1416,7 @@ def _handle_resource_per_vp_hex(effect: Effect, ctx: EffectContext) -> None:
     gained = vp_hex_count * per_hex
     if gained > 0:
         ctx.player.resources += gained
+        ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
         f"({vp_hex_count} connected VP tile{'s' if vp_hex_count != 1 else ''} × {per_hex})",
@@ -1411,6 +1430,7 @@ def _handle_resources_per_tiles_lost(effect: Effect, ctx: EffectContext) -> None
     gained = tiles_lost * per_tile
     if gained > 0:
         ctx.player.resources += gained
+        ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
         f"({tiles_lost} tile(s) lost last round × {per_tile})",
@@ -1445,6 +1465,7 @@ def _handle_actions_per_cards_played(effect: Effect, ctx: EffectContext) -> None
     actions_gained = min(other_cards * effect.value, max_actions)
     if actions_gained > 0:
         ctx.player.actions_available += actions_gained
+        ctx.player.cumulative_bonus_actions_gained += actions_gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} grants {actions_gained} action(s) "
         f"({other_cards} other card(s) played, max {max_actions})",
@@ -1704,6 +1725,8 @@ def _handle_abandon_and_block(effect: Effect, ctx: EffectContext) -> None:
     # Gain resources (value/upgraded_value from effect entry — see card YAML)
     gained = effect.effective_value(ctx.card.is_upgraded)
     ctx.player.resources += gained
+    if gained > 0:
+        ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
         f"{ctx.player.name} scorches tile {ctx.action.target_q},{target_r} "
         f"(now blocked terrain, +{gained} resources)",
@@ -1775,10 +1798,14 @@ def _handle_trash_gain_power(effect: Effect, ctx: EffectContext) -> None:
             multiplier = int(effect.metadata.get("multiplier", 2))
             resources_gained = power * multiplier
             ctx.player.resources += resources_gained
+            if resources_gained > 0:
+                ctx.player.cumulative_resources_gained += resources_gained
 
             action_key = "upgraded_claim_action_return" if ctx.card.is_upgraded else "claim_action_return"
             actions_gained = int(effect.metadata.get(action_key, 1))
             ctx.player.actions_available += actions_gained
+            if actions_gained > 0:
+                ctx.player.cumulative_bonus_actions_gained += actions_gained
 
             ctx.game._log(
                 f"{ctx.player.name} trashes {trashed_card.name} (Claim, power {power}) "
@@ -1806,6 +1833,8 @@ def _handle_resources_per_tiles_owned(effect: Effect, ctx: EffectContext) -> Non
         divisor = 4
     gained = tile_count // divisor
     ctx.player.resources += gained
+    if gained > 0:
+        ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} gains {gained} resources "
         f"({tile_count} tiles / {divisor})",
@@ -1947,6 +1976,7 @@ def _handle_grant_actions_if_stacked(effect: Effect, ctx: EffectContext) -> None
         other_r = other.target_r if other.target_r is not None else 0
         if other.target_q == ctx.action.target_q and other_r == tr:
             ctx.player.actions_available += ev
+            ctx.player.cumulative_bonus_actions_gained += ev
             ctx.game._log(
                 f"{ctx.player.name} gains {ev} action(s) from {ctx.card.name} "
                 f"(stacked on tile {ctx.target_tile_key})",
@@ -2029,6 +2059,7 @@ def _handle_resources_per_tiles_captured_last_round(
     gained = captured * per_tile
     if gained > 0:
         ctx.player.resources += gained
+        ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
         f"({captured} tile(s) captured last round × {per_tile})",
@@ -2107,6 +2138,7 @@ def _handle_gain_resources_per_card_in_hand(effect: Effect, ctx: EffectContext) 
     gained = counted * per
     if gained > 0:
         ctx.player.resources += gained
+        ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
         f"({counted} {filter_type or 'card(s)'} in hand × {per})",

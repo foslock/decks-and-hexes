@@ -312,7 +312,7 @@ def _projected_formula_vp(card: Card, player: Any, game: Any) -> float:
         # Most relevant for Swarm (lots of small clusters)
         if player.archetype == Archetype.SWARM:
             growth = 1.0
-    elif formula == "fortified_tiles_3":
+    elif formula == "fortified_tiles_4":
         # Most relevant for Fortress (permanent defense)
         if player.archetype == Archetype.FORTRESS:
             growth = 1.0
@@ -1215,7 +1215,14 @@ class CPUPlayer:
         # Diplomat from behind, etc.) stay skipped here because this path
         # only considers CLAIM-type cards.
         if self.profile.never_idle_fallback:
-            return self._fallback_frontier_claim(game, player, skip_card_ids)
+            claim_fallback = self._fallback_frontier_claim(game, player, skip_card_ids)
+            if claim_fallback is not None:
+                return claim_fallback
+            # Last-resort burn: cards in hand at end of turn are discarded
+            # anyway, so play any net-non-negative engine/defense rather than
+            # idle the action slot. This catches the case where Luna held
+            # extra cards but had no scored play (round-3 regression).
+            return self._fallback_burn_safe_card(game, player, skip_card_ids)
         return None
 
     def _pick_best_card(self, game: Any, player: Any,
@@ -1283,8 +1290,12 @@ class CPUPlayer:
                     scored.append((s, a, tier))
 
         # Pick from the highest non-empty tier. Noise applies within tier.
-        # When tier_priority_ordering is disabled (easy-tier), fall back to a
-        # single flat pool so card ordering is driven purely by score+noise.
+        # Tier 0 (action-return / "free" cards) is ALWAYS preferred so the CPU
+        # banks more actions before committing slots; tier 1 (card-draw) goes
+        # next so the option set expands while there are still actions to use
+        # the new cards. All shipped difficulty profiles enable this — the
+        # `else` branch is kept as an escape hatch for hypothetical future
+        # profiles that opt out of strict tiering.
         chosen: Optional[dict[str, Any]] = None
         chosen_pool: list[tuple[float, dict[str, Any]]] = []
         if self.profile.tier_priority_ordering:
@@ -1522,6 +1533,288 @@ class CPUPlayer:
                     best = (score, action)
 
         return best[1] if best is not None else None
+
+    def _fallback_burn_safe_card(
+        self,
+        game: Any,
+        player: Any,
+        skip_card_ids: Optional[set[str]] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Last-resort fallback: when both _pick_best_card and _fallback_frontier_claim
+        return None, look for ANY card in hand that's safe to play and play it
+        rather than idle the action slot. Cards in hand at end of turn are
+        discarded anyway, so most non-negative plays are strictly better than
+        leaving the action unused.
+
+        Handled categories:
+          - Chosen-opponent cards (forced_discard, plague, etc.): targeted at
+            the VP leader (most impactful opponent). Skipped only when the
+            effect would HELP the opponent (Forced March-style action grants).
+          - Mandatory self-trash cards (Demon Pact etc.): burned conditionally
+            — engines with positive immediate effects (resources / draws) are
+            played; claims/defenses follow the same effective-target rules as
+            non-trashing cards so they aren't wasted on losing plays.
+
+        Skipped (would actively harm us):
+          - Unplayable cards (Land Grant)
+          - Debt when we can't afford the trash cost
+          - Diplomat / Diplomacy from behind (would gift opponents VP)
+          - Cards that grant opponents bonus actions / draws / resources
+          - Cards with negative resource gain beyond Debt
+          - PLAY_RESOURCE_COST cards (Mercenary) — would waste resources
+          - Search/tutor cards — too complex to guess selections from here
+        """
+        if player.actions_used >= player.actions_available:
+            return None
+
+        # Iterate hand in tier-priority order (matches _pick_best_card):
+        #   tier 0 = action-return (free) — play first
+        #   tier 1 = card-draw — play next to expand options
+        #   tier 2 = everything else
+        # This guarantees that if the burn path is the only path that fires,
+        # the CPU still respects the action-economy priority.
+        def _burn_tier(c: Card) -> int:
+            if c.effective_action_return >= 1:
+                return 0
+            if c.effective_draw_cards >= 1:
+                return 1
+            return 2
+        ordered = sorted(
+            enumerate(player.hand),
+            key=lambda entry: _burn_tier(entry[1]),
+        )
+
+        for i, card in ordered:
+            if card.unplayable:
+                continue
+            if skip_card_ids and card.id in skip_card_ids:
+                continue
+            net_cost = 1 - card.effective_action_return
+            if net_cost > 0 and player.actions_used >= player.actions_available:
+                continue
+
+            # Skip Debt when we can't afford the trash cost (matches _score_engine).
+            if card.definition_id == DEF_ID_DEBT:
+                if player.resources < 3:
+                    continue
+                # Debt is safe to burn when affordable — removes dead weight.
+                return {"card_index": i}
+
+            # Negative resource gain (paying to play) — never burn.
+            if card.effective_resource_gain < 0:
+                continue
+
+            # Cards that hand opponents free VP — never burn.
+            if any(e.type == EffectType.GRANT_LAND_GRANTS for e in card.effects):
+                continue
+
+            # Cards that grant opponents bonus actions / draws / resources
+            # (Forced March-style "help your opponent" cards). Burning these
+            # in the fallback would actively help opponents catch up.
+            grants_opponent_help = False
+            for e in card.effects:
+                tgt = getattr(e, "target", None)
+                if tgt not in ("all_others", "chosen_player"):
+                    continue
+                if e.type in (
+                    EffectType.GRANT_ACTIONS,
+                    EffectType.GRANT_ACTIONS_NEXT_TURN,
+                    EffectType.GAIN_RESOURCES,
+                    EffectType.DRAW_CARDS,
+                ):
+                    grants_opponent_help = True
+                    break
+            if grants_opponent_help:
+                continue
+
+            # Cards that cost resources to play (Mercenary) — burning them on a
+            # losing target would waste both an action AND resources. Skip.
+            if any(e.type == EffectType.PLAY_RESOURCE_COST for e in card.effects):
+                continue
+
+            # Cards needing a search / tutor choice — defer to the normal
+            # scoring path which handles the selection plumbing.
+            if any(e.type == EffectType.SEARCH_ZONE for e in card.effects):
+                continue
+
+            # Mandatory self-trash (Demon Pact etc.): only burn when the
+            # immediate effect is worth losing the card. Engines with no
+            # resource/draw gain are skipped — burning them is purely a
+            # negative trade.
+            self_trash = any(e.type == EffectType.MANDATORY_SELF_TRASH for e in card.effects)
+            if self_trash and card.card_type == CardType.ENGINE:
+                if card.effective_resource_gain <= 0 and card.effective_draw_cards <= 0:
+                    continue
+
+            # Forced-discard / chosen-opponent burn target: pick the VP leader
+            # (excluding ourselves and players who've left). Falls back to any
+            # opponent. play_card sets target_player_id from this.
+            chosen_target_pid: Optional[str] = None
+            needs_chosen = (
+                card.forced_discard > 0
+                or any(getattr(e, "target", None) == "chosen_player" for e in card.effects)
+            )
+            if needs_chosen:
+                opponents = [
+                    pid for pid in game.player_order
+                    if pid != self.player_id and not game.players[pid].has_left
+                ]
+                if not opponents:
+                    continue
+                chosen_target_pid = max(
+                    opponents,
+                    key=lambda pid: getattr(game.players[pid], "vp", 0),
+                )
+
+            if card.card_type == CardType.ENGINE:
+                # Plain engines (Gather, Tithe, etc.) are always safe to burn:
+                # they only add resources / draws / actions.
+                action: dict[str, Any] = {"card_index": i}
+                if chosen_target_pid is not None:
+                    action["target_player_id"] = chosen_target_pid
+                return action
+
+            if card.card_type == CardType.DEFENSE:
+                # Burn defense onto our most valuable owned tile. For
+                # self-trashing defense cards (one-shot powerful effects),
+                # require the tile to actually be threatened — otherwise
+                # the lost card isn't recouped.
+                if game.grid is None:
+                    continue
+                owned = game.grid.get_player_tiles(self.player_id)
+                if not owned:
+                    continue
+                def _defense_priority(t: Any) -> tuple[int, int, int]:
+                    is_vp = 1 if t.is_vp else 0
+                    enemy_adj = sum(
+                        1 for a in game.grid.get_adjacent(t.q, t.r)
+                        if a.owner is not None and a.owner != self.player_id
+                    )
+                    is_base = 1 if (t.is_base and t.base_owner == self.player_id) else 0
+                    return (is_vp, enemy_adj, is_base)
+                if self_trash:
+                    threatened = [t for t in owned if _defense_priority(t)[1] > 0 or t.is_vp]
+                    if not threatened:
+                        continue
+                    def_target: HexTile = max(threatened, key=_defense_priority)
+                else:
+                    def_target = max(owned, key=_defense_priority)
+                action_def: dict[str, Any] = {
+                    "card_index": i,
+                    "target_q": def_target.q,
+                    "target_r": def_target.r,
+                }
+                if chosen_target_pid is not None:
+                    action_def["target_player_id"] = chosen_target_pid
+                return action_def
+
+            if card.card_type == CardType.CLAIM:
+                # _fallback_frontier_claim only plays claims that will WIN the
+                # tile. For non-self-trashing claims the user's directive is:
+                # burn the card anyway since it discards otherwise. For
+                # self-trashing claims, only burn if we'd actually take the
+                # tile — losing the card on a failed claim is a strict loss.
+                if game.grid is None:
+                    continue
+                if getattr(game, "claim_ban_rounds", 0) > 0:
+                    continue
+                if card.flood or card.target_own_tile:
+                    continue
+                require_winning = self_trash
+                # Pass 1: an enemy/neutral frontier target (the standard play).
+                # Pass 2 (only if pass 1 fails AND the card isn't unoccupied_only):
+                # play on one of our own threatened tiles to stack power as
+                # ad-hoc defense — claim-cards-as-defense on contested tiles.
+                grid = game.grid
+                def _own_defensive_priority(t: HexTile) -> tuple[int, int, int]:
+                    is_vp = 1 if t.is_vp else 0
+                    enemy_adj = sum(
+                        1 for a in grid.get_adjacent(t.q, t.r)
+                        if a.owner is not None and a.owner != self.player_id
+                    )
+                    is_base = 1 if (t.is_base and t.base_owner == self.player_id) else 0
+                    return (is_vp, enemy_adj, is_base)
+
+                claim_target: Optional[HexTile] = None
+                if card.adjacency_required:
+                    owned = grid.get_player_tiles(self.player_id)
+                    if not owned:
+                        continue
+                    # Pass 1: enemy/neutral frontier
+                    for pt in owned:
+                        for adj in grid.get_adjacent(pt.q, pt.r):
+                            if adj.is_blocked or adj.owner == self.player_id:
+                                continue
+                            if pt.distance_to(adj) > card.claim_range:
+                                continue
+                            if card.effective_unoccupied_only and adj.owner is not None:
+                                continue
+                            if require_winning:
+                                est = self._estimate_effective_power(game, player, adj, card)
+                                if est <= adj.defense_power:
+                                    continue
+                            claim_target = adj
+                            break
+                        if claim_target is not None:
+                            break
+                    # Pass 2: own threatened tile as defensive stack
+                    if claim_target is None and not card.effective_unoccupied_only and not require_winning:
+                        own_in_range = [
+                            ot for ot in owned
+                            if any(pt.distance_to(ot) <= card.claim_range for pt in owned)
+                            and (ot.is_vp or ot.is_base or any(
+                                a.owner is not None and a.owner != self.player_id
+                                for a in grid.get_adjacent(ot.q, ot.r)
+                            ))
+                        ]
+                        if own_in_range:
+                            claim_target = max(own_in_range, key=_own_defensive_priority)
+                    if claim_target is None:
+                        continue
+                    action_claim: dict[str, Any] = {
+                        "card_index": i,
+                        "target_q": claim_target.q,
+                        "target_r": claim_target.r,
+                    }
+                    if chosen_target_pid is not None:
+                        action_claim["target_player_id"] = chosen_target_pid
+                    return action_claim
+
+                # Non-adjacency claims (rare). Pass 1: any non-self tile.
+                for tile in grid.tiles.values():
+                    if tile.is_blocked or tile.owner == self.player_id:
+                        continue
+                    if card.effective_unoccupied_only and tile.owner is not None:
+                        continue
+                    if require_winning:
+                        est = self._estimate_effective_power(game, player, tile, card)
+                        if est <= tile.defense_power:
+                            continue
+                    claim_target = tile
+                    break
+                # Pass 2: own threatened tile (defensive stack) for unrestricted claims.
+                if claim_target is None and not card.effective_unoccupied_only and not require_winning:
+                    own_threatened = [
+                        t for t in grid.get_player_tiles(self.player_id)
+                        if t.is_vp or t.is_base or any(
+                            a.owner is not None and a.owner != self.player_id
+                            for a in grid.get_adjacent(t.q, t.r)
+                        )
+                    ]
+                    if own_threatened:
+                        claim_target = max(own_threatened, key=_own_defensive_priority)
+                if claim_target is None:
+                    continue
+                action_claim_any: dict[str, Any] = {
+                    "card_index": i,
+                    "target_q": claim_target.q,
+                    "target_r": claim_target.r,
+                }
+                if chosen_target_pid is not None:
+                    action_claim_any["target_player_id"] = chosen_target_pid
+                return action_claim_any
+
+        return None
 
     def _score_claim_targets(self, game: Any, player: Any, card: Card,
                              card_index: int,

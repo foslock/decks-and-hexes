@@ -410,7 +410,7 @@ class TestNeutralFortifiedPost:
 
 class TestNeutralWarBonds:
     def test_war_bonds_resources_and_action(self, card_registry):
-        """Tithe: gain 3 resources, gain 1 action back."""
+        """Tithe: gain 2 resources, gain 1 action back."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         wb = _copy_card(card_registry["neutral_war_bonds"], "test_wb")
@@ -421,7 +421,7 @@ class TestNeutralWarBonds:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_res + 3
+        assert player.resources == initial_res + 2
         # Action return: played costs 1 action, returns 1 → net 0
         assert player.actions_available == initial_actions + 1
 
@@ -1949,13 +1949,13 @@ class TestFortressTollRoad:
 
 class TestFortressFortifiedPosition:
     def test_fortified_position_vp_formula(self, card_registry):
-        """Fortified Position: VP from tiles with permanent defense >= 3."""
+        """Ironclad: VP from tiles with permanent defense >= 4."""
         card = card_registry["fortress_fortified_position"]
-        assert card.vp_formula == "fortified_tiles_3"
+        assert card.vp_formula == "fortified_tiles_4"
         assert card.unplayable is True
 
     def test_fortified_position_vp_computation(self, card_registry):
-        """Fortified Position: tiles with total permanent defense (base + entrench) >= 3 give VP."""
+        """Ironclad: tiles with total permanent defense (base + entrench) >= 4 give VP."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
 
@@ -1965,13 +1965,13 @@ class TestFortressFortifiedPosition:
 
         vp_before = compute_player_vp(game, "p0")
 
-        # Give a non-base tile permanent defense >= 3
+        # Give a non-base tile permanent defense >= 4
         tiles = game.grid.get_player_tiles("p0")
         non_base = [t for t in tiles if not t.is_base]
         if not non_base:
             pytest.skip("No non-base tiles")
 
-        non_base[0].permanent_defense_bonus = 3
+        non_base[0].permanent_defense_bonus = 4
         vp_after = compute_player_vp(game, "p0")
         assert vp_after == vp_before + 1
 

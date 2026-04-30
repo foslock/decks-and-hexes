@@ -764,3 +764,137 @@ class TestAdvanceResolve:
         # Only human player needs to advance
         advance_resolve(game, "p0")
         assert game.current_phase == Phase.BUY
+
+
+class TestRoundBreakdown:
+    """Round Breakdown stats: per-round snapshots emitted as round_ended events."""
+
+    EXPECTED_KEYS = {
+        "vp",
+        "tiles_occupied",
+        "cumulative_resources_gained",
+        "cumulative_bonus_actions_gained",
+        "deck_size",
+        "cumulative_claim_power_resolved",
+        "cumulative_defense_power_played",
+        "has_left",
+    }
+
+    def _run_round(self, game: GameState) -> None:
+        """Run one full round: submit empty plays, resolve, end turn."""
+        for pid in game.player_order:
+            submit_play(game, pid)
+        for pid in game.player_order:
+            advance_resolve(game, pid)
+        execute_end_of_turn(game)
+        # Round 2+ enters UPKEEP at start_of_turn; advance to PLAY for next loop
+        if game.current_phase == Phase.UPKEEP:
+            execute_upkeep(game)
+
+    def test_round_ended_event_emitted_each_round(self, small_2p_game: GameState) -> None:
+        game = small_2p_game
+        self._run_round(game)
+        self._run_round(game)
+        round_ended = [e for e in game.game_log if e.event_type == "round_ended"]
+        assert len(round_ended) == 2
+        # First snapshot was for round 1, second for round 2
+        assert [e.data["round"] for e in round_ended] == [1, 2]
+
+    def test_round_ended_payload_shape(self, small_2p_game: GameState) -> None:
+        game = small_2p_game
+        self._run_round(game)
+        entry = next(e for e in game.game_log if e.event_type == "round_ended")
+        stats = entry.data["player_stats"]
+        assert set(stats.keys()) == set(game.player_order)
+        for pid in game.player_order:
+            assert set(stats[pid].keys()) == self.EXPECTED_KEYS
+            # tiles_occupied at end of an empty-play round = base tile count (2 starting tiles)
+            assert stats[pid]["tiles_occupied"] >= 0
+            assert stats[pid]["deck_size"] >= 1
+            assert stats[pid]["has_left"] is False
+
+    def test_cumulative_resources_monotonic(self, small_2p_game: GameState) -> None:
+        game = small_2p_game
+        for _ in range(4):
+            self._run_round(game)
+        round_ended = [e for e in game.game_log if e.event_type == "round_ended"]
+        for pid in game.player_order:
+            series = [e.data["player_stats"][pid]["cumulative_resources_gained"]
+                      for e in round_ended]
+            assert all(b >= a for a, b in zip(series, series[1:])), \
+                f"cumulative_resources_gained not monotonic for {pid}: {series}"
+
+    def test_cumulative_bonus_actions_monotonic(self, small_2p_game: GameState) -> None:
+        game = small_2p_game
+        for _ in range(4):
+            self._run_round(game)
+        round_ended = [e for e in game.game_log if e.event_type == "round_ended"]
+        for pid in game.player_order:
+            series = [e.data["player_stats"][pid]["cumulative_bonus_actions_gained"]
+                      for e in round_ended]
+            assert all(b >= a for a, b in zip(series, series[1:])), \
+                f"cumulative_bonus_actions_gained not monotonic for {pid}: {series}"
+
+    def test_round_ended_marks_player_left(self, small_2p_game: GameState) -> None:
+        game = small_2p_game
+        # Simulate p1 leaving before the first end-of-turn
+        game.players["p1"].has_left = True
+        self._run_round(game)
+        entry = next(e for e in game.game_log if e.event_type == "round_ended")
+        stats = entry.data["player_stats"]
+        assert stats["p0"]["has_left"] is False
+        assert stats["p1"]["has_left"] is True
+        # The leaver still appears in the snapshot so the chart has data through their leave round
+        assert "p1" in stats
+
+    def test_immediate_card_action_return_bumps_accumulator(
+        self, small_2p_game: GameState
+    ) -> None:
+        """Playing a card with effective_action_return > 0 bumps the cumulative accumulator."""
+        game = small_2p_game
+        p0 = game.players["p0"]
+        # Find any card in hand with positive action_return
+        candidate = next(
+            (i for i, c in enumerate(p0.hand) if c.effective_action_return > 0),
+            None,
+        )
+        if candidate is None:
+            pytest.skip("No cards with action_return in opening hand for this seed")
+        before = p0.cumulative_bonus_actions_gained
+        expected_grant = p0.hand[candidate].effective_action_return
+        # Most action_return cards are GATHER-type with no target; play() handles that.
+        ok, _ = play_card(game, "p0", candidate)
+        if not ok:
+            pytest.skip("Card needed a target — skipping this seed")
+        assert p0.cumulative_bonus_actions_gained == before + expected_grant
+
+    def test_defense_accumulator_bumps_when_fortifying(
+        self, small_2p_game: GameState
+    ) -> None:
+        """Resolving a defense card increments cumulative_defense_power_played."""
+        game = small_2p_game
+        assert game.grid is not None
+        p0 = game.players["p0"]
+        before = p0.cumulative_defense_power_played
+        # Find a defense card and an owned tile to fortify
+        own_tiles = game.grid.get_player_tiles("p0")
+        if not own_tiles:
+            pytest.skip("No owned tiles to fortify")
+        defense_idx = next(
+            (i for i, c in enumerate(p0.hand)
+             if c.card_type == CardType.DEFENSE and c.effective_defense_bonus > 0),
+            None,
+        )
+        if defense_idx is None:
+            pytest.skip("No defense cards in opening hand for this seed")
+        target = own_tiles[0]
+        bonus = p0.hand[defense_idx].effective_defense_bonus
+        ok, _ = play_card(game, "p0", defense_idx, target_q=target.q, target_r=target.r)
+        if not ok:
+            pytest.skip("Defense card couldn't target this tile")
+        # Run reveal to actually apply defense; submit empty for p1
+        submit_play(game, "p1")
+        for pid in game.player_order:
+            advance_resolve(game, pid)
+        # p0's defense accumulator should have grown by at least one bonus application
+        assert p0.cumulative_defense_power_played >= before + bonus

@@ -386,7 +386,15 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
     <div ref={cardRef} data-card-full="true" data-hints-side={hintsOnLeft ? 'left' : 'right'} style={{
       width: CARD_FULL_WIDTH,
       position: 'relative',
-      background: '#1e1e3a',
+      // Layered background gives the blue/grey panel some depth: a base color
+      // plus two faint repeating gradients that read as fine fabric/paper grain
+      // and a soft top-down highlight, so the card doesn't feel flat under the
+      // 3D tilt and glare effects when zoomed.
+      background:
+        'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 35%, rgba(0,0,0,0.18) 100%),' +
+        'repeating-linear-gradient(45deg, rgba(255,255,255,0.018) 0 1px, rgba(0,0,0,0) 1px 3px),' +
+        'repeating-linear-gradient(-45deg, rgba(255,255,255,0.014) 0 1px, rgba(0,0,0,0) 1px 4px),' +
+        '#1e1e3a',
       border: `2px solid ${typeColor}`,
       borderRadius: 12,
       padding: '12px 14px 14px',

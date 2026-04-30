@@ -4,6 +4,7 @@ import { CardViewPopup } from './CardHand';
 import { useSound } from '../audio/useSound';
 import { computeVpBreakdown, type VpBreakdown } from '../utils/vpBreakdown';
 import { downloadGameLog } from '../utils/downloadGameLog';
+import RoundBreakdownOverlay from './RoundBreakdownOverlay';
 
 interface LeaderboardEntry {
   playerId: string;
@@ -46,6 +47,7 @@ export default function GameOverOverlay({
 
   const [returnedToLobby, setReturnedToLobby] = useState(false);
   const [downloadingLog, setDownloadingLog] = useState(false);
+  const [showRoundBreakdown, setShowRoundBreakdown] = useState(false);
 
   // Toggle overlay visibility with Escape key
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -346,6 +348,23 @@ export default function GameOverOverlay({
         })()}
         <button
           className="go-btn"
+          onClick={() => setShowRoundBreakdown(true)}
+          style={{
+            padding: '12px 24px',
+            fontSize: 14,
+            fontWeight: 'bold',
+            background: '#1f2a44',
+            border: '1px solid #3a4a6a',
+            borderRadius: 8,
+            color: '#cfd8ea',
+            cursor: 'pointer',
+          }}
+          title="View per-round stats for each player"
+        >
+          Round Breakdown
+        </button>
+        <button
+          className="go-btn"
           onClick={async () => {
             if (downloadingLog) return;
             setDownloadingLog(true);
@@ -439,6 +458,15 @@ export default function GameOverOverlay({
           />
         );
       })()}
+
+      {/* Round Breakdown overlay */}
+      {showRoundBreakdown && (
+        <RoundBreakdownOverlay
+          gameId={gameState.id}
+          gameState={gameState}
+          onClose={() => setShowRoundBreakdown(false)}
+        />
+      )}
     </div>
   );
 }

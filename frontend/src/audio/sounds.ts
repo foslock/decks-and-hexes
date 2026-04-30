@@ -128,10 +128,15 @@ export function countdownTick(ctx: Ctx, dest: Dest) {
   osc(ctx, dest, 'sine', 880, 0.08, 0.1, 10);
 }
 
-/** Bright chime — perfect fifth */
+/** Bright chime — perfect fifth.
+ *  Scheduled ~60ms in the future so the audio thread has the nodes queued in
+ *  its render buffer BEFORE the main thread starts the heavy lobby→game
+ *  navigation that immediately follows. Without the lookahead, a long main-
+ *  thread block right after start(now) can swallow the chime in production
+ *  builds where the GameScreen mount is more expensive than in dev. */
 export function countdownGo(ctx: Ctx, dest: Dest) {
-  osc(ctx, dest, 'sine', 880, 0.1, 0.3, 10);
-  osc(ctx, dest, 'sine', 1320, 0.08, 0.3, 10);
+  oscAt(ctx, dest, 'sine', 880, 0.1, 0.06, 0.3, 10);
+  oscAt(ctx, dest, 'sine', 1320, 0.08, 0.06, 0.3, 10);
 }
 
 /** Subtle UI click */

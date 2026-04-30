@@ -86,7 +86,7 @@ class Card:
     unplayable: bool = False  # Cannot be played from hand (e.g. Land Grant — dead weight)
     trash_immune: bool = False  # Cannot be targeted by other cards' trash effects
     passive_vp: int = 0  # VP awarded on purchase (card stays in deck)
-    vp_formula: str = ""  # Dynamic VP formula: "trash_div_5", "fortified_tiles_3", "deck_div_10"
+    vp_formula: str = ""  # Dynamic VP formula: "trash_div_5", "fortified_tiles_4", "deck_div_10"
     unique: bool = False  # If true, player may only own one copy in their deck (draw + hand + discard)
     description: str = ""
     upgrade_description: str = ""

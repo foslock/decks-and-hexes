@@ -261,10 +261,13 @@ export default function LobbyScreen({
           addRecentSeed(lobby.config.map_seed, lobby.config.grid_size);
         }
         console.log('[Lobby] calling onGameStart with gameId:', lastMessage.game_id);
-        onGameStart(
-          lastMessage.game_id as string,
-          lastMessage.state as unknown as GameState,
-        );
+        // Defer the heavy lobby→game navigation by a frame so the audio
+        // scheduler call above settles before React unmounts this screen and
+        // mounts the (expensive) GameScreen — otherwise the production build's
+        // longer mount time can preempt the still-queuing chime.
+        const gameId = lastMessage.game_id as string;
+        const state = lastMessage.state as unknown as GameState;
+        setTimeout(() => onGameStart(gameId, state), 80);
       }
     } else if (lastMessage.type === 'lobby_closed') {
       console.log('[Lobby] lobby_closed received → onLeave');
