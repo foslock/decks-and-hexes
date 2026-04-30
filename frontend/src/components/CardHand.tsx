@@ -112,6 +112,11 @@ interface CardHandProps {
   /** True when the game is in the Play phase. The upgrade badge only shows
    *  during Play — upgrading is not a legal action in Reveal/Buy/Upkeep. */
   isPlayPhase?: boolean;
+  /** Predicate: does this card target a tile when played? Used to scope the
+   *  touch-drag fade-over-grid effect to cards the player aims at the board.
+   *  Cards that don't target a tile (targetless engine cards) keep full opacity
+   *  while dragged. Defaults to assuming every card targets a tile. */
+  cardTargetsTile?: (card: Card) => boolean;
 }
 
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
@@ -637,6 +642,7 @@ export default function CardHand({
   upgradeCreditsAvailable = 0,
   onUpgradeCard,
   isPlayPhase = false,
+  cardTargetsTile,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -2063,9 +2069,12 @@ export default function CardHand({
         const distAboveHand = Math.max(0, handTop - dragPos.y);
         const morph = Math.min(1, distAboveHand / DRAG_MORPH_DISTANCE);
         // On touch, fade the ghost once it's clearly above the hand (over the
-        // grid area) so the player can see the board beneath the card.
+        // grid area) so the player can see the board beneath the card. Skip
+        // the fade for cards that don't target a tile — those don't need the
+        // board visible while dragging.
         const isTouchDrag = dragStartRef.current?.pointerType === 'touch';
-        const ghostOpacity = isTouchDrag && morph >= 1 ? TOUCH_DRAG_GRID_OPACITY : 1;
+        const targetsTile = cardTargetsTile ? cardTargetsTile(dragCard) : true;
+        const ghostOpacity = isTouchDrag && morph >= 1 && targetsTile ? TOUCH_DRAG_GRID_OPACITY : 1;
         return (
           <div style={{
             position: 'fixed',
