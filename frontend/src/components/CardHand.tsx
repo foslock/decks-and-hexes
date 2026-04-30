@@ -133,9 +133,13 @@ const CARD_MIN_HEIGHT = 52;
 // fully morph from the compact in-hand card into the full card preview.
 const DRAG_MORPH_DISTANCE = 110;
 // On touch input, lift the effective drag cursor above the finger so the
-// targeted hex isn't hidden under the player's fingertip. Both the drop
-// target and the hex highlight use this offset so they stay in sync.
+// targeted hex isn't hidden under the player's fingertip. The drop target
+// and hex highlight use this offset, but the drag ghost itself stays at
+// the raw finger position so the card visual doesn't obscure the grid.
 const TOUCH_DRAG_Y_OFFSET = 56;
+// Opacity applied to the drag ghost while a touch drag hovers the grid,
+// so the player can see the board through the card under their finger.
+const TOUCH_DRAG_GRID_OPACITY = 0.45;
 
 function ActionReturnBadge({ value }: { value: number }) {
   if (value === 0) return null;
@@ -1435,10 +1439,12 @@ export default function CardHand({
         setHoveredRect(null);
       }
       const isTouch = dragStartRef.current.pointerType === 'touch';
-      const effectiveY = isTouch ? clientY - TOUCH_DRAG_Y_OFFSET : clientY;
+      const offsetY = isTouch ? clientY - TOUCH_DRAG_Y_OFFSET : clientY;
       setDraggingIndex(dragStartRef.current.index);
-      setDragPos({ x: clientX, y: effectiveY });
-      onDragMove?.(clientX, effectiveY);
+      // Card visual stays under the finger so it doesn't block the grid view;
+      // the offset Y is only used for hit detection / hex highlighting.
+      setDragPos({ x: clientX, y: clientY });
+      onDragMove?.(clientX, offsetY);
 
       // Feed horizontal cursor velocity into swing physics
       {
@@ -2056,6 +2062,10 @@ export default function CardHand({
         const handTop = handRect?.top ?? window.innerHeight;
         const distAboveHand = Math.max(0, handTop - dragPos.y);
         const morph = Math.min(1, distAboveHand / DRAG_MORPH_DISTANCE);
+        // On touch, fade the ghost once it's clearly above the hand (over the
+        // grid area) so the player can see the board beneath the card.
+        const isTouchDrag = dragStartRef.current?.pointerType === 'touch';
+        const ghostOpacity = isTouchDrag && morph >= 1 ? TOUCH_DRAG_GRID_OPACITY : 1;
         return (
           <div style={{
             position: 'fixed',
@@ -2066,6 +2076,8 @@ export default function CardHand({
             transformOrigin: 'top center',
             transform: `rotate(${dragSwingAngle}deg) scale(1.05)`,
             filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.5))',
+            opacity: ghostOpacity,
+            transition: 'opacity 0.12s ease',
           }}>
             {/* Compact ghost — fades out as the card leaves the hand */}
             {morph < 1 && (
