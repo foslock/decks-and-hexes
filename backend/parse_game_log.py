@@ -178,6 +178,39 @@ def summarize_round_progress(log: ParsedLog) -> None:
     print()
 
 
+def summarize_round_breakdown(log: ParsedLog) -> None:
+    """Per-round breakdown of the six chartable Round Breakdown metrics."""
+    rounds = [
+        e for e in log.entries if e.get("event_type") == "round_ended"
+    ]
+    if not rounds:
+        return
+    metrics = [
+        ("vp", "vp"),
+        ("tiles", "tiles_occupied"),
+        ("res", "cumulative_resources_gained"),
+        ("act", "cumulative_bonus_actions_gained"),
+        ("deck", "deck_size"),
+        ("clm_pwr", "cumulative_claim_power_resolved"),
+        ("def_pwr", "cumulative_defense_power_played"),
+    ]
+    pids = log.meta.get("player_order", [])
+    metric_labels = " ".join(f"{m[0]:>7}" for m in metrics)
+    print("Round breakdown (end-of-round snapshots):")
+    for e in rounds:
+        data = e.get("data") or {}
+        rnd = data.get("round")
+        stats = data.get("player_stats", {})
+        print(f"  Round {rnd}")
+        print(f"    {'player':<14}  {metric_labels}  left")
+        for pid in pids:
+            row = stats.get(pid, {})
+            values = " ".join(f"{int(row.get(key, 0)):>7}" for _, key in metrics)
+            left = "Y" if row.get("has_left") else ""
+            print(f"    {log.player_name(pid):<14}  {values}  {left}")
+    print()
+
+
 def print_events_filtered(
     log: ParsedLog,
     event_types: list[str] | None,
@@ -218,6 +251,7 @@ def main() -> int:
         summarize_event_counts(log)
         summarize_per_player(log)
         summarize_round_progress(log)
+        summarize_round_breakdown(log)
 
     if args.events or args.player:
         event_types = [s.strip() for s in args.events.split(",")] if args.events else None

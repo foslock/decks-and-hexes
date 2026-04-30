@@ -310,6 +310,11 @@ class Player:
     claims_won_last_round: int = 0  # tiles successfully claimed last round (for War Tithe)
     tiles_lost_last_round: int = 0  # tiles captured from this player last round (for Robin Hood)
     tiles_captured_from_opponents_last_round: int = 0  # tiles taken from opponents last round (for Pursuit)
+    # Round Breakdown accumulators — surfaced via the round_ended event for charting.
+    cumulative_resources_gained: int = 0
+    cumulative_bonus_actions_gained: int = 0
+    cumulative_claim_power_resolved: int = 0
+    cumulative_defense_power_played: int = 0
     pending_discard: int = 0  # deferred discard count (e.g. Regroup: draw first, then discard)
     pending_search: Optional[PendingSearch] = None  # deferred tutor/search (SEARCH_ZONE effects)
     # Smart roll state — hidden heuristics for archetype market draws.
@@ -395,6 +400,33 @@ class Player:
             # so it's only serialized when the recipient is this player
             "pending_search": self.pending_search.to_dict() if self.pending_search and not hide_hand else None,
         }
+
+
+def credit_resources(player: Player, amount: int) -> None:
+    """Add resources to a player and bump the cumulative-gained accumulator.
+
+    Funnel every resource credit (card effects, passives, start-of-turn bonuses,
+    refunds) through this helper so the Round Breakdown chart's
+    cumulative_resources_gained metric stays accurate. Pure spends
+    (player.resources -= N) bypass this helper by design.
+    """
+    if amount <= 0:
+        return
+    player.resources += amount
+    player.cumulative_resources_gained += amount
+
+
+def credit_bonus_actions(player: Player, amount: int) -> None:
+    """Grant bonus actions from a card effect (immediate or deferred).
+
+    Funnel every card-driven action grant through this helper. Excludes the
+    base per-turn allotment and passive-driven start-of-turn extras — those
+    bump player.actions_available directly without going through here.
+    """
+    if amount <= 0:
+        return
+    player.actions_available += amount
+    player.cumulative_bonus_actions_gained += amount
 
 
 @dataclass
@@ -723,11 +755,11 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
         divisor = 4 if is_upgraded else 5
         return len(player.trash) // divisor
 
-    elif formula == "fortified_tiles_3":
-        # Fortified Position: 1 VP per non-base tile with total permanent defense >= 3 (>= 2 upgraded)
+    elif formula == "fortified_tiles_4":
+        # Ironclad: 1 VP per non-base tile with total permanent defense >= 4 (>= 3 upgraded)
         if not game.grid:
             return 0
-        threshold = 2 if is_upgraded else 3
+        threshold = 3 if is_upgraded else 4
         return sum(
             1 for t in game.grid.tiles.values()
             if t.owner == player.id and not t.is_base
@@ -996,7 +1028,7 @@ def execute_start_of_turn(game: GameState) -> GameState:
         # Grant bonus resources from next-turn effects (Supply Depot)
         extra_resources = player.turn_modifiers.extra_resources_next_turn
         if extra_resources > 0:
-            player.resources += extra_resources
+            credit_resources(player, extra_resources)
             game._log(f"{player.name} gains {extra_resources} extra resource(s) from effects",
                       visible_to=[pid], actor=pid)
             player.turn_modifiers.extra_resources_next_turn = 0
@@ -1595,11 +1627,14 @@ def play_card(game: GameState, player_id: str, card_index: int,
 
     # Handle immediate effects (↺ and ↑ return actions)
     if card.effective_action_return > 0:
-        player.actions_available += card.effective_action_return
+        credit_bonus_actions(player, card.effective_action_return)
 
     # Immediate resource gain (or cost for negative values like Debt)
     if card.timing == Timing.IMMEDIATE and card.effective_resource_gain != 0:
-        player.resources += card.effective_resource_gain
+        if card.effective_resource_gain > 0:
+            credit_resources(player, card.effective_resource_gain)
+        else:
+            player.resources += card.effective_resource_gain  # negative = spend (e.g. Debt)
         if card.effective_resource_gain > 0:
             game._log(f"{player.name} gains {card.effective_resource_gain} resources from {card.name}",
                       visible_to=[player_id], actor=player_id)
@@ -2055,7 +2090,7 @@ def execute_reveal(game: GameState) -> GameState:
         # Resource / draw effects for ON_RESOLUTION defense cards
         if card.timing == Timing.ON_RESOLUTION:
             if card.effective_resource_gain > 0:
-                player.resources += card.effective_resource_gain
+                credit_resources(player, card.effective_resource_gain)
             if card.effective_draw_cards > 0:
                 drawn = player.deck.draw(card.effective_draw_cards, game.rng)
                 player.hand.extend(drawn)
@@ -2069,11 +2104,13 @@ def execute_reveal(game: GameState) -> GameState:
             tile = game.grid.get_tile(action.target_q, _action_target_r)
             if tile and tile.owner == pid:
                 tile.defense_power += card.effective_defense_bonus
+                player.cumulative_defense_power_played += card.effective_defense_bonus
                 game._log(f"{player.name} fortifies tile {action.target_q},{action.target_r} (+{card.effective_defense_bonus} defense)")
             for et_q, et_r in action.extra_targets:
                 et_tile = game.grid.get_tile(et_q, et_r)
                 if et_tile and et_tile.owner == pid:
                     et_tile.defense_power += card.effective_defense_bonus
+                    player.cumulative_defense_power_played += card.effective_defense_bonus
                     game._log(f"{player.name} fortifies tile {et_q},{et_r} (+{card.effective_defense_bonus} defense)")
 
         # Resolve structured on_resolution effects (permanent_defense, defense_per_adjacent, etc.)
@@ -2158,6 +2195,7 @@ def execute_reveal(game: GameState) -> GameState:
             player = game.players[pid]
             power = calculate_effective_power(game, player, action.card, action)
             power_by_player[pid] = power_by_player.get(pid, 0) + power
+            player.cumulative_claim_power_resolved += power
 
         # Add existing defense (owned tile: credited to owner; unowned tile with intrinsic
         # defense: modeled as a neutral blocker that real players must beat)
@@ -2386,7 +2424,7 @@ def execute_reveal(game: GameState) -> GameState:
 
         if card.timing == Timing.ON_RESOLUTION:
             if card.effective_resource_gain > 0:
-                player.resources += card.effective_resource_gain
+                credit_resources(player, card.effective_resource_gain)
             if card.effective_draw_cards > 0:
                 drawn = player.deck.draw(card.effective_draw_cards, game.rng)
                 player.hand.extend(drawn)
@@ -3027,10 +3065,51 @@ def end_buy_phase(game: GameState, player_id: str) -> tuple[bool, str]:
     return True, "Done buying"
 
 
+def _emit_round_ended_snapshot(game: GameState) -> None:
+    """Snapshot per-player Round Breakdown stats at the close of the round.
+
+    Emitted as a `round_ended` event so the frontend chart and offline
+    parse_game_log.py analysis can both consume the same per-round series.
+    """
+    player_stats: dict[str, dict[str, Any]] = {}
+    for pid in game.player_order:
+        player = game.players[pid]
+        tiles_occupied = (
+            sum(1 for t in game.grid.tiles.values() if t.owner == pid)
+            if game.grid else 0
+        )
+        deck_size = (
+            len(player.deck.cards) + len(player.deck.discard) + len(player.hand)
+        )
+        player_stats[pid] = {
+            "vp": compute_player_vp(game, pid),
+            "tiles_occupied": tiles_occupied,
+            "cumulative_resources_gained": player.cumulative_resources_gained,
+            "cumulative_bonus_actions_gained": player.cumulative_bonus_actions_gained,
+            "deck_size": deck_size,
+            "cumulative_claim_power_resolved": player.cumulative_claim_power_resolved,
+            "cumulative_defense_power_played": player.cumulative_defense_power_played,
+            "has_left": player.has_left,
+        }
+    game._log(
+        f"=== Round {game.current_round} ended ===",
+        event_type="round_ended",
+        data={
+            "round": game.current_round,
+            "player_stats": player_stats,
+        },
+    )
+
+
 def execute_end_of_turn(game: GameState) -> GameState:
     """Phase 5: End of Turn."""
     game.current_phase = Phase.END_OF_TURN
     game._log("=== End of Turn ===")
+    # Snapshot per-player Round Breakdown stats BEFORE any end-of-turn mutations
+    # (VP-target check, round-limit check, round increment) so the snapshot
+    # captures the state at the close of the round just played, including the
+    # final round when the game ends here.
+    _emit_round_ended_snapshot(game)
 
     for pid in game.player_order:
         player = game.players[pid]

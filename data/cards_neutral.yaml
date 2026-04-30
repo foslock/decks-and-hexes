@@ -321,10 +321,10 @@ cards:
     power: 0
     draw_cards: 1
     upgraded_draw_cards: 1
-    effect: "Gain 3 resources. Draw 1 card. Gain 1 action."
-    effect_upgraded: "Gain 5 resources. Draw 1 card. Gain 1 action."
-    resource_gain: 3
-    upgraded_resource_gain: 5
+    effect: "Gain 2 resources. Draw 1 card. Gain 1 action."
+    effect_upgraded: "Gain 4 resources. Draw 1 card. Gain 1 action."
+    resource_gain: 2
+    upgraded_resource_gain: 4
     trash_on_use: false
 
   - id: neutral_reduce
@@ -489,7 +489,7 @@ cards:
     action_return: 0
     power: 0
     effect: "Gain 1 resource for every 3 resources you already have (rounded down, minimum 1)."
-    effect_upgraded: "Gain 1 resource for every 3 resources you already have (rounded down, minimum 1). Draw 1 card."
+    effect_upgraded: "Draw 1 card. Gain 1 resource for every 3 resources you already have (rounded down, minimum 1)."
     trash_on_use: false
     effects:
       - type: resource_scaling

@@ -354,9 +354,9 @@ cards:
     power: 0
     unplayable: true
     unique: true
-    vp_formula: fortified_tiles_3
-    effect: "+1 VP for every non-base tile you own with a total permanent defense of 3 or higher."
-    effect_upgraded: "+1 VP for every non-base tile you own with a total permanent defense of 2 or higher."
+    vp_formula: fortified_tiles_4
+    effect: "+1 VP for every non-base tile you own with a total permanent defense of 4 or higher."
+    effect_upgraded: "+1 VP for every non-base tile you own with a total permanent defense of 3 or higher."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards Entrench investment. Fluctuates as tiles are lost or captured. Takes up a hand slot when drawn."
