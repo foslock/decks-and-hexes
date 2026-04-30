@@ -2438,11 +2438,60 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
     };
   }, []);
 
+  // Pause/resume the Pixi ticker in response to the `paused` prop.
+  // Pausing relieves iOS Safari memory/GPU pressure when a full-screen DOM
+  // overlay (shop, card browser, deck viewer, upgrade preview) is
+  // compositing on top of the WebGL canvas. We do a single render before
+  // stopping so the board's last frame is visible behind the overlay backdrop.
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    if (paused) {
+      // Render one final frame with current state, then stop the ticker
+      try { app.renderer.render(app.stage); } catch { /* renderer may be tearing down */ }
+      app.ticker.stop();
+    } else {
+      app.ticker.start();
+    }
+  }, [paused]);
+
+  // Re-render tiles when data changes
+  useEffect(() => {
+    if (!appRef.current) return;
+    renderTiles();
+    // Re-add VP path layer under tile icons/text (at the index saved before PASS 8)
+    const vpG = vpPathGraphicsRef.current;
+    if (vpG && hexContainerRef.current) {
+      const idx = Math.min(vpInsertIndexRef.current, hexContainerRef.current.children.length);
+      hexContainerRef.current.addChildAt(vpG, idx);
+    }
+    // Re-add resolve animation layer just above VP paths, below text labels
+    const resolveC = resolveLayerContainerRef.current;
+    if (resolveC && hexContainerRef.current) {
+      const resolveIdx = vpInsertIndexRef.current + (vpG ? 1 : 0);
+      hexContainerRef.current.addChildAt(resolveC, Math.min(resolveIdx, hexContainerRef.current.children.length));
+    }
+    // Re-add review pulse layer on top
+    const pulseG = reviewPulseGraphicsRef.current;
+    if (pulseG && hexContainerRef.current) {
+      hexContainerRef.current.addChild(pulseG);
+    }
+    // renderTiles destroys and recreates every tile Graphics (and the shared
+    // hover-edge Graphics). Forget the cached hover key so the drag-hover
+    // effect below re-dispatches the synthetic pointerover onto the fresh
+    // graphics — otherwise the white edges drawn into the just-destroyed
+    // hover-edge layer disappear after each re-render.
+    currentDragHoverKeyRef.current = null;
+  }, [tiles, highlightTiles, weakHighlightTiles, activePlayerId, plannedActions, multiTileTargets, claimChevrons, connectedVpTiles, buildProgress, bgEnabled, renderTiles]);
+
   // Drag-hover override: when dragHoverPosition is set, drive the per-tile
   // hover effects (white edges, preview label, cursor proximity fade) from
   // that position instead of the actual pointer. CardHand applies a vertical
   // offset on touch input so the highlighted hex isn't hidden under the
   // player's finger; this effect keeps the hover in sync with that offset.
+  // Declared after the renderTiles effect so it runs second on each commit
+  // and dispatches its synthetic pointerover onto the freshly-created tile
+  // Graphics (rather than the about-to-be-destroyed previous-render set).
   useEffect(() => {
     dragHoverActiveRef.current = dragHoverPosition != null;
 
@@ -2509,8 +2558,6 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
     if (newG && !newG.destroyed) {
       // The native handlers read e.global.{x,y} for tooltip positioning; the
       // canvas-local coords here match what a real Pixi event would carry.
-      // The native handlers only read `e.global.{x,y}` (for tooltip
-      // positioning) — passing a minimal stand-in is safe at runtime.
       (newG.emit as (event: string, arg?: unknown) => void)(
         'pointerover',
         { global: { x: canvasX, y: canvasY } },
@@ -2519,47 +2566,7 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
     } else {
       currentDragHoverKeyRef.current = null;
     }
-  }, [dragHoverPosition]);
-
-  // Pause/resume the Pixi ticker in response to the `paused` prop.
-  // Pausing relieves iOS Safari memory/GPU pressure when a full-screen DOM
-  // overlay (shop, card browser, deck viewer, upgrade preview) is
-  // compositing on top of the WebGL canvas. We do a single render before
-  // stopping so the board's last frame is visible behind the overlay backdrop.
-  useEffect(() => {
-    const app = appRef.current;
-    if (!app) return;
-    if (paused) {
-      // Render one final frame with current state, then stop the ticker
-      try { app.renderer.render(app.stage); } catch { /* renderer may be tearing down */ }
-      app.ticker.stop();
-    } else {
-      app.ticker.start();
-    }
-  }, [paused]);
-
-  // Re-render tiles when data changes
-  useEffect(() => {
-    if (!appRef.current) return;
-    renderTiles();
-    // Re-add VP path layer under tile icons/text (at the index saved before PASS 8)
-    const vpG = vpPathGraphicsRef.current;
-    if (vpG && hexContainerRef.current) {
-      const idx = Math.min(vpInsertIndexRef.current, hexContainerRef.current.children.length);
-      hexContainerRef.current.addChildAt(vpG, idx);
-    }
-    // Re-add resolve animation layer just above VP paths, below text labels
-    const resolveC = resolveLayerContainerRef.current;
-    if (resolveC && hexContainerRef.current) {
-      const resolveIdx = vpInsertIndexRef.current + (vpG ? 1 : 0);
-      hexContainerRef.current.addChildAt(resolveC, Math.min(resolveIdx, hexContainerRef.current.children.length));
-    }
-    // Re-add review pulse layer on top
-    const pulseG = reviewPulseGraphicsRef.current;
-    if (pulseG && hexContainerRef.current) {
-      hexContainerRef.current.addChild(pulseG);
-    }
-  }, [tiles, highlightTiles, weakHighlightTiles, activePlayerId, plannedActions, multiTileTargets, claimChevrons, connectedVpTiles, buildProgress, bgEnabled, renderTiles]);
+  });
 
   // Refresh tooltip when planned actions change (e.g. after undo)
   useEffect(() => {
