@@ -6,6 +6,45 @@ import CardFull, { CARD_FULL_WIDTH } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 
+/** Module-level cache of the iOS DeviceOrientation permission state so the
+ *  request runs once and is shared across modal opens. iOS requires the
+ *  request to happen synchronously inside a user gesture, so it's kicked off
+ *  from `showZoom` (which runs in the click handler that opens the modal),
+ *  not from the modal's effect — the gesture would already be over by then. */
+type OrientationPermissionState = 'unknown' | 'pending' | 'granted' | 'denied' | 'unsupported';
+let orientationPermission: OrientationPermissionState = 'unknown';
+const orientationPermissionListeners = new Set<() => void>();
+function notifyOrientationPermission() {
+  for (const fn of orientationPermissionListeners) fn();
+}
+function ensureOrientationPermission() {
+  if (typeof window === 'undefined') return;
+  if (orientationPermission !== 'unknown') return;
+  if (!('DeviceOrientationEvent' in window)) {
+    orientationPermission = 'unsupported';
+    return;
+  }
+  const DOE = window.DeviceOrientationEvent as unknown as {
+    requestPermission?: () => Promise<'granted' | 'denied'>;
+  };
+  if (typeof DOE.requestPermission !== 'function') {
+    // Non-iOS platforms (Android Chrome, etc.) don't gate orientation events.
+    orientationPermission = 'granted';
+    notifyOrientationPermission();
+    return;
+  }
+  orientationPermission = 'pending';
+  DOE.requestPermission()
+    .then(state => {
+      orientationPermission = state === 'granted' ? 'granted' : 'denied';
+      notifyOrientationPermission();
+    })
+    .catch(() => {
+      orientationPermission = 'denied';
+      notifyOrientationPermission();
+    });
+}
+
 /** Wraps the zoomed CardFull with a 3D tilt + glare overlay so the card feels
  *  like a physical, slightly reflective object in the user's hand. On
  *  pointer-capable devices the tilt tracks the cursor over the card's bounds.
@@ -45,34 +84,22 @@ function TiltingZoomedCard({ card }: { card: Card }) {
         setTilt({ x: nx, y: ny, glareX: gx, glareY: gy, active: true });
       };
 
-      const DOE = window.DeviceOrientationEvent as unknown as {
-        requestPermission?: () => Promise<'granted' | 'denied'>;
-      };
-      let unlistenPermission: (() => void) | null = null;
-
-      if (typeof DOE.requestPermission === 'function') {
-        // iOS 13+: permission must be requested from a user gesture. The
-        // modal is opened by a tap, but that gesture has already ended by
-        // the time this effect runs, so wait for the next touch on the
-        // overlay and request then.
-        const requestOnTouch = () => {
-          DOE.requestPermission!()
-            .then(state => {
-              if (state === 'granted') {
-                window.addEventListener('deviceorientation', onOrient);
-              }
-            })
-            .catch(() => { /* user denied or prompt failed; leave card flat */ });
-        };
-        window.addEventListener('touchend', requestOnTouch, { once: true });
-        unlistenPermission = () => window.removeEventListener('touchend', requestOnTouch);
-      } else {
+      let attached = false;
+      const attach = () => {
+        if (attached) return;
+        if (orientationPermission !== 'granted') return;
+        attached = true;
         window.addEventListener('deviceorientation', onOrient);
-      }
+      };
+      // Permission is requested from `showZoom` (a real click gesture) so by
+      // the time this effect runs the iOS prompt is usually resolved. If it's
+      // still pending, attach as soon as the cached state flips.
+      attach();
+      orientationPermissionListeners.add(attach);
 
       return () => {
-        window.removeEventListener('deviceorientation', onOrient);
-        unlistenPermission?.();
+        orientationPermissionListeners.delete(attach);
+        if (attached) window.removeEventListener('deviceorientation', onOrient);
       };
     }
 
@@ -183,6 +210,10 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
   const shiftHeld = useShiftKey();
 
   const showZoom = useCallback((card: Card, cardList?: Card[]) => {
+    // Kick off the iOS DeviceOrientation permission prompt synchronously
+    // inside the click gesture that opened the modal — by the time the
+    // modal mounts, the gesture is over and iOS would reject the request.
+    ensureOrientationPermission();
     setZoomedCard(card);
     setNavList(cardList ?? null);
   }, []);

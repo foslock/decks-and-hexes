@@ -167,6 +167,15 @@ interface HexGridProps {
   undoableTiles?: Set<string>;
   /** Ref populated with the Pixi Container used for resolve animations — set by HexGrid, read by ResolveOverlay */
   resolveLayerRef?: React.MutableRefObject<Container | null>;
+  /**
+   * Effective drag-cursor position in client (viewport) coordinates while a
+   * card is being dragged. When set, drives the hex hover highlight from this
+   * position so it stays in sync with the drop target — even on touch input,
+   * where CardHand applies a vertical offset to lift the cursor above the
+   * player's finger. Native pointer events from touch are suppressed during
+   * drag to avoid double-highlighting the actual finger tile.
+   */
+  dragHoverPosition?: { clientX: number; clientY: number } | null;
 }
 
 /** Re-exported so callers can type the resolve layer ref without importing pixi.js directly. */
@@ -454,7 +463,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles, resolveLayerRef }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles, resolveLayerRef, dragHoverPosition }: HexGridProps) {
   const bgEnabled = useBackgroundImages();
   const bgEnabledRef = useRef(bgEnabled);
   bgEnabledRef.current = bgEnabled;
@@ -538,6 +547,12 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressAnimRef = useRef<(() => void) | null>(null);
   const longPressFiredRef = useRef(false);
+  // True while a card drag is active and dragHoverPosition drives hover. Used
+  // to suppress native touch pointerover/pointerout events on tile graphics so
+  // the synthetic events dispatched at the offset position win.
+  const dragHoverActiveRef = useRef(false);
+  // Tile key of the hex currently shown as hovered via the drag-hover override.
+  const currentDragHoverKeyRef = useRef<string | null>(null);
 
   tilesRef.current = tiles;
   highlightRef.current = highlightTiles;
@@ -864,6 +879,10 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
       });
       g.on('pointerover', (e) => {
         if (disableHoverRef.current) return;
+        // Touch hover is driven by the drag-hover override during drags so the
+        // highlight stays in sync with the offset drop target. Skip the native
+        // event for the hex actually under the finger.
+        if (dragHoverActiveRef.current && e?.pointerType === 'touch') return;
         if (!tile.is_blocked) {
           hoveredTileRef.current = key;
           const hoverEdgeG = hoverEdgeGraphicsRef.current;
@@ -1163,7 +1182,8 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
         if (disableHoverRef.current) return;
         setTooltip((prev) => prev ? { ...prev, x: e.global.x, y: e.global.y } : null);
       });
-      g.on('pointerout', () => {
+      g.on('pointerout', (e) => {
+        if (dragHoverActiveRef.current && e?.pointerType === 'touch') return;
         if (!tile.is_blocked) {
           hoverEdgeGraphicsRef.current?.clear();
           hoveredTileRef.current = null;
@@ -2417,6 +2437,89 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
       if (resolveLayerRefLocal.current) resolveLayerRefLocal.current.current = null;
     };
   }, []);
+
+  // Drag-hover override: when dragHoverPosition is set, drive the per-tile
+  // hover effects (white edges, preview label, cursor proximity fade) from
+  // that position instead of the actual pointer. CardHand applies a vertical
+  // offset on touch input so the highlighted hex isn't hidden under the
+  // player's finger; this effect keeps the hover in sync with that offset.
+  useEffect(() => {
+    dragHoverActiveRef.current = dragHoverPosition != null;
+
+    const clearCurrent = () => {
+      const prevKey = currentDragHoverKeyRef.current;
+      if (!prevKey) return;
+      const prevG = tileGraphicsRef.current.get(prevKey)?.g;
+      // Pixi's typed emit signature requires a real FederatedEvent; we
+      // synthesize a minimal stand-in (the existing handler ignores the
+      // argument), so cast through `unknown` to bypass the nominal check.
+      if (prevG && !prevG.destroyed) (prevG.emit as (event: string, arg?: unknown) => void)('pointerout');
+      cursorHexRef.current = null;
+      cursorOnGridRef.current = false;
+      currentDragHoverKeyRef.current = null;
+    };
+
+    if (!dragHoverPosition) {
+      clearCurrent();
+      return;
+    }
+
+    const containerEl = containerRef.current;
+    const transform = transformRefLocal.current?.current;
+    if (!containerEl || !transform) return;
+    const rect = containerEl.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+
+    const canvasX = dragHoverPosition.clientX - rect.left;
+    const canvasY = dragHoverPosition.clientY - rect.top;
+    // Bail out (and clear) if the offset cursor isn't over the grid container.
+    if (canvasX < 0 || canvasX > rect.width || canvasY < 0 || canvasY > rect.height) {
+      clearCurrent();
+      return;
+    }
+
+    // Same screen->local->axial pipeline used for the drop target.
+    const cx = rect.width / 2;
+    const cy = rect.height / 2;
+    const dx = canvasX - cx;
+    const dy = canvasY - cy;
+    const cos = Math.cos(-transform.rotation);
+    const sin = Math.sin(-transform.rotation);
+    const localX = (dx * cos - dy * sin) / transform.scale + transform.pivotX;
+    const localY = (dx * sin + dy * cos) / transform.scale + transform.pivotY;
+    const frac = pixelToAxial(localX, localY);
+    const snapped = axialRound(frac.q, frac.r);
+    const newKey = `${snapped.q},${snapped.r}`;
+
+    // Keep cursor proximity fade in sync with the override position.
+    cursorHexRef.current = snapped;
+    cursorOnGridRef.current = true;
+
+    if (newKey === currentDragHoverKeyRef.current) return;
+
+    const prevKey = currentDragHoverKeyRef.current;
+    if (prevKey) {
+      const prevG = tileGraphicsRef.current.get(prevKey)?.g;
+      // Pixi's typed emit signature requires a real FederatedEvent; we
+      // synthesize a minimal stand-in (the existing handler ignores the
+      // argument), so cast through `unknown` to bypass the nominal check.
+      if (prevG && !prevG.destroyed) (prevG.emit as (event: string, arg?: unknown) => void)('pointerout');
+    }
+    const newG = tileGraphicsRef.current.get(newKey)?.g;
+    if (newG && !newG.destroyed) {
+      // The native handlers read e.global.{x,y} for tooltip positioning; the
+      // canvas-local coords here match what a real Pixi event would carry.
+      // The native handlers only read `e.global.{x,y}` (for tooltip
+      // positioning) — passing a minimal stand-in is safe at runtime.
+      (newG.emit as (event: string, arg?: unknown) => void)(
+        'pointerover',
+        { global: { x: canvasX, y: canvasY } },
+      );
+      currentDragHoverKeyRef.current = newKey;
+    } else {
+      currentDragHoverKeyRef.current = null;
+    }
+  }, [dragHoverPosition]);
 
   // Pause/resume the Pixi ticker in response to the `paused` prop.
   // Pausing relieves iOS Safari memory/GPU pressure when a full-screen DOM
