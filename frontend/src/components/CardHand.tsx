@@ -46,6 +46,10 @@ interface CardHandProps {
   onDoubleClick?: (cardIndex: number) => void;
   onDragStart?: (cardIndex: number) => void;
   onDragEnd?: () => void;
+  /** Fires on every drag move with the effective cursor position (after any
+   *  touch-input vertical offset has been applied). Lets the parent drive the
+   *  hex highlight from the same coordinates the drop will use. */
+  onDragMove?: (clientX: number, clientY: number) => void;
   disabled: boolean;
   // Deck / discard data
   deckSize: number;
@@ -108,6 +112,11 @@ interface CardHandProps {
   /** True when the game is in the Play phase. The upgrade badge only shows
    *  during Play — upgrading is not a legal action in Reveal/Buy/Upkeep. */
   isPlayPhase?: boolean;
+  /** Predicate: does this card target a tile when played? Used to scope the
+   *  touch-drag fade-over-grid effect to cards the player aims at the board.
+   *  Cards that don't target a tile (targetless engine cards) keep full opacity
+   *  while dragged. Defaults to assuming every card targets a tile. */
+  cardTargetsTile?: (card: Card) => boolean;
 }
 
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
@@ -128,6 +137,14 @@ const CARD_MIN_HEIGHT = 52;
 // Distance (in px) the drag ghost must travel above the hand's top edge to
 // fully morph from the compact in-hand card into the full card preview.
 const DRAG_MORPH_DISTANCE = 110;
+// On touch input, lift the effective drag cursor above the finger so the
+// targeted hex isn't hidden under the player's fingertip. The drop target
+// and hex highlight use this offset, but the drag ghost itself stays at
+// the raw finger position so the card visual doesn't obscure the grid.
+const TOUCH_DRAG_Y_OFFSET = 56;
+// Opacity applied to the drag ghost while a touch drag hovers the grid,
+// so the player can see the board through the card under their finger.
+const TOUCH_DRAG_GRID_OPACITY = 0.45;
 
 function ActionReturnBadge({ value }: { value: number }) {
   if (value === 0) return null;
@@ -598,6 +615,7 @@ export default function CardHand({
   onDoubleClick,
   onDragStart,
   onDragEnd,
+  onDragMove,
   disabled,
   deckSize,
   discardCount,
@@ -624,6 +642,7 @@ export default function CardHand({
   upgradeCreditsAvailable = 0,
   onUpgradeCard,
   isPlayPhase = false,
+  cardTargetsTile,
 }: CardHandProps) {
   const animated = useAnimated();
   const animationOff = useAnimationOff();
@@ -733,7 +752,7 @@ export default function CardHand({
   const [cardMarginLeft, setCardMarginLeft] = useState(CARD_GAP);
 
   const handContainerRef = useRef<HTMLDivElement>(null);
-  const dragStartRef = useRef<{ x: number; y: number; index: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; index: number; pointerType: string } | null>(null);
   const isDraggingRef = useRef(false);
 
   // Drag swing physics — simulates card hanging from cursor top-center
@@ -1409,7 +1428,7 @@ export default function CardHand({
   const handlePointerDown = useCallback((e: ReactPointerEvent, localIdx: number) => {
     if (disabled && !trashMode) return;
     e.preventDefault();
-    dragStartRef.current = { x: e.clientX, y: e.clientY, index: localIdx };
+    dragStartRef.current = { x: e.clientX, y: e.clientY, index: localIdx, pointerType: e.pointerType };
     isDraggingRef.current = false;
   }, [disabled, trashMode]);
 
@@ -1425,8 +1444,13 @@ export default function CardHand({
         setHoveredIndex(null);
         setHoveredRect(null);
       }
+      const isTouch = dragStartRef.current.pointerType === 'touch';
+      const offsetY = isTouch ? clientY - TOUCH_DRAG_Y_OFFSET : clientY;
       setDraggingIndex(dragStartRef.current.index);
+      // Card visual stays under the finger so it doesn't block the grid view;
+      // the offset Y is only used for hit detection / hex highlighting.
       setDragPos({ x: clientX, y: clientY });
+      onDragMove?.(clientX, offsetY);
 
       // Feed horizontal cursor velocity into swing physics
       {
@@ -1441,11 +1465,12 @@ export default function CardHand({
         s.lastTime = now;
       }
 
-      // Compute drop target index for reordering
+      // Compute drop target index for reordering. Hand drop test uses the
+      // raw finger position so touch users can still drop back into the hand.
       const { isOverHand, dropIdx } = computeDropTarget(clientX, clientY);
       setDropTargetIndex(isOverHand ? dropIdx : null);
     }
-  }, [onDragStart, localOrder, computeDropTarget, setDropTargetIndex]);
+  }, [onDragStart, onDragMove, localOrder, computeDropTarget, setDropTargetIndex]);
 
   const handlePointerMove = useCallback((e: ReactPointerEvent) => {
     if (trashMode) return; // Disable dragging in trash selection mode
@@ -1494,7 +1519,10 @@ export default function CardHand({
         const now = performance.now();
         const dt = now - s.lastTime;
         const vx = dt > 0 && dt < 200 ? (e.clientX - s.lastX) / dt : 0;
-        onDragPlay(localOrder[localIdx], e.clientX, e.clientY, vx, 0);
+        // Apply the same touch offset to the drop position the highlight uses.
+        const isTouch = dragStartRef.current?.pointerType === 'touch';
+        const effectiveY = isTouch ? e.clientY - TOUCH_DRAG_Y_OFFSET : e.clientY;
+        onDragPlay(localOrder[localIdx], e.clientX, effectiveY, vx, 0);
       }
     } else {
       const cardIdx = localOrder[localIdx];
@@ -1549,7 +1577,10 @@ export default function CardHand({
           const now = performance.now();
           const dt = now - s.lastTime;
           const vx = dt > 0 && dt < 200 ? (e.clientX - s.lastX) / dt : 0;
-          onDragPlay(localOrder[localIdx], e.clientX, e.clientY, vx, 0);
+          // Apply the same touch offset to the drop position the highlight uses.
+          const isTouch = dragStartRef.current?.pointerType === 'touch';
+          const effectiveY = isTouch ? e.clientY - TOUCH_DRAG_Y_OFFSET : e.clientY;
+          onDragPlay(localOrder[localIdx], e.clientX, effectiveY, vx, 0);
         }
       }
       resetDragState();
@@ -2037,6 +2068,13 @@ export default function CardHand({
         const handTop = handRect?.top ?? window.innerHeight;
         const distAboveHand = Math.max(0, handTop - dragPos.y);
         const morph = Math.min(1, distAboveHand / DRAG_MORPH_DISTANCE);
+        // On touch, fade the ghost once it's clearly above the hand (over the
+        // grid area) so the player can see the board beneath the card. Skip
+        // the fade for cards that don't target a tile — those don't need the
+        // board visible while dragging.
+        const isTouchDrag = dragStartRef.current?.pointerType === 'touch';
+        const targetsTile = cardTargetsTile ? cardTargetsTile(dragCard) : true;
+        const ghostOpacity = isTouchDrag && morph >= 1 && targetsTile ? TOUCH_DRAG_GRID_OPACITY : 1;
         return (
           <div style={{
             position: 'fixed',
@@ -2047,6 +2085,8 @@ export default function CardHand({
             transformOrigin: 'top center',
             transform: `rotate(${dragSwingAngle}deg) scale(1.05)`,
             filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.5))',
+            opacity: ghostOpacity,
+            transition: 'opacity 0.12s ease',
           }}>
             {/* Compact ghost — fades out as the card leaves the hand */}
             {morph < 1 && (

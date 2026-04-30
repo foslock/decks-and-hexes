@@ -778,6 +778,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [hoveredCardIndex, setHoveredCardIndex] = useState<number | null>(null);
   const [draggingCardIndex, setDraggingCardIndex] = useState<number | null>(null);
+  /** Effective drag cursor position (CardHand applies a touch-input vertical
+   *  offset). Drives the HexGrid hover highlight so it stays synced with the
+   *  drop hex computed from the same coordinates. */
+  const [dragHoverPos, setDragHoverPos] = useState<{ clientX: number; clientY: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showUpgradePreview, setShowUpgradePreview] = useState(false);
   const [showFullLog, setShowFullLog] = useState(false);
@@ -4673,6 +4677,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               transformRef={gridTransformRef}
               resolveLayerRef={resolveLayerRef}
               gridRotation={gridRotation}
+              dragHoverPosition={draggingCardIndex !== null ? dragHoverPos : null}
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
               plannedActions={phase === 'play' ? plannedActions : undefined}
               previewCard={phase === 'play' ? (() => {
@@ -5979,7 +5984,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 if (card?.card_type === 'engine' && !needsOpponentTarget(card) && !card.target_own_tile) playCardNoTarget(idx);
               }}
               onDragStart={setDraggingCardIndex}
-              onDragEnd={() => setDraggingCardIndex(null)}
+              onDragEnd={() => { setDraggingCardIndex(null); setDragHoverPos(null); }}
+              onDragMove={(x, y) => setDragHoverPos({ clientX: x, clientY: y })}
               disabled={phase !== 'play' || playSubmitted || interactionBlocked}
               deckSize={introSequence !== 'done' && !introHandReady ? activePlayer.deck_size + activePlayer.hand.length : activePlayer.deck_size}
               discardCount={discardCountOverride !== null ? discardCountOverride : activePlayer.discard_count}
@@ -6012,6 +6018,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               upgradeCreditsAvailable={activePlayer?.upgrade_credits ?? 0}
               onUpgradeCard={handleUpgradeCard}
               isPlayPhase={phase === 'play' && !resolving && !playSubmitted}
+              cardTargetsTile={(card) => (
+                card.card_type === 'claim'
+                || card.card_type === 'defense'
+                || (card.card_type === 'engine' && (needsOpponentTarget(card) || card.target_own_tile))
+              )}
             />
             </div>
           )}
