@@ -91,6 +91,10 @@ def _assert_players_equal(a: Player, b: Player) -> None:
     assert a.has_left == b.has_left
     assert a.left_vp == b.left_vp
     assert a.claims_won_last_round == b.claims_won_last_round
+    assert a.cumulative_resources_gained == b.cumulative_resources_gained
+    assert a.cumulative_bonus_actions_gained == b.cumulative_bonus_actions_gained
+    assert a.cumulative_claim_power_resolved == b.cumulative_claim_power_resolved
+    assert a.cumulative_defense_power_played == b.cumulative_defense_power_played
     assert a.pending_discard == b.pending_discard
     assert a._prev_market_ids == b._prev_market_ids
     assert a._prev_market_types == b._prev_market_types
@@ -350,6 +354,45 @@ class TestBasicRoundTrip:
         blob = serialize_game(game)
         restored = deserialize_game(blob, card_registry)
         _assert_games_equal(game, restored)
+
+    def test_cumulative_round_breakdown_stats_round_trip(
+        self, card_registry: dict[str, Card]
+    ) -> None:
+        """Cumulative round-breakdown counters survive serialize/deserialize.
+
+        Regression: these were dropped from the save blob, so reloading
+        mid-game zeroed them out for every player simultaneously.
+        """
+        game = create_game(
+            GridSize.SMALL,
+            [
+                {"id": "p0", "name": "Alice", "archetype": "vanguard"},
+                {"id": "p1", "name": "Bob", "archetype": "swarm"},
+            ],
+            card_registry,
+            seed=42,
+        )
+        p0 = game.players["p0"]
+        p1 = game.players["p1"]
+        p0.cumulative_resources_gained = 28
+        p0.cumulative_bonus_actions_gained = 4
+        p0.cumulative_claim_power_resolved = 13
+        p0.cumulative_defense_power_played = 7
+        p1.cumulative_resources_gained = 31
+        p1.cumulative_bonus_actions_gained = 2
+        p1.cumulative_claim_power_resolved = 9
+        p1.cumulative_defense_power_played = 5
+
+        restored = deserialize_game(serialize_game(game), card_registry)
+
+        assert restored.players["p0"].cumulative_resources_gained == 28
+        assert restored.players["p0"].cumulative_bonus_actions_gained == 4
+        assert restored.players["p0"].cumulative_claim_power_resolved == 13
+        assert restored.players["p0"].cumulative_defense_power_played == 7
+        assert restored.players["p1"].cumulative_resources_gained == 31
+        assert restored.players["p1"].cumulative_bonus_actions_gained == 2
+        assert restored.players["p1"].cumulative_claim_power_resolved == 9
+        assert restored.players["p1"].cumulative_defense_power_played == 5
 
 
 class TestRNGContinuity:
