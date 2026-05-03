@@ -1162,11 +1162,8 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
               if (persistDef > 0) parts.push(`${persistDef} persistent`);
               if (tmpDef > 0) parts.push(`${tmpDef} temporary`);
               const breakdown = parts.length > 1 ? ` (${parts.join(' + ')})` : '';
-              if (isNeutral) {
-                lines.push(`Neutral Defense: ${tile.defense_power}${breakdown}. Claiming requires at least ${tile.defense_power} power.`);
-              } else {
-                lines.push(`Defense: ${tile.defense_power}${breakdown}. Claiming requires at least ${tile.defense_power + 1} power.`);
-              }
+              const label = isNeutral ? 'Neutral Defense' : 'Defense';
+              lines.push(`${label}: ${tile.defense_power}${breakdown}. Claiming requires at least ${tile.defense_power} power.`);
             }
             if (tile.owner && playerInfoRef.current?.[tile.owner]) {
               const info = playerInfoRef.current[tile.owner];

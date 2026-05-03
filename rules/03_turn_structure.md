@@ -39,7 +39,7 @@ All players flip their played cards face-up simultaneously.
 1. **Claim resolution** – all tiles with at least one Claim card played on them are resolved:
    - Each Claim card contributes its **power value** to that tile.
    - A player may only play **one Claim card per tile per round**, unless they have a **stacking exception card** (Coordinated Push, Dog Pile, Juggernaut).
-   - The player with the **highest total power** on a tile wins it. Ties go to the **current owner** (defender wins ties). Neutral tiles (no owner) have a defense value of **0**.
+   - The player with the **highest total power** on a tile wins it. A 1v1 attacker-vs-defender tie goes to the **attacker**. If two or more attackers tie at the top alongside the defender, no one wins and the **current owner keeps the tile**. Neutral tiles (no owner) have a defense value of **0**.
    - Claimed tiles must be **adjacent to a tile the player already owns**, unless the card specifically states otherwise (e.g. Overrun, Proliferate, Eminent Domain).
    - Players cannot claim blocked terrain tiles unless they have the **Pathfinder** passive.
 2. **Post-resolution effects** – conditional effects that depend on Claim success or failure resolve now (e.g. "if successful, draw 1 card next turn"). Any forced discards triggered here apply to the **targeted opponent's next turn hand draw** — the opponent does not discard from their current hand.

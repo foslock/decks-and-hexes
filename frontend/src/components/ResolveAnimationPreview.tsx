@@ -172,19 +172,20 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
     defenderSourceR = dr * TERRITORY_FIRST_STEP;
   }
 
-  // Winner: strongest attacker if they beat defender outright; otherwise defender holds.
-  // Ties between multiple top attackers also go to the defender (if any).
+  // Winner: a single top attacker captures whenever its power ≥ the defender's
+  // (1v1 ties go to the attacker). Multi-attacker ties at the top fall through
+  // to the defender (or the first attacker on neutral tiles).
   const powers = claimants.map(c => c.power).sort((a, b) => b - a);
   const topPower = powers[0] ?? 0;
   const topCount = powers.filter(p => p === topPower).length;
   const topAttacker = claimants.find(c => c.power === topPower) ?? null;
   let winnerId: string | null;
-  if (topAttacker && topPower > defenderPower && topCount === 1) {
+  if (topAttacker && topPower >= defenderPower && topCount === 1) {
     winnerId = topAttacker.player_id;
   } else if (defenderId) {
     winnerId = defenderId;
   } else if (topAttacker) {
-    // Neutral tile, all-attacker tie → defender wins ties, but there's no
+    // Neutral tile, all-attacker tie → no clear winner, but there's no
     // defender, so for the demo just pick the first top attacker.
     winnerId = topAttacker.player_id;
   } else {

@@ -2180,7 +2180,9 @@ def execute_reveal(game: GameState) -> GameState:
         for tk in claims_by_tile.keys()
     }
 
-    # Resolve claims: highest power wins, ties to defender
+    # Resolve claims: highest power wins. 1v1 attacker-vs-defender ties go to
+    # the attacker; multi-attacker ties at the top leave the tile with the
+    # current owner (no winner among the tied attackers).
     for tile_key, claims in claims_by_tile.items():
         tile = game.grid.tiles.get(tile_key)
         if not tile:
@@ -2246,12 +2248,24 @@ def execute_reveal(game: GameState) -> GameState:
             })
             continue
 
+        winner_id = None
         if len(real_contenders) == 1:
             winner_id = real_contenders[0]
-        elif tile.owner in real_contenders:
-            winner_id = tile.owner  # defender wins ties
         else:
-            # Tie between attackers — nobody wins
+            # Multiple players tied at the top.
+            # 1v1 attacker-vs-defender tie → attacker wins (rule).
+            # Otherwise (multi-attacker tie, with or without defender) → tile
+            # is unchanged.
+            attacker_contenders = [pid for pid in real_contenders if pid != tile.owner]
+            if tile.owner in real_contenders and len(attacker_contenders) == 1:
+                winner_id = attacker_contenders[0]
+                game._log(
+                    f"Tile {tile_key}: {winner_id} ties defender {tile.owner} on power "
+                    f"{max_power}; attacker wins on tie"
+                )
+
+        if winner_id is None:
+            # Tie between attackers (with or without a tied defender) — nobody wins
             game._log(f"Tile {tile_key}: tie between attackers, no change")
             for pid, _ in claims:
                 claim_results.setdefault(tile_key, {})[pid] = False

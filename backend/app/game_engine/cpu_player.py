@@ -2097,7 +2097,7 @@ class CPUPlayer:
 
         # Pre-compute power vs defense for VP-specific bonuses.
         effective_power = self._estimate_effective_power(game, player, tile, card)
-        can_win = effective_power > tile.defense_power
+        can_win = effective_power >= tile.defense_power
 
         # Combined stackable power: if we've already planned claims on this
         # tile this turn, our new card adds to that total for the resolution
@@ -2108,7 +2108,7 @@ class CPUPlayer:
         else:
             combined_prior = 0
         combined_total = effective_power + combined_prior
-        can_win_combined = combined_total > tile.defense_power
+        can_win_combined = combined_total >= tile.defense_power
 
         # VP-value scaling: premium (vp=2) tiles dominate standard (vp=1)
         # rather than scaling linearly. A vp=2 tile is worth closer to 3.5×

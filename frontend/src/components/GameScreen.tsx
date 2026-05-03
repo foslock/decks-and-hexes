@@ -137,9 +137,11 @@ function computeClaimPowerOnTile(
  * target tile under the validation rules:
  *   - Siege Engine / Conqueror (`ignore_defense` effect): only strips temporary
  *     round bonuses; base + permanent defense still count.
- *   - Neutral tiles: power must be >= the tile's effective defense.
- *   - Other-player tiles: power must be STRICTLY GREATER than the tile's
- *     effective defense (defender wins ties at resolution).
+ *   - Neutral and occupied tiles alike: power must be >= the tile's effective
+ *     defense. A 1v1 attacker-vs-defender tie goes to the attacker at
+ *     resolution; multi-attacker ties at the top leave the tile with the
+ *     defender, but this predicate runs over a single hovered card and so
+ *     can't foresee that — it just answers "could this card win on its own?"
  * Uses `defense_power`, the live total of base + permanent + temporary defense.
  */
 function canClaimCaptureTile(
@@ -151,8 +153,7 @@ function canClaimCaptureTile(
   const effectiveDefense = ignoresDefense
     ? tile.base_defense + tile.permanent_defense_bonus
     : tile.defense_power;
-  if (!tile.owner) return effectivePower >= effectiveDefense;
-  return effectivePower > effectiveDefense;
+  return effectivePower >= effectiveDefense;
 }
 
 // Hex geometry helpers moved to `../utils/hexGeometry` so sibling components

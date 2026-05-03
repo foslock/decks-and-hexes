@@ -333,8 +333,8 @@ class TestRevealPhase:
         assert tile is not None
         assert tile.owner == "p0"
 
-    def test_defender_wins_ties(self, small_2p_game: GameState) -> None:
-        """If attacker power equals defense, defender keeps the tile."""
+    def test_attacker_wins_one_v_one_tie(self, small_2p_game: GameState) -> None:
+        """Single attacker tied with defender's defense → attacker captures the tile."""
         game = small_2p_game
         assert game.grid is not None
 
@@ -365,17 +365,17 @@ class TestRevealPhase:
         p0.hand.insert(0, claim_card)
         claim_idx = 0
 
-        # Set defense equal to attacker power so it's a tie → defender wins
+        # Set defense equal to attacker power so it's a tie → attacker wins
         target.defense_power = claim_card.effective_power
         play_card(game, "p0", claim_idx, target.q, target.r)
 
         submit_play(game, "p0")
         submit_play(game, "p1")
 
-        # Defender should win (1 attack vs 1 defense = tie = defender wins)
+        # Attacker should win on tie (1 attack vs 1 defense = attacker captures)
         tile = game.grid.get_tile(target.q, target.r)
         assert tile is not None
-        assert tile.owner == "p1"
+        assert tile.owner == "p0"
 
 
 class TestBuyPhase:

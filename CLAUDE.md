@@ -101,7 +101,7 @@ since `vp_value` defaults to 1 for every tile.
 - All board interaction uses unified Claim cards — neutral tiles have implicit defense 0
 - Claims must target tiles adjacent to one the player already owns, unless card says otherwise
 - One Claim per tile per round — except stacking exception cards (Coordinated Push, Dog Pile, Juggernaut)
-- Ties go to current owner (defender wins)
+- 1v1 attacker-vs-defender ties go to the attacker; multi-attacker ties at the top leave the tile with the current owner
 - Blocked terrain cannot be claimed without Pathfinder passive
 
 ### Resources

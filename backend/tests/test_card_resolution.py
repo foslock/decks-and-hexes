@@ -2042,8 +2042,8 @@ class TestTrashExcludedFromVP:
 
 
 class TestContestResolution:
-    def test_defender_wins_ties(self, card_registry):
-        """When attacker and defender have equal power, defender keeps tile."""
+    def test_attacker_wins_one_v_one_tie(self, card_registry):
+        """1v1 attacker vs defender at equal power → attacker captures the tile."""
         game = _make_2p_game(card_registry)
         p0 = game.players["p0"]
         p1 = game.players["p1"]
@@ -2073,7 +2073,52 @@ class TestContestResolution:
         submit_play(game, "p1")
 
         tile = game.grid.get_tile(target.q, target.r)
-        assert tile.owner == "p1"  # defender wins tie
+        assert tile.owner == "p0"  # attacker wins tie
+
+    def test_multi_attacker_tie_with_defender_holds(self, card_registry):
+        """Two attackers tied at the top with the defender → tile stays with defender.
+
+        Only the canonical 1v1 attacker-vs-defender tie flips to the attacker.
+        When two or more attackers tie at the top alongside the defender,
+        we fall through to the existing "tie among attackers" branch.
+        """
+        game = _make_3p_game(card_registry)
+        # p1 will defend; p0 and p2 will both attack with the same power.
+        target = _ensure_adjacent_enemy_tile(game, "p0", "p1")
+        assert target is not None
+        # Make the same target adjacent to p2 too so its claim is legal.
+        for adj in game.grid.get_adjacent(target.q, target.r):
+            if adj.owner is None and not adj.is_blocked:
+                adj.owner = "p2"
+                break
+
+        attack0 = _make_card("atk0", "AttackerA", CardType.CLAIM, power=5,
+                             adjacency_required=False)
+        attack2 = _make_card("atk2", "AttackerC", CardType.CLAIM, power=5,
+                             adjacency_required=False)
+        defend = _make_card("def", "Defender", CardType.CLAIM, power=5,
+                            adjacency_required=False)
+        game.players["p0"].hand = [attack0] + game.players["p0"].hand[1:]
+        game.players["p1"].hand = [defend] + game.players["p1"].hand[1:]
+        game.players["p2"].hand = [attack2] + game.players["p2"].hand[1:]
+
+        target.defense_power = 0
+        target.base_defense = 0
+
+        success, _ = play_card(game, "p0", 0, target_q=target.q, target_r=target.r)
+        assert success
+        success, _ = play_card(game, "p1", 0, target_q=target.q, target_r=target.r)
+        assert success
+        success, _ = play_card(game, "p2", 0, target_q=target.q, target_r=target.r)
+        assert success
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+        submit_play(game, "p2")
+
+        # Multi-attacker tie at the top including the defender → tile is unchanged
+        tile = game.grid.get_tile(target.q, target.r)
+        assert tile.owner == "p1"
 
     def test_attacker_wins_with_higher_power(self, card_registry):
         """Higher power attacker takes the tile."""
