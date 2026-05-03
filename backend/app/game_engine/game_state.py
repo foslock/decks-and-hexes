@@ -2322,49 +2322,51 @@ def execute_reveal(game: GameState) -> GameState:
 
         if winner_id != tile.owner:
             if tile.is_base:
-                # Base raid: generate Rubble cards for defender and Spoils for attacker
+                # Base raid: generate Rubble cards for defender and Spoils for attacker.
+                # We only enter this branch when the attacker won the resolution
+                # (winner_id != tile.owner), which under the current rules covers
+                # both strict wins AND 1v1 ties (ties go to the attacker). Floor
+                # rubble at 1 so a tied base raid still yields a Spoils + 1 Rubble
+                # rather than silently "failing".
                 base_owner_id = tile.base_owner or ""
                 defender = game.players[base_owner_id]
                 attacker = game.players[winner_id]
                 attacker_power = power_by_player.get(winner_id, 0)
                 total_defense = power_by_player.get(base_owner_id, 0) if base_owner_id in power_by_player else current_defense
-                rubble_count = max(0, attacker_power - total_defense)
-                if rubble_count > 0:
-                    for _ in range(rubble_count):
-                        defender.deck.discard.append(make_rubble_card())
-                    attacker.deck.discard.append(make_spoils_card())
-                    game._log(
-                        f"{attacker.name} raids {defender.name}'s base! "
-                        f"{rubble_count} Rubble added to {defender.name}'s deck, "
-                        f"Spoils added to {attacker.name}'s deck."
-                    )
-                    # Record player effects for flying-card animations
-                    game.player_effects.append({
-                        "source_player_id": winner_id,
-                        "target_player_id": base_owner_id,
-                        "card_name": "Raided",
-                        "effect": f"+{rubble_count} Rubble",
-                        "effect_type": "base_raid_rubble",
-                        "value": rubble_count,
-                        "source_q": tile.q,
-                        "source_r": tile.r,
-                        "added_card_name": "Rubble",
-                        "added_card_count": rubble_count,
-                    })
-                    game.player_effects.append({
-                        "source_player_id": winner_id,
-                        "target_player_id": winner_id,
-                        "card_name": "Spoils",
-                        "effect": "+1 Spoils",
-                        "effect_type": "base_raid_spoils",
-                        "value": 1,
-                        "source_q": tile.q,
-                        "source_r": tile.r,
-                        "added_card_name": "Spoils",
-                        "added_card_count": 1,
-                    })
-                else:
-                    game._log(f"{game.players[winner_id].name} fails to raid {defender.name}'s base")
+                rubble_count = max(1, attacker_power - total_defense)
+                for _ in range(rubble_count):
+                    defender.deck.discard.append(make_rubble_card())
+                attacker.deck.discard.append(make_spoils_card())
+                game._log(
+                    f"{attacker.name} raids {defender.name}'s base! "
+                    f"{rubble_count} Rubble added to {defender.name}'s deck, "
+                    f"Spoils added to {attacker.name}'s deck."
+                )
+                # Record player effects for flying-card animations
+                game.player_effects.append({
+                    "source_player_id": winner_id,
+                    "target_player_id": base_owner_id,
+                    "card_name": "Raided",
+                    "effect": f"+{rubble_count} Rubble",
+                    "effect_type": "base_raid_rubble",
+                    "value": rubble_count,
+                    "source_q": tile.q,
+                    "source_r": tile.r,
+                    "added_card_name": "Rubble",
+                    "added_card_count": rubble_count,
+                })
+                game.player_effects.append({
+                    "source_player_id": winner_id,
+                    "target_player_id": winner_id,
+                    "card_name": "Spoils",
+                    "effect": "+1 Spoils",
+                    "effect_type": "base_raid_spoils",
+                    "value": 1,
+                    "source_q": tile.q,
+                    "source_r": tile.r,
+                    "added_card_name": "Spoils",
+                    "added_card_count": 1,
+                })
             else:
                 old_owner = tile.owner
                 if old_owner is not None:

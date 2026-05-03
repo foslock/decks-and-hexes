@@ -1128,6 +1128,36 @@ class TestBaseRaidPopups:
         assert sum(1 for c in p1.deck.discard if c.name == "Rubble") == 3
         assert sum(1 for c in p0.deck.discard if c.name == "Spoils") == 1
 
+    def test_tied_base_raid_yields_one_rubble_and_spoils(self, card_registry):
+        """Base raid where attacker power == defense → attacker wins the tie,
+        floor of 1 Rubble + 1 Spoils so the raid still pays out instead of
+        silently failing."""
+        game, p0, p1, p1_base = self._setup_raid_scenario(
+            card_registry, attacker_power=4, base_defense=4,
+        )
+        original_owner = p1_base.owner
+        original_base_owner = p1_base.base_owner
+
+        success, msg = play_card(game, "p0", 0, target_q=p1_base.q, target_r=p1_base.r)
+        assert success, msg
+
+        submit_play(game, "p0")
+        submit_play(game, "p1")
+
+        # Base tile is NOT transferred — only its defense reset.
+        assert p1_base.owner == original_owner
+        assert p1_base.base_owner == original_base_owner
+
+        rubble = [e for e in game.player_effects if e["effect_type"] == "base_raid_rubble"]
+        spoils = [e for e in game.player_effects if e["effect_type"] == "base_raid_spoils"]
+        assert len(rubble) == 1
+        assert len(spoils) == 1
+        assert rubble[0]["value"] == 1  # floored to 1 even though margin is 0
+        assert sum(1 for c in p1.deck.discard if c.name == "Rubble") == 1
+        assert sum(1 for c in p0.deck.discard if c.name == "Spoils") == 1
+        # No defended popup — the raid succeeded
+        assert not any(e["effect_type"] == "base_raid_defended" for e in game.player_effects)
+
     def test_defended_raid_emits_defended_popup(self, card_registry):
         """Defended base raid: emits a Defended popup above the base owner."""
         # Start with defense low enough to allow play-time validation,
