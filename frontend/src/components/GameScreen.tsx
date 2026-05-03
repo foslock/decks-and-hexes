@@ -42,28 +42,44 @@ function needsOpponentTarget(card: Card): boolean {
 
 /**
  * Compute effective power for a card still in hand, accounting for dynamic
- * modifiers (hand-size scaling, tile-count scaling).  Returns a copy of the
- * card with `power` overridden if applicable.  Used only for the drag
- * preview — once a card is played, the backend snapshots effective_power on
- * the PlannedAction and the frontend uses that instead.
+ * modifiers (hand-size scaling, tile-count scaling, and Strike Team's
+ * if_played_claim_this_turn bonus).  Returns a copy of the card with `power`
+ * overridden if applicable.  Used only for the drag/hover preview — once a
+ * card is played, the backend snapshots effective_power on the PlannedAction
+ * and the frontend uses that instead.
  */
-function withEffectivePower(card: Card, handSize: number, tileCount: number): Card {
+function withEffectivePower(
+  card: Card,
+  handSize: number,
+  tileCount: number,
+  hasPlayedClaim: boolean = false,
+): Card {
   if (!card.effects) return card;
   const isUpgraded = card.is_upgraded;
 
+  let strikeTeamBonus = 0;
   for (const eff of card.effects) {
     if (eff.type === 'power_per_tiles_owned') {
       const divisor = (isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value) || 3;
       const scaledPow = Math.floor(tileCount / divisor);
       const totalPow = eff.metadata?.replaces_base_power ? scaledPow : card.power + scaledPow;
-      return { ...card, power: totalPow };
+      return { ...card, power: totalPow + strikeTeamBonus };
     }
     if (eff.type === 'power_modifier' && eff.condition === 'cards_in_hand') {
       const ev = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-      return { ...card, power: Math.max(0, handSize - 1) + ev };
+      return { ...card, power: Math.max(0, handSize - 1) + ev + strikeTeamBonus };
+    }
+    if (
+      eff.type === 'power_modifier' &&
+      eff.condition === 'if_played_claim_this_turn' &&
+      hasPlayedClaim
+    ) {
+      strikeTeamBonus +=
+        isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
     }
   }
 
+  if (strikeTeamBonus > 0) return { ...card, power: card.power + strikeTeamBonus };
   return card;
 }
 
@@ -86,10 +102,11 @@ function computeClaimPowerOnTile(
   handSize: number,
   ownedTileCount: number,
   claimBuffBonus: number = 0,
+  hasPlayedClaim: boolean = false,
 ): number {
   // Start from base power, then apply tile-count / hand-size scaling that
-  // doesn't depend on the target tile.
-  let power = withEffectivePower(card, handSize, ownedTileCount).power;
+  // doesn't depend on the target tile (and Strike Team's played-claim bonus).
+  let power = withEffectivePower(card, handSize, ownedTileCount, hasPlayedClaim).power;
   // War Banner: preview the +power bonus the next Claim will consume.
   power += claimBuffBonus;
   if (!card.effects) return power;
@@ -1210,6 +1227,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       vpHexCount: gameState.grid ? countConnectedVpTiles(gameState.grid.tiles, activePlayerId) : 0,
       debtCount,
       playedCardNames,
+      hasPlayedClaimThisRound,
     };
   }, [activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand, activePlayer.trash, activePlayer.deck_size, activePlayer.deck_cards, activePlayer.discard, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId, activePlayer.planned_actions]);
 
@@ -4105,7 +4123,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const claimBuffBonus = card.card_type === 'claim' && activePlayer?.claim_buffs?.[0]
         ? activePlayer.claim_buffs[0].power_bonus
         : 0;
-      let effectivePower = computeClaimPowerOnTile(card, tile, tiles, activePlayerId, handSize, playerTileCount, claimBuffBonus);
+      // Strike Team: bonus power if the active player already played another Claim this round.
+      const hasPlayedClaim = (activePlayer?.planned_actions ?? [])
+        .some(a => a.card.card_type === 'claim' && a.card.id !== card.id);
+      let effectivePower = computeClaimPowerOnTile(card, tile, tiles, activePlayerId, handSize, playerTileCount, claimBuffBonus, hasPlayedClaim);
       // For stackable cards, add power from existing planned claims on this tile
       if (card.stackable && activePlayer?.planned_actions) {
         const combinedClaims: Card[] = [card];
@@ -4681,16 +4702,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
               plannedActions={phase === 'play' ? plannedActions : undefined}
               previewCard={phase === 'play' ? (() => {
+                // Strike Team: preview gets +2/+3 power if the active player has
+                // already played another Claim this round (mirrors backend
+                // `a.card.id != card.id` — exclude the previewed card itself).
+                const playedClaimExcluding = (cardId: string | undefined) =>
+                  (activePlayer?.planned_actions ?? [])
+                    .some(a => a.card.card_type === 'claim' && a.card.id !== cardId);
                 // In multi-tile selection mode, lock preview to the active card
                 if (multiTileCardIndex !== null) {
                   const sc = activePlayer?.hand[multiTileCardIndex] ?? null;
-                  return sc ? withEffectivePower(sc, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0) : null;
+                  return sc
+                    ? withEffectivePower(sc, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0, playedClaimExcluding(sc.id))
+                    : null;
                 }
                 const raw = highlightCard?.card_type === 'claim' || highlightCard?.card_type === 'defense' ? highlightCard
                   : (highlightCard?.card_type === 'engine' && (needsOpponentTarget(highlightCard) || highlightCard?.target_own_tile)) ? highlightCard
                   : draggingCardIndex !== null ? activePlayer?.hand[draggingCardIndex] ?? null
                   : null;
-                return raw ? withEffectivePower(raw, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0) : null;
+                return raw ? withEffectivePower(raw, activePlayer?.hand.length ?? 0, activePlayer?.tile_count ?? 0, playedClaimExcluding(raw.id)) : null;
               })() : null}
               previewValidTiles={(() => {
                 if (phase !== 'play') return undefined;
@@ -4725,6 +4754,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
               disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || prePlaySearchMode || activePlayer?.pending_search || searchAnimating || searchFlights || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
+              suppressTileTooltips={draggingCardIndex !== null}
               reviewPulseTiles={reviewPulseTiles}
               onTileHover={reviewing ? (q, r, sx, sy) => {
                 setReviewHoveredTile(`${q},${r}`);

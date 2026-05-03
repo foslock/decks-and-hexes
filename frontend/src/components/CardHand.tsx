@@ -142,6 +142,11 @@ const DRAG_MORPH_DISTANCE = 110;
 // and hex highlight use this offset, but the drag ghost itself stays at
 // the raw finger position so the card visual doesn't obscure the grid.
 const TOUCH_DRAG_Y_OFFSET = 56;
+// On mouse input, the cursor stays at the top of the drag ghost — push the
+// card visual itself below the cursor so the hex under the cursor remains
+// visible. (Touch keeps the ghost at the raw finger position; the offset
+// above is only applied to hit detection.)
+const MOUSE_DRAG_GHOST_Y_OFFSET = 28;
 // Opacity applied to the drag ghost while a touch drag hovers the grid,
 // so the player can see the board through the card under their finger.
 const TOUCH_DRAG_GRID_OPACITY = 0.45;
@@ -1445,10 +1450,12 @@ export default function CardHand({
         setHoveredRect(null);
       }
       const isTouch = dragStartRef.current.pointerType === 'touch';
+      // Touch: hit-test is lifted above the finger so the targeted hex stays
+      // visible above the fingertip. Mouse: hit-test stays at the cursor —
+      // the ghost card is offset below the cursor (see render path) so the
+      // hex under the cursor remains visible.
       const offsetY = isTouch ? clientY - TOUCH_DRAG_Y_OFFSET : clientY;
       setDraggingIndex(dragStartRef.current.index);
-      // Card visual stays under the finger so it doesn't block the grid view;
-      // the offset Y is only used for hit detection / hex highlighting.
       setDragPos({ x: clientX, y: clientY });
       onDragMove?.(clientX, offsetY);
 
@@ -2075,11 +2082,14 @@ export default function CardHand({
         const isTouchDrag = dragStartRef.current?.pointerType === 'touch';
         const targetsTile = cardTargetsTile ? cardTargetsTile(dragCard) : true;
         const ghostOpacity = isTouchDrag && morph >= 1 && targetsTile ? TOUCH_DRAG_GRID_OPACITY : 1;
+        // Mouse: push the ghost below the cursor so the hovered hex stays
+        // visible above the card. Touch: keep the ghost at the finger.
+        const ghostTopOffset = isTouchDrag ? -6 : MOUSE_DRAG_GHOST_Y_OFFSET;
         return (
           <div style={{
             position: 'fixed',
             left: dragPos.x,
-            top: dragPos.y - 6,
+            top: dragPos.y + ghostTopOffset,
             pointerEvents: 'none',
             zIndex: 9999,
             transformOrigin: 'top center',

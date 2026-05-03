@@ -143,6 +143,10 @@ interface HexGridProps {
   connectedVpTiles?: Set<string>;
   /** When true, suppress hover effects (highlight, tooltips) — e.g. when a full-screen overlay is open */
   disableHover?: boolean;
+  /** When true, suppress tile tooltips (info text + planned-cards preview)
+   *  but keep the hex hover highlight and preview-power label. Used while
+   *  the player is dragging a card so the tooltips don't distract. */
+  suppressTileTooltips?: boolean;
   /** Tile keys to show pulsing outline (review mode — tiles with played cards) */
   reviewPulseTiles?: Set<string>;
   /** Called when a tile is hovered during review (provides screen coords for popup positioning) */
@@ -432,10 +436,11 @@ function PlannedCardsPreview({ cards, x, y, undoable }: { cards: { card: Card; e
         return (
           <div key={col} style={{ display: 'flex', flexDirection: 'column', gap: rowGap }}>
             {colCards.map((entry, i) => {
-              const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
+              const hasFrozenPower = entry.effectivePower != null;
+              const c = hasFrozenPower ? { ...entry.card, power: entry.effectivePower! } : entry.card;
               return (
                 <React.Fragment key={i}>
-                  <CompactCard card={c} />
+                  <CompactCard card={c} subtitleContext={hasFrozenPower ? { powerFrozen: true } : undefined} />
                   {i === undoRowIdx && (
                     <div style={{ fontSize: 10, color: '#aaa', textAlign: 'center', marginTop: -2 }}>
                       Hold to undo
@@ -463,7 +468,7 @@ function lightenColor(color: number, amount: number): number {
   );
 }
 
-export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths, connectedVpTiles, disableHover, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles, resolveLayerRef, dragHoverPosition }: HexGridProps) {
+export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, borderTiles, activePlayerId, plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths, connectedVpTiles, disableHover, suppressTileTooltips, reviewPulseTiles, onTileHover, onTileHoverEnd, buildProgress, gridRotation, paused, onLongPress, undoableTiles, resolveLayerRef, dragHoverPosition }: HexGridProps) {
   const bgEnabled = useBackgroundImages();
   const bgEnabledRef = useRef(bgEnabled);
   bgEnabledRef.current = bgEnabled;
@@ -506,6 +511,8 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
   tooltipsEnabledRef.current = tooltipsEnabled;
   const disableHoverRef = useRef(disableHover);
   disableHoverRef.current = disableHover;
+  const suppressTileTooltipsRef = useRef(suppressTileTooltips);
+  suppressTileTooltipsRef.current = suppressTileTooltips;
   // Cursor proximity fade on neutral tiles
   const cursorHexRef = useRef<{ q: number; r: number } | null>(null);
   const cursorOnGridRef = useRef(false);
@@ -584,6 +591,12 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
       }
     }
   }, [disableHover]);
+
+  // Clear any visible tile tooltip when drag-suppression turns on so a
+  // pre-existing tooltip doesn't linger over the grid during the drag.
+  useEffect(() => {
+    if (suppressTileTooltips) setTooltip(null);
+  }, [suppressTileTooltips]);
 
   // Compute bounding box of all tiles in unscaled pixel space, then fit to canvas.
   const fitGrid = useCallback(() => {
@@ -1103,12 +1116,16 @@ export default function HexGrid({ tiles, onTileClick, onTilePointerDown, highlig
           }
         }
 
-        // Planned action card tooltip (always shown — critical gameplay info)
+        // Planned action card tooltip (always shown — critical gameplay info,
+        // except while the player is mid-drag — then we suppress all tile
+        // tooltips so they don't distract from targeting).
         const plannedAction = plannedActionsRef.current?.get(key);
         // Also show card preview for multi-tile-selected tiles (not yet confirmed)
         const multiTileCard = previewCardRef.current;
         const isMultiTileTarget = multiTileCard && multiTileTargetsRef.current?.some(([sq, sr]) => `${sq},${sr}` === key);
-        if (plannedAction) {
+        if (suppressTileTooltipsRef.current) {
+          // Skip all tile tooltips during a drag.
+        } else if (plannedAction) {
           const claimOnlyCards = plannedAction.allCards
             .filter(ac => ac.card.card_type === 'claim')
             .map(ac => ac.card);
