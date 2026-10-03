@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, typ
 import { createPortal } from 'react-dom';
 import type { GameState } from '../types/game';
 import { getGameLog, type LogEntry } from '../api/client';
+import Icon from '../icons/Icon';
 
 interface RoundBreakdownOverlayProps {
   gameId: string;
@@ -231,11 +232,11 @@ export default function RoundBreakdownOverlay({
 
   return (
     <div
+      className="cc-ov-backdrop"
       onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.75)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -244,118 +245,40 @@ export default function RoundBreakdownOverlay({
         transition: 'opacity 0.2s ease',
       }}
     >
-      <style>{`
-        .rb-modal { padding: 24px; gap: 16px; }
-        .rb-header-title { font-size: 22px; }
-        .rb-header-sub { font-size: 13px; }
-        .rb-metrics {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-          gap: 6px;
-        }
-        .rb-metric-btn {
-          width: 100%;
-          padding: 5px 10px;
-          font-size: 12px;
-          line-height: 1.15;
-          border-radius: 6px;
-          cursor: pointer;
-          text-align: center;
-          /* Reserve enough height for a wrapped 2-line label so single-line and
-             wrapped-line buttons all render at the same height regardless of which
-             one is selected (bold weight) and which wraps. */
-          min-height: 38px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
-        }
-        .rb-metric-btn:hover { background: #2a2a4e !important; }
-        .rb-chart-card { padding: 10px; }
-        .rb-legend { gap: 14px; padding: 8px 4px; }
-        .rb-legend-item { font-size: 13px; }
-        .rb-line { transition: opacity 0.25s ease; }
-        .rb-marker { transition: r 0.2s ease; }
-        .rb-axis-text { font-family: 'Inter', system-ui, sans-serif; font-size: 11px; fill: #888; }
-
-        @media (max-width: 640px) {
-          .rb-modal { padding: 14px; gap: 12px; border-radius: 10px; }
-          .rb-header-title { font-size: 18px; }
-          .rb-header-sub { font-size: 12px; }
-          .rb-metrics {
-            grid-template-columns: repeat(2, 1fr);
-            gap: 6px;
-          }
-          .rb-metric-btn { padding: 5px 6px; font-size: 11px; min-height: 34px; }
-          .rb-chart-card { padding: 6px; }
-          .rb-legend { gap: 10px 12px; padding: 4px 2px; }
-          .rb-legend-item { font-size: 12px; }
-        }
-        @media (max-width: 380px) {
-          .rb-metrics { grid-template-columns: 1fr; }
-        }
-      `}</style>
       <div
-        className="rb-modal"
+        className="cc-ov-modal cc-ov-rb"
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: 'min(96vw, 920px)',
-          maxHeight: '92vh',
-          background: '#12122a',
-          border: '2px solid #4a4a6a',
-          borderRadius: 14,
-          color: '#fff',
-          boxShadow: '0 10px 50px rgba(0,0,0,0.6)',
           opacity: visible ? 1 : 0,
-          transform: visible ? 'scale(1)' : 'scale(0.96)',
-          transition: 'opacity 0.25s ease, transform 0.25s ease',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'auto',
+          transform: visible ? 'none' : 'translateY(10px) scale(0.965)',
+          transition: 'opacity 0.3s var(--cc-ease-out), transform 0.3s var(--cc-ease-out)',
         }}
       >
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="rb-header-title" style={{ fontWeight: 'bold', letterSpacing: 0.5 }}>Round Breakdown</div>
-            <div className="rb-header-sub" style={{ color: '#888', marginTop: 3 }}>
+        <div className="cc-ov-header">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="cc-ov-title">Round Breakdown</div>
+            <div className="cc-ov-subtitle">
               End-of-round stats for each player. Click a metric to switch the view.
             </div>
           </div>
           <button
+            className="cc-ov-close"
             onClick={onClose}
             aria-label="Close"
-            style={{
-              flex: '0 0 auto',
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              border: '1px solid #3a3a5a',
-              background: '#1a1a3a',
-              color: '#aaa',
-              fontSize: 18,
-              cursor: 'pointer',
-              lineHeight: 1,
-            }}
-          >×</button>
+          ><Icon name="close" size={14} decorative /></button>
         </div>
 
+        <div className="cc-ov-rb-body">
         {/* Metric selector — auto-fit grid stacks to 2 cols on phones, 1 col on tiny screens */}
-        <div className="rb-metrics">
+        <div className="cc-ov-rb-metrics">
           {METRICS.map(m => {
             const selected = m.key === metric;
             return (
               <button
                 key={m.key}
-                className="rb-metric-btn"
+                className={`cc-ov-chip${selected ? ' is-active' : ''}`}
                 onClick={() => setMetric(m.key)}
-                style={{
-                  fontWeight: selected ? 'bold' : 'normal',
-                  background: selected ? '#3a4a8a' : '#1f2a44',
-                  border: `1px solid ${selected ? '#7a8acc' : '#3a4a6a'}`,
-                  color: selected ? '#fff' : '#cfd8ea',
-                  boxShadow: selected ? '0 0 12px rgba(160,170,255,0.35)' : 'none',
-                }}
               >
                 {m.label}
               </button>
@@ -365,15 +288,15 @@ export default function RoundBreakdownOverlay({
 
         {/* Body — chart + legend */}
         {loading ? (
-          <div style={{ padding: 60, textAlign: 'center', color: '#888' }}>Loading round data…</div>
+          <div className="cc-ov-rb-empty">Loading round data…</div>
         ) : error ? (
-          <div style={{ padding: 60, textAlign: 'center', color: '#ff6666' }}>Failed to load: {error}</div>
+          <div className="cc-ov-rb-empty" style={{ color: '#ff8b97' }}>Failed to load: {error}</div>
         ) : rounds.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center', color: '#888' }}>No completed rounds yet.</div>
+          <div className="cc-ov-rb-empty">No completed rounds yet.</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {/* Chart */}
-            <div className="rb-chart-card" style={{ position: 'relative', background: '#0c0c1e', border: '1px solid #2a2a4a', borderRadius: 10 }}>
+            <div className="cc-ov-inset cc-ov-rb-chart">
               <svg
                 viewBox={`0 0 ${CHART_W} ${CHART_H}`}
                 preserveAspectRatio="xMidYMid meet"
@@ -387,19 +310,30 @@ export default function RoundBreakdownOverlay({
                       x2={CHART_W - PAD_RIGHT}
                       y1={yToPx(v)}
                       y2={yToPx(v)}
-                      stroke="#1f1f3a"
+                      stroke="rgba(255,255,255,0.07)"
+                      strokeDasharray={v === 0 ? undefined : '3 5'}
                       strokeWidth={1}
                     />
-                    <text x={PAD_LEFT - 8} y={yToPx(v) + 4} textAnchor="end" className="rb-axis-text">{v}</text>
+                    <text x={PAD_LEFT - 10} y={yToPx(v) + 4} textAnchor="end" className="cc-ov-rb-axis">{v}</text>
                   </g>
                 ))}
+                {/* Y-axis title (current metric) */}
+                <text
+                  x={14}
+                  y={PAD_TOP + (CHART_H - PAD_TOP - PAD_BOTTOM) / 2}
+                  textAnchor="middle"
+                  transform={`rotate(-90 14 ${PAD_TOP + (CHART_H - PAD_TOP - PAD_BOTTOM) / 2})`}
+                  className="cc-ov-rb-axis-title"
+                >
+                  {activeMetric.short}
+                </text>
                 {/* X-axis labels */}
                 {xTicks.map(r => (
-                  <text key={`x-${r}`} x={xToPx(r)} y={CHART_H - 14} textAnchor="middle" className="rb-axis-text">R{r}</text>
+                  <text key={`x-${r}`} x={xToPx(r)} y={CHART_H - 14} textAnchor="middle" className="cc-ov-rb-axis">R{r}</text>
                 ))}
                 {/* Axis line */}
-                <line x1={PAD_LEFT} x2={CHART_W - PAD_RIGHT} y1={CHART_H - PAD_BOTTOM} y2={CHART_H - PAD_BOTTOM} stroke="#3a3a5a" strokeWidth={1} />
-                <line x1={PAD_LEFT} x2={PAD_LEFT} y1={PAD_TOP} y2={CHART_H - PAD_BOTTOM} stroke="#3a3a5a" strokeWidth={1} />
+                <line x1={PAD_LEFT} x2={CHART_W - PAD_RIGHT} y1={CHART_H - PAD_BOTTOM} y2={CHART_H - PAD_BOTTOM} stroke="rgba(232,196,106,0.35)" strokeWidth={1} />
+                <line x1={PAD_LEFT} x2={PAD_LEFT} y1={PAD_TOP} y2={CHART_H - PAD_BOTTOM} stroke="rgba(232,196,106,0.35)" strokeWidth={1} />
 
                 {/* Player lines */}
                 {series.map(s => {
@@ -409,7 +343,17 @@ export default function RoundBreakdownOverlay({
                   const endsAtLeave = s.leftRound !== null && lastPoint.round === s.leftRound;
                   const opacity = s.leftRound !== null ? 0.65 : 1;
                   return (
-                    <g key={s.pid} className="rb-line" style={{ opacity }}>
+                    <g key={s.pid} className="cc-ov-rb-line" style={{ opacity }}>
+                      {/* Soft under-glow (a wide, faint stroke — no SVG filters) */}
+                      <polyline
+                        points={polyPoints}
+                        fill="none"
+                        stroke={s.color}
+                        strokeOpacity={0.18}
+                        strokeWidth={8}
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                      />
                       <polyline
                         points={polyPoints}
                         fill="none"
@@ -446,13 +390,12 @@ export default function RoundBreakdownOverlay({
                             style={{ cursor: 'help' }}
                           >
                             <circle
-                              className="rb-marker"
                               cx={cx}
                               cy={cy}
                               r={5}
                               fill={s.color}
-                              stroke="#0c0c1e"
-                              strokeWidth={1.5}
+                              stroke="#0d0c22"
+                              strokeWidth={2}
                             />
                             <circle cx={cx} cy={cy} r={12} fill="transparent" />
                           </g>
@@ -480,23 +423,15 @@ export default function RoundBreakdownOverlay({
                 return (
                   <div
                     ref={tooltipRef}
+                    className="cc-ov-tooltip"
                     style={{
                       position: 'fixed',
                       left,
                       top,
-                      background: '#1a1a3a',
-                      border: '1px solid #4a4a6a',
-                      borderRadius: 6,
-                      padding: '8px 12px',
-                      fontSize: 12,
-                      color: '#ccc',
-                      pointerEvents: 'none',
-                      whiteSpace: 'nowrap',
                       zIndex: 50001,
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.6)',
                     }}
                   >
-                    <div style={{ color: '#888', marginBottom: 4 }}>Round {hover.round} · {activeMetric.short}</div>
+                    <div className="cc-ov-tooltip-title">Round {hover.round} · {activeMetric.short}</div>
                     {hover.entries.map(({ pid, value }) => {
                       const info = playerInfo.find(p => p.pid === pid);
                       if (!info) return null;
@@ -504,7 +439,7 @@ export default function RoundBreakdownOverlay({
                         <div key={pid} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                           <span style={{ width: 8, height: 8, borderRadius: '50%', background: info.color }} />
                           <span style={{ color: info.color, fontWeight: 'bold' }}>{info.name}</span>
-                          <span style={{ color: '#fff' }}>{value}</span>
+                          <span style={{ color: 'var(--cc-text)', marginLeft: 'auto', fontWeight: 'bold' }}>{value}</span>
                         </div>
                       );
                     })}
@@ -514,34 +449,24 @@ export default function RoundBreakdownOverlay({
             </div>
 
             {/* Legend */}
-            <div className="rb-legend" style={{ display: 'flex', flexWrap: 'wrap' }}>
+            <div className="cc-ov-rb-legend">
               {playerInfo.map(info => (
                 <div
                   key={info.pid}
-                  className="rb-legend-item"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    opacity: info.leftRound !== null ? 0.55 : 1,
-                  }}
+                  className="cc-ov-rb-legend-item"
+                  style={{ opacity: info.leftRound !== null ? 0.55 : 1 }}
                 >
-                  <span style={{
-                    width: 12,
-                    height: 12,
-                    borderRadius: '50%',
-                    background: info.color,
-                    boxShadow: '0 0 4px rgba(0,0,0,0.5)',
-                  }} />
-                  <span style={{ color: '#fff' }}>{info.name}</span>
+                  <span className="cc-ov-rb-dot" style={{ background: info.color, color: info.color }} />
+                  <span style={{ color: 'var(--cc-text)' }}>{info.name}</span>
                   {info.leftRound !== null && (
-                    <span style={{ color: '#888', fontSize: 11 }}>(left round {info.leftRound})</span>
+                    <span style={{ color: 'var(--cc-text-faint)', fontSize: 11 }}>(left round {info.leftRound})</span>
                   )}
                 </div>
               ))}
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

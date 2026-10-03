@@ -9,7 +9,7 @@ function cardImageCachePlugin(): Plugin {
     name: 'card-image-cache',
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url?.startsWith('/cards/') && req.url.endsWith('.png')) {
+        if (req.url?.startsWith('/cards/') && /\.(png|webp)$/.test(req.url)) {
           // Cache for 7 days, allow revalidation
           res.setHeader('Cache-Control', 'public, max-age=604800, immutable')
         }
@@ -18,7 +18,7 @@ function cardImageCachePlugin(): Plugin {
     },
     configurePreviewServer(server) {
       server.middlewares.use((req, res, next) => {
-        if (req.url?.startsWith('/cards/') && req.url.endsWith('.png')) {
+        if (req.url?.startsWith('/cards/') && /\.(png|webp)$/.test(req.url)) {
           res.setHeader('Cache-Control', 'public, max-age=604800, immutable')
         }
         next()

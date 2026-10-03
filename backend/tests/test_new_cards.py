@@ -455,7 +455,7 @@ class TestHatchingGrounds:
     """Adds N Rabble cards to discard pile. trash_on_use."""
 
     def _count_rabble_in_discard(self, player):
-        return sum(1 for c in player.deck.discard if c.id == "swarm_rabble")
+        return sum(1 for c in player.deck.discard if c.definition_id == "swarm_rabble")
 
     def test_base_adds_three_rabble(self, small_2p_game, card_registry):
         game = small_2p_game
@@ -483,7 +483,7 @@ class TestHatchingGrounds:
         assert after - before == 5
 
     def test_rabble_cards_are_independent_copies(self, small_2p_game, card_registry):
-        """Each added Rabble must be its own Card instance (deepcopy)."""
+        """Each added Rabble must be its own Card instance with its own id (B9)."""
         game = small_2p_game
         player = game.players["p1"]
         hg = _copy_card(card_registry["swarm_hatching_grounds"], "t_hg3")
@@ -491,8 +491,9 @@ class TestHatchingGrounds:
 
         ok, _ = play_card(game, "p1", 0)
         assert ok
-        rabble_instances = [c for c in player.deck.discard if c.id == "swarm_rabble"]
+        rabble_instances = [c for c in player.deck.discard if c.definition_id == "swarm_rabble"]
         assert len(rabble_instances) >= 3
+        assert len({c.id for c in rabble_instances}) == len(rabble_instances)
         # Mutating one must not affect the others
         rabble_instances[0].passive_vp = 99
         for c in rabble_instances[1:]:
@@ -692,7 +693,7 @@ class TestMasterEngineer:
     """Adds N Entrench cards to discard pile."""
 
     def _count_entrench(self, player):
-        return sum(1 for c in player.deck.discard if c.id == "fortress_entrench")
+        return sum(1 for c in player.deck.discard if c.definition_id == "fortress_entrench")
 
     def _setup(self, card_registry):
         game = create_game(
@@ -747,8 +748,8 @@ class TestCaravan:
         initial_hand = len(player.hand)
         ok, msg = play_card(game, "p0", 0, discard_card_indices=[0])
         assert ok, msg
-        # Played 1, discarded 1 (no draw at base) → -2
-        assert len(player.hand) == initial_hand - 2
+        # Played 1, discarded 1, drew 1 → -1
+        assert len(player.hand) == initial_hand - 1
 
     def test_upgraded_discards_before_drawing(self, small_2p_game, card_registry):
         """Caravan+: discard must resolve before the draw, so the discarded card
@@ -779,5 +780,5 @@ class TestCaravan:
         initial_hand = len(player.hand)
         ok, _ = play_card(game, "p0", 0, discard_card_indices=[0])
         assert ok
-        # Played 1, discarded 1, drew 1 → -1
-        assert len(player.hand) == initial_hand - 1
+        # Played 1, discarded 1, drew 2 → 0
+        assert len(player.hand) == initial_hand

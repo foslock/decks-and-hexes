@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BASE } from '../api/client';
 import CardBrowser from './CardBrowser';
+import Icon from '../icons/Icon';
 import HowToPlay from './HowToPlay';
 import HeroAnimation from './HeroAnimation';
 import packageJson from '../../package.json';
@@ -8,6 +9,34 @@ import packageJson from '../../package.json';
 interface SetupScreenProps {
   onCreateLobby: () => void;
   onJoinLobby: (code: string) => Promise<void>;
+}
+
+/** Ambient embers drifting up behind the title screen (fixed layout so the
+ *  pattern is stable between renders). left %, duration s, delay s, drift px. */
+const EMBERS: [number, number, number, number][] = [
+  [6, 15, -2, 40], [14, 19, -11, -30], [23, 13, -6, 25], [31, 17, -14, -45],
+  [42, 21, -3, 35], [55, 16, -9, -25], [63, 14, -1, 50], [71, 20, -16, -35],
+  [79, 15, -7, 30], [88, 18, -12, -40], [94, 13, -4, 20], [48, 22, -18, -20],
+];
+
+function HomeEmbers() {
+  return (
+    <div className="cc-scr-embers" aria-hidden="true">
+      {EMBERS.map(([left, dur, delay, drift], i) => (
+        <span
+          key={i}
+          className="cc-scr-ember"
+          style={{
+            left: `${left}%`,
+            animationDuration: `${dur}s`,
+            animationDelay: `${delay}s`,
+            ['--drift' as string]: `${drift}px`,
+            ...(i % 3 === 0 ? { width: 2, height: 2 } : null),
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenProps) {
@@ -44,162 +73,111 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   };
 
   return (
-    <div style={{ height: '100dvh', minWidth: 350, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
-      <style>{`
-        .lobby-btn { transition: box-shadow 0.2s ease; box-shadow: none; }
-        .lobby-btn:hover { box-shadow: 0 0 16px rgba(74, 158, 255, 0.35); }
-        .lobby-btn-green:hover { box-shadow: 0 0 16px rgba(58, 142, 94, 0.5); }
-        @keyframes title-glow {
-          0%, 100% { text-shadow: 0 0 20px rgba(74, 158, 255, 0.3), 0 0 40px rgba(74, 120, 255, 0.15); }
-          50% { text-shadow: 0 0 30px rgba(74, 158, 255, 0.5), 0 0 60px rgba(74, 120, 255, 0.25), 0 0 80px rgba(74, 100, 255, 0.1); }
-        }
-      `}</style>
+    <div className="cc-scr-backdrop cc-scr-home">
+      <HomeEmbers />
+
       {/* Title */}
-      <div style={{ textAlign: 'center', marginTop: 60, flexShrink: 0, padding: '0 24px' }}>
-        <h1 style={{ fontSize: 52, fontWeight: 900, marginBottom: 8, letterSpacing: 4, fontFamily: "'Cinzel', serif", textTransform: 'uppercase', animation: 'title-glow 3s ease-in-out infinite' }}>
-          Card Clash
-        </h1>
-        <div style={{ fontSize: 14, color: '#666' }}>
+      <header className="cc-scr-home-header">
+        <h1 className="cc-title cc-scr-home-title">Card Clash</h1>
+        <div className="cc-scr-ornament" aria-hidden="true"><i /></div>
+        <div className="cc-scr-home-tagline">
           Simultaneous deck-building territory control
         </div>
-      </div>
+      </header>
 
       {/* Hero animation — fills space between title and buttons */}
-      <div style={{ flex: 1, minHeight: 350, minWidth: 350, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px 0' }}>
+      <div className="cc-scr-home-hero">
         <HeroAnimation />
       </div>
 
       {/* Bottom buttons — pinned to bottom */}
-      <div style={{ flexShrink: 0, maxWidth: 480, width: '100%', margin: '0 auto', padding: '0 24px', boxSizing: 'border-box' }}>
-      {/* Create / Join Lobby */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-        <button
-          className="lobby-btn lobby-btn-green"
-          onClick={() => onCreateLobby()}
-          style={{
-            padding: 16,
-            background: '#2a6e3e', border: '1px solid #3a8e5e',
-            borderRadius: 8, color: '#fff', fontSize: 22,
-            fontWeight: 'bold', cursor: 'pointer',
-          }}
-        >
-          Create
-        </button>
-        {!showJoinDialog ? (
+      <div className="cc-scr-home-actions">
+        {/* Create / Join Lobby */}
+        <div className="cc-scr-home-row">
           <button
-            className="lobby-btn"
-            onClick={() => setShowJoinDialog(true)}
-            style={{
-              padding: 16,
-              background: '#2a4a6e', border: '1px solid #3a6a8e',
-              borderRadius: 8, color: '#fff', fontSize: 22,
-              fontWeight: 'bold', cursor: 'pointer',
-            }}
+            className="cc-btn-primary cc-scr-btn-xl"
+            onClick={() => onCreateLobby()}
           >
-            Join
+            Create
           </button>
-        ) : (
-          <div style={{
-            display: 'flex', gap: 4, alignItems: 'center',
-            background: '#2a4a6e', border: '1px solid #3a6a8e',
-            borderRadius: 8, padding: '4px 8px',
-            minWidth: 0, overflow: 'hidden',
-          }}>
-            <input
-              value={joinCode}
-              onChange={(e) => { setJoinCode(e.target.value.toUpperCase().slice(0, 4)); setJoinError(null); }}
-              placeholder="CODE"
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  attemptJoin();
-                } else if (e.key === 'Escape') {
-                  setShowJoinDialog(false);
-                  setJoinCode('');
-                  setJoinError(null);
-                }
-              }}
-              style={{
-                flex: 1, minWidth: 0, padding: '10px', textAlign: 'center',
-                background: '#1a2a3e', border: '1px solid #555',
-                borderRadius: 4, color: '#fff', fontSize: 18,
-                fontFamily: 'monospace', letterSpacing: 4,
-              }}
-            />
+          {!showJoinDialog ? (
             <button
-              onClick={attemptJoin}
-              disabled={joinCode.length === 0}
-              style={{
-                flexShrink: 0, padding: '10px 14px',
-                background: joinCode.length > 0 ? '#4a9eff' : '#333',
-                border: 'none', borderRadius: 4, color: '#fff',
-                fontSize: 14, fontWeight: 'bold',
-                cursor: joinCode.length > 0 ? 'pointer' : 'not-allowed',
-              }}
+              className="cc-btn-secondary cc-scr-btn-xl"
+              onClick={() => setShowJoinDialog(true)}
             >
               Join
             </button>
-            <button
-              onClick={() => { setShowJoinDialog(false); setJoinCode(''); setJoinError(null); }}
-              style={{
-                flexShrink: 0, padding: '10px', background: 'transparent',
-                border: 'none', color: '#888', cursor: 'pointer', fontSize: 14,
-              }}
-            >
-              &#10005;
-            </button>
+          ) : (
+            <div className="cc-scr-join-box">
+              <input
+                className="cc-scr-join-input"
+                value={joinCode}
+                onChange={(e) => { setJoinCode(e.target.value.toUpperCase().slice(0, 4)); setJoinError(null); }}
+                placeholder="CODE"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    attemptJoin();
+                  } else if (e.key === 'Escape') {
+                    setShowJoinDialog(false);
+                    setJoinCode('');
+                    setJoinError(null);
+                  }
+                }}
+              />
+              <button
+                className="cc-btn-primary cc-scr-join-go"
+                onClick={attemptJoin}
+                disabled={joinCode.length === 0}
+              >
+                Join
+              </button>
+              <button
+                className="cc-scr-join-cancel"
+                onClick={() => { setShowJoinDialog(false); setJoinCode(''); setJoinError(null); }}
+                aria-label="Cancel"
+              >
+                <Icon name="close" size={12} decorative />
+              </button>
+            </div>
+          )}
+        </div>
+        {joinError && (
+          <div className="cc-scr-error" style={{ marginBottom: 10 }}>
+            {joinError}
           </div>
         )}
-      </div>
-      {joinError && (
-        <div style={{
-          fontSize: 12, color: '#ff6666', textAlign: 'center',
-          padding: '6px 12px', marginBottom: 8,
-          background: '#2a1a1a', border: '1px solid #552222',
-          borderRadius: 6,
-        }}>
-          {joinError}
-        </div>
-      )}
 
-      {/* How to Play / Card Browser */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
-        <button
-          onClick={() => setShowHowToPlay(true)}
-          style={{
-            flex: 1, padding: 14,
-            background: '#2a2a3e', border: '1px solid #555',
-            borderRadius: 8, color: '#fff', fontSize: 14,
-            fontWeight: 'bold', cursor: 'pointer',
-          }}
-        >
-          How to Play
-        </button>
-        <button
-          onClick={() => setShowCardBrowser(true)}
-          style={{
-            flex: 1, padding: 14,
-            background: '#2a2a3e', border: '1px solid #555',
-            borderRadius: 8, color: '#fff', fontSize: 14,
-            fontWeight: 'bold', cursor: 'pointer',
-          }}
-        >
-          Card Browser
-        </button>
-      </div>
+        {/* How to Play / Card Browser */}
+        <div className="cc-scr-home-secondary">
+          <button
+            className="cc-btn-secondary cc-scr-btn-md"
+            onClick={() => setShowHowToPlay(true)}
+          >
+            <span className="cc-scr-btn-icon" aria-hidden="true"><Icon name="passive" size={15} decorative /></span>
+            How to Play
+          </button>
+          <button
+            className="cc-btn-secondary cc-scr-btn-md"
+            onClick={() => setShowCardBrowser(true)}
+          >
+            <span className="cc-scr-btn-icon" aria-hidden="true"><Icon name="drawPile" size={15} decorative /></span>
+            Card Browser
+          </button>
+        </div>
       </div>
 
       {/* Version & copyright footer */}
-      <div style={{
-        flexShrink: 0, padding: '12px 0 16px',
-        fontSize: 10, color: '#444', textAlign: 'center',
-      }}>
-        <a href="https://github.com/foslock/decks-and-hexes/issues" target="_blank" rel="noopener noreferrer" style={{ color: '#667', textDecoration: 'none' }}>Provide Feedback</a>
-        <span style={{ margin: '0 6px' }}>&middot;</span>
-        <span>v{packageJson.version}{backendVersion ? ` / v${backendVersion}` : ''}</span>
-        <span style={{ margin: '0 6px' }}>&middot;</span>
-        <span>&copy; 2026 J. Foster Lockwood</span>
-      </div>
+      <footer className="cc-scr-home-footer">
+        <a href="https://github.com/foslock/decks-and-hexes/issues" target="_blank" rel="noopener noreferrer">Provide Feedback</a>
+        <span className="cc-scr-dot-sep" aria-hidden="true" />
+        <span className="cc-scr-version">v{packageJson.version}{backendVersion ? ` / v${backendVersion}` : ''}</span>
+        <span className="cc-scr-dot-sep is-last" aria-hidden="true" />
+        <span className="cc-scr-copyright">
+          &copy; 2026{' '}
+          <a href="https://www.fosterlockwood.com" target="_blank" rel="noopener noreferrer">J. Foster Lockwood</a>
+        </span>
+      </footer>
 
       {showHowToPlay && (
         <HowToPlay onClose={() => setShowHowToPlay(false)} />

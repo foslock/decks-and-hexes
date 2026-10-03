@@ -15,20 +15,21 @@ Card Clash is a 2–6 player simultaneous deck-building territory control game. 
 - CPU players count toward archetype weighting for objective selection and **will attempt to complete objectives**, competing with human players for the 2 VP reward
 
 ## Win Condition
-The **first player whose derived VP reaches the VP target wins.** VP is checked at the end of each round. The game also ends when the round limit is reached — the player with the most VP wins (ties share victory).
+The **first player whose derived VP reaches the VP target wins.** VP is checked at the end of each round. If several players reach the target in the same round, the one with the **most VP** wins; remaining ties go to the most VP hexes connected to base, then the most tiles owned, and are otherwise a shared victory. Seat order never breaks a tie. The game also ends when the round limit is reached — the player with the most VP wins (ties share victory).
 
 VP is derived instantaneously from the game state:
 1. **Territory:** +1 VP for every 3 tiles owned
 2. **Connected VP hexes:** VP hex tiles connected back to your base via owned tiles add their bonus VP (+1 or +2)
-3. **Card VP:** Land Grant cards in deck add +1 VP each; Rubble cards subtract -1 VP each
-4. **Objectives:** Completing mid-game objectives awards +2 VP each
-5. **Card effects:** Some cards grant or remove bonus VP
+3. **Card VP:** Land Grant and Spoils cards in deck add +1 VP each; formula cards (Arsenal, Warden, Colony, …) add their current value. Rubble is worth 0 VP — it only clogs your hand
+4. **Card effects:** Some cards grant or remove bonus VP
+
+(Objectives and passives are design candidates kept in `data/` but are not part of the current digital game.)
 
 ### Base Tiles
-Each player's starting corner tile is their **base** — permanently owned, with passive defense (Swarm: 2, Vanguard: 3, Fortress: 4). Bases cannot be captured but can be **raided** to inflict Rubble cards on the defender.
+Each player's starting corner tile is their **base** — permanently owned, with passive defense **3** for every archetype. Bases cannot be captured but can be **raided**: a successful raid gives the defender **1 Rubble** (a dead card; at most 1 per raid, however much the claim beat the defense) and the attacker **1 Spoils** (+1 VP).
 
 ### Dynamic VP Target
-The VP target scales with grid size, player count, and game speed (Fast/Normal/Slow). Default speed is Normal (1.0× multiplier). Formula: `total_tiles // (tiles_per_vp × player_count × 0.75) × speed_multiplier`, minimum 3. `tiles_per_vp` = 3 (constant across all grid sizes).
+The VP target scales with grid size and player count (`compute_vp_target`): 2-player base targets are Small 10, Medium 14, Large 18, Mega 22, Ultra 26, minus 1 per player beyond 2, minimum 4. `tiles_per_vp` = 3 (constant across all grid sizes).
 
 ---
 
@@ -38,9 +39,9 @@ Each archetype is defined by two of three traits: **Fast**, **Cheap**, **Strong*
 
 | Archetype | Traits | Identity | Action Slots |
 |---|---|---|---|
-| **Vanguard** | Fast + Strong | High power, expensive, aggressive | 4 |
-| **Swarm** | Fast + Cheap | Low power, cheap, floods the board | 4 |
-| **Fortress** | Cheap + Strong | High power, slow cycle, defensive | 3 |
+| **Vanguard** | Fast + Strong | High power, expensive, aggressive | 5 |
+| **Swarm** | Fast + Cheap | Low power, cheap, floods the board | 5 |
+| **Fortress** | Cheap + Strong | High power, slow cycle, defensive | 5 |
 
 ---
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, Fragment } from 'react';
 import { useAnimationOff, useAnimationSpeed } from './SettingsContext';
 import type { GameState } from '../types/game';
 
@@ -38,7 +38,6 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
   const [settingsVisible, setSettingsVisible] = useState(false);
   const [readyVisible, setReadyVisible] = useState(false);
   const [fadingOut, setFadingOut] = useState(false);
-  const [readyHovered, setReadyHovered] = useState(false);
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
 
@@ -108,163 +107,106 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [readyVisible, fadingOut]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const slideDur = animOff ? 0 : 0.8 * animSpeed;
+  const slideDur = animOff ? 0 : 0.45 * animSpeed;
   const slideStyle = (visible: boolean, delayMs?: number): React.CSSProperties => ({
     opacity: visible ? 1 : 0,
-    transform: visible ? 'translateY(0)' : 'translateY(30px)',
-    transition: animOff ? 'none' : `opacity ${slideDur}s ease, transform ${slideDur}s ease`,
+    transform: visible ? 'translateY(0) scale(1)' : 'translateY(24px) scale(0.96)',
+    transition: animOff ? 'none' : `opacity ${slideDur}s ease-out, transform ${slideDur}s cubic-bezier(0.22, 1, 0.36, 1)`,
     transitionDelay: delayMs ? `${Math.round(delayMs * animSpeed)}ms` : undefined,
   });
 
   const vpTiles = Object.values(gameState.grid.tiles).filter(t => t.is_vp).length;
   const tilesPerVp = 3;
+  // Head-to-head games get a "VS" between the two cards
+  const showVs = playerCount === 2;
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      zIndex: 40000,
-      background: 'rgba(10, 10, 20, 0.95)',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
+    <div className="cc-scr-intro" style={{
       opacity: fadingOut ? 0 : 1,
       transition: fadingOut ? `opacity ${0.6 * animSpeed}s ease` : 'none',
       pointerEvents: fadingOut ? 'none' : 'auto',
     }}>
       {/* VP Target — top area */}
-      <div style={{
-        ...slideStyle(vpVisible),
-        marginBottom: 48,
-      }}>
-        <div style={{
-          fontSize: 52,
-          fontWeight: 'bold',
-          color: '#fff',
-          textAlign: 'center',
-          textTransform: 'uppercase',
-          letterSpacing: 6,
-          textShadow: '0 0 30px rgba(74, 158, 255, 0.5), 0 2px 8px rgba(0,0,0,0.8)',
-        }}>
+      <div className="cc-scr-intro-vp" style={slideStyle(vpVisible)}>
+        <div className="cc-scr-eyebrow" style={{ marginBottom: 10 }}>The battle begins</div>
+        <div className="cc-title cc-scr-intro-title">
           Collect {gameState.vp_target} VP
         </div>
-        <div style={{
-          fontSize: 14,
-          color: '#888',
-          textAlign: 'center',
-          marginTop: 8,
-          letterSpacing: 2,
-        }}>
+        <div className="cc-scr-ornament" aria-hidden="true"><i /></div>
+        <div className="cc-scr-intro-sub">
           First player to reach the target wins
         </div>
       </div>
 
-      {/* Player Rows — center */}
-      <div style={{ marginBottom: 48, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* Player cards — center */}
+      <div className="cc-scr-intro-players">
         {gameState.player_order.map((pid, i) => {
           const player = gameState.players[pid];
           if (!player) return null;
           const color = player.color || '#888';
           const archLabel = ARCHETYPE_LABELS[player.archetype] || player.archetype;
           return (
-            <div
-              key={pid}
-              style={{
-                ...slideStyle(playersVisible[i]),
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '12px 32px',
-                background: 'rgba(30, 30, 50, 0.8)',
-                borderRadius: 10,
-                borderLeft: `4px solid ${color}`,
-                minWidth: 360,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                <span style={{
-                  fontSize: 20,
-                  fontWeight: 'bold',
-                  color,
-                }}>
+            <Fragment key={pid}>
+              {showVs && i === 1 && (
+                <div className="cc-scr-vs" style={slideStyle(playersVisible[i])}>VS</div>
+              )}
+              <div
+                className="cc-scr-vs-card"
+                style={{ ...slideStyle(playersVisible[i]), ['--pc' as string]: color }}
+              >
+                {ARCHETYPE_LABELS[player.archetype] && (
+                  <img
+                    className="cc-scr-vs-emblem"
+                    src={`/assets/howtoplay/${player.archetype}.webp`}
+                    alt=""
+                    draggable={false}
+                  />
+                )}
+                <div className="cc-scr-vs-name">
                   {player.name}
-                </span>
+                </div>
+                <div className="cc-scr-vs-arch">
+                  {archLabel}
+                </div>
                 {player.is_cpu && player.cpu_difficulty && (
-                  <span style={{ fontSize: 13, color: '#555' }}>
+                  <div className="cc-scr-vs-cpu">
                     ({player.cpu_difficulty})
-                  </span>
+                  </div>
                 )}
               </div>
-              <div style={{ fontSize: 14, color: '#aaa', textTransform: 'capitalize' }}>
-                {archLabel}
-              </div>
-            </div>
+            </Fragment>
           );
         })}
       </div>
 
       {/* Game Settings — bottom area */}
-      <div style={{
-        ...slideStyle(settingsVisible),
-        marginBottom: 40,
-      }}>
-        <div style={{
-          fontSize: 13,
-          color: '#666',
-          textAlign: 'center',
-          letterSpacing: 2,
-          textTransform: 'uppercase',
-          marginBottom: 6,
-        }}>
+      <div className="cc-scr-intro-settings" style={slideStyle(settingsVisible)}>
+        <div className="cc-scr-eyebrow">
           Game Settings
         </div>
-        <div style={{
-          display: 'flex',
-          gap: 24,
-          justifyContent: 'center',
-          fontSize: 14,
-          color: '#aaa',
-        }}>
-          <span>{GRID_SIZE_LABELS[gameState.grid.size] || gameState.grid.size}</span>
-          <span>·</span>
-          <span>{gameState.max_rounds} Rounds</span>
-          <span>·</span>
-          <span>{vpTiles} Bonus VP tiles</span>
-          <span>·</span>
-          <span>{tilesPerVp} tiles per VP</span>
+        <div className="cc-scr-chips">
+          <span className="cc-scr-chip">{GRID_SIZE_LABELS[gameState.grid.size] || gameState.grid.size}</span>
+          <span className="cc-scr-chip"><b>{gameState.max_rounds}</b> Rounds</span>
+          <span className="cc-scr-chip"><b>{vpTiles}</b> Bonus VP tiles</span>
+          <span className="cc-scr-chip"><b>{tilesPerVp}</b> tiles per VP</span>
         </div>
       </div>
 
       {/* Ready Button */}
-      <div style={{
+      <div className="cc-scr-intro-ready-wrap" style={{
         opacity: readyVisible ? 1 : 0,
-        transform: readyVisible ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.9)',
-        transition: animOff ? 'none' : `opacity ${0.5 * animSpeed}s ease, transform ${0.5 * animSpeed}s ease`,
+        transform: readyVisible ? 'translateY(0) scale(1)' : 'translateY(16px) scale(0.92)',
+        transition: animOff ? 'none' : `opacity ${0.4 * animSpeed}s ease-out, transform ${0.4 * animSpeed}s cubic-bezier(0.34, 1.56, 0.64, 1)`,
       }}>
         <button
+          className="cc-btn-primary cc-scr-intro-ready"
           onClick={handleReady}
           disabled={!readyVisible}
-          onMouseEnter={() => setReadyHovered(true)}
-          onMouseLeave={() => setReadyHovered(false)}
-          style={{
-            padding: '14px 48px',
-            fontSize: 20,
-            fontWeight: 'bold',
-            color: '#fff',
-            background: '#2aaa4a',
-            border: 'none',
-            borderRadius: 10,
-            cursor: readyVisible ? 'pointer' : 'default',
-            boxShadow: readyHovered && readyVisible
-              ? '0 4px 30px rgba(42, 170, 74, 0.7), 0 0 15px rgba(42, 170, 74, 0.4)'
-              : '0 4px 20px rgba(42, 170, 74, 0.4)',
-            letterSpacing: 2,
-            transition: 'box-shadow 0.2s ease',
-          }}
+          style={{ cursor: readyVisible ? 'pointer' : 'default' }}
         >
           I'm Ready
         </button>
+        <div className="cc-scr-intro-hint">Press Enter</div>
       </div>
     </div>
   );

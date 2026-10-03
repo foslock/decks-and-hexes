@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAnimationMode } from './SettingsContext';
+import { useSound } from '../audio/useSound';
 
 interface PhaseBannerProps {
   phase: string;
@@ -18,6 +19,14 @@ interface PhaseBannerProps {
   /** Extra milliseconds to add to the hold duration at center. */
   extraHoldMs?: number;
 }
+
+/** Accent glow behind the banner text, per phase. */
+const PHASE_ACCENTS: Record<string, string> = {
+  upkeep: '74, 158, 255',
+  play: '232, 196, 106',
+  reveal: '220, 70, 90',
+  buy: '255, 170, 74',
+};
 
 const PHASE_LABELS: Record<string, string> = {
   upkeep: 'Upkeep',
@@ -44,6 +53,7 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
   const wasHeldRef = useRef(false);
 
   const label = labelOverride || PHASE_LABELS[phase] || phase;
+  const accent = PHASE_ACCENTS[phase] ?? PHASE_ACCENTS.play;
 
   // Stable refs for callbacks — prevents effect cleanup from cancelling
   // pending timeouts when parent re-renders (e.g. from WebSocket updates)
@@ -68,6 +78,15 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
     });
     return () => cancelAnimationFrame(raf);
   }, [stage]);
+
+  // Swell as the ribbon sweeps in. Banners with a custom label (e.g. the
+  // match-start "Begin!") already have their own jingle.
+  const sound = useSound();
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
+  useEffect(() => {
+    if (stage === 'enter' && !labelOverride) soundRef.current.phaseChange();
+  }, [stage, labelOverride]);
 
   // enter → hold: wait for the slide-in transition to finish
   useEffect(() => {
@@ -122,14 +141,14 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
     // Normal / Fast: fade in from small left offset, fade out to small right offset
     switch (stage) {
       case 'mount':
-        transform = 'translate(calc(-50% - 30px), -50%)';
+        transform = 'translate(calc(-50% - 30px), -50%) scale(1.06)';
         opacity = 0;
         transition = 'none';
         break;
       case 'enter':
         transform = 'translate(-50%, -50%)';
         opacity = 1;
-        transition = `transform ${enterMs}ms ease-out, opacity ${enterMs}ms ease-out`;
+        transition = `transform ${enterMs}ms cubic-bezier(0.22, 1, 0.36, 1), opacity ${enterMs}ms ease-out`;
         break;
       case 'hold':
         transform = 'translate(-50%, -50%)';
@@ -137,7 +156,7 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
         transition = 'none';
         break;
       case 'exit':
-        transform = 'translate(calc(-50% + 30px), -50%)';
+        transform = 'translate(calc(-50% + 30px), -50%) scale(0.98)';
         opacity = 0;
         transition = `transform ${exitMs}ms ease-in, opacity ${exitMs}ms ease-in`;
         break;
@@ -159,12 +178,12 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
       <div style={{
         position: 'absolute',
         inset: 0,
-        background: 'rgba(0,0,0,0.3)',
+        background: 'radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0.15), rgba(0,0,0,0.45))',
         opacity: backdropOpacity,
         transition: backdropTransition,
       }} />
 
-      {/* Banner text */}
+      {/* Banner ribbon */}
       <div style={{
         position: 'absolute',
         left: '50%',
@@ -172,28 +191,40 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
         transform,
         transition,
         opacity,
-        background: 'linear-gradient(90deg, transparent, rgba(20, 20, 40, 0.85) 20%, rgba(20, 20, 40, 0.85) 80%, transparent)',
-        padding: '20px 120px',
+        width: 'min(960px, 100vw)',
+        background:
+          `radial-gradient(ellipse 45% 90% at 50% 50%, rgba(${accent}, 0.22), rgba(${accent}, 0) 70%),` +
+          'linear-gradient(90deg, transparent, rgba(14, 14, 34, 0.9) 18%, rgba(14, 14, 34, 0.9) 82%, transparent)',
+        padding: 'clamp(14px, 3vw, 22px) clamp(24px, 8vw, 120px)',
         whiteSpace: 'nowrap',
+        textAlign: 'center',
       }}>
+        {/* Gold hairlines framing the ribbon */}
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 1, background: 'linear-gradient(90deg, transparent, rgba(232,196,106,0.85) 50%, transparent)' }} />
+        <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 1, background: 'linear-gradient(90deg, transparent, rgba(232,196,106,0.85) 50%, transparent)' }} />
         <div style={{
-          fontSize: 42,
-          fontWeight: 'bold',
-          color: '#fff',
-          textAlign: 'center',
+          display: 'inline-block',
+          fontSize: 'clamp(26px, 6vw, 46px)',
+          fontFamily: 'var(--cc-font-display)',
+          fontWeight: 900,
           textTransform: 'uppercase',
-          letterSpacing: 8,
-          textShadow: '0 0 20px rgba(74, 158, 255, 0.6), 0 2px 8px rgba(0,0,0,0.8)',
+          letterSpacing: '0.18em',
+          paddingLeft: '0.18em', // balance the trailing letter-spacing
+          background: 'linear-gradient(180deg, #fff6d6 0%, #f3d27e 48%, #b8862e 100%)',
+          WebkitBackgroundClip: 'text',
+          backgroundClip: 'text',
+          color: 'transparent',
+          filter: `drop-shadow(0 2px 0 rgba(0,0,0,0.6)) drop-shadow(0 0 16px rgba(${accent}, 0.45))`,
         }}>
           {label}
         </div>
         {subtitle && (
           <div style={{
-            fontSize: 16,
-            color: '#ffcc66',
-            textAlign: 'center',
+            fontSize: 'clamp(12px, 2.4vw, 16px)',
+            color: '#e9dcc0',
             marginTop: 6,
-            letterSpacing: 2,
+            letterSpacing: 3,
+            textTransform: 'uppercase',
             textShadow: '0 1px 6px rgba(0,0,0,0.8)',
           }}>
             {subtitle}

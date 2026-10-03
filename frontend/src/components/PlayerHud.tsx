@@ -2,6 +2,8 @@ import { useRef, useLayoutEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Player } from '../types/game';
 import type { VpBreakdown } from '../utils/vpBreakdown';
+import Icon from '../icons/Icon';
+import { CostLabel, IconValue } from '../icons/Num';
 
 /** Renders text that shrinks (via transform scaleX) to fit a fixed max width. */
 function ShrinkText({ text, maxWidth, style }: { text: string; maxWidth: number; style?: React.CSSProperties }) {
@@ -166,12 +168,6 @@ interface PlayerHudProps {
   vpBreakdown?: VpBreakdown;
 }
 
-const ARCHETYPE_ICONS: Record<string, string> = {
-  vanguard: '⚔️',
-  swarm: '🐝',
-  fortress: '🏰',
-};
-
 // Player colors are now dynamic — read from player.color field
 
 function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { label: string; color: string } {
@@ -228,15 +224,25 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
       data-player-hud={player.id}
       onPointerEnter={hasReachedVpTarget ? () => setShowVpTooltip(true) : undefined}
       onPointerLeave={hasReachedVpTarget ? () => setShowVpTooltip(false) : undefined}
+      className="cc-hud-player"
       style={{
         padding: '8px 10px',
-        background: player.has_left ? '#111' : isActive ? '#2a2a4e' : '#1a1a2e',
+        // Glass plate with a soft player-colored tint fading in from the left.
+        background: player.has_left
+          ? '#111'
+          : `linear-gradient(90deg, ${player.color || '#666'}26, transparent 50%),` +
+            `linear-gradient(180deg, rgba(255,255,255,${isActive ? 0.075 : 0.04}) 0%, rgba(255,255,255,0) 55%),` +
+            (isActive ? 'rgba(34, 34, 72, 0.92)' : 'rgba(20, 20, 44, 0.85)'),
         border: borderStyle,
-        borderRadius: 8,
+        borderRadius: 10,
+        boxShadow: isActive
+          ? `inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.45), 0 0 0 1px ${player.color || '#666'}22`
+          : 'inset 0 1px 0 rgba(255,255,255,0.04), 0 3px 10px rgba(0,0,0,0.35)',
         opacity: player.has_left ? 0.45 : isActive ? 1 : 0.7,
         filter: player.has_left ? 'grayscale(0.8)' : undefined,
         animation,
         position: 'relative',
+        transition: 'opacity 200ms ease, box-shadow 200ms ease',
       }}
     >
       {/* VP target tooltip — portalled to body so it's never clipped */}
@@ -258,7 +264,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           zIndex: 20000,
           pointerEvents: 'none',
         }}>
-          ★ {player.name} has reached the VP target — game ends after this round
+          <Icon name="vp" size={11} decorative style={{ verticalAlign: '-0.12em', marginRight: 4 }} />{player.name} has reached the VP target — game ends after this round
         </span>,
         document.body
       )}
@@ -269,7 +275,8 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           width: 12,
           height: 12,
           borderRadius: '50%',
-          background: player.color || '#666',
+          background: `radial-gradient(circle at 35% 30%, rgba(255,255,255,0.55), rgba(255,255,255,0) 45%), ${player.color || '#666'}`,
+          boxShadow: `0 0 0 1.5px rgba(0,0,0,0.5), 0 0 8px ${player.color || '#666'}88`,
           flexShrink: 0,
         }} />
         <span style={{ flex: '1 1 0', minWidth: 0, overflow: 'hidden' }}>
@@ -278,6 +285,8 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
               display: 'inline-block',
               whiteSpace: 'nowrap',
               fontSize: 13,
+              letterSpacing: 0.2,
+              color: 'var(--cc-text)',
               maxWidth: '100%',
               transformOrigin: 'left center',
               transform: 'scaleX(var(--name-scale, 1))',
@@ -290,6 +299,15 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
             }}
           >
             {player.name}
+            {player.is_cpu && (
+              <span
+                title={player.cpu_difficulty ? `Computer player (${player.cpu_difficulty})` : 'Computer player'}
+                style={{
+                  marginLeft: 5, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', verticalAlign: '0.15em',
+                  color: 'var(--cc-text-faint)', border: '1px solid var(--cc-panel-border-strong)', borderRadius: 3, padding: '0 3px',
+                }}
+              >CPU</span>
+            )}
           </span>
         </span>
         {/* Always reserve space for the 1st badge so width doesn't shift */}
@@ -299,8 +317,9 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
             fontSize: 9,
             padding: '1px 5px',
             borderRadius: 6,
-            background: isFirstPlayer ? '#ffd700' : 'transparent',
-            color: isFirstPlayer ? '#000' : 'transparent',
+            background: isFirstPlayer ? 'linear-gradient(180deg, #ffe39a, #d4a542)' : 'transparent',
+            color: isFirstPlayer ? '#2a1d05' : 'transparent',
+            boxShadow: isFirstPlayer ? 'inset 0 1px 0 rgba(255,255,255,0.5)' : undefined,
             fontWeight: 'bold',
             letterSpacing: 0.5,
             lineHeight: 1.4,
@@ -316,8 +335,10 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
           padding: '1px 6px',
           borderRadius: 6,
           background: `${status.color}22`,
+          border: `1px solid ${status.color}44`,
           color: status.color,
           fontWeight: 'bold',
+          letterSpacing: 0.3,
           whiteSpace: 'nowrap',
         }}>
           {status.label}
@@ -325,27 +346,25 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
       </div>
 
       {/* Stats row */}
-      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', color: '#bbb' }}>
+      <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, color: 'var(--cc-text-dim)', fontVariantNumeric: 'tabular-nums' }}>
         {vpBreakdown ? (
           <VpStatTip breakdown={vpBreakdown}>
-            <span style={hasReachedVpTarget ? {
+            <IconValue icon="vp" value={player.vp} size={12} decorative style={hasReachedVpTarget ? {
               color: '#ffd700',
-              fontWeight: 'bold',
               textShadow: '0 0 6px rgba(255, 255, 255, 0.6)',
-            } : undefined}>★ {player.vp}</span>
+            } : undefined} />
           </VpStatTip>
         ) : (
           <StatTip label="Victory Points">
-            <span style={hasReachedVpTarget ? {
+            <IconValue icon="vp" value={player.vp} size={12} decorative style={hasReachedVpTarget ? {
               color: '#ffd700',
-              fontWeight: 'bold',
               textShadow: '0 0 6px rgba(255, 255, 255, 0.6)',
-            } : undefined}>★ {player.vp}</span>
+            } : undefined} />
           </StatTip>
         )}
-        <StatTip label="Resources">💰 {player.resources}</StatTip>
-        <StatTip label="Tiles Occupied">🔷 {tileCount}</StatTip>
-        <StatTip label="Total Deck Size">🃏 {totalCards}</StatTip>
+        <StatTip label="Resources"><IconValue icon="resource" value={player.resources} size={12} decorative /></StatTip>
+        <StatTip label="Tiles Occupied"><IconValue icon="tile" value={tileCount} size={12} decorative /></StatTip>
+        <StatTip label="Total Deck Size"><IconValue icon="drawPile" value={totalCards} size={12} decorative /></StatTip>
       </div>
 
       {/* Purchases made this buy phase */}
@@ -367,7 +386,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
                 cursor: onPurchaseHover ? 'pointer' : undefined,
               }}
             >
-              {p.card_name} ({p.cost}💰)
+              {p.card_name} (<CostLabel cost={p.cost} size={10} />)
             </span>
           ))}
         </div>

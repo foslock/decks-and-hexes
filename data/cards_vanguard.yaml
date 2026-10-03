@@ -1,6 +1,6 @@
 # Card Clash – Vanguard Card Pool
 # Archetype: Fast + Strong
-# Action Slots: 4
+# Action Slots: 5 (all archetypes: 5 actions, 5-card hand)
 # Identity: High power, expensive to buy, aggressive expansion
 #
 # EDITING NOTES:
@@ -20,8 +20,10 @@ cards:
     power: 0
     resource_gain: 0
     upgraded_resource_gain: 0
+    draw_cards: 0
+    upgraded_draw_cards: 0
     effect: "Gain 1 resource for each tile you successfully claimed last round."
-    effect_upgraded: "Gain 2 resources for each tile you successfully claimed last round. Draw 1 card."
+    effect_upgraded: "Gain 2 resources for each tile you successfully claimed last round. Draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards sustained aggression across rounds. Creates a virtuous cycle: claim tiles → fund more claims."
@@ -81,7 +83,7 @@ cards:
     name: Strike Team
     name_upgraded: Strike Team+
     type: Claim
-    buy_cost: 4
+    buy_cost: 5
     action_return: 0
     reversible: true
     power: 3
@@ -89,6 +91,7 @@ cards:
     effect_upgraded: "Claim: Power 3. If you played another Claim card this round, +3 power."
     secondary_effect: null
     secondary_timing: null
+    note: "Checked when Claims resolve, so the other Claim can be played before or after Strike Team (any Claim counts, Explore included)."
 
     effects:
       - type: power_modifier
@@ -149,7 +152,7 @@ cards:
     action_return: 0
     reversible: true
     power: 3
-    effect: "Claim: Power 3. Stackable."
+    effect: "Claim: Power 3. Stackable. If you've already played another Claim on this tile this round, gain 1 action."
     effect_upgraded: "Claim: Power 4. Stackable. If you've already played another Claim on this tile this round, gain 1 action."
     secondary_effect: null
     secondary_timing: null
@@ -157,7 +160,7 @@ cards:
 
     effects:
       - type: grant_actions_if_stacked
-        value: 0
+        value: 1
         upgraded_value: 1
         timing: immediate
 
@@ -178,7 +181,7 @@ cards:
     name: Regroup
     name_upgraded: Regroup+
     type: Engine
-    buy_cost: 4
+    buy_cost: 3
     action_return: 1
     upgraded_action_return: 2
     power: 0
@@ -240,8 +243,8 @@ cards:
     buy_cost: 6
     action_return: 0
     power: 3
-    effect: "Claim: Power 3. If successful, randomly claim up to one available adjacent neutral tile automatically."
-    effect_upgraded: "Claim: Power 5. If successful, randomly claim up to one available adjacent neutral tile automatically. Draw 1 card next round."
+    effect: "Claim: Power 3. If successful, automatically claim one random adjacent neutral tile that has no defense."
+    effect_upgraded: "Claim: Power 5. If successful, automatically claim one random adjacent neutral tile that has no defense. Draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
 
@@ -280,12 +283,16 @@ cards:
     action_return: 2
     upgraded_action_return: 3
     power: 0
-    effect: "Gain 2 actions. Target opponent gains 1 extra action next round."
-    effect_upgraded: "Gain 3 actions."
+    draw_cards: 0
+    effect: "Gain 2 actions. Draw 1 card next round. Target opponent gains 1 extra action next round."
+    effect_upgraded: "Gain 3 actions. Draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
 
     effects:
+      - type: draw_next_turn
+        value: 1
+        timing: on_resolution
       - type: grant_actions_next_turn
         value: 1
         upgraded_value: 0
@@ -317,11 +324,11 @@ cards:
     type: Claim
     buy_cost: 9
     action_return: 0
-    action_cost: 2
     reversible: true
-    power: 6
-    effect: "Claim: Power 6. Costs 1 less resource to purchase for each VP tile you currently control. Costs 2 actions to play."
-    effect_upgraded: "Claim: Power 8. Costs 1 less resource to purchase for each VP tile you currently control. Costs 2 actions to play."
+    power: 5
+    upgraded_power: 7
+    effect: "Claim: Power 5. Costs 1 less resource to purchase for each VP tile you currently control."
+    effect_upgraded: "Claim: Power 7. Costs 1 less resource to purchase for each VP tile you currently control."
     secondary_effect: null
     secondary_timing: null
 
@@ -341,8 +348,8 @@ cards:
     unplayable: true
     unique: true
     vp_formula: contested_wins
-    effect: "While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +1 VP."
-    effect_upgraded: "While in your hand, if you win 2 or more contested tiles this round, this card permanently gains +2 VP."
+    effect: "While in your hand, if 2 or more of your Claims beat opponent-owned tiles this round (base raids count), this card permanently gains +1 VP."
+    effect_upgraded: "While in your hand, if 2 or more of your Claims beat opponent-owned tiles this round (base raids count), this card permanently gains +2 VP."
     secondary_effect: null
     secondary_timing: null
     note: "Escalating VP engine — grows each round you hit the threshold while in hand. Takes up a hand slot when drawn."
@@ -362,20 +369,16 @@ cards:
     action_return: 0
     reversible: true
     power: 0
-    defense_bonus: 2
-    upgraded_defense_bonus: 3
+    defense_bonus: 3
+    upgraded_defense_bonus: 4
     resource_gain: 0
     upgraded_resource_gain: 0
-    effect: "One tile you own gains +2 defense this round. If an opponent's claim on this tile fails, draw 1 card next round."
-    effect_upgraded: "One tile you own gains +3 defense this round. If an opponent's claim on this tile fails, draw 1 card next round."
+    effect: "One tile you own gains +3 defense this round. If an opponent's claim on this tile fails, draw 1 card next round."
+    effect_upgraded: "One tile you own gains +4 defense this round. If an opponent's claim on this tile fails, draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
 
     effects:
-      - type: defense_bonus
-        value: 2
-        upgraded_value: 3
-        timing: on_resolution
       - type: draw_next_turn
         value: 1
         timing: on_resolution
@@ -401,14 +404,14 @@ cards:
     name: Arsenal
     name_upgraded: Arsenal+
     type: Passive
-    buy_cost: 5
+    buy_cost: 6
     action_return: 0
     power: 0
     unplayable: true
     unique: true
-    vp_formula: deck_div_10
-    effect: "+1 VP for every 10 cards in your deck."
-    effect_upgraded: "+1 VP for every 8 cards in your deck."
+    vp_formula: deck_div_12
+    effect: "+1 VP for every 12 cards in your deck."
+    effect_upgraded: "+1 VP for every 10 cards in your deck."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards aggressive card purchasing. Creates a strategic fork: thin for efficiency or bulk up for VP. Takes up a hand slot when drawn."
@@ -438,7 +441,7 @@ cards:
     name: Financier
     name_upgraded: Financier+
     type: Engine
-    buy_cost: 8
+    buy_cost: 5
     action_return: 0
     upgraded_action_return: 2
     power: 0
@@ -448,7 +451,7 @@ cards:
     effect_upgraded: "Draw 1 card for each Debt you have in your deck. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
-    note: "Turns the Debt penalty into a card draw engine. Expensive at 7 cost, but becomes very powerful when loaded with Debt cards. Upgraded version also grants 2 actions, making it a net-positive action card."
+    note: "Turns the Debt penalty into a card draw engine. Costs 5, and becomes very powerful when loaded with Debt cards. Upgraded version also grants 2 actions, making it a net-positive action card."
 
     effects:
       - type: draw_per_debt
@@ -484,18 +487,18 @@ cards:
     buy_cost: 3
     action_return: 0
     power: 0
-    effect: "Trash 1 card from your hand. If it was a Claim card, gain resources equal to double its effective power and gain 1 action."
-    effect_upgraded: "Trash 1 card from your hand. If it was a Claim card, gain resources equal to double its effective power and gain 2 actions."
+    effect: "Trash 1 card from your hand. If it was a Claim card, gain resources equal to its power and gain 1 action."
+    effect_upgraded: "Trash 1 card from your hand. If it was a Claim card, gain resources equal to its power and gain 2 actions."
     secondary_effect: null
     secondary_timing: null
-    note: "Combat-themed deck thinning. Uses effective power (including upgrades and printed modifiers), not base power. Turns outgrown Explores (0 res) into deck thinning, or surplus Claim cards into fuel."
+    note: "Combat-themed deck thinning. Uses the trashed card's printed power (its upgraded power if upgraded); conditional bonuses such as Strike Team's +2 don't count. Turns outgrown Explores (0 resources, +1 action) into deck thinning, or surplus Claim cards into fuel."
 
     effects:
       - type: trash_gain_power
-        value: 2
+        value: 1
         timing: immediate
         requires_choice: true
-        metadata: {optional: true, multiplier: 2, claim_only_bonus: true, use_effective_power: true, claim_action_return: 1, upgraded_claim_action_return: 2}
+        metadata: {optional: true, multiplier: 1, claim_only_bonus: true, use_effective_power: true, claim_action_return: 1, upgraded_claim_action_return: 2}
 
   - id: vanguard_ultimatum
     name: Ultimatum
@@ -612,7 +615,7 @@ cards:
     name: War Banner
     name_upgraded: War Banner+
     type: Engine
-    buy_cost: 7
+    buy_cost: 5
     action_return: 0
     upgraded_action_return: 1
     power: 0

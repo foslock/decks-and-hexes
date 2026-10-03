@@ -6,7 +6,9 @@ import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
-import { renderSubtitlePart } from './SubtitlePartRenderer';
+import { renderSubtitle } from './SubtitlePartRenderer';
+import Icon from '../icons/Icon';
+import { CostLabel } from '../icons/Num';
 import { useSound } from '../audio/useSound';
 import { useCardZoom } from './CardZoomContext';
 
@@ -119,14 +121,7 @@ interface CardHandProps {
   cardTargetsTile?: (card: Card) => boolean;
 }
 
-import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
-
-const CARD_EMOJI: Record<string, string> = {
-  claim: '⚔️',
-  defense: '🛡️',
-  engine: '⚙️',
-  passive: '📜',
-};
+import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground, MINI_CARD_SHADOW } from '../constants/cardColors';
 
 const DRAG_THRESHOLD = 12;
 const CARD_WIDTH = 134;
@@ -150,22 +145,6 @@ const MOUSE_DRAG_GHOST_Y_OFFSET = 28;
 // Opacity applied to the drag ghost while a touch drag hovers the grid,
 // so the player can see the board through the card under their finger.
 const TOUCH_DRAG_GRID_OPACITY = 0.45;
-
-function ActionReturnBadge({ value }: { value: number }) {
-  if (value === 0) return null;
-  return (
-    <span style={{
-      fontSize: 10,
-      padding: '1px 4px',
-      borderRadius: 4,
-      background: value === 2 ? '#4aff6a' : '#ffaa4a',
-      color: '#000',
-      fontWeight: 'bold',
-    }}>
-      {value === 1 ? '↺' : '↑'}
-    </span>
-  );
-}
 
 // Floating card preview shown above/below a hovered hand card
 function CardPreview({ card, anchorRect, exiting, extraOffset = 0 }: { card: Card; anchorRect: DOMRect; exiting?: boolean; extraOffset?: number }) {
@@ -357,7 +336,7 @@ function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: b
                 {displayCard.name}
               </span>
             </div>
-            <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : '—'}</span>
+            <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={displayCard.buy_cost} size={15} /></span>
           </div>
           <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
             <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -366,7 +345,7 @@ function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: b
                 el.style.setProperty('--sub-scale', String(scale));
               }
             }}>
-            {buildCardSubtitle(displayCard).map((part, i) => renderSubtitlePart(part, i, { passiveVp: displayCard.passive_vp }))}
+            {renderSubtitle(buildCardSubtitle(displayCard), { fontSize: 15, passiveVp: displayCard.passive_vp })}
             </span>
           </div>
         </div>
@@ -405,10 +384,10 @@ function CompactCardContent({ card, titleSize = 14, subtitleSize = 13, subtitleC
         <div style={{ fontWeight: 'bold', fontSize: titleSize, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
           {card.name}
         </div>
-        <span style={{ fontSize: subtitleSize - 1, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>
+        <span style={{ fontSize: subtitleSize - 1, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={card.buy_cost} size={subtitleSize - 1} /></span>
       </div>
       <div style={{ fontSize: subtitleSize, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-        {buildCardSubtitle(card, subtitleCtx).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp, showDynamic: true }))}
+        {renderSubtitle(buildCardSubtitle(card, subtitleCtx), { fontSize: subtitleSize, passiveVp: card.passive_vp, showDynamic: true })}
       </div>
     </>
   );
@@ -530,8 +509,9 @@ export function CardViewPopup({
             <button
               onClick={onClose}
               style={{ padding: '4px 10px', background: '#2a2a3e', border: '1px solid #555', borderRadius: 5, color: '#aaa', fontSize: 13, cursor: 'pointer' }}
+              aria-label="Close"
             >
-              ✕
+              <Icon name="close" size={12} decorative style={{ verticalAlign: '-0.1em' }} />
             </button>
           </div>
         </div>
@@ -547,7 +527,7 @@ export function CardViewPopup({
                   marginBottom: 8,
                   fontWeight: 'bold',
                 }}>
-                  {isTrashed ? '🗑 ' : ''}{group.label} ({group.items.length})
+                  {isTrashed && <Icon name="trash" size={13} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} />}{group.label} ({group.items.length})
                 </div>
               )}
               {group.items.length === 0 ? (
@@ -1631,10 +1611,13 @@ export default function CardHand({
     justifyContent: 'center',
     gap: 2,
     padding: '4px 10px',
-    background: '#2a2a3e',
-    border: '1px solid #444',
-    borderRadius: 8,
-    color: '#fff',
+    // Stacked-deck look: two offset card edges behind a glass face.
+    background: 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0) 45%, rgba(0,0,0,0.25)), #1d1d38',
+    border: '1px solid rgba(232, 196, 106, 0.3)',
+    borderRadius: 9,
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 2px -2px 0 -1px #2a2a4c, 4px -4px 0 -2px #23233f, 0 4px 10px rgba(0,0,0,0.45)',
+    color: 'var(--cc-text)',
+    fontVariantNumeric: 'tabular-nums',
     cursor: 'pointer',
     width: BTN_WIDTH,
     minHeight: CARD_MIN_HEIGHT,
@@ -1769,10 +1752,10 @@ export default function CardHand({
               } : {}),
             }}
           >
-            <span style={{ fontSize: 24, fontWeight: 'bold', color: '#fff', lineHeight: 1 }}>
+            <span style={{ fontSize: 24, fontWeight: 900, fontFamily: 'var(--cc-font-display)', color: '#fff', lineHeight: 1, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
               {shuffling ? shuffleDisplayCount : deckSize + drawPileBonus}
             </span>
-            <span style={{ fontSize: 9, color: '#888' }}>Draw</span>
+            <span style={{ fontSize: 9, color: 'var(--cc-gold)', opacity: 0.75, textTransform: 'uppercase', letterSpacing: 1 }}>Draw</span>
           </button>
         </div>
 
@@ -1909,9 +1892,9 @@ export default function CardHand({
                   flexShrink: 0,
                   marginLeft: localIdx === 0 ? 0 : cardMarginLeft,
                   padding: 6,
-                  background: isTrashSelected ? '#5a2020' : isTrashPlayed ? '#1a3a1a' : isSelected ? '#3a3a6e' : '#2a2a3e',
+                  background: isTrashSelected ? '#5a2020' : isTrashPlayed ? '#1a3a1a' : miniCardBackground(typeColor, isSelected ? '#34346a' : undefined),
                   border: `2px solid ${isTrashSelected ? '#ff4444' : isTrashPlayed ? '#4aff6a' : isSelected ? '#fff' : typeColor}`,
-                  borderRadius: 6,
+                  borderRadius: 8,
                   color: '#fff',
                   pointerEvents: isAnimating ? 'none' as const : 'auto' as const,
                   cursor: trashMode ? (isTrashPlayed ? 'default' : 'pointer') : disabled ? 'not-allowed' : 'grab',
@@ -1932,7 +1915,9 @@ export default function CardHand({
                       ? '-3px 0 0 0 #fff, -6px 0 12px rgba(255,255,255,0.3)'
                       : isDropAfter
                         ? '3px 0 0 0 #fff, 6px 0 12px rgba(255,255,255,0.3)'
-                        : 'none',
+                        : isSelected
+                          ? `${MINI_CARD_SHADOW}, 0 0 14px ${typeColor}aa`
+                          : MINI_CARD_SHADOW,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -1946,7 +1931,7 @@ export default function CardHand({
                       {card.name}
                     </span>
                   </div>
-                  <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{card.buy_cost != null ? `${card.buy_cost}💰` : '—'}</span>
+                  <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={card.buy_cost} size={13} /></span>
                 </div>
                 <div style={{ fontSize: 13, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                   <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -1955,7 +1940,7 @@ export default function CardHand({
                       el.style.setProperty('--sub-scale', String(scale));
                     }
                   }}>
-                  {buildCardSubtitle(card, subtitleContext).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp, showDynamic: true }))}
+                  {renderSubtitle(buildCardSubtitle(card, subtitleContext), { fontSize: 13, passiveVp: card.passive_vp, showDynamic: true })}
                   </span>
                 </div>
                 {/* Icon overlay — shown when card is selected for trashing/discarding */}
@@ -1970,9 +1955,10 @@ export default function CardHand({
                     zIndex: 5,
                   }}>
                     <div style={{
-                      fontSize: 28,
+                      color: '#fff',
                       filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.8))',
-                    }}>{trashMode?.label === 'Discard' ? '🃏↘' : '🗑️'}</div>
+                      display: 'flex',
+                    }}><Icon name={trashMode?.label === 'Discard' ? 'discard' : 'trash'} size={28} decorative /></div>
                   </div>
                 )}
                 {/* Dark overlay + "Playing" label on the card being played */}
@@ -2039,8 +2025,8 @@ export default function CardHand({
           title="View discard pile"
           style={{ ...iconBtnStyle, opacity: discardCount === 0 ? 0.4 : 1 }}
         >
-          <span style={{ fontSize: 24, fontWeight: 'bold', color: '#aaa', lineHeight: 1 }}>{discardCount}</span>
-          <span style={{ fontSize: 9, color: '#888' }}>Discard</span>
+          <span style={{ fontSize: 24, fontWeight: 900, fontFamily: 'var(--cc-font-display)', color: '#c9c7dc', lineHeight: 1, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>{discardCount}</span>
+          <span style={{ fontSize: 9, color: 'var(--cc-gold)', opacity: 0.75, textTransform: 'uppercase', letterSpacing: 1 }}>Discard</span>
         </button>
       </div>
 

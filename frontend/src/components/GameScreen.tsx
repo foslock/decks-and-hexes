@@ -15,17 +15,21 @@ import ResolveOverlay from './ResolveOverlay';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
-import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor, miniCardBackground, MINI_CARD_SHADOW } from '../constants/cardColors';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed, useBackgroundImages } from './SettingsContext';
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import CompactCard from './CompactCard';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
-import { renderSubtitlePart } from './SubtitlePartRenderer';
+import { renderSubtitle } from './SubtitlePartRenderer';
+import Icon from '../icons/Icon';
+import { CostLabel, IconValue, Num } from '../icons/Num';
 import { useSound } from '../audio/useSound';
 import { useCardZoom } from './CardZoomContext';
 import { computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
+import { preloadCardImages } from '../utils/cardImagePreload';
+import { preloadCatalogArt } from '../cardCatalog';
 
 /** Check if an engine card needs an opponent target (forced discard or inject rubble). */
 function needsOpponentTarget(card: Card): boolean {
@@ -115,6 +119,8 @@ function computeClaimPowerOnTile(
     if (eff.type !== 'power_modifier') continue;
     const mod = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
     if (eff.condition === 'if_target_neutral' && !tile.owner) power += mod;
+    // Road Builder: bonus when the tile joins two of your disconnected groups
+    if (eff.condition === 'if_bridges_territory' && tileBridgesTerritory(tile, tiles, activePlayerId)) power += mod;
     if (eff.condition === 'if_adjacent_owned_gte') {
       const threshold = eff.condition_threshold ?? 3;
       let adjOwned = 0;
@@ -130,6 +136,43 @@ function computeClaimPowerOnTile(
     }
   }
   return power;
+}
+
+/**
+ * True if claiming `tile` would connect two or more currently disconnected
+ * groups of `playerId`'s tiles (mirrors backend `tile_bridges_territory`).
+ */
+function tileBridgesTerritory(
+  tile: import('../types/game').HexTile,
+  tiles: Record<string, import('../types/game').HexTile>,
+  playerId: string,
+): boolean {
+  const owned = new Set(Object.keys(tiles).filter(k => tiles[k].owner === playerId));
+  const starts: string[] = [];
+  for (const [dq, dr] of HEX_DIRS) {
+    const nk = `${tile.q + dq},${tile.r + dr}`;
+    if (owned.has(nk)) starts.push(nk);
+  }
+  if (starts.length < 2) return false;
+  const visited = new Set<string>();
+  let groups = 0;
+  for (const start of starts) {
+    if (visited.has(start)) continue;
+    if (++groups >= 2) return true;
+    const queue = [start];
+    visited.add(start);
+    while (queue.length > 0) {
+      const [cq, cr] = queue.pop()!.split(',').map(Number);
+      for (const [dq, dr] of HEX_DIRS) {
+        const nk = `${cq + dq},${cr + dr}`;
+        if (!visited.has(nk) && owned.has(nk)) {
+          visited.add(nk);
+          queue.push(nk);
+        }
+      }
+    }
+  }
+  return false;
 }
 
 /**
@@ -481,9 +524,11 @@ function PhaseIndicatorPill({ phase }: { phase: string }) {
         onPointerEnter={(e) => setRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
         onPointerLeave={() => setRect(null)}
         style={{
-          fontSize: 11, padding: '2px 8px', borderRadius: 4,
-          background: PHASE_PILL_COLORS[phase] ?? '#333',
-          color: '#fff', fontWeight: 'bold', textTransform: 'uppercase', cursor: 'help',
+          fontSize: 10, padding: '2px 8px', borderRadius: 999,
+          background: `linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0) 60%), ${PHASE_PILL_COLORS[phase] ?? '#333'}`,
+          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.25), 0 0 10px ${(PHASE_PILL_COLORS[phase] ?? '#333')}55`,
+          color: '#fff', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, cursor: 'help',
+          textShadow: '0 1px 1px rgba(0,0,0,0.4)',
         }}
       >
         {PHASE_PILL_LABELS[phase] ?? phase.replace(/_/g, ' ')}
@@ -502,7 +547,7 @@ function PhaseIndicatorPill({ phase }: { phase: string }) {
             const isCurrent = phase === p;
             return (
               <span key={p} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                {i > 0 && <span style={{ color: '#555', fontSize: 10 }}>→</span>}
+                {i > 0 && <Icon name="then" size={9} decorative style={{ color: '#555' }} />}
                 <span style={{
                   fontSize: 11, padding: '2px 8px', borderRadius: 4,
                   background: isCurrent ? (PHASE_PILL_COLORS[p] ?? '#333') : 'transparent',
@@ -767,6 +812,71 @@ function DebtCardFlyAnimation({
     />
   );
 }
+
+/** Shared glass panel look for the floating in-game HUD. */
+const HUD_PANEL_STYLE: React.CSSProperties = {
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 45%), rgba(12, 12, 30, 0.9)',
+  border: '1px solid rgba(232, 196, 106, 0.16)',
+  borderRadius: 12,
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 24px rgba(0,0,0,0.45)',
+};
+
+type ActionButtonVariant = 'warn' | 'go' | 'muted' | 'danger' | 'slate' | 'info';
+const ACTION_BUTTON_FILLS: Record<ActionButtonVariant, { bg: string; border: string; color: string }> = {
+  warn: { bg: 'linear-gradient(180deg, #ffb46e 0%, #f08a3c 52%, #c8601c 100%)', border: '#ffcb94', color: '#fff' },
+  go: { bg: 'linear-gradient(180deg, #6ee495 0%, #2fa356 52%, #1d7a3c 100%)', border: '#9cf3b8', color: '#fff' },
+  muted: { bg: 'linear-gradient(180deg, #4b4b68 0%, #36364e 100%)', border: 'rgba(255,255,255,0.14)', color: '#b9b8cc' },
+  danger: { bg: 'linear-gradient(180deg, #ff7a7a 0%, #e04545 52%, #b02a2a 100%)', border: '#ffaaaa', color: '#fff' },
+  slate: { bg: 'linear-gradient(180deg, #a3a3b8 0%, #77778e 100%)', border: '#c9c9d9', color: '#fff' },
+  info: { bg: 'linear-gradient(180deg, #7cbcff 0%, #4a9eff 52%, #2d74d0 100%)', border: '#a9d3ff', color: '#fff' },
+};
+
+/** Embossed, display-font style shared by the phase action buttons
+ *  (Submit Play, Done Buying, Done Reviewing, Confirm/Cancel). */
+function actionButtonStyle(variant: ActionButtonVariant, size: 'lg' | 'sm' = 'lg'): React.CSSProperties {
+  const f = ACTION_BUTTON_FILLS[variant];
+  return {
+    padding: size === 'lg' ? '10px 24px' : '6px 16px',
+    background: f.bg,
+    border: `1px solid ${f.border}`,
+    borderRadius: 10,
+    color: f.color,
+    fontFamily: 'var(--cc-font-display)',
+    fontWeight: 900,
+    letterSpacing: '0.05em',
+    fontSize: size === 'lg' ? 17 : 13,
+    lineHeight: '1.2',
+    textShadow: variant === 'muted' ? 'none' : '0 1px 2px rgba(0,0,0,0.45)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.45)',
+  };
+}
+
+/** Glass button used in the top-right HUD bar (Cards / Deck / Shop / gear). */
+const HUD_BUTTON_STYLE: React.CSSProperties = {
+  padding: '7px 14px',
+  background: 'linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02)), rgba(18, 18, 40, 0.93)',
+  border: '1px solid rgba(232, 196, 106, 0.28)',
+  borderColor: 'rgba(232, 196, 106, 0.28)',
+  borderRadius: 9,
+  color: 'var(--cc-text)',
+  fontSize: 13,
+  fontWeight: 'bold',
+  letterSpacing: 0.3,
+  cursor: 'pointer',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 12px rgba(0,0,0,0.4)',
+};
+
+/** Default table backdrop: a soft spotlight behind the board, a vignette
+ *  toward the edges, and a faint hex lattice for texture. */
+const GAME_BACKDROP = [
+  'radial-gradient(ellipse 70% 60% at 50% 46%, rgba(64, 72, 140, 0.32) 0%, rgba(30, 30, 70, 0.12) 45%, rgba(0, 0, 0, 0) 70%)',
+  'radial-gradient(ellipse at 50% 50%, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 8, 0.55) 100%)',
+  `url("data:image/svg+xml,${encodeURIComponent(
+    "<svg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'>" +
+    "<path d='M28 0 L56 16 L56 48 L28 64 L0 48 L0 16 Z M28 64 L28 97' fill='none' stroke='rgba(255,255,255,0.025)' stroke-width='1'/></svg>",
+  )}")`,
+  'linear-gradient(180deg, #121230 0%, #0c0c20 100%)',
+].join(', ');
 
 export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby, wsSend, wsMessage }: GameScreenProps) {
   // Sync player colors from game state into the shared PLAYER_COLORS map
@@ -1054,13 +1164,46 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // Auto-dismiss error toast after 4 seconds
   useEffect(() => {
     if (!error) return;
+    sound.invalidAction();
     const timer = setTimeout(() => setError(null), 4000);
     return () => clearTimeout(timer);
-  }, [error]);
+  }, [error, sound]);
 
   const activePlayerId = gameState.player_order[activePlayerIndex];
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+
+  // Chime when the local player's VP goes up (tracked per player so a
+  // hot-seat seat switch doesn't count as a gain).
+  const lastVpRef = useRef<{ pid: string; vp: number } | null>(null);
+  useEffect(() => {
+    const vp = activePlayer?.vp;
+    if (vp === undefined) return;
+    const last = lastVpRef.current;
+    if (last && last.pid === activePlayerId && vp > last.vp) sound.vpGain();
+    lastVpRef.current = { pid: activePlayerId, vp };
+  }, [activePlayer?.vp, activePlayerId, sound]);
+
+  // Warm card art the player is about to hover: their hand, deck, discard
+  // and both markets load at high priority; the rest of the catalog trickles
+  // in during idle time (see utils/cardImagePreload).
+  const visibleCardIdsKey = useMemo(() => {
+    const ids = new Set<string>();
+    const add = (c?: Card | null) => { if (c?.definition_id) ids.add(c.definition_id); };
+    activePlayer?.hand?.forEach(add);
+    activePlayer?.deck_cards?.forEach(add);
+    activePlayer?.discard?.forEach(add);
+    activePlayer?.archetype_market?.forEach(add);
+    gameState.shared_market?.forEach(s => add(s.card));
+    return [...ids].sort().join('|');
+  }, [activePlayer, gameState.shared_market]);
+  useEffect(() => {
+    if (!visibleCardIdsKey) return;
+    preloadCardImages(visibleCardIdsKey.split('|'), 'high');
+  }, [visibleCardIdsKey]);
+  useEffect(() => {
+    preloadCatalogArt(activePlayer?.archetype);
+  }, [activePlayer?.archetype]);
 
   // Clear player-effect popups once the game phase leaves `reveal` (usually
   // → `buy`). This covers both the single-player immediate-transition path
@@ -1214,9 +1357,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       tileCount: activePlayer.tile_count,
       handSize: activePlayer.hand.length,
       defenseCardsInHand: activePlayer.hand.filter(c => c.card_type === 'defense').length,
+      // Watchful Keep: only defense *bonuses* count (above intrinsic base/VP-hex defense)
       tilesWithDefenseOwned: gameState.grid
         ? Object.values(gameState.grid.tiles).filter(t =>
-            t.owner === activePlayerId && (t.defense_power > 0 || t.permanent_defense_bonus > 0)
+            t.owner === activePlayerId && (t.defense_power > t.base_defense || t.permanent_defense_bonus > 0)
           ).length
         : 0,
       trashCount: activePlayer.trash?.length ?? 0,
@@ -2930,11 +3074,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     try {
       setError(null);
       const result = await api.rerollMarket(gameState.id, activePlayerId);
+      sound.coinSpend();
       onStateUpdate(result.state);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState.id, activePlayerId, onStateUpdate]);
+  }, [gameState.id, activePlayerId, onStateUpdate, sound]);
 
   const handleEndTurn = useCallback(async () => {
     try {
@@ -3827,7 +3972,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (broken.length > 0) {
           setResolveLogEntries(prev => [
             ...prev,
-            `★ ${winnerName} disrupted ${loserName}'s VP bonus path${broken.length > 1 ? 's' : ''} at ${lostTileKey}`,
+            `${winnerName} disrupted ${loserName}'s VP bonus path${broken.length > 1 ? 's' : ''} at ${lostTileKey}`,
           ]);
         }
 
@@ -4066,7 +4211,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       candidates = adjacentTiles;
     }
 
-    // Adjacency bridge (Road Builder): precompute whether we need the bridge check
+    // Adjacency-bridge targeting restriction (legacy effect type; no current card uses it —
+    // Road Builder now gets bonus power on bridging tiles instead): precompute the bridge check
     const needsBridge = card.effects?.some(e => e.type === 'adjacency_bridge') ?? false;
     // Build set of all owned tile coords for bridge BFS
     const ownedSet = needsBridge
@@ -4120,8 +4266,19 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (groups < 2) continue;
       }
       // Classify: strong (power sufficient) vs weak (power insufficient)
-      const claimBuffBonus = card.card_type === 'claim' && activePlayer?.claim_buffs?.[0]
-        ? activePlayer.claim_buffs[0].power_bonus
+      // Queued Claim buffs (War Banner, Swarm Tactics, Rally Cry+): the next Claim
+      // consumes one buff per distinct source card, so sum those.
+      const claimBuffBonus = card.card_type === 'claim'
+        ? (() => {
+            const seen = new Set<string | undefined>();
+            let total = 0;
+            for (const b of activePlayer?.claim_buffs ?? []) {
+              if (seen.has(b.source_card_id)) continue;
+              seen.add(b.source_card_id);
+              total += b.power_bonus ?? 0;
+            }
+            return total;
+          })()
         : 0;
       // Strike Team: bonus power if the active player already played another Claim this round.
       const hasPlayedClaim = (activePlayer?.planned_actions ?? [])
@@ -4151,7 +4308,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // Own tiles are valid defensive placements for Claim cards (the claim
     // power adds to the tile's defense at resolution time). Skip this for
     // unoccupied_only cards (e.g. Proliferate) and adjacency-bridge cards
-    // (Road Builder) which can't meaningfully target a tile already owned.
+    // (legacy restriction) which can't meaningfully target a tile already owned.
     if (!card.unoccupied_only && !needsBridge) {
       for (const [key, tile] of Object.entries(tiles)) {
         if (!tile || tile.is_blocked) continue;
@@ -4550,7 +4707,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [phase, activePlayer, undoableTiles, gameState.id, onStateUpdate]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', background: '#1a1a2e', color: '#fff', ...(bgEnabled ? { backgroundImage: `url(/backgrounds/bg-game-${gameBgIndex}.png)`, backgroundSize: 'cover', backgroundPosition: 'center' } : {}) }}>
+    <div style={{
+      display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', color: '#fff',
+      backgroundColor: '#0e0e22',
+      backgroundImage: bgEnabled
+        ? `radial-gradient(ellipse at 50% 45%, rgba(8,8,24,0) 35%, rgba(8,8,24,0.55) 80%, rgba(4,4,14,0.85) 100%), url(/backgrounds/bg-game-${gameBgIndex}.webp)`
+        : GAME_BACKDROP,
+      backgroundSize: bgEnabled ? 'cover, cover' : undefined,
+      backgroundPosition: 'center',
+    }}>
       {/* Full-width grid area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div
@@ -4775,18 +4940,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 210, width: 'fit-content', opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
             {/* Round / Phase / VP target */}
             <div style={{
-              background: 'rgba(10, 10, 20, 0.85)',
-              borderRadius: 8,
-              padding: '8px 14px',
+              ...HUD_PANEL_STYLE,
+              padding: '8px 14px 8px',
               marginBottom: 6,
-              backdropFilter: 'blur(4px)',
-              border: '1px solid #333',
               width: 'fit-content',
               pointerEvents: hudVisible ? 'auto' : 'none',
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, whiteSpace: 'nowrap' }}>
                 <span style={{
-                  fontSize: 16, fontWeight: 'bold',
+                  fontSize: 16, fontWeight: 900, fontFamily: 'var(--cc-font-display)', letterSpacing: 0.8,
                   ...(gameState.max_rounds && gameState.current_round >= gameState.max_rounds
                     ? { color: '#ffe14d', animation: 'finalRoundGlow 2s ease-in-out infinite' }
                     : { color: '#fff' }),
@@ -4797,11 +4959,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </span>
                 <PhaseIndicatorPill phase={phase} />
               </div>
-              <div style={{ fontSize: 12, color: '#aaa' }}>
-                ★ {gameState.vp_target} VP to win
+              <div style={{ fontSize: 12, color: 'var(--cc-text-dim)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <IconValue icon="vp" value={gameState.vp_target} size={12} color="var(--cc-gold)" title="Victory points" />
+                <span>VP to win</span>
                 {gameState.max_rounds && (
                   <Tooltip content={`Game ends after round ${gameState.max_rounds}. Starting on round 5, the leading player will receive a Debt card each round.`} position="below">
-                    <span style={{ marginLeft: 8, cursor: 'help' }}>⏱ {gameState.current_round}/{gameState.max_rounds}</span>
+                    <span style={{ marginLeft: 8, cursor: 'help', display: 'inline-flex' }}>
+                      <IconValue icon="round" value={`${gameState.current_round}/${gameState.max_rounds}`} size={12} title="Round" />
+                    </span>
                   </Tooltip>
                 )}
               </div>
@@ -4811,8 +4976,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   fontSize: 13,
                 }}>
                   {gameState.winners && gameState.winners.length > 1
-                    ? `★ Tied: ${gameState.winners.map(id => gameState.players[id]?.name).join(', ')}!`
-                    : `★ ${gameState.players[gameState.winner]?.name} wins!`}
+                    ? `Tied: ${gameState.winners.map(id => gameState.players[id]?.name).join(', ')}!`
+                    : `${gameState.players[gameState.winner]?.name} wins!`}
                 </div>
               )}
             </div>
@@ -4822,10 +4987,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onMouseEnter={() => setPlayerPanelExpanded(true)}
               onMouseLeave={() => setPlayerPanelExpanded(false)}
               style={{
-                background: 'rgba(10, 10, 20, 0.85)',
-                borderRadius: 8,
-                border: '1px solid #333',
-                backdropFilter: 'blur(4px)',
+                ...HUD_PANEL_STYLE,
                 transition: 'all 0.2s ease',
                 width: 200,
                 maxHeight: 'calc(100dvh - 300px)',
@@ -4965,11 +5127,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   ref={inPlayContainerRef}
                   className="in-play-list"
                   style={{
+                    ...HUD_PANEL_STYLE,
                     marginTop: 6,
-                    background: 'rgba(10, 10, 20, 0.85)',
-                    borderRadius: 8,
-                    border: '1px solid #333',
-                    backdropFilter: 'blur(4px)',
                     padding: PAD,
                     width: COL_W + PAD * 2 + 2, // card width + padding + border
                     maxHeight: 'calc(100dvh - 420px)',
@@ -4991,7 +5150,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     }
                     .war-banner-pulse { animation: warBannerPulse 1.8s ease-in-out infinite; }
                   `}</style>
-                  <div style={{ fontSize: 10, color: '#888', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
+                  <div style={{ fontSize: 10, color: 'var(--cc-gold)', opacity: 0.8, textTransform: 'uppercase', letterSpacing: 1.5, fontFamily: 'var(--cc-font-display)', fontWeight: 700, marginBottom: 5 }}>
                     In Play ({actions.length})
                   </div>
                   <div style={{
@@ -5015,16 +5174,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           style={{
                             width: COL_W,
                             padding: '3px 6px',
-                            background: '#2a2a3e',
+                            background: miniCardBackground(typeColor, inPlayHoverIndex === i ? '#33335a' : undefined),
                             border: `1px solid ${typeColor}`,
-                            borderRadius: 5,
+                            borderRadius: 6,
+                            boxShadow: MINI_CARD_SHADOW,
                             color: '#fff',
                             marginBottom: GAP,
                             breakInside: 'avoid' as const,
                             cursor: 'default',
                             transition: 'background 0.1s, opacity 0.15s',
                             opacity: inPlayExitAnims[i]?.active ? 0 : 1,
-                            ...(inPlayHoverIndex === i ? { background: '#3a3a5e' } : {}),
                           }}
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
@@ -5039,7 +5198,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                                 el.style.setProperty('--sub-scale', String(scale));
                               }
                             }}>
-                              {statParts.map((part, j) => renderSubtitlePart(part, j))}
+                              {renderSubtitle(statParts, { fontSize: 11, passiveVp: c.passive_vp })}
                             </span>
                           </div>
                         </div>
@@ -5087,7 +5246,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         </div>
                       </div>
                       <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                        {anim.subtitleParts.map((part, j) => renderSubtitlePart(part, j))}
+                        {renderSubtitle(anim.subtitleParts, { fontSize: 11, passiveVp: anim.card.passive_vp })}
                       </div>
                     </div>
                   );
@@ -5235,14 +5394,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               className="hud-btn"
               onClick={() => { setShowCardBrowser(true); setShowDeckViewer(false); setShowShopOverlay(false); }}
               style={{
-                padding: '6px 14px',
-                background: '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 6,
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 'bold',
-                cursor: 'pointer',
+                ...HUD_BUTTON_STYLE,
                 pointerEvents: hudVisible ? 'auto' : 'none',
               }}
             >
@@ -5252,14 +5404,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               className="hud-btn"
               onClick={() => { setShowDeckViewer(s => !s); setShowShopOverlay(false); }}
               style={{
-                padding: '6px 14px',
-                background: '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 6,
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 'bold',
-                cursor: 'pointer',
+                ...HUD_BUTTON_STYLE,
                 pointerEvents: hudVisible ? 'auto' : 'none',
               }}
             >
@@ -5269,19 +5414,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               className="hud-btn"
               onClick={() => { setShowShopOverlay(s => !s); setShowDeckViewer(false); }}
               style={{
-                padding: '6px 14px',
-                background: '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 6,
-                color: '#fff',
-                fontSize: 13,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                borderColor: phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? '#4a9eff' : '#555',
+                ...HUD_BUTTON_STYLE,
+                borderColor: phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? '#e8c46a' : HUD_BUTTON_STYLE.borderColor,
                 pointerEvents: hudVisible ? 'auto' : 'none',
                 ...(phase === 'buy' && !phaseBanner && !showShopOverlay && !activePlayer?.has_ended_turn ? {
                   animation: animationMode !== 'off' ? 'shopPulse 2s ease-in-out infinite' : undefined,
-                  boxShadow: '0 0 12px rgba(74, 158, 255, 0.6)',
+                  boxShadow: '0 0 12px rgba(232, 196, 106, 0.6)',
+                  color: '#ffe7a8',
                 } : {}),
               }}
             >
@@ -5289,28 +5428,28 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             </button>
 
             {/* Gear icon dropdown */}
-            <div ref={settingsRef} style={{ position: 'relative', order: narrowTop ? -1 : undefined, pointerEvents: hudVisible ? 'auto' : 'none' }}>
+            <div ref={settingsRef} style={{ position: 'relative', zIndex: settingsExpanded ? 5 : undefined, order: narrowTop ? -1 : undefined, pointerEvents: hudVisible ? 'auto' : 'none' }}>
               <button
                 className="hud-btn"
                 onClick={() => setSettingsExpanded(p => !p)}
                 style={{
-                  padding: '6px 14px', borderRadius: 6,
-                  background: settingsExpanded ? '#3a3a6e' : '#2a2a3e',
-                  border: '1px solid #555', color: '#aaa',
-                  cursor: 'pointer', fontSize: 13, lineHeight: '1',
+                  ...HUD_BUTTON_STYLE,
+                  ...(settingsExpanded ? { background: 'rgba(58, 58, 110, 0.95)' } : {}),
+                  color: 'var(--cc-text-dim)',
+                  lineHeight: '1',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   boxSizing: 'border-box',
                 }}
                 title="Settings"
               >
-                <span style={{ fontSize: 16, lineHeight: '1' }}>⚙</span>
+                <Icon name="settings" size={16} decorative />
               </button>
               {settingsExpanded && (
-                <div style={{
+                <div className="cc-rise-in" style={{
+                  ...HUD_PANEL_STYLE,
                   position: 'absolute', top: 42, right: 0,
-                  background: '#1e1e36', border: '1px solid #444',
-                  borderRadius: 8, padding: 12, minWidth: 240,
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 45%), rgba(20, 20, 44, 0.97)',
+                  padding: 12, minWidth: 240,
                 }}>
                   <SettingsPanel
                     isMultiplayer={isMultiplayer}
@@ -5334,10 +5473,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   />
                   <button
                     onClick={() => { setShowFullLog(true); setSettingsExpanded(false); }}
+                    className="cc-btn-secondary"
                     style={{
-                      width: '100%', padding: '6px 0', marginTop: 8,
-                      background: '#2a2a3e', border: '1px solid #444',
-                      borderRadius: 4, color: '#aaa', fontSize: 12, cursor: 'pointer',
+                      width: '100%', padding: '7px 0', marginTop: 8,
+                      fontSize: 12, fontWeight: 'bold', letterSpacing: 0.4,
                     }}
                   >
                     Full Game Log
@@ -5350,7 +5489,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         onClick={() => setShowTestPanel(p => !p)}
                         style={{ fontSize: 12, color: '#ffaa4a', cursor: 'pointer', fontWeight: 'bold', marginBottom: 4 }}
                       >
-                        {showTestPanel ? '▾' : '▸'} Test Mode
+                        <Icon name="chevron" size={9} decorative style={{ transform: showTestPanel ? 'rotate(90deg)' : undefined, transition: 'transform 0.15s', marginRight: 4 }} />Test Mode
                       </div>
                       {showTestPanel && (
                         <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -5625,7 +5764,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   }}
                   title="Test mode: permanently trash this card"
                 >
-                  🗑 Trash
+                  <Icon name="trash" size={13} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} />Trash
                 </button>
               </>
             )}
@@ -5642,8 +5781,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <>
                   <style>{`
                     @keyframes pulseGlowGreenMulti {
-                      0%, 100% { box-shadow: 0 0 6px rgba(42,170,74,0.3), 0 2px 8px rgba(0,0,0,0.4); }
-                      50% { box-shadow: 0 0 14px rgba(42,170,74,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                      0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 6px rgba(42,170,74,0.3), 0 4px 12px rgba(0,0,0,0.45); }
+                      50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 18px rgba(60,200,100,0.65), 0 4px 12px rgba(0,0,0,0.45); }
                     }
                   `}</style>
                   <span style={{ fontSize: 12, color: '#aaa' }}>
@@ -5653,16 +5792,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={handleCancelMultiTile}
                     style={{
-                      padding: '6px 16px',
-                      background: '#555',
-                      border: 'none',
-                      borderRadius: 6,
+                      ...actionButtonStyle('muted', 'sm'),
                       color: '#fff',
-                      fontWeight: 'bold',
                       cursor: 'pointer',
-                      fontSize: 13,
-                      lineHeight: '1.2',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                     }}
                   >
                     Cancel
@@ -5672,16 +5804,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     onClick={handleConfirmMultiTile}
                     tooltip={`Confirm all selected tiles for this ${label} card.${isFullSelection ? ' (Press Enter)' : ''}`}
                     style={{
-                      padding: '10px 24px',
-                      background: isFullSelection ? '#2aaa4a' : '#4a9eff',
-                      border: 'none',
-                      borderRadius: 8,
-                      color: '#fff',
-                      fontWeight: 'bold',
+                      ...actionButtonStyle(isFullSelection ? 'go' : 'info'),
                       cursor: 'pointer',
-                      fontSize: 18,
-                      lineHeight: '1.2',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                       animation: isFullSelection ? 'pulseGlowGreenMulti 1.6s ease-in-out infinite' : undefined,
                     }}
                   >
@@ -5713,16 +5837,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   <button
                     onClick={handleCancelTrash}
                     style={{
-                      padding: '6px 16px',
-                      background: '#555',
-                      border: 'none',
-                      borderRadius: 6,
+                      ...actionButtonStyle('muted', 'sm'),
                       color: '#fff',
-                      fontWeight: 'bold',
                       cursor: 'pointer',
-                      fontSize: 13,
-                      lineHeight: '1.2',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                     }}
                   >
                     Cancel
@@ -5733,16 +5850,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     disabled={!canConfirm}
                     tooltip={`Confirm ${trashMode.label.toLowerCase()} selection for ${card?.name ?? 'card'}.`}
                     style={{
-                      padding: '10px 24px',
-                      background: canConfirm ? (trashMode.label === 'Discard' ? '#888' : '#ff4444') : '#555',
-                      border: 'none',
-                      borderRadius: 8,
-                      color: '#fff',
-                      fontWeight: 'bold',
+                      ...actionButtonStyle(canConfirm ? (trashMode.label === 'Discard' ? 'slate' : 'danger') : 'muted'),
                       cursor: canConfirm ? 'pointer' : 'not-allowed',
-                      fontSize: 18,
-                      lineHeight: '1.2',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                       opacity: canConfirm ? 1 : 0.5,
                       animation: atMaxSelection ? 'pulseGlowConfirmTrash 1.4s ease-in-out infinite' : undefined,
                     }}
@@ -5759,12 +5868,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               }}>
                 <style>{`
                   @keyframes pulseGlowOrange {
-                    0%, 100% { box-shadow: 0 0 6px rgba(255,136,68,0.3), 0 2px 8px rgba(0,0,0,0.4); }
-                    50% { box-shadow: 0 0 14px rgba(255,136,68,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                    0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 6px rgba(255,136,68,0.3), 0 4px 12px rgba(0,0,0,0.45); }
+                    50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 18px rgba(255,136,68,0.65), 0 4px 12px rgba(0,0,0,0.45); }
                   }
                   @keyframes pulseGlowGreen {
-                    0%, 100% { box-shadow: 0 0 6px rgba(42,170,74,0.3), 0 2px 8px rgba(0,0,0,0.4); }
-                    50% { box-shadow: 0 0 14px rgba(42,170,74,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                    0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 6px rgba(42,170,74,0.3), 0 4px 12px rgba(0,0,0,0.45); }
+                    50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 18px rgba(60,200,100,0.65), 0 4px 12px rgba(0,0,0,0.45); }
                   }
                 `}</style>
                 <HoldToSubmitButton
@@ -5775,19 +5884,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   warning={`You still have ${activePlayer.hand.length} card(s) and ${submitActionsLeft} action(s) remaining.`}
                   tooltip="Submitting locks your play for this round. You cannot change it after."
                   style={{
-                    padding: '10px 24px',
-                    background: submitCanStillPlay ? '#ff8844' : '#2a9a3e',
-                    border: 'none',
-                    borderRadius: 8,
-                    color: '#fff',
-                    fontWeight: 'bold',
+                    ...actionButtonStyle(submitCanStillPlay ? 'warn' : 'go'),
                     cursor: 'pointer',
-                    fontSize: 18,
-                    lineHeight: '1.2',
                     animation: submitCanStillPlay ? 'pulseGlowOrange 2s ease-in-out infinite' : 'pulseGlowGreen 2s ease-in-out infinite',
                   }}
                 >
-                  Submit Play{submitCanStillPlay ? ' →' : ' ✓'}
+                  Submit Play<Icon name={submitCanStillPlay ? 'then' : 'check'} size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
                 </HoldToSubmitButton>
               </div>
             )}
@@ -5795,16 +5897,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               <button
                 disabled
                 style={{
-                  padding: '10px 24px',
-                  background: '#555',
-                  border: 'none',
-                  borderRadius: 8,
-                  color: '#aaa',
-                  fontWeight: 'bold',
+                  ...actionButtonStyle('muted'),
                   cursor: 'not-allowed',
-                  fontSize: 18,
-                  lineHeight: '1.2',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                 }}
               >
                 Resolving...
@@ -5814,31 +5908,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               <button
                 onClick={handleDoneReviewing}
                 style={{
-                  padding: '10px 24px',
-                  background: '#2aaa4a',
-                  border: 'none',
-                  borderRadius: 8,
-                  color: '#fff',
-                  fontWeight: 'bold',
+                  ...actionButtonStyle('go'),
                   cursor: 'pointer',
-                  fontSize: 18,
-                  lineHeight: '1.2',
                   animation: 'reviewBtnFadeIn 0.4s ease-out forwards, pulseGlowGreen 2s ease-in-out 0.4s infinite',
                 }}
               >
-                Done Reviewing{reviewCountdown !== null && reviewCountdown > 0 ? ` (${reviewCountdown}s)` : ''} ✓
+                Done Reviewing{reviewCountdown !== null && reviewCountdown > 0 ? ` (${reviewCountdown}s)` : ''}<Icon name="check" size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
               </button>
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !gameState.players_done_buying.includes(activePlayerId) && !activePlayer.has_ended_turn && (
               <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
                 <style>{`
                   @keyframes pulseGlowOrange {
-                    0%, 100% { box-shadow: 0 0 6px rgba(255,136,68,0.3), 0 2px 8px rgba(0,0,0,0.4); }
-                    50% { box-shadow: 0 0 14px rgba(255,136,68,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                    0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 6px rgba(255,136,68,0.3), 0 4px 12px rgba(0,0,0,0.45); }
+                    50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 18px rgba(255,136,68,0.65), 0 4px 12px rgba(0,0,0,0.45); }
                   }
                   @keyframes pulseGlowGreen {
-                    0%, 100% { box-shadow: 0 0 6px rgba(42,170,74,0.3), 0 2px 8px rgba(0,0,0,0.4); }
-                    50% { box-shadow: 0 0 14px rgba(42,170,74,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+                    0%, 100% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 6px rgba(42,170,74,0.3), 0 4px 12px rgba(0,0,0,0.45); }
+                    50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 18px rgba(60,200,100,0.65), 0 4px 12px rgba(0,0,0,0.45); }
                   }
                 `}</style>
                 <HoldToSubmitButton
@@ -5848,19 +5935,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   warning="Done buying ends your shopping. Any unspent resources carry over."
                   tooltip={cannotAffordAnyBuyOption ? "You can't afford any card, upgrade, or re-roll." : undefined}
                   style={{
-                    padding: '10px 24px',
-                    background: cannotAffordAnyBuyOption ? '#2a9a3e' : '#ff8844',
-                    border: 'none',
-                    borderRadius: 8,
-                    color: '#fff',
-                    fontWeight: 'bold',
+                    ...actionButtonStyle(cannotAffordAnyBuyOption ? 'go' : 'warn'),
                     cursor: 'pointer',
-                    fontSize: 18,
-                    lineHeight: '1.2',
                     animation: cannotAffordAnyBuyOption ? 'pulseGlowGreen 2s ease-in-out infinite' : 'pulseGlowOrange 2s ease-in-out infinite',
                   }}
                 >
-                  Done Buying {cannotAffordAnyBuyOption ? '✓' : '→'}
+                  Done Buying<Icon name={cannotAffordAnyBuyOption ? 'check' : 'then'} size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
                 </HoldToSubmitButton>
               </div>
             )}
@@ -5869,19 +5949,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 <button
                   disabled
                   style={{
-                    padding: '10px 24px',
-                    background: '#555',
-                    border: 'none',
-                    borderRadius: 8,
-                    color: '#aaa',
-                    fontWeight: 'bold',
+                    ...actionButtonStyle('muted'),
                     cursor: 'not-allowed',
-                    fontSize: 18,
-                    lineHeight: '1.2',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
                   }}
                 >
-                  ✓ Done Buying
+                  <Icon name="check" size={12} decorative style={{ marginRight: 6, verticalAlign: '-0.1em' }} />Done Buying
                 </button>
               </div>
             )}
@@ -5898,9 +5970,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 position: 'absolute', bottom: 4, left: 12,
                 display: 'flex', alignItems: 'center', gap: 8,
                 padding: '6px 14px',
-                background: 'rgba(26, 26, 46, 0.85)',
-                border: `1px solid ${submitActionsLeft > 0 ? '#4a9eff44' : '#33333366'}`,
-                borderRadius: 8,
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%), rgba(14, 14, 34, 0.85)',
+                border: `1px solid ${submitActionsLeft > 0 ? 'rgba(232, 196, 106, 0.35)' : 'rgba(255,255,255,0.08)'}`,
+                borderRadius: 10,
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 12px rgba(0,0,0,0.4)',
               }}
             >
               <style>{`
@@ -5930,12 +6003,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </div>
               </div>
               <span style={{
-                fontSize: 22, fontWeight: 'bold',
-                color: submitActionsLeft > 0 ? '#fff' : '#555',
-                textShadow: submitActionsLeft > 0 ? '0 0 8px rgba(74, 158, 255, 0.4)' : 'none',
+                fontSize: 22, fontWeight: 900, fontFamily: 'var(--cc-font-display)',
+                fontVariantNumeric: 'tabular-nums',
+                color: submitActionsLeft > 0 ? '#ffe7a8' : '#555',
+                textShadow: submitActionsLeft > 0 ? '0 0 10px rgba(232, 196, 106, 0.45), 0 1px 2px rgba(0,0,0,0.6)' : 'none',
                 position: 'relative',
               }}>
-                ⚡ {submitActionsLeft}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  <Icon name="action" size={22} title="Actions" />
+                  <Num value={submitActionsLeft} style={{ fontFamily: 'inherit', fontWeight: 900, top: 0 }} />
+                </span>
                 {floatingActions.map(fa => (
                   <span
                     key={fa.id}
@@ -5951,7 +6028,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       animation: 'actionFloat 850ms ease-out forwards',
                     }}
                   >
-                    {fa.type === 'gain' ? `+${fa.amount} ⚡` : `−${fa.amount} ⚡`}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      {fa.type === 'gain' ? `+${fa.amount}` : `−${fa.amount}`}
+                      <Icon name="action" size={17} decorative />
+                    </span>
                   </span>
                 ))}
               </span>
@@ -6112,7 +6192,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const left = Math.min(reviewTilePopupPos.x + 16, window.innerWidth - POPUP_W - 12);
         const top = Math.min(reviewTilePopupPos.y - 20, window.innerHeight - cards.length * 70 - 20);
         const REVIEW_TYPE_COLORS = CARD_TYPE_COLORS;
-        const REVIEW_EMOJI: Record<string, string> = { claim: '⚔️', defense: '🛡️', engine: '⚙️', passive: '📜' };
         return (
           <div style={{
             position: 'fixed',
@@ -6155,7 +6234,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                       <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                         {c.name}
                       </div>
-                      <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : '—'}</span>
+                      <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={c.buy_cost} size={15} /></span>
                     </div>
                     <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                       <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -6164,7 +6243,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                           el.style.setProperty('--sub-scale', String(scale));
                         }
                       }}>
-                      {statParts.map((part, j) => renderSubtitlePart(part, j))}
+                      {renderSubtitle(statParts, { fontSize: 15, passiveVp: c.passive_vp })}
                       </span>
                     </div>
                   </div>
@@ -6184,7 +6263,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const rect = rowEl.getBoundingClientRect();
         const POPUP_W = 180;
         const REVIEW_TYPE_COLORS = CARD_TYPE_COLORS;
-        const REVIEW_EMOJI: Record<string, string> = { claim: '⚔️', defense: '🛡️', engine: '⚙️', passive: '📜' };
         const reviewPlayedCardNames = actions.map(a => a.card.name);
         return (
           <div style={{
@@ -6224,7 +6302,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
                       {c.name}
                     </div>
-                    <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{c.buy_cost != null ? `${c.buy_cost}💰` : '—'}</span>
+                    <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={c.buy_cost} size={15} /></span>
                   </div>
                   <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
                     <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
@@ -6233,7 +6311,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         el.style.setProperty('--sub-scale', String(scale));
                       }
                     }}>
-                    {statParts.map((part, j) => renderSubtitlePart(part, j))}
+                    {renderSubtitle(statParts, { fontSize: 15, passiveVp: c.passive_vp })}
                     </span>
                   </div>
                 </div>
@@ -6406,11 +6484,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       {/* Keyframes for shop pulse glow + player effect popup */}
       <style>{`
         @keyframes shopPulse {
-          0%, 100% { box-shadow: 0 0 8px rgba(74, 158, 255, 0.4); }
-          50% { box-shadow: 0 0 20px rgba(74, 158, 255, 0.8), 0 0 40px rgba(74, 158, 255, 0.3); }
+          0%, 100% { box-shadow: 0 0 8px rgba(232, 196, 106, 0.35), 0 4px 12px rgba(0,0,0,0.4); }
+          50% { box-shadow: 0 0 20px rgba(232, 196, 106, 0.75), 0 0 36px rgba(232, 196, 106, 0.25), 0 4px 12px rgba(0,0,0,0.4); }
         }
-        .hud-btn { transition: box-shadow 0.2s ease; }
-        .hud-btn:hover { box-shadow: 0 0 8px rgba(160, 170, 255, 0.45); }
         @keyframes finalRoundGlow {
           0%, 100% { text-shadow: 0 0 6px rgba(255, 225, 77, 0.4), 0 0 12px rgba(255, 225, 77, 0.2); }
           50% { text-shadow: 0 0 10px rgba(255, 225, 77, 0.8), 0 0 20px rgba(255, 225, 77, 0.4), 0 0 30px rgba(255, 225, 77, 0.2); }

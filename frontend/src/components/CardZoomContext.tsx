@@ -5,6 +5,7 @@ import type { Card } from '../types/game';
 import CardFull, { CARD_FULL_WIDTH } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
+import Icon from '../icons/Icon';
 
 /** Module-level cache of the iOS DeviceOrientation permission state so the
  *  request runs once and is shared across modal opens. iOS requires the
@@ -298,8 +299,10 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
               }}
               onMouseEnter={(e) => (e.currentTarget.style.color = '#fff')}
               onMouseLeave={(e) => (e.currentTarget.style.color = '#888')}
+              role="button"
+              aria-label="Previous card"
             >
-              ‹
+              <Icon name="chevron" size={30} decorative style={{ transform: 'rotate(180deg)', display: 'block' }} />
             </div>
           )}
 
@@ -321,8 +324,10 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
               }}
               onMouseEnter={(e) => (e.currentTarget.style.color = '#fff')}
               onMouseLeave={(e) => (e.currentTarget.style.color = '#888')}
+              role="button"
+              aria-label="Next card"
             >
-              ›
+              <Icon name="chevron" size={30} decorative style={{ display: 'block' }} />
             </div>
           )}
 
@@ -339,7 +344,7 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
               pointerEvents: 'none',
               visibility: shiftHeld ? 'visible' : 'hidden',
             }}>
-              ✦ Upgraded Preview
+              <Icon name="upgrade" size={11} decorative style={{ verticalAlign: '-0.12em', marginRight: 4 }} />Upgraded Preview
             </div>
           )}
 

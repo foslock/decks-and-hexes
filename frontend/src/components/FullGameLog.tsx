@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import * as api from '../api/client';
+import { useAnimationMode } from './SettingsContext';
 import type { LogEntry } from '../api/client';
+import Icon from '../icons/Icon';
 
 interface FullGameLogProps {
   gameId: string;
@@ -24,6 +26,7 @@ export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: Full
   const [loading, setLoading] = useState(true);
   const [filterRound, setFilterRound] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const animClass = useAnimationMode() !== 'off' ? ' cc-ov-anim' : '';
 
   useEffect(() => {
     let cancelled = false;
@@ -70,11 +73,11 @@ export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: Full
 
   return (
     <div
+      className={`cc-ov-backdrop${animClass}`}
       onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.75)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -82,139 +85,69 @@ export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: Full
       }}
     >
       <div
+        className={`cc-ov-modal cc-ov-log-modal${animClass}`}
         onClick={(e) => e.stopPropagation()}
-        style={{
-          width: '90%',
-          maxWidth: 640,
-          maxHeight: '80vh',
-          background: '#1a1a2e',
-          border: '2px solid #333',
-          borderRadius: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
       >
         {/* Header */}
-        <div style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid #333',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-        }}>
-          <h3 style={{ margin: 0, flex: 1, color: '#fff' }}>Game Log</h3>
-
-          {/* Round filter */}
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: '#888' }}>Round:</span>
-            <button
-              onClick={() => setFilterRound(null)}
-              style={{
-                padding: '2px 8px',
-                fontSize: 11,
-                background: filterRound === null ? '#4a9eff' : '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 4,
-                color: '#fff',
-                cursor: 'pointer',
-              }}
-            >
-              All
-            </button>
-            {rounds.map((r) => (
-              <button
-                key={r}
-                onClick={() => setFilterRound(r)}
-                style={{
-                  padding: '2px 8px',
-                  fontSize: 11,
-                  background: filterRound === r ? '#4a9eff' : '#2a2a3e',
-                  border: '1px solid #555',
-                  borderRadius: 4,
-                  color: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
+        <div className="cc-ov-header">
+          <h3 className="cc-ov-title" style={{ flex: 1 }}>Game Log</h3>
 
           <button
+            className="cc-btn-secondary cc-ov-btn-sm"
             onClick={handleDownload}
             disabled={entries.length === 0}
-            style={{
-              padding: '4px 12px',
-              background: entries.length > 0 ? '#2a5a2e' : '#333',
-              border: '1px solid #555',
-              borderRadius: 4,
-              color: entries.length > 0 ? '#fff' : '#555',
-              cursor: entries.length > 0 ? 'pointer' : 'not-allowed',
-              fontSize: 12,
-            }}
+            style={{ cursor: entries.length > 0 ? 'pointer' : 'not-allowed' }}
           >
             Download
           </button>
           <button
+            className="cc-ov-close"
             onClick={onClose}
-            style={{
-              padding: '4px 12px',
-              background: '#333',
-              border: 'none',
-              borderRadius: 4,
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: 14,
-            }}
+            aria-label="Close"
           >
-            ✕
+            <Icon name="close" size={14} decorative />
           </button>
         </div>
 
+        {/* Round filter */}
+        <div className="cc-ov-log-filter">
+          <span className="cc-ov-log-filter-label">Round:</span>
+          <button
+            className={`cc-ov-chip${filterRound === null ? ' is-active' : ''}`}
+            onClick={() => setFilterRound(null)}
+          >
+            All
+          </button>
+          {rounds.map((r) => (
+            <button
+              key={r}
+              className={`cc-ov-chip${filterRound === r ? ' is-active' : ''}`}
+              onClick={() => setFilterRound(r)}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+
         {/* Log entries */}
-        <div style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: 12,
-          fontFamily: 'monospace',
-          fontSize: 13,
-        }}>
+        <div className="cc-ov-inset cc-ov-log-list">
           {loading ? (
-            <div style={{ color: '#888', textAlign: 'center', padding: 20 }}>Loading...</div>
+            <div className="cc-ov-log-empty">Loading...</div>
           ) : filtered.length === 0 ? (
-            <div style={{ color: '#888', textAlign: 'center', padding: 20 }}>No log entries</div>
+            <div className="cc-ov-log-empty">No log entries</div>
           ) : (
             filtered.map((entry, i) => (
               <div
                 key={i}
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  marginBottom: 4,
-                  padding: '3px 0',
-                  borderBottom: '1px solid #1e1e30',
-                }}
+                className={`cc-ov-log-row${entry.message.startsWith('===') ? ' is-header' : ''}`}
               >
-                <span style={{
-                  minWidth: 24,
-                  color: '#555',
-                  fontSize: 11,
-                  textAlign: 'right',
-                }}>
+                <span className="cc-ov-log-round">
                   R{entry.round}
                 </span>
-                <span style={{
-                  minWidth: 48,
-                  color: '#666',
-                  fontSize: 11,
-                }}>
+                <span className="cc-ov-log-phase" data-phase={entry.phase}>
                   {PHASE_LABELS[entry.phase] || entry.phase}
                 </span>
-                <span style={{
-                  color: entry.message.startsWith('===') ? '#4a9eff' : '#ccc',
-                  fontWeight: entry.message.startsWith('===') ? 'bold' : 'normal',
-                }}>
+                <span className="cc-ov-log-msg">
                   {entry.message}
                 </span>
               </div>
@@ -224,14 +157,8 @@ export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: Full
         </div>
 
         {/* Footer */}
-        <div style={{
-          padding: '8px 16px',
-          borderTop: '1px solid #333',
-          fontSize: 12,
-          color: '#666',
-          textAlign: 'center',
-        }}>
-          {filtered.length} entries · Click outside or ✕ to close
+        <div className="cc-ov-footer">
+          {filtered.length} entries · Click outside or press close to dismiss
         </div>
       </div>
     </div>

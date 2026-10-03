@@ -64,18 +64,19 @@ export default function Tooltip({ content, delay = 0, position: placement = 'abo
             ...(placement === 'below'
               ? { top: coords.y + 8, transform: 'translateX(-50%)' }
               : { top: coords.y - 8, transform: 'translate(-50%, -100%)' }),
-            background: '#111122',
-            border: '1px solid #555',
-            borderRadius: 6,
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 50%), rgba(14, 14, 32, 0.97)',
+            border: '1px solid rgba(232, 196, 106, 0.28)',
+            borderRadius: 8,
             padding: '6px 10px',
             fontSize: 12,
-            lineHeight: 1.4,
-            color: '#ddd',
+            lineHeight: 1.45,
+            color: '#e4e2ef',
             maxWidth: 260,
             zIndex: 60000,
             pointerEvents: 'none',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.55)',
             whiteSpace: 'normal',
+            animation: 'cc-tooltip-in 140ms ease-out both',
           }}
         >
           {content}
@@ -328,6 +329,18 @@ export const HoldToSubmitButton = forwardRef<HoldToSubmitHandle, Omit<React.Butt
           touchAction: 'none',
         }}
       >
+        {/* Charge fill that sweeps left-to-right while holding */}
+        {requireHold && (
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.28))',
+            pointerEvents: 'none',
+            transformOrigin: 'left center',
+            transform: outlineRevealed ? 'scaleX(1)' : 'scaleX(0)',
+            transition: outlineRevealed ? `transform ${animDuration}ms linear` : 'transform 150ms ease-out',
+          }} />
+        )}
         {/* White outline that reveals left-to-right via CSS transition */}
         {requireHold && (
           <div style={{

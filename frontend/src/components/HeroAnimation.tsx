@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { Application, Container, Graphics } from 'pixi.js';
 
 // --- Hex geometry (flat-top, same as HexGrid) ---
 const HEX_SIZE = 24;
@@ -18,7 +18,7 @@ function pixelToAxial(px: number, py: number): { q: number; r: number } {
 
 function axialRound(q: number, r: number): { q: number; r: number } {
   const s = -q - r;
-  let rq = Math.round(q); let rr = Math.round(r); let rs = Math.round(s);
+  let rq = Math.round(q); let rr = Math.round(r); const rs = Math.round(s);
   const dq = Math.abs(rq - q); const dr = Math.abs(rr - r); const ds = Math.abs(rs - s);
   if (dq > dr && dq > ds) rq = -rr - rs;
   else if (dr > ds) rr = -rq - rs;
@@ -55,19 +55,119 @@ function generateHexCoords(radius: number): { q: number; r: number }[] {
 // Easing functions
 function easeOutCubic(t: number): number { return 1 - Math.pow(1 - t, 3); }
 function easeInCubic(t: number): number { return t * t * t; }
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
 function easeOutElastic(t: number): number {
   if (t === 0 || t === 1) return t;
   return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * (2 * Math.PI / 3)) + 1;
 }
 
-const BLUE = 0x2a6ecc;
-const RED = 0xcc2a2a;
-const CLAIM_EMOJIS = ['⚔️', '🗡️', '🛡️', '🏹', '💥', '🔥', '⚡', '🎯'];
+const BLUE = 0x2f6fd0;
+const RED = 0xc8323c;
+const GRID_LINE = 0x8c7a52; // warm hairline between tiles
 
 function lerp(a: number, b: number, t: number): number { return a + (b - a) * t; }
+
+// --- Scene layout (internal canvas units; the canvas is CSS-scaled with
+// object-fit: contain and the DOM cards follow the same transform) ---
+const CANVAS_W = 400;
+const CANVAS_H = 320;
+const GRID_RADIUS = 3;
+const GRID_PIXEL_H = (GRID_RADIUS * 2) * Math.sqrt(3) * HEX_SIZE;
+const CARD_H = GRID_PIXEL_H * 0.66;
+const CARD_W = CARD_H * 0.68;
+/** Root font size of a hero card in canvas units — card internals use em. */
+const CARD_FONT = 10;
+
+// --- The two cards that clash in the hero. Real cards + their WebP art. ---
+interface HeroCardDef {
+  id: string;
+  name: string;
+  archetype: string;
+  type: 'Claim' | 'Defense';
+  cost: number;
+  text: string;
+}
+
+const CLAIM_COLOR = '#a83040';   // CARD_TYPE_COLORS.claim
+const DEFENSE_COLOR = '#3a7abf'; // CARD_TYPE_COLORS.defense
+
+/** Blue (left) side defends… */
+const DEFENDERS: HeroCardDef[] = [
+  { id: 'fortress_iron_wall', name: 'Iron Wall', archetype: 'Fortress', type: 'Defense', cost: 3, text: 'One tile you own cannot be claimed this round.' },
+  { id: 'fortress_citadel', name: 'Twin Cities', archetype: 'Fortress', type: 'Defense', cost: 7, text: 'Two tiles you own each get +3 permanent defense until captured. Trash this card.' },
+  { id: 'fortress_bulwark', name: 'Bulwark', archetype: 'Fortress', type: 'Defense', cost: 3, text: 'Two tiles you own each gain +2 defense this round.' },
+];
+/** …red (right) side attacks. */
+const ATTACKERS: HeroCardDef[] = [
+  { id: 'vanguard_spearhead', name: 'Spearhead', archetype: 'Vanguard', type: 'Claim', cost: 7, text: 'Claim: Power 8. Trash this card.' },
+  { id: 'neutral_conqueror', name: 'Conqueror', archetype: 'Shared', type: 'Claim', cost: 7, text: 'Claim: Power 5. Ignores temporary defense bonuses on targeted tile.' },
+  { id: 'vanguard_blitz', name: 'Blitz', archetype: 'Vanguard', type: 'Claim', cost: 3, text: 'Claim: Power 2. If successful, draw 1 card next round.' },
+];
+
+function pick<T>(list: T[]): T {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+/** Bold the numbers that matter ("Power 8", "+2 defense"). */
+function renderCardText(text: string) {
+  return text.split(/(Power \d+|\+\d+(?: permanent)? defense)/).map((part, i) =>
+    i % 2 === 1 ? <strong key={i}>{part}</strong> : part,
+  );
+}
+
+function HeroCard({ card, accent, cardRef }: { card: HeroCardDef; accent: string; cardRef: RefObject<HTMLDivElement> }) {
+  return (
+    <div
+      ref={cardRef}
+      className="cc-scr-hero-card"
+      style={{ ['--hc-accent' as string]: accent, width: CARD_W, height: CARD_H, fontSize: CARD_FONT }}
+    >
+      <div className="cc-scr-hero-card-head">
+        <span className="cc-scr-hero-card-name">{card.name}</span>
+        <span className="cc-scr-hero-card-cost">{card.cost}</span>
+      </div>
+      <div className="cc-scr-hero-card-art">
+        <img src={`/cards/${card.id}.webp`} alt="" draggable={false} decoding="async" />
+      </div>
+      <div className="cc-scr-hero-card-type">
+        {card.archetype} <span style={{ opacity: 0.5 }}>—</span> <b>{card.type}</b>
+      </div>
+      <div className="cc-scr-hero-card-text">{renderCardText(card.text)}</div>
+    </div>
+  );
+}
+
+/**
+ * Tear a Pixi app down without a white flash.
+ *
+ * Losing the WebGL context is slow (~40 ms) and React runs this effect's
+ * cleanup in the same task as the commit that swaps the home screen for the
+ * lobby. Destroying synchronously there blocks the main thread while the
+ * compositor is still showing the previous frame, whose canvas layer now
+ * points at a lost context — browsers paint that as a blank white rectangle
+ * until the next frame lands. So: stop rendering and detach the canvas now,
+ * and destroy once the next screen has actually painted.
+ */
+function disposeApp(app: Application) {
+  try { app.ticker?.stop(); } catch { /* never initialised */ }
+  try {
+    const canvas = app.canvas as HTMLCanvasElement | undefined;
+    if (canvas) {
+      canvas.style.display = 'none';
+      canvas.remove();
+    }
+  } catch { /* renderer never created */ }
+  let done = false;
+  const destroy = () => {
+    if (done) return;
+    done = true;
+    try { app.destroy(true, { children: true }); } catch { /* already gone */ }
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => setTimeout(destroy, 32));
+  }
+  // Fallback for hidden tabs, where rAF never fires.
+  setTimeout(destroy, 1000);
+}
 
 interface CardState {
   x: number;
@@ -78,48 +178,113 @@ interface CardState {
 
 export default function HeroAnimation() {
   const containerRef = useRef<HTMLDivElement>(null);
-  const appRef = useRef<Application | null>(null);
-  const startTimeRef = useRef(0);
+  const canvasHostRef = useRef<HTMLDivElement>(null);
+  const blueCardRef = useRef<HTMLDivElement>(null);
+  const redCardRef = useRef<HTMLDivElement>(null);
+  const [cards] = useState(() => ({ blue: pick(DEFENDERS), red: pick(ATTACKERS) }));
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    const container = containerRef.current;
+    const canvasHost = canvasHostRef.current;
+    if (!container || !canvasHost) return;
     let destroyed = false;
+    let ready = false;
 
     const app = new Application();
-    const CANVAS_W = 400;
-    const CANVAS_H = 320;
 
     // Cap resolution on phones to avoid DPR-3 + 4x antialias blowing up the
     // WebGL backbuffer on iOS Safari. iPadOS (incl. its Macintosh UA) and
-    // macOS get full DPR for crisp output.
+    // macOS get full DPR for crisp output. The canvas is CSS-scaled to fill
+    // the hero area, so the backbuffer is also scaled by how much the
+    // 400x320 scene is enlarged (otherwise it's upscaled and blurry on big
+    // screens) — capped at 2 on phones and 3 elsewhere.
     const rawDpr = window.devicePixelRatio || 1;
     const ua = navigator.userAgent;
     const isPhone = /iPhone|iPod/.test(ua)
       || (/Android/.test(ua) && /Mobile/.test(ua))
       || /webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-    const resolution = isPhone ? Math.min(rawDpr, 2) : rawDpr;
+    const computeResolution = () => {
+      const fit = Math.min(container.clientWidth / CANVAS_W, container.clientHeight / CANVAS_H) || 1;
+      const ideal = rawDpr * Math.max(1, fit);
+      return Math.min(ideal, isPhone ? Math.min(rawDpr, 2) : Math.max(rawDpr, 3));
+    };
+
+    // --- DOM card overlay: mirror the canvas's object-fit: contain box ---
+    const layout = { scale: 1, offX: 0, offY: 0, w: CARD_W, h: CARD_H };
+    const applyLayout = () => {
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      if (!cw || !ch) return;
+      const s = Math.min(cw / CANVAS_W, ch / CANVAS_H);
+      layout.scale = s;
+      layout.offX = (cw - CANVAS_W * s) / 2;
+      layout.offY = (ch - CANVAS_H * s) / 2;
+      layout.w = CARD_W * s;
+      layout.h = CARD_H * s;
+      for (const el of [blueCardRef.current, redCardRef.current]) {
+        if (!el) continue;
+        el.style.width = `${layout.w}px`;
+        el.style.height = `${layout.h}px`;
+        el.style.fontSize = `${CARD_FONT * s}px`;
+      }
+    };
+    const placeCard = (el: HTMLDivElement | null, st: CardState) => {
+      if (!el) return;
+      const x = layout.offX + st.x * layout.scale - layout.w / 2;
+      const y = layout.offY + st.y * layout.scale - layout.h / 2;
+      el.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, 0) rotate(${st.rotation.toFixed(4)}rad)`;
+      el.style.opacity = st.alpha >= 1 ? '1' : st.alpha.toFixed(3);
+    };
+    applyLayout();
+
+    const centerX = CANVAS_W / 2;
+    const centerY = CANVAS_H / 2;
+    // Card rest positions (also used by the no-WebGL fallback)
+    const restL = centerX - CARD_W * 0.55;
+    const restR = centerX + CARD_W * 0.55;
+    const restAngleL = -0.08; // slight tilt left
+    const restAngleR = 0.08;  // slight tilt right
+    const showStaticCards = () => {
+      placeCard(blueCardRef.current, { x: restL, y: centerY, rotation: restAngleL, alpha: 1 });
+      placeCard(redCardRef.current, { x: restR, y: centerY, rotation: restAngleR, alpha: 1 });
+    };
+
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastResolution = computeResolution();
+    let onLayoutChange: (() => void) | null = null;
+    const ro = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+        applyLayout();
+        onLayoutChange?.();
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (destroyed || !ready) return;
+          const res = computeResolution();
+          if (Math.abs(res - lastResolution) > 0.05) {
+            lastResolution = res;
+            app.renderer.resize(CANVAS_W, CANVAS_H, res);
+          }
+        }, 200);
+      })
+      : null;
+    ro?.observe(container);
 
     app.init({
       backgroundAlpha: 0,
       width: CANVAS_W,
       height: CANVAS_H,
       antialias: true,
-      resolution,
-      autoDensity: true,
+      resolution: lastResolution,
+      autoDensity: false, // CSS size is controlled by the stylesheet (100%, contain)
     }).then(() => {
-      if (destroyed) { app.destroy(); return; }
-      appRef.current = app;
-      app.canvas.style.width = '100%';
-      app.canvas.style.height = '100%';
-      app.canvas.style.objectFit = 'contain';
-      containerRef.current!.appendChild(app.canvas);
+      if (destroyed) { disposeApp(app); return; }
+      ready = true;
+      canvasHost.appendChild(app.canvas);
 
       const stage = app.stage;
-      const centerX = CANVAS_W / 2;
-      const centerY = CANVAS_H / 2;
 
       // --- Generate grid data ---
-      const radius = 3;
+      const radius = GRID_RADIUS;
       const allHexes = generateHexCoords(radius);
       // Sort by q for left-to-right fill
       const sortedByQ = [...allHexes].sort((a, b) => a.q - b.q || a.r - b.r);
@@ -130,7 +295,6 @@ export default function HeroAnimation() {
       withPixel.sort((a, b) => a.x - b.x || a.y - b.y);
       const midIdx = Math.ceil(withPixel.length / 2);
       const blueHexes = new Set(withPixel.slice(0, midIdx).map(h => `${h.q},${h.r}`));
-      const redHexes = new Set(withPixel.slice(midIdx).map(h => `${h.q},${h.r}`));
 
       // --- Create containers ---
       const gridContainer = new Container();
@@ -143,9 +307,6 @@ export default function HeroAnimation() {
       const hoverG = new Graphics();
       gridContainer.addChild(hoverG);
       let prevHoverKey: string | null = null;
-
-      const cardContainer = new Container();
-      stage.addChild(cardContainer);
 
       // --- Cursor proximity tracking ---
       // Use native DOM events to avoid Pixi's coordinate mismatch with object-fit: contain
@@ -189,7 +350,7 @@ export default function HeroAnimation() {
       for (const hex of allHexes) {
         const { x, y } = axialToPixel(hex.q, hex.r);
         const g = new Graphics();
-        g.setStrokeStyle({ width: 1, color: 0x333355, alpha: 0.6 });
+        g.setStrokeStyle({ width: 1, color: GRID_LINE, alpha: 0.55 });
         drawHexagon(g, x, y, HEX_SIZE - 1);
         g.stroke();
         g.alpha = 0;
@@ -222,17 +383,15 @@ export default function HeroAnimation() {
 
         // Blue layer
         const gBlue = new Graphics();
-        gBlue.beginFill(BLUE, 1);
         drawHexagon(gBlue, x, y, HEX_SIZE - 2);
-        gBlue.fill();
+        gBlue.fill({ color: BLUE, alpha: 1 });
         gBlue.alpha = 0;
         gridContainer.addChild(gBlue);
 
         // Red layer (on top)
         const gRed = new Graphics();
-        gRed.beginFill(RED, 1);
         drawHexagon(gRed, x, y, HEX_SIZE - 2);
-        gRed.fill();
+        gRed.fill({ color: RED, alpha: 1 });
         gRed.alpha = 0;
         gridContainer.addChild(gRed);
 
@@ -255,61 +414,10 @@ export default function HeroAnimation() {
         return bp.x - ap.x || bp.y - ap.y;
       });
 
-      // --- Card drawing ---
-      const gridPixelH = (radius * 2) * Math.sqrt(3) * HEX_SIZE;
-      const cardH = gridPixelH * 0.60;
-      const cardW = cardH * 0.65;
-      const cardR = 8; // corner radius
-
-      const blueEmoji = CLAIM_EMOJIS[Math.floor(Math.random() * CLAIM_EMOJIS.length)];
-      let redEmoji = CLAIM_EMOJIS[Math.floor(Math.random() * CLAIM_EMOJIS.length)];
-      while (redEmoji === blueEmoji) redEmoji = CLAIM_EMOJIS[Math.floor(Math.random() * CLAIM_EMOJIS.length)];
-
-      function drawCard(color: number, emoji: string): Container {
-        const c = new Container();
-
-        // Card background
-        const bg = new Graphics();
-        bg.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, cardR);
-        bg.fill({ color: 0x181828, alpha: 0.9 });
-        bg.roundRect(-cardW / 2, -cardH / 2, cardW, cardH, cardR);
-        bg.stroke({ width: 2.5, color, alpha: 0.9 });
-        c.addChild(bg);
-
-        // Emoji in upper area
-        const emojiText = new Text({
-          text: emoji,
-          style: new TextStyle({ fontSize: 38 }),
-        });
-        emojiText.anchor.set(0.5);
-        emojiText.y = -cardH / 2 + cardH * 0.3;
-        c.addChild(emojiText);
-
-        // Placeholder bars (grey rounded rects for "text")
-        const barG = new Graphics();
-        const barY1 = cardH * 0.12;
-        const barY2 = barY1 + 14;
-        const barY3 = barY2 + 12;
-        const barW1 = cardW * 0.65;
-        const barW2 = cardW * 0.5;
-        const barW3 = cardW * 0.55;
-        const barLeft = -cardW * 0.35; // left-aligned margin
-
-        barG.roundRect(barLeft, barY1, barW1, 8, 4);
-        barG.fill({ color: 0x555566, alpha: 0.6 });
-        barG.roundRect(barLeft, barY2, barW2, 6, 3);
-        barG.fill({ color: 0x444455, alpha: 0.5 });
-        barG.roundRect(barLeft, barY3, barW3, 6, 3);
-        barG.fill({ color: 0x444455, alpha: 0.4 });
-        c.addChild(barG);
-
-        return c;
-      }
-
-      const blueCard = drawCard(BLUE, blueEmoji);
-      const redCard = drawCard(RED, redEmoji);
-      cardContainer.addChild(blueCard);
-      cardContainer.addChild(redCard);
+      // --- Cards (DOM elements laid over the canvas) ---
+      const cardW = CARD_W;
+      const blueCard = blueCardRef.current;
+      const redCard = redCardRef.current;
 
       // --- Animation timeline ---
       // All times in ms
@@ -330,20 +438,18 @@ export default function HeroAnimation() {
       const offscreenL = -CANVAS_W / 2 - cardW;
       const offscreenR = CANVAS_W + CANVAS_W / 2 + cardW;
       const collisionX = centerX; // meet at center
-      const restL = centerX - cardW * 0.55;
-      const restR = centerX + cardW * 0.55;
-      const restAngleL = -0.08; // slight tilt left
-      const restAngleR = 0.08;  // slight tilt right
 
       // State
       let animDone = false;
-      startTimeRef.current = 0;
+      let startTime = 0;
       const blueState: CardState = { x: offscreenL, y: centerY, rotation: 0, alpha: 0 };
       const redState: CardState = { x: offscreenR, y: centerY, rotation: 0, alpha: 0 };
+      // Re-place the cards immediately when the hero is resized
+      onLayoutChange = () => { placeCard(blueCard, blueState); placeCard(redCard, redState); };
 
       const tickerFn = () => {
-        if (!startTimeRef.current) startTimeRef.current = performance.now();
-        const elapsed = performance.now() - startTimeRef.current;
+        if (!startTime) startTime = performance.now();
+        const elapsed = performance.now() - startTime;
 
         // Cursor proximity fade
         const wantCursor = cursorOnGrid;
@@ -373,7 +479,7 @@ export default function HeroAnimation() {
               drawHexagon(hoverG, hx, hy, HEX_SIZE - 1);
               hoverG.fill();
               // Edge highlight
-              hoverG.setStrokeStyle({ width: 2.5, color: 0xffffff, alpha: 0.6, cap: 'round' });
+              hoverG.setStrokeStyle({ width: 2.5, color: 0xffe9b0, alpha: 0.65, cap: 'round' });
               drawHexagon(hoverG, hx, hy, HEX_SIZE - 1);
               hoverG.stroke();
               // Neighbor subtle glow
@@ -438,7 +544,7 @@ export default function HeroAnimation() {
 
         // --- Ripple displacement from collision ---
         const RIPPLE_START = COLLISION_TIME - 180;
-        if (elapsed >= RIPPLE_START) {
+        if (elapsed >= RIPPLE_START && !animDone) {
           const rippleElapsed = elapsed - RIPPLE_START;
           const applyRipple = (items: { g?: Graphics; gBlue?: Graphics; gRed?: Graphics; hexDist: number; px: number; py: number }[]) => {
             for (const item of items) {
@@ -494,10 +600,6 @@ export default function HeroAnimation() {
         if (elapsed >= TOTAL_ANIM) {
           if (!animDone) {
             animDone = true;
-            blueState.x = restL;
-            blueState.rotation = restAngleL;
-            redState.x = restR;
-            redState.rotation = restAngleR;
             // Snap tiles to full base color and clear any ripple displacement
             for (const tile of tileFills) {
               tile.currentAlpha = 0.45;
@@ -515,15 +617,18 @@ export default function HeroAnimation() {
           const breathe = Math.sin(idleT * 1.2) * 2 * breatheRamp;
           const breathe2 = Math.sin(idleT * 1.2 + 0.5) * 2 * breatheRamp;
 
-          blueCard.x = restL;
-          blueCard.y = centerY + breathe;
-          blueCard.rotation = restAngleL;
-          blueCard.alpha = 1;
+          blueState.x = restL;
+          blueState.y = centerY + breathe;
+          blueState.rotation = restAngleL;
+          blueState.alpha = 1;
 
-          redCard.x = restR;
-          redCard.y = centerY + breathe2;
-          redCard.rotation = restAngleR;
-          redCard.alpha = 1;
+          redState.x = restR;
+          redState.y = centerY + breathe2;
+          redState.rotation = restAngleR;
+          redState.alpha = 1;
+
+          placeCard(blueCard, blueState);
+          placeCard(redCard, redState);
 
           // Tile breathing + border contest (ramps in over first 3s of idle)
           const contestRamp = Math.min(1, idleT / 3);
@@ -559,38 +664,30 @@ export default function HeroAnimation() {
         }
 
         // Apply card state
-        blueCard.x = blueState.x;
-        blueCard.y = blueState.y;
-        blueCard.rotation = blueState.rotation;
-        blueCard.alpha = blueState.alpha;
-
-        redCard.x = redState.x;
-        redCard.y = redState.y;
-        redCard.rotation = redState.rotation;
-        redCard.alpha = redState.alpha;
+        placeCard(blueCard, blueState);
+        placeCard(redCard, redState);
       };
 
       app.ticker.add(tickerFn);
+    }).catch(() => {
+      // No WebGL (or init failed): show the two cards at rest over an empty board.
+      if (!destroyed) showStaticCards();
     });
 
     return () => {
       destroyed = true;
-      if (appRef.current) {
-        appRef.current.destroy(true);
-        appRef.current = null;
-      }
+      onLayoutChange = null;
+      ro?.disconnect();
+      if (resizeTimer) clearTimeout(resizeTimer);
+      if (ready) disposeApp(app);
     };
   }, []);
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    />
+    <div ref={containerRef} className="cc-scr-hero" aria-hidden="true">
+      <div ref={canvasHostRef} className="cc-scr-hero-canvas" />
+      <HeroCard card={cards.blue} accent={DEFENSE_COLOR} cardRef={blueCardRef} />
+      <HeroCard card={cards.red} accent={CLAIM_COLOR} cardRef={redCardRef} />
+    </div>
   );
 }

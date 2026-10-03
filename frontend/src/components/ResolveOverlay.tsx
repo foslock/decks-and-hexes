@@ -5,6 +5,8 @@ import type { Container } from 'pixi.js';
 import { Graphics } from 'pixi.js';
 import { useAnimationMode, useAnimationSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
+import Icon from '../icons/Icon';
+import { Num } from '../icons/Num';
 
 // ---------------------------------------------------------------------------
 // Pixi wedge animation helpers — wedge geometry lives in the hex grid's own
@@ -1106,10 +1108,27 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
               textShadow: `0 0 8px ${color}, 0 2px 4px rgba(0,0,0,0.8)`,
             }}
           >
-            <span style={{ color: '#fff' }}>🛡{permDef}</span>
-            {step.defense_immunity
-              ? <span style={{ color: '#66ccff' }}>+∞</span>
-              : tempDef > 0 && <span style={{ color: '#66ccff' }}>+{tempDef}</span>}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, filter: `drop-shadow(0 0 6px ${color}) drop-shadow(0 2px 3px rgba(0,0,0,0.8))`, textShadow: 'none' }}>
+              {permDef > 0 && (
+                <span style={{ color: '#fff', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                  <Icon name="fortify" size={22} title="Permanent defense" />
+                  <Num value={permDef} />
+                </span>
+              )}
+              {step.defense_immunity
+                ? <span style={{ color: '#66ccff', display: 'inline-flex', alignItems: 'center', gap: 2 }}><Icon name="immune" size={22} decorative />{permDef > 0 ? null : <span style={{ fontSize: 16 }}>Immune</span>}</span>
+                : tempDef > 0 && (
+                  <span style={{ color: '#66ccff', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                    {permDef === 0 && <Icon name="defense" size={22} title="Defense this round" />}
+                    <Num value={`+${tempDef}`} />
+                  </span>
+                )}
+              {permDef === 0 && !step.defense_immunity && tempDef <= 0 && (
+                <span style={{ color: '#fff', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                  <Icon name="defense" size={22} title="Defense" /><Num value={0} />
+                </span>
+              )}
+            </span>
           </div>
         );
       })()}
@@ -1156,9 +1175,10 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
               zIndex: 502,
               whiteSpace: 'nowrap',
               pointerEvents: 'none',
+              filter: `drop-shadow(0 0 8px ${color}) drop-shadow(0 0 14px rgba(255, 215, 0, 0.6))`,
             }}
           >
-            ★
+            <Icon name="vp" size={28} title="Victory point" />
           </div>
         );
       })()}
@@ -1225,9 +1245,10 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
               zIndex: 502,
               whiteSpace: 'nowrap',
               pointerEvents: 'none',
+              filter: `drop-shadow(0 0 6px ${color}) drop-shadow(0 0 12px ${color})`,
             }}
           >
-            ⚔
+            <Icon name="power" size={24} title="Claim" />
           </div>
         );
       })()}
@@ -1433,8 +1454,8 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
           >
             {num.isDefender && (
               // Absolutely-positioned shield sits just to the left of the number so the digit
-              // (not the "🛡 N" block) is what lands on the phantom-wedge centroid — otherwise
-              // the emoji's width biases the whole block off-center toward the hex interior.
+              // (not the "shield N" block) is what lands on the phantom-wedge centroid — otherwise
+              // the glyph's width biases the whole block off-center toward the hex interior.
               <span style={{
                 position: 'absolute',
                 right: '100%',
@@ -1442,8 +1463,9 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
                 transform: 'translateY(-50%)',
                 marginRight: 2,
                 WebkitTextStroke: 0,
-                textShadow: '0 2px 4px rgba(0,0,0,0.8)',
-              }}>🛡</span>
+                display: 'flex',
+                filter: 'drop-shadow(0 0 1px #fff) drop-shadow(0 2px 3px rgba(0,0,0,0.8))',
+              }}><Icon name="defense" size={16} title="Defender" /></span>
             )}
             {num.power}
             {num.isWinner && isWinStage && (

@@ -19,6 +19,7 @@ from .cards import (
     make_rubble_card,
 )
 from .effects import ConditionType, Effect, EffectType
+from .hex_grid import mark_tile_lost, tile_bridges_territory
 
 if TYPE_CHECKING:
     from .game_state import GameState, PlannedAction, Player
@@ -247,8 +248,16 @@ def resolve_on_resolution_effects(
     claim_succeeded: Optional[bool] = None,
     defender_id: Optional[str] = None,
     claim_results: Optional[dict[str, dict[str, bool]]] = None,
+    only_conditions: Optional[set[ConditionType]] = None,
 ) -> None:
-    """Resolve ON_RESOLUTION-timing effects. Called from execute_reveal()."""
+    """Resolve ON_RESOLUTION-timing effects. Called from execute_reveal().
+
+    *only_conditions* restricts the pass to effects gated on those conditions.
+    Defense cards resolve before claims (so their bonuses count), which means
+    claim-outcome conditions can't be known yet; execute_reveal re-runs just
+    those effects after claims resolve (e.g. Counterattack's "if an
+    opponent's claim on this tile fails" draw).
+    """
     ctx = EffectContext(
         game=game,
         player=player,
@@ -267,6 +276,8 @@ def resolve_on_resolution_effects(
             continue
         # Skip power_modifier — already handled in calculate_effective_power
         if effect.type == EffectType.POWER_MODIFIER:
+            continue
+        if only_conditions is not None and effect.condition not in only_conditions:
             continue
         if not check_condition(effect.condition, game, player, card, action,
                                claim_succeeded=claim_succeeded):
@@ -373,13 +384,24 @@ def check_condition(
         return False
 
     if condition == ConditionType.IF_TARGET_HAS_DEFENSE:
-        # Battering Ram: true if target tile has any defense bonuses (permanent or round-based)
+        # Battering Ram: true if the target tile has a defense *bonus* —
+        # permanent (Entrench, Barricade, ...) or this round's Defense cards.
+        # Intrinsic defense (base 3, VP hexes 2/3, premium neighbours 1) is
+        # not a bonus.
         if game.grid and action.target_q is not None:
             target_r = action.target_r if action.target_r is not None else 0
             tile = game.grid.get_tile(action.target_q, target_r)
             if tile:
-                has_defense = tile.permanent_defense_bonus > 0 or tile.defense_power > 0
-                return has_defense
+                return tile_has_defense_bonus(tile)
+        return False
+
+    if condition == ConditionType.IF_BRIDGES_TERRITORY:
+        # Road Builder: the target tile joins two of this player's
+        # disconnected territory groups. play_card always snapshots power for
+        # this condition, so it's judged against the board at play time.
+        if game.grid and action.target_q is not None:
+            target_r = action.target_r if action.target_r is not None else 0
+            return tile_bridges_territory(game.grid, player.id, action.target_q, target_r)
         return False
 
     if condition == ConditionType.ZERO_ACTIONS:
@@ -454,6 +476,16 @@ def check_condition(
         return False
 
     return False
+
+
+def tile_has_defense_bonus(tile: Any) -> bool:
+    """True if a tile's defense exceeds its intrinsic (terrain / base) value,
+    i.e. it carries a permanent fortification or a Defense card bonus this
+    round. Shared by Battering Ram and Watchful Keep."""
+    return bool(
+        tile.permanent_defense_bonus > 0
+        or tile.defense_power > tile.base_defense
+    )
 
 
 # ── Effect handlers ───────────────────────────────────────────────
@@ -749,12 +781,20 @@ def _handle_draw_next_turn(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_auto_claim_adjacent_neutral(effect: Effect, ctx: EffectContext) -> None:
-    """Breakthrough: on success, randomly claim one adjacent neutral tile."""
+    """Breakthrough: on success, randomly claim one adjacent neutral tile.
+
+    Only tiles with no defense at all are eligible — VP hexes and premium-hex
+    neighbours carry intrinsic defense and must be claimed normally.
+    """
     if not ctx.game.grid or ctx.action.target_q is None:
         return
     target_r = ctx.action.target_r if ctx.action.target_r is not None else 0
     adj_tiles = ctx.game.grid.get_adjacent(ctx.action.target_q, target_r)
-    candidates = [t for t in adj_tiles if t.owner is None and not t.is_blocked]
+    candidates = [
+        t for t in adj_tiles
+        if t.owner is None and not t.is_blocked
+        and t.defense_power == 0 and t.base_defense == 0 and t.permanent_defense_bonus == 0
+    ]
     if candidates:
         tile = ctx.game.rng.choice(candidates)
         tile.owner = ctx.player.id
@@ -949,7 +989,7 @@ def _handle_dynamic_buy_cost(effect: Effect, ctx: EffectContext) -> None:
 
 def _handle_cease_fire(effect: Effect, ctx: EffectContext) -> None:
     """Cease Fire: mark pending bonus draws, resolved after all claims."""
-    bonus = effect.value
+    bonus = effect.effective_value(ctx.card.is_upgraded)
     ctx.player.turn_modifiers.cease_fire_bonus += bonus
     ctx.game._log(
         f"{ctx.player.name} plays {ctx.card.name} — will draw {bonus} extra card(s) "
@@ -994,13 +1034,27 @@ def _handle_enhance_vp_tile(effect: Effect, ctx: EffectContext) -> None:
         actor=ctx.player.id)
 
 
+def land_grant_counts(effect: Effect, is_upgraded: bool) -> tuple[int, int]:
+    """(Land Grants for the player, Land Grants for each opponent) granted by a
+    GRANT_LAND_GRANTS effect. Read from metadata (Diplomat: 2/1, upgraded 2/0);
+    defaults reproduce the original 1/1 (upgraded 2/1)."""
+    md = effect.metadata
+    if is_upgraded:
+        self_count = int(md.get("upgraded_self_count", md.get("self_count", 2)))
+        others = int(md.get("upgraded_others_count", md.get("others_count", 1)))
+    else:
+        self_count = int(md.get("self_count", 1))
+        others = int(md.get("others_count", 1))
+    return max(0, self_count), max(0, others)
+
+
 def _handle_grant_land_grants(effect: Effect, ctx: EffectContext) -> None:
     """Grant Land Grants. Supports two modes:
-    - chosen_player (Fortress Diplomacy): self + target opponent
+    - chosen_player: self + target opponent
     - all_players (Neutral Diplomat): self first, then all others
+    Counts come from land_grant_counts().
     """
-    # Self first (always)
-    self_count = 2 if ctx.card.is_upgraded else 1
+    self_count, others_count = land_grant_counts(effect, ctx.card.is_upgraded)
     for _ in range(self_count):
         grant = make_land_grant_card()
         ctx.player.deck.discard.append(grant)
@@ -1022,55 +1076,62 @@ def _handle_grant_land_grants(effect: Effect, ctx: EffectContext) -> None:
         "added_card_count": self_count,
     })
 
+    if others_count <= 0:
+        return
+
     if effect.target == "chosen_player":
-        # Fortress Diplomacy: target one opponent
+        # Target one opponent
         target_id = ctx.action.target_player_id
         if target_id:
             target_player = ctx.game.players.get(target_id)
             if target_player:
-                target_grant = make_land_grant_card()
-                target_player.deck.discard.append(target_grant)
+                for _ in range(others_count):
+                    target_player.deck.discard.append(make_land_grant_card())
                 ctx.game._log(
-                    f"{target_player.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
+                    f"{target_player.name} receives {others_count} Land Grant(s) from {ctx.player.name}'s {ctx.card.name}",
                     actor=ctx.player.id)
                 ctx.game.player_effects.append({
                     "source_player_id": ctx.player.id,
                     "target_player_id": target_id,
                     "card_name": ctx.card.name,
-                    "effect": "+1 Land Grant",
+                    "effect": f"+{others_count} Land Grant{'s' if others_count > 1 else ''}",
                     "effect_type": "grant_land_grants",
-                    "value": 1,
+                    "value": others_count,
                     "source_q": ctx.action.target_q,
                     "source_r": ctx.action.target_r,
                     "added_card_name": "Land Grant",
-                    "added_card_count": 1,
+                    "added_card_count": others_count,
                 })
     else:
         # Neutral Diplomat: all other players
         for pid, other in ctx.game.players.items():
             if pid == ctx.player.id:
                 continue
-            other_grant = make_land_grant_card()
-            other.deck.discard.append(other_grant)
+            for _ in range(others_count):
+                other.deck.discard.append(make_land_grant_card())
             ctx.game._log(
-                f"{other.name} receives a Land Grant from {ctx.player.name}'s {ctx.card.name}",
+                f"{other.name} receives {others_count} Land Grant(s) from {ctx.player.name}'s {ctx.card.name}",
                 actor=ctx.player.id)
             ctx.game.player_effects.append({
                 "source_player_id": ctx.player.id,
                 "target_player_id": pid,
                 "card_name": ctx.card.name,
-                "effect": "+1 Land Grant",
+                "effect": f"+{others_count} Land Grant{'s' if others_count > 1 else ''}",
                 "effect_type": "grant_land_grants",
-                "value": 1,
+                "value": others_count,
                 "source_q": ctx.action.target_q,
                 "source_r": ctx.action.target_r,
                 "added_card_name": "Land Grant",
-                "added_card_count": 1,
+                "added_card_count": others_count,
             })
 
 
 def _handle_vp_from_contested_wins(effect: Effect, ctx: EffectContext) -> None:
-    """Battle Glory: if won 2+ contested tiles this turn, increase card's passive_vp.
+    """Battle Glory: if 2+ of the player's Claims beat opponent-owned tiles
+    this round (base raids included), increase the card's passive_vp.
+
+    Neutral tiles don't count even when another player also claimed them —
+    the card text says "opponent-owned tiles" to match.
 
     Now a Passive card — triggers for all copies in the player's hand during
     resolve_on_resolution_effects, not played as an action.
@@ -1262,7 +1323,7 @@ def _handle_resources_per_claims_last_round(effect: Effect, ctx: EffectContext) 
         ctx.player.resources += gained
         ctx.player.cumulative_resources_gained += gained
         ctx.game._log(f"{ctx.player.name} gains {gained} resources from War Tithe ({claims} tiles claimed last round)")
-    # Upgraded: draw 1 card
+    # Upgraded: draw 1 card next round (text: "Draw 1 card next round")
     if ctx.card.is_upgraded and effect.metadata.get("upgraded_draw"):
         draw_count = effect.metadata["upgraded_draw"]
         ctx.player.turn_modifiers.extra_draws_next_turn += draw_count
@@ -1356,7 +1417,11 @@ def _handle_conditional_action(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_resource_scaling(effect: Effect, ctx: EffectContext) -> None:
-    """Dividends: gain 1 resource per N resources currently held (min 1)."""
+    """Dividends: gain 1 resource per N resources currently held (min 1).
+
+    Dividends+'s "Draw 1 card" is the card's upgraded_draw_cards stat, drawn
+    by play_card — not here (it used to be both, drawing 2).
+    """
     divisor = effect.value  # e.g. 2 = gain 1 per 2 held
     gained = max(1, ctx.player.resources // divisor)
     ctx.player.resources += gained
@@ -1365,14 +1430,6 @@ def _handle_resource_scaling(effect: Effect, ctx: EffectContext) -> None:
         f"{ctx.player.name}'s {ctx.card.name} earns {gained} resource(s) "
         f"(had {ctx.player.resources - gained}, 1 per {divisor} held)",
         visible_to=[ctx.player.id], actor=ctx.player.id)
-    # Upgraded Dividends: draw 1 card
-    if ctx.card.is_upgraded:
-        drawn = ctx.player.deck.draw(1, ctx.game.rng)
-        ctx.player.hand.extend(drawn)
-        if drawn:
-            ctx.game._log(
-                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
-                visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
 def _handle_cycle(effect: Effect, ctx: EffectContext) -> None:
@@ -1610,7 +1667,7 @@ def _handle_global_claim_ban(effect: Effect, ctx: EffectContext) -> None:
             "source_player_id": ctx.player.id,
             "target_player_id": pid,
             "card_name": ctx.card.name,
-            "effect": "🚫 No claims next turn",
+            "effect": "No claims next turn",
             "effect_type": "global_claim_ban",
             "value": effect.duration,
         })
@@ -1687,6 +1744,7 @@ def _handle_abandon_tile(effect: Effect, ctx: EffectContext) -> None:
             f"{ctx.player.name}'s {ctx.card.name}: cannot abandon a base tile",
             visible_to=[ctx.player.id], actor=ctx.player.id)
         return
+    mark_tile_lost(tile, tile.owner)
     tile.owner = None
     tile.held_since_turn = None
     tile.defense_power = tile.base_defense
@@ -1715,6 +1773,7 @@ def _handle_abandon_and_block(effect: Effect, ctx: EffectContext) -> None:
             f"{ctx.player.name}'s {ctx.card.name}: cannot scorch a base tile",
             visible_to=[ctx.player.id], actor=ctx.player.id)
         return
+    mark_tile_lost(tile, tile.owner)
     tile.owner = None
     tile.held_since_turn = None
     tile.is_blocked = True
@@ -1767,7 +1826,13 @@ register_handler(EffectType.MANDATORY_SELF_TRASH, _handle_mandatory_self_trash)
 
 def _handle_trash_gain_power(effect: Effect, ctx: EffectContext) -> None:
     """Arms Dealer: trash 1 card from hand. If it was a Claim card, gain
-    resources equal to double its effective power and gain action(s)."""
+    resources equal to (metadata multiplier, default 1) × its power and gain
+    action(s).
+
+    "Power" is the trashed card's printed power — its upgraded power if it is
+    upgraded (``Card.effective_power``). Conditional modifiers (Strike Team's
+    +2, Militia's adjacency bonus, ...) depend on a target and don't apply.
+    """
     if not ctx.player.hand:
         ctx.game._log(f"{ctx.player.name}: no cards to trash, skipping",
                       visible_to=[ctx.player.id], actor=ctx.player.id)
@@ -1793,9 +1858,9 @@ def _handle_trash_gain_power(effect: Effect, ctx: EffectContext) -> None:
         ctx.player.trash.append(trashed_card)
 
         if trashed_card.card_type == CardType.CLAIM:
-            # Use effective power (includes upgrades and printed modifiers)
+            # Printed power (upgraded power if upgraded); no conditional modifiers
             power = trashed_card.effective_power
-            multiplier = int(effect.metadata.get("multiplier", 2))
+            multiplier = int(effect.metadata.get("multiplier", 1))
             resources_gained = power * multiplier
             ctx.player.resources += resources_gained
             if resources_gained > 0:
@@ -2100,9 +2165,13 @@ def _handle_create_cards_to_discard(effect: Effect, ctx: EffectContext) -> None:
         ctx.game._log(
             f"[create_cards_to_discard] card_id={card_id} not in registry")
         return
-    import copy as _copy
+    import uuid
+    from .cards import _copy_card
     for _ in range(count):
-        clone = _copy.deepcopy(template)
+        # Each copy needs its own instance id: "another Rabble" checks compare
+        # card ids, and the frontend keys cards by id. (A uuid suffix stays
+        # unique across server restarts and saved games.)
+        clone = _copy_card(template, f"created_{uuid.uuid4().hex[:10]}")
         ctx.player.deck.discard.append(clone)
     ctx.game._log(
         f"{ctx.player.name}'s {ctx.card.name} adds {count} {template.name} "
@@ -2157,12 +2226,16 @@ def _handle_gain_resources_per_card_in_hand(effect: Effect, ctx: EffectContext) 
 def _handle_draw_per_tiles_with_defense_bonus(
     effect: Effect, ctx: EffectContext
 ) -> None:
-    """Watchful Keep: draw 1 card per owned tile with any defense bonus (capped)."""
+    """Watchful Keep: draw 1 card per owned tile with any defense bonus (capped).
+
+    A bonus is defense above the tile's intrinsic value (see
+    tile_has_defense_bonus); a bare base or VP hex doesn't count.
+    """
     per = effect.effective_value(ctx.card.is_upgraded)
     tiles_with_def = 0
     if ctx.game.grid:
         for tile in ctx.game.grid.get_player_tiles(ctx.player.id):
-            if tile.permanent_defense_bonus > 0 or tile.defense_power > 0:
+            if tile_has_defense_bonus(tile):
                 tiles_with_def += 1
     cap_key = "upgraded_max_draws" if ctx.card.is_upgraded else "max_draws"
     max_draws = int(effect.metadata.get(cap_key, 999))

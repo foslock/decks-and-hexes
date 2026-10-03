@@ -9,12 +9,12 @@ Players collectively agree on a grid size (Small / Medium / Large / Mega / Ultra
 ## Step 2: Generate the Board
 1. Place the hex grid.
 2. Assign **starting corner clusters** (2 tiles each) to each active player. Distribute corners evenly around the grid. Empty corners are left unoccupied unless the host has opted to add CPU players.
-3. Randomly place **Blocked Terrain** tiles across non-corner, non-VP hexes. Suggested count:
-   - Small: 3–4 blocked tiles
-   - Medium: 5–7 blocked tiles
-   - Large: 8–10 blocked tiles
-   - Mega: 11–14 blocked tiles
-   - Ultra: 14–18 blocked tiles
+3. Randomly place **Blocked Terrain** tiles across non-corner, non-VP hexes. Count used by the digital game:
+   - Small: 5–7 blocked tiles
+   - Medium: 8–10 blocked tiles
+   - Large: 10–14 blocked tiles
+   - Mega: 14–18 blocked tiles
+   - Ultra: 18–22 blocked tiles
 4. Randomly distribute **VP Hex** markers evenly across the remaining tiles.
 
 ## Step 3: Determine Initial Turn Order
@@ -23,6 +23,8 @@ Roll or randomly determine the **first player** for Round 1. Seat order is fixed
 > **Why this matters:** Being first player affects tie-breaking in conflict resolution and sets the rhythm of the play phase. Rotating it ensures no player holds a sustained advantage.
 
 ## Step 4: Passive Draft
+
+> **Not in the current digital game.** Passives are a design candidate kept in `data/passives.yaml`.
 1. Randomly draw **n+2 passives** from the passive pool (where n = number of active players).
 2. Display all drawn passives face-up.
 3. Players draft in **reverse Round 1 turn order** (the Round 1 last player picks first, the Round 1 first player picks last).
@@ -46,7 +48,7 @@ All archetypes start with the same 10-card deck:
 |---|---|---|---|---|
 | 5 | 5 | 10 | 5 | 5 |
 
-Explore (Claim: Power 1 on any adjacent tile) and Gather (Gain 1 resource) are shared starter cards present in every archetype's starting deck. They establish a common baseline before archetype identity takes over via market purchases. The deck is sized at exactly 2 × hand size so it cycles once before any purchased card can appear.
+Explore (Claim: Power 0 on an adjacent unoccupied tile) and Gather (Gain 2 resources) are shared starter cards present in every archetype's starting deck. They establish a common baseline before archetype identity takes over via market purchases. The deck is sized at exactly 2 × hand size so it cycles once before any purchased card can appear.
 
 ## Step 6: Prepare the Markets
 
@@ -57,7 +59,7 @@ Each archetype pool is shuffled separately. These are private per player — eac
 Lay out all shared cards in separate face-up stacks with their copy counts visible. These are shared by all players.
 
 ### Upgrade Credits
-Place upgrade credit tokens in a shared pool (suggested: 2 × number of active players available at game start).
+Upgrade credits are bought during the Buy Phase for 5 resources each (no supply limit in the digital game).
 
 ## Step 7: Prepare Resources
 Each player starts with **0 resources**. Resources are tracked individually and carry over between turns.

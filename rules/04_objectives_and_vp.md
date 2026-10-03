@@ -2,16 +2,17 @@
 
 ## Victory Points (Derived Scoring)
 
-VP is **derived instantaneously** from the current game state — it is not accumulated over turns. VP updates whenever tiles change hands, VP hexes connect or disconnect, or Rubble/Land Grant cards enter or leave the deck.
+VP is **derived instantaneously** from the current game state — it is not accumulated over turns. VP updates whenever tiles change hands, VP hexes connect or disconnect, or VP cards (Land Grant, Spoils, formula cards) enter or leave the deck.
 
 ### VP Formula
 
 ```
 tile_vp       = total_owned_tiles // 3
 vp_hex_bonus  = sum of vp_value for each VP hex connected to your base (standard=1, premium=2)
-card_vp       = sum of passive_vp across all cards in deck+hand+discard (Land Grant=+1, Rubble=-1)
-bonus_vp      = any VP from card effects (objectives, Scorched Earth, etc.)
-player_vp     = max(0, tile_vp + vp_hex_bonus + card_vp + bonus_vp)
+card_vp       = sum of passive_vp across all cards in deck+hand+discard (Land Grant=+1, Spoils=+1, Rubble=0)
+formula_vp    = current value of formula cards (Arsenal, Warden, Colony, Ironclad, Spoils Hoard)
+bonus_vp      = any VP from card effects
+player_vp     = max(0, tile_vp + vp_hex_bonus + card_vp + formula_vp + bonus_vp)
 ```
 
 | Component | Source | Amount |
@@ -19,8 +20,8 @@ player_vp     = max(0, tile_vp + vp_hex_bonus + card_vp + bonus_vp)
 | Territory | Every 3 tiles owned | +1 VP per 3 tiles |
 | Connected VP hexes | VP hex tiles connected to your base via owned tiles | +1 or +2 VP per hex |
 | Land Grant cards | In deck (passive, not played) | +1 VP each |
-| Rubble cards | In deck (from base raids) | -1 VP each |
-| Objectives | First to complete | +2 VP each |
+| Spoils cards | In deck (from your successful base raids) | +1 VP each |
+| Rubble cards | In deck (from raids on your base) | 0 VP (dead card) |
 
 ### Connectivity Rule
 
@@ -28,27 +29,26 @@ A VP hex adds its bonus VP only when **connected to your base** — there must b
 
 ### Win Condition
 
-Checked at the **end of each round**. The first player whose derived VP ≥ the **VP target** wins. Since VP can fluctuate (losing tiles, gaining Rubble), a player can drop below the target after having been above it.
+Checked at the **end of each round**. The first player whose derived VP ≥ the **VP target** wins. Since VP can fluctuate (losing tiles), a player can drop below the target after having been above it.
+
+If two or more players reach the target in the same end-of-round check, seat order does **not** decide it:
+1. Highest VP wins.
+2. Still tied: most VP hexes connected to their base.
+3. Still tied: most tiles owned.
+4. Still tied: shared victory (all tied players are listed as winners).
 
 The game also ends when the **round limit** is reached (default 20 rounds). The player with the most VP wins. If tied, all tied players share victory.
 
 ### Dynamic VP Target
 
-The VP target scales with grid size, player count, and game speed:
+The VP target scales with grid size and player count (`compute_vp_target` in `game_state.py`):
 
 ```
-tiles_per_vp = 3                   # constant across all grid sizes
-base_vp = total_tiles // (tiles_per_vp × player_count × 0.75)
-vp_target = max(3, round(base_vp × speed_multiplier))
+base (2 players): Small 10, Medium 14, Large 18, Mega 22, Ultra 26
+vp_target = max(4, base - (player_count - 2))
 ```
 
-| Speed | Multiplier | Description |
-|-------|-----------|-------------|
-| Fast | 0.66× | Quick games, lower target |
-| Normal (default) | 1.0× | Standard experience |
-| Slow | 1.33× | Longer, more strategic games |
-
-The setup screen displays the computed VP target based on selected grid size, player count, and speed.
+The host can override the target at setup.
 
 ---
 
@@ -57,8 +57,8 @@ The setup screen displays the computed VP target based on selected grid size, pl
 Each player's first starting tile is their **base**. Bases have special rules:
 
 - **Permanently owned:** A base tile can never change ownership. It always belongs to its original player.
-- **Passive defense:** Base defense varies by archetype — Swarm: 2, Vanguard: 3, Fortress: 4.
-- **Raidable:** An enemy can play a Claim card targeting a base tile. If the claim power exceeds the base's total defense (passive defense + any active defense bonuses from the owner's played cards), the base owner receives **Rubble cards** equal to `(claim power − total defense)`. The base remains owned by the original player.
+- **Passive defense:** 3 for every archetype.
+- **Raidable:** An enemy can play a Claim card targeting a base tile. If the claim power exceeds the base's total defense (passive defense + any defense bonuses from the owner's cards and claims), the raid succeeds: the base owner receives **1 Rubble** card (capped at 1 per raid, however much the power exceeded the defense) and the attacker receives **1 Spoils** card (+1 VP). The base remains owned by the original player, so a raid is not a "captured tile" for Robin Hood, Pursuit or Warden.
 - **Once per round per attacker:** Each opponent may raid a base once per round independently. Each raid is resolved separately against the base's full defense.
 
 ### Rubble Cards
@@ -68,17 +68,19 @@ Rubble is a curse-type card generated by base raids:
 | Field | Value |
 |-------|-------|
 | Name | Rubble |
-| Type | Curse |
+| Type | Passive (unplayable) |
 | Power | 0 |
-| passive_vp | -1 |
+| passive_vp | 0 |
 | Playable | No (dead card — takes up a hand slot when drawn) |
 | Trashable | Yes (by any card with trash effects) |
 
-Rubble cards are added to the defender's discard pile and shuffle into their deck normally. Each Rubble reduces VP by 1 and wastes a hand slot when drawn.
+Rubble cards are added to the defender's discard pile and shuffle into their deck normally. Each Rubble wastes a hand slot when drawn; it does not cost VP. Infestation can also add Rubble to an opponent's discard pile.
 
 ---
 
 ## Objectives
+
+> **Not in the current digital game.** Objectives are a design candidate kept in `data/objectives.yaml`; the rest of this section describes the intended tabletop rule.
 
 ### Overview
 Three objectives are revealed mid-game, creating a secondary scoring layer that rewards specific playstyles. Objectives are selected from the objective pool based on archetypes in play.

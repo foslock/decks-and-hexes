@@ -30,9 +30,18 @@ from .effect_resolver import (
     calculate_effective_power,
     resolve_immediate_effects,
     resolve_on_resolution_effects,
+    tile_has_defense_bonus,
 )
 from .card_packs import get_pack
-from .hex_grid import BASE_DEFENSE, GRID_CONFIG, GridSize, HexGrid, generate_hex_grid
+from .hex_grid import (
+    BASE_DEFENSE,
+    GRID_CONFIG,
+    GridSize,
+    HexGrid,
+    generate_hex_grid,
+    mark_tile_lost,
+    tile_bridges_territory,
+)
 
 
 class Phase(str, Enum):
@@ -52,8 +61,11 @@ DEFAULT_MAX_ROUNDS = 20
 DEBT_START_ROUND = 5  # Debt cards start being distributed at this round
 SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33}
 REROLL_COST = 1
-RETAIN_COST = 2
+RETAIN_COST = 2  # reserved: there is no Retain action in the digital game yet
 UPGRADE_CREDIT_COST = 5
+# A successful base raid gives the defender this many Rubble (at most),
+# however far the attack beat the base's defense, plus 1 Spoils to the attacker.
+RAID_RUBBLE_CAP = 1
 
 _SEED_CHARS = string.ascii_lowercase + string.digits  # a-z0-9
 _SEED_LENGTH = 6
@@ -745,6 +757,11 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
     return max(0, tile_vp + vp_hex_bonus + card_vp + formula_vp + bonus_vp)
 
 
+def arsenal_divisor(is_upgraded: bool) -> int:
+    """Cards per VP for Arsenal (vp_formula "deck_div_12")."""
+    return 10 if is_upgraded else 12
+
+
 def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> int:
     """Compute dynamic VP for a card with a vp_formula."""
     formula = card.vp_formula
@@ -766,10 +783,10 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
             and t.base_defense + t.permanent_defense_bonus >= threshold
         )
 
-    elif formula == "deck_div_10":
-        # Arsenal: 1 VP per 10 cards in deck (8 upgraded)
+    elif formula == "deck_div_12":
+        # Arsenal: 1 VP per 12 cards in deck (10 upgraded)
         all_cards = player.deck.cards + player.hand + player.deck.discard
-        divisor = 8 if is_upgraded else 10
+        divisor = arsenal_divisor(is_upgraded)
         return len(all_cards) // divisor
 
     elif formula == "disconnected_groups_3":
@@ -808,12 +825,15 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
 
     elif formula == "uncaptured_tiles_8":
         # Warden: 1 VP per 8 tiles (6 upgraded) that have never changed hands
+        # since this player claimed them: tiles they've held continuously since
+        # their first claim. Tiles taken from an opponent count; tiles the
+        # player lost (or abandoned) and later retook don't (tile.lost_by).
         if not game.grid:
             return 0
         divisor = 6 if is_upgraded else 8
         count = sum(
             1 for t in game.grid.tiles.values()
-            if t.owner == player.id and not t.is_base and t.capture_count == 0
+            if t.owner == player.id and not t.is_base and player.id not in t.lost_by
         )
         return count // divisor
 
@@ -1002,7 +1022,7 @@ def execute_start_of_turn(game: GameState) -> GameState:
 
     # Log global claim ban (Snowy Holiday) — decrement happens at end of turn
     if game.claim_ban_rounds > 0:
-        game._log("⚠️ Claim cards are banned this round (Snowy Holiday)")
+        game._log("Claim cards are banned this round (Snowy Holiday)")
 
     for pid in game.player_order:
         player = game.players[pid]
@@ -1131,58 +1151,13 @@ def execute_upkeep(game: GameState) -> GameState:
 
 def _tile_bridges_territory(grid: 'HexGrid', player_id: str, q: int, r: int) -> bool:
     """Return True if claiming tile (q, r) would connect two or more disconnected
-    groups of the player's territory.
+    groups of the player's territory. Thin wrapper kept for existing callers."""
+    return tile_bridges_territory(grid, player_id, q, r)
 
-    Algorithm: find how many distinct groups of the player's owned tiles are
-    adjacent to (q, r). If >= 2, the tile bridges them.
-    """
-    from collections import deque
 
-    tile = grid.get_tile(q, r)
-    if not tile:
-        return False
-
-    # Collect player-owned neighbors of the target tile
-    owned_neighbors: list[tuple[int, int]] = []
-    for nq, nr in tile.neighbors():
-        n = grid.get_tile(nq, nr)
-        if n and n.owner == player_id:
-            owned_neighbors.append((nq, nr))
-
-    if len(owned_neighbors) < 2:
-        return False
-
-    # BFS among ALL player-owned tiles (excluding the target, which isn't owned yet)
-    # to see how many distinct groups touch the target tile.
-    all_owned = {
-        (t.q, t.r) for t in grid.tiles.values()
-        if t.owner == player_id
-    }
-
-    visited: set[tuple[int, int]] = set()
-    groups_touching_target = 0
-
-    for start in owned_neighbors:
-        if start in visited:
-            continue
-        # BFS from this neighbor through owned tiles
-        group: set[tuple[int, int]] = set()
-        queue = deque([start])
-        group.add(start)
-        while queue:
-            cq, cr = queue.popleft()
-            ct = grid.get_tile(cq, cr)
-            if not ct:
-                continue
-            for nnq, nnr in ct.neighbors():
-                if (nnq, nnr) in group or (nnq, nnr) not in all_owned:
-                    continue
-                group.add((nnq, nnr))
-                queue.append((nnq, nnr))
-        visited |= group
-        groups_touching_target += 1
-
-    return groups_touching_target >= 2
+# Power-modifier conditions that are always evaluated (and frozen) at play
+# time instead of being re-checked when Claims resolve. See play_card.
+_PLAY_TIME_POWER_CONDITIONS = frozenset({ConditionType.IF_BRIDGES_TERRITORY})
 
 
 def play_card(game: GameState, player_id: str, card_index: int,
@@ -1463,7 +1438,18 @@ def play_card(game: GameState, player_id: str, card_index: int,
     # Remove card from hand and create planned action
     # Compute effective power BEFORE removing the card so dynamic modifiers
     # (hand size, tile count, adjacency) reflect the game state at play time.
-    # This value is frozen for the rest of the turn.
+    #
+    # Snapshot rule (audit B16 — deliberate, documented behaviour): the value
+    # is frozen only when it DIFFERS from the card's printed power. When a
+    # conditional modifier isn't active at play time the action stores no
+    # snapshot, and calculate_effective_power re-evaluates the condition when
+    # Claims resolve. Consequences:
+    #   * Strike Team gets its +2 if ANY other Claim is played this round,
+    #     before or after it (the "dynamic power" behaviour of d9afd57).
+    #   * Battering Ram on a tile with no bonus at play time sees Defense cards
+    #     the owner plays on it this round (they resolve before Claims).
+    # Conditions in _PLAY_TIME_POWER_CONDITIONS are always frozen at play time
+    # (Road Builder's bridge check), since the board mutates while Claims resolve.
     snapshotted_power: Optional[int] = None
     consumed_claim_buff: Optional[dict[str, Any]] = None
     consumed_claim_buff_sources: Optional[list[dict[str, Any]]] = None
@@ -1528,12 +1514,17 @@ def play_card(game: GameState, player_id: str, card_index: int,
                     if total_bonus:
                         computed = computed + total_bonus
                         game._log(
-                            f"{player.name}'s War Banner(s) buff {card.name} by "
-                            f"+{total_bonus} power ({len(consumed)} banner(s))",
+                            f"{player.name}'s queued Claim buff(s) add +{total_bonus} "
+                            f"power to {card.name} ({len(consumed)} source(s))",
                             visible_to=[player.id], actor=player.id)
         # Only store if it differs from the base power (i.e. a dynamic modifier
-        # applied, or a claim_buff was consumed).
-        if computed != card.effective_power:
+        # applied, or a claim_buff was consumed) — or the card's condition must
+        # be judged at play time.
+        freeze_now = any(
+            e.type == EffectType.POWER_MODIFIER and e.condition in _PLAY_TIME_POWER_CONDITIONS
+            for e in card.effects
+        )
+        if computed != card.effective_power or (freeze_now and card.card_type == CardType.CLAIM):
             snapshotted_power = computed
 
     # Snapshot dynamic resource gain (War Tithe, Dividends) before removing card from hand
@@ -1593,7 +1584,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 max_draws = eff.metadata.get(cap_key, 999)
                 tiles_with_def = sum(
                     1 for t in game.grid.get_player_tiles(player_id)
-                    if t.permanent_defense_bonus > 0 or t.defense_power > 0
+                    if tile_has_defense_bonus(t)
                 )
                 snapshotted_draw_cards = min(tiles_with_def * per, max_draws)
                 break
@@ -1741,8 +1732,10 @@ def undo_planned_action(
 ) -> tuple[bool, str]:
     """Undo a planned action during the play phase, returning the card to hand.
 
-    Only works for cards tagged ``reversible`` — those with no immediate side
-    effects beyond consuming an action slot.
+    Only works for cards tagged ``reversible`` whose play had no immediate
+    side effects beyond consuming an action slot (see
+    ``Card.effective_reversible``): undo can't take back drawn cards, gained
+    resources or granted actions.
     """
     if game.current_phase != Phase.PLAY:
         return False, f"Not in Play phase (current: {game.current_phase.value})"
@@ -1759,7 +1752,7 @@ def undo_planned_action(
     action = player.planned_actions[action_index]
     card = action.card
 
-    if not card.reversible:
+    if not card.effective_reversible:
         return False, f"{card.name} cannot be undone"
 
     # Reverse: give back the action cost
@@ -2314,7 +2307,9 @@ def execute_reveal(game: GameState) -> GameState:
                 attacker = game.players[winner_id]
                 attacker_power = power_by_player.get(winner_id, 0)
                 total_defense = power_by_player.get(base_owner_id, 0) if base_owner_id in power_by_player else current_defense
-                rubble_count = max(0, attacker_power - total_defense)
+                # Capped: a raid inflicts at most RAID_RUBBLE_CAP (1) Rubble,
+                # however far the claim beat the base's defense.
+                rubble_count = min(RAID_RUBBLE_CAP, max(0, attacker_power - total_defense))
                 if rubble_count > 0:
                     for _ in range(rubble_count):
                         defender.deck.discard.append(make_rubble_card())
@@ -2355,6 +2350,7 @@ def execute_reveal(game: GameState) -> GameState:
                 old_owner = tile.owner
                 if old_owner is not None:
                     tile.capture_count += 1  # tile changed hands between players
+                    mark_tile_lost(tile, old_owner)  # Warden: no longer continuously held
                 tile.owner = winner_id
                 tile.held_since_turn = game.current_round
                 tile.defense_power = tile.base_defense  # reset to intrinsic defense, not 0
@@ -2415,6 +2411,37 @@ def execute_reveal(game: GameState) -> GameState:
                         "effect_type": "draw_next_turn",
                         "value": draw_on_success,
                     })
+
+    # Defense cards resolved before claims, so effects gated on the claim
+    # outcome couldn't fire then. Re-run just those now. For a Defense card
+    # "the defender holds" means at least one opponent claimed one of its
+    # target tiles this round and the card's owner still owns that tile
+    # (Counterattack: "If an opponent's claim on this tile fails...").
+    for pid, action in defense_actions:
+        card = action.card
+        if not any(e.condition == ConditionType.IF_DEFENDER_HOLDS for e in card.effects):
+            continue
+        target_keys: list[str] = []
+        if action.target_q is not None:
+            target_keys.append(f"{action.target_q},{action.target_r if action.target_r is not None else 0}")
+        target_keys.extend(f"{eq},{er}" for eq, er in action.extra_targets)
+        held = False
+        for tk in target_keys:
+            attackers_failed = [
+                cpid for cpid, ok in claim_results.get(tk, {}).items()
+                if cpid != pid and not ok
+            ]
+            dtile = game.grid.tiles.get(tk)
+            if attackers_failed and dtile is not None and dtile.owner == pid:
+                held = True
+                break
+        if held:
+            resolve_on_resolution_effects(
+                game, game.players[pid], card, action,
+                claim_succeeded=False,
+                claim_results=claim_results,
+                only_conditions={ConditionType.IF_DEFENDER_HOLDS},
+            )
 
     # Resolve non-claim, non-defense actions (on_resolution effects)
     # (Defense cards were already resolved before claims above.)
@@ -2564,15 +2591,20 @@ def execute_reveal(game: GameState) -> GameState:
         )
         game.players[pid].claims_won_last_round = won
 
-    # Track tiles lost this round (for Robin Hood next round)
+    # Track tiles that actually changed hands this round (Robin Hood / Pursuit
+    # next round). Only steps where an opponent took the tile count: not the
+    # owner's own Defense steps, successful defenses, ties or failed claims —
+    # and not base raids, since a raided base stays with its owner.
     tiles_lost: dict[str, int] = {pid: 0 for pid in game.player_order}
     tiles_captured: dict[str, int] = {pid: 0 for pid in game.player_order}
     for step in game.resolution_steps:
         prev = step.get("previous_owner")
         winner = step.get("winner_id")
-        if prev and prev in tiles_lost:
+        if not prev or not winner or winner == prev or step.get("is_base_raid"):
+            continue
+        if prev in tiles_lost:
             tiles_lost[prev] += 1
-        if winner and prev and winner != prev and winner in tiles_captured:
+        if winner in tiles_captured:
             tiles_captured[winner] += 1
     for pid in game.player_order:
         game.players[pid].tiles_lost_last_round = tiles_lost[pid]
@@ -3101,6 +3133,34 @@ def _emit_round_ended_snapshot(game: GameState) -> None:
     )
 
 
+def _vp_tiebreak_key(game: GameState, pid: str) -> tuple[int, int, int]:
+    """(VP, VP hexes connected to base, tiles owned) — higher is better."""
+    vp = compute_player_vp(game, pid)
+    if not game.grid:
+        return (vp, 0, 0)
+    connected = game.grid.get_connected_tiles(pid)
+    owned = game.grid.get_player_tiles(pid)
+    vp_hexes = sum(1 for t in owned if t.is_vp and (t.q, t.r) in connected)
+    return (vp, vp_hexes, len(owned))
+
+
+def rank_vp_target_winners(game: GameState, qualifying: list[str]) -> list[str]:
+    """Pick the winner(s) among players who reached the VP target in the same
+    end-of-round check.
+
+    1. Highest VP.
+    2. Most VP hexes connected to their base (the ones that score).
+    3. Most tiles owned.
+    4. Still tied: shared victory — every remaining player is in the returned
+       list (``game.winners``), in seat order.
+    """
+    if len(qualifying) <= 1:
+        return list(qualifying)
+    keys = {pid: _vp_tiebreak_key(game, pid) for pid in qualifying}
+    best = max(keys.values())
+    return [pid for pid in qualifying if keys[pid] == best]
+
+
 def execute_end_of_turn(game: GameState) -> GameState:
     """Phase 5: End of Turn."""
     game.current_phase = Phase.END_OF_TURN
@@ -3134,29 +3194,39 @@ def execute_end_of_turn(game: GameState) -> GameState:
     # across the end-of-turn boundary.
 
     # --- VP target check (checked at end of round) ---
-    for pid in game.player_order:
-        player = game.players[pid]
-        if player.has_left:
-            continue
-        current_vp = compute_player_vp(game, pid)
-        if current_vp >= game.vp_target:
-            game.winner = pid
-            game.winners = [pid]
-            game.current_phase = Phase.GAME_OVER
-            game._log(
-                f"{player.name} wins with {current_vp} VP!",
-                event_type="game_over",
-                data={
-                    "reason": "vp_target",
-                    "winner": pid,
-                    "winners": [pid],
-                    "final_vp": {
-                        p: compute_player_vp(game, p) for p in game.player_order
-                    },
-                    "round": game.current_round,
-                },
-            )
-            return game
+    # Everyone who reached the target this round is a candidate; seat order
+    # never decides it (audit B11). See rank_vp_target_winners for the
+    # tie-break order.
+    qualifying = [
+        pid for pid in game.player_order
+        if not game.players[pid].has_left
+        and compute_player_vp(game, pid) >= game.vp_target
+    ]
+    if qualifying:
+        winners = rank_vp_target_winners(game, qualifying)
+        game.winner = winners[0]
+        game.winners = winners
+        game.current_phase = Phase.GAME_OVER
+        final_vp = {p: compute_player_vp(game, p) for p in game.player_order}
+        top_vp = final_vp[winners[0]]
+        if len(winners) > 1:
+            names = ", ".join(game.players[pid].name for pid in winners)
+            msg = f"Tied victory: {names} with {top_vp} VP!"
+        else:
+            msg = f"{game.players[winners[0]].name} wins with {top_vp} VP!"
+        game._log(
+            msg,
+            event_type="game_over",
+            data={
+                "reason": "vp_target",
+                "winner": game.winner,
+                "winners": winners,
+                "contenders": qualifying,
+                "final_vp": final_vp,
+                "round": game.current_round,
+            },
+        )
+        return game
 
     # --- Round limit check ---
     if game.current_round >= game.max_rounds:
@@ -3219,6 +3289,9 @@ def auto_play_cpu_plays(game: GameState) -> None:
 
         cpu = CPUPlayer(pid, difficulty=player.cpu_difficulty, rng=game.rng)
 
+        # Cash in banked upgrade credits before choosing plays.
+        cpu.spend_upgrade_credits(game)
+
         # Play cards (same loop pattern as simulation._run_play_phase)
         failed_card_ids: set[str] = set()
         for _ in range(30):  # safety limit
@@ -3249,6 +3322,40 @@ def auto_play_cpu_plays(game: GameState) -> None:
                 submit_pending_search(game, pid, selections)
 
         submit_play(game, pid)
+
+
+def plan_cpu_purchases(game: GameState, player_id: str,
+                       max_purchases: int = 10) -> list[dict[str, Any]]:
+    """Plan a CPU's whole buy phase without touching *game*.
+
+    Each pick must see the resources and markets left after the previous
+    buy, so the purchases are applied to a scratch copy of the game as they
+    are chosen. The caller replays the returned actions on the real game
+    (the live server does this with "browsing" delays between buys).
+    """
+    import copy
+    from .cpu_player import CPUPlayer
+
+    # Share the read-only card registry; give the copy fresh logs so planning
+    # never leaks entries into the real game's history.
+    memo: dict[int, Any] = {
+        id(game.card_registry): game.card_registry,
+        id(game.log): [],
+        id(game.game_log): [],
+    }
+    sim = copy.deepcopy(game, memo)
+    player = sim.players[player_id]
+    cpu = CPUPlayer(player_id, difficulty=player.cpu_difficulty, rng=sim.rng)
+    purchases: list[dict[str, Any]] = []
+    for _ in range(max_purchases):
+        purchase = cpu.pick_next_purchase(sim)
+        if purchase is None:
+            break
+        ok, _msg = buy_card(sim, player_id, purchase["source"], purchase.get("card_id") or "")
+        if not ok:
+            break
+        purchases.append(purchase)
+    return purchases
 
 
 def auto_play_cpu_buys(game: GameState) -> None:

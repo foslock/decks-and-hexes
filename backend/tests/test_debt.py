@@ -325,7 +325,7 @@ class TestFinancier:
         card = card_registry["vanguard_financier"]
         assert card.name == "Financier"
         assert card.card_type == CardType.ENGINE
-        assert card.buy_cost == 8
+        assert card.buy_cost == 5
         assert card.archetype == Archetype.VANGUARD
 
     def test_financier_draws_per_debt_in_deck(self, card_registry):

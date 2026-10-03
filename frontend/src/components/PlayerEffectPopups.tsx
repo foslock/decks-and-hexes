@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HexTile, PlayerEffect } from '../types/game';
 import { PLAYER_COLORS, type GridTransform } from './HexGrid';
 import { axialToPixel, localToScreen } from '../utils/hexGeometry';
+import Icon from '../icons/Icon';
 
 /**
  * Effect callouts shown above target-player base tiles during review mode.
@@ -585,7 +586,7 @@ function useFlyingCards(
 
       const isRubble = effect.added_card_name === 'Rubble';
       const cardColor = isRubble ? '#ff6666' : '#ffd700';
-      const cardEmoji = isRubble ? '🪨' : '★';
+      const cardIcon = isRubble ? 'rubble' : 'vp';
       const effectDelay = idx * STAGGER_DELAY * animSpeed;
 
       for (let c = 0; c < effect.added_card_count; c++) {
@@ -626,7 +627,7 @@ function useFlyingCards(
                 whiteSpace: 'nowrap',
                 boxShadow: `0 0 12px ${cardColor}66`,
               }}>
-                {cardEmoji} {effect.added_card_name}
+                <Icon name={cardIcon} size={12} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} />{effect.added_card_name}
               </div>
             </div>
           </div>

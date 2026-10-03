@@ -1,3 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <text y="0.9em" x="0.05em" font-size="85">⚔️</text>
+  <rect x="1.5" y="1.5" width="97" height="97" rx="20" fill="#1a1a38" stroke="#a8822c" stroke-width="3"/>
+  <g transform="translate(17 17) scale(4.125)" fill="#e8c46a">
+    <path d="M1.78 1.78 L2.66 4.85 L8.04 10.23 L6.59 11.68 L6.66 12.45 L7.43 13.23 L8.14 13.23 L9.98 11.39 L11.68 13.09 L13.09 11.68 L11.39 9.98 L13.23 8.14 L13.23 7.43 L12.45 6.66 L11.68 6.59 L10.23 8.04 L4.85 2.66 Z"/>
+    <path d="M13.09 11.05 L15.13 13.09 L13.09 15.13 L11.05 13.09 Z"/>
+    <g stroke="#1a1a38" stroke-width="1.4" stroke-linejoin="round" paint-order="stroke">
+      <path d="M14.22 1.78 L13.34 4.85 L7.96 10.23 L9.41 11.68 L9.34 12.45 L8.57 13.23 L7.86 13.23 L6.02 11.39 L4.32 13.09 L2.91 11.68 L4.61 9.98 L2.77 8.14 L2.77 7.43 L3.55 6.66 L4.32 6.59 L5.77 8.04 L11.15 2.66 Z"/>
+      <path d="M2.91 11.05 L4.95 13.09 L2.91 15.13 L0.87 13.09 Z"/>
+    </g>
+  </g>
 </svg>

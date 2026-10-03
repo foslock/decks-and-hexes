@@ -27,6 +27,28 @@ Bump frontend version when frontend files change, backend version when backend f
 - Frontend typecheck: `cd frontend && npx tsc --noEmit`
 - Start frontend: `cd frontend && npm run dev`
 
+### CPU Difficulty Benchmark
+`backend/scripts/difficulty_benchmark.py` pits CPU agents head-to-head (parallel,
+seeded, seats rotated, archetypes randomized) and reports win rates. Agents:
+`easy` / `medium` / `hard`, exploit bots `rush` (buys only the biggest Claims —
+the "strike rush" that used to beat Hard), `greedy`, `raider`, `<tier>@base`
+(the tier from `cpu_player.py` at git HEAD, for before/after comparisons), and
+profile overrides like `hard~threat_modeling=0,noise=0.1`.
+- Standard suite: `cd backend && uv run python scripts/difficulty_benchmark.py --suite --games 300 --grid small,medium`
+- Specific matchups: `uv run python scripts/difficulty_benchmark.py hard:rush medium:hard@base --games 400`
+- Archetype balance (Hard mirror): `uv run python scripts/difficulty_benchmark.py hard:hard --games 900 --grid small,medium` (add `--players 3`)
+Re-run the suite after changing CPU logic **or** card balance — card changes shift
+the tiers too. CPU buy/upgrade valuation lives in `backend/app/game_engine/cpu_valuation.py`;
+per-tier feature flags and weights are the `DifficultyProfile`s in `cpu_player.py`.
+
+### Card Art
+Card art lives in `frontend/public/cards/<definition_id>.png` (source). The app
+loads a compressed `.webp` sibling first (≈40 KB vs ≈500 KB) and falls back to the
+PNG. After adding or replacing art, regenerate the WebPs (incremental):
+`uv run --project backend --with pillow python frontend/scripts/optimize_images.py`
+Preloading is handled by `frontend/src/utils/cardImagePreload.ts` (hand/deck/markets
+at high priority, the rest of the catalog during idle time).
+
 ### Game Log Analysis
 When the user refers to a "game log" they mean a JSON file produced by
 `GET /api/games/{game_id}/log` or the in-app **Download Log** button — typically
@@ -75,7 +97,7 @@ since `vp_value` defaults to 1 for every tile.
 - `data/cards_vanguard.yaml` — 14 Vanguard archetype cards + upgrades
 - `data/cards_swarm.yaml` — 14 Swarm archetype cards + upgrades
 - `data/cards_fortress.yaml` — 14 Fortress archetype cards + upgrades
-- `data/cards_neutral.yaml` — Starter cards (Advance, Gather) + 12 market cards
+- `data/cards_neutral.yaml` — Starter cards (Explore, Gather) + 12 market cards
 - `data/objectives.yaml` — 28 objectives (Vanguard, Swarm, Fortress, Wildcard pools)
 - `data/passives.yaml` — 37 passive abilities
 
@@ -84,21 +106,21 @@ since `vp_value` defaults to 1 for every tile.
 ## Key Design Rules (critical to get right in implementation)
 
 ### Turn Structure (5 phases)
-1. **Start of Turn** — Distribute Debt card to VP leader (round 5+), score VP hexes held since last turn, draw hand, reveal archetype market (3 random cards from player's archetype deck)
+1. **Start of Turn** — Distribute Debt card to VP leader (round 5+), draw hand, reveal archetype market (random cards from player's archetype deck). VP is derived from the board at any moment, not scored here
 2. **Play Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
-4. **Buy Phase** (sequential) — Players take turns buying in player order (from first player). Each player gets an exclusive buy window. Spend resources to re-roll (2 resources, once per turn) or retain (1 resource, once per turn) archetype market. Purchase archetype cards, shared market cards (unlimited per turn), or upgrade credits (4 resources). Purchases are visible to all players.
-5. **End of Turn** — Discard hand. Check objective reveal threshold. Rotate first player token clockwise.
+4. **Buy Phase** (concurrent in the digital game) — Each player buys and signals when done. Spend resources to re-roll the archetype market (1 resource; there is no Retain action). Purchase archetype cards, shared market cards (max 1 copy of each shared card per round), or upgrade credits (5 resources). Purchases are visible to all players.
+5. **End of Turn** — Discard hand. Check the VP target (see VP Scoring). Rotate first player token clockwise.
 
 ### Action Slot System
-- Every card costs exactly 1 action to play
-- All archetypes: 3 starting actions per turn
-- Some cards grant extra actions when played (e.g. "Gain 1 action" or "Gain 2 actions")
-- No hard cap on actions — chaining action-granting cards can exceed 3
+- Most cards cost 1 action to play (`action_cost`; a few heavy cards cost 2–3)
+- All archetypes: 5 starting actions per turn
+- Some cards grant extra actions when played (e.g. "Gain 1 action" or "Gain 2 actions"); a card whose action return covers its cost can be played at 0 actions
+- No hard cap on actions — chaining action-granting cards can exceed 5
 - Immediate effects (action gains, card draws) resolve during Play Phase as cards are played
 
 ### Claiming Tiles
-- All board interaction uses unified Claim cards — neutral tiles have implicit defense 0
+- All board interaction uses unified Claim cards — most neutral tiles have defense 0; VP hexes have intrinsic defense (standard 2, premium 3; premium neighbours 1), and a tie against a neutral tile's intrinsic defense goes to the attacker
 - Claims must target tiles adjacent to one the player already owns, unless card says otherwise
 - One Claim per tile per round — except stacking exception cards (Coordinated Push, Dog Pile, Juggernaut)
 - Ties go to current owner (defender wins)
@@ -110,15 +132,15 @@ since `vp_value` defaults to 1 for every tile.
 - No cap unless Hoarder passive (caps at 8)
 
 ### VP Scoring
-- VP hex tiles score at START of turn for tiles held since previous turn (not the turn claimed)
-- Win condition checked immediately after VP scoring in Phase 1
-- Objectives award 2 VP on completion (first to complete wins it)
-- Land Grant card awards 1 VP immediately when played
+- VP is derived (`compute_player_vp`): owned tiles // 3 + connected VP hexes (1 or 2 each) + card VP (Land Grant / Spoils +1 each, formula cards) + bonus VP
+- Win condition checked at the end of each round. If several players reach the target together: highest VP, then most connected VP hexes, then most tiles, else a shared victory (`game.winners`)
+- Land Grant is an unplayable card worth 1 VP while in your deck
+- Bases have defense 3 (all archetypes). A successful base raid gives the defender 1 Rubble (capped at 1 per raid; Rubble is worth 0 VP) and the attacker 1 Spoils (+1 VP)
 
 ### Markets
-- **Archetype market:** 3 random cards drawn from player's private archetype deck each turn. Private per player. Re-roll (2 res) or Retain one card (1 res) during Buy Phase.
+- **Archetype market:** random cards drawn from player's private archetype deck each turn (`archetype_market_size`). Private per player. Re-roll (1 resource) during Buy Phase; Retain is not implemented.
 - **Shared market:** Shared stacks with N×2 copies per card (N = player count). When exhausted, gone for the game.
-- **Upgrade credits:** Tokens, 4 resources each. Spent at start of Phase 1 to upgrade one card in hand. Max one upgrade per turn. Permanent.
+- **Upgrade credits:** Tokens, 5 resources each. Spent during the Play phase to upgrade a card in hand (one credit per card; several per turn allowed). Permanent.
 
 ### Forced Discards
 - Always apply to targeted opponent's NEXT turn (they draw fewer cards)
@@ -133,16 +155,18 @@ since `vp_value` defaults to 1 for every tile.
 | Fortress | 5 | 5 | 10 | 5 | 5 |
 
 ### Explore & Gather (starter cards — NOT purchasable from market)
-- **Explore:** Claim: Power 1 on any adjacent tile
+- **Explore:** Claim: Power 0 on an adjacent unoccupied tile
 - **Gather:** Gain 2 resources
 
 ### Objectives
+- Not implemented in the digital game yet (data kept in `data/objectives.yaml`)
 - Revealed at end of round 3 (Small), 4 (Medium), or 5 (Large)
 - 3 objectives revealed: weighted toward archetypes in play
 - First player (human or CPU) to meet condition claims it for 2 VP
 - CPU players actively pursue objectives
 
 ### Passives
+- Not implemented in the digital game yet (data kept in `data/passives.yaml`)
 - n+2 drawn randomly per game (n = active players)
 - Drafted in reverse Round 1 turn order
 - Each player picks 1, remainder discarded
@@ -214,9 +238,10 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Debt start round: **5**
 - Debt trash cost: **3 resources**
 - Re-roll cost: **1 resource**
-- Retain cost: **2 resources**
+- Retain cost: **2 resources** (constant only — no Retain action exists)
 - Upgrade credit cost: **5 resources**
 - Starting resources: **0**
-- Action slot hard cap: **6**
+- Action slot hard cap: **none** (5 starting actions)
+- Base raid Rubble: **1 per raid** (`RAID_RUBBLE_CAP`)
 - Objective VP reward: **2**
 - Objective reveal rounds: **3 / 4 / 5 / 6 / 7** (Small / Medium / Large / Mega / Ultra)

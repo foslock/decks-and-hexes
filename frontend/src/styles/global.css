@@ -1,0 +1,199 @@
+/* Global base styles + shared keyframes. Component styles stay inline;
+   this file holds what inline styles can't express (keyframes, focus rings,
+   scrollbars, reduced-motion) and the design tokens they reference. */
+
+:root {
+  --cc-bg: #12122a;
+  --cc-bg-deep: #0b0b1c;
+  --cc-panel: rgba(22, 22, 48, 0.92);
+  --cc-panel-solid: #1a1a38;
+  --cc-panel-border: rgba(255, 255, 255, 0.09);
+  --cc-panel-border-strong: rgba(255, 255, 255, 0.16);
+  --cc-text: #f2efe6;
+  --cc-text-dim: #a9a7bf;
+  --cc-text-faint: #6f6d8a;
+  --cc-gold: #e8c46a;
+  --cc-gold-bright: #ffd877;
+  --cc-gold-deep: #a8822c;
+  --cc-accent: #4a9eff;
+  --cc-danger: #ff5c6c;
+  --cc-success: #54d68a;
+  --cc-radius-sm: 6px;
+  --cc-radius: 10px;
+  --cc-radius-lg: 14px;
+  --cc-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --cc-shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6), 0 4px 12px rgba(0, 0, 0, 0.4);
+  --cc-font-display: 'Cinzel', Georgia, serif;
+  --cc-font-body: 'Philosopher', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --cc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --cc-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--cc-bg-deep);
+  color: var(--cc-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button { font-family: inherit; }
+
+/* Keyboard focus ring (mouse clicks don't show it). */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--cc-gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Thin, themed scrollbars for panels and logs. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(232, 196, 106, 0.35) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(232, 196, 106, 0.28);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: rgba(232, 196, 106, 0.45); }
+
+/* ── Shared keyframes ─────────────────────────────────────────── */
+
+@keyframes cc-art-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -50% 0; }
+}
+
+@keyframes cc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cc-rise-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes cc-pop-in {
+  0% { opacity: 0; transform: scale(0.9); }
+  60% { opacity: 1; transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes cc-gold-sheen {
+  0% { background-position: -150% 0; }
+  60%, 100% { background-position: 250% 0; }
+}
+
+@keyframes cc-glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 196, 106, 0.0), var(--cc-shadow); }
+  50% { box-shadow: 0 0 22px 2px rgba(232, 196, 106, 0.35), var(--cc-shadow); }
+}
+
+@keyframes cc-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+/* ── Reusable game UI primitives ─────────────────────────────── */
+
+/* Primary call-to-action: embossed gold with a periodic sheen. */
+.cc-btn-primary {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #f3d98b;
+  border-radius: var(--cc-radius);
+  color: #2a1d05;
+  font-family: var(--cc-font-display);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: linear-gradient(180deg, #ffe39a 0%, #e8c46a 45%, #c79a3c 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(0, 0, 0, 0.18),
+    0 6px 18px rgba(232, 196, 106, 0.25), 0 2px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform 140ms var(--cc-ease-out), box-shadow 160ms ease, filter 160ms ease;
+}
+.cc-btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%) 0 0 / 220% 100% no-repeat;
+  animation: cc-gold-sheen 4.5s ease-in-out infinite;
+  pointer-events: none;
+}
+.cc-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(0, 0, 0, 0.18),
+    0 10px 26px rgba(232, 196, 106, 0.35), 0 3px 6px rgba(0, 0, 0, 0.45);
+}
+.cc-btn-primary:active:not(:disabled) { transform: translateY(1px) scale(0.99); }
+.cc-btn-primary:disabled { filter: grayscale(0.7) brightness(0.6); cursor: not-allowed; }
+.cc-btn-primary:disabled::after { display: none; }
+
+/* Secondary: dark glass with a gold hairline. */
+.cc-btn-secondary {
+  border: 1px solid rgba(232, 196, 106, 0.35);
+  border-radius: var(--cc-radius);
+  color: var(--cc-text);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)), var(--cc-panel-solid);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 6px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  transition: transform 140ms var(--cc-ease-out), border-color 160ms ease, background 160ms ease;
+}
+.cc-btn-secondary:hover:not(:disabled) {
+  border-color: rgba(232, 196, 106, 0.7);
+  transform: translateY(-1px);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)), var(--cc-panel-solid);
+}
+.cc-btn-secondary:active:not(:disabled) { transform: translateY(1px); }
+.cc-btn-secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Framed panel: dark glass with a subtle gold-edged bevel. */
+.cc-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0) 40%), var(--cc-panel);
+  border: 1px solid var(--cc-panel-border);
+  border-radius: var(--cc-radius-lg);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--cc-shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Display heading with engraved gold lettering. */
+.cc-title {
+  font-family: var(--cc-font-display);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  background: linear-gradient(180deg, #fff3c8 0%, #f0cf78 45%, #b8862e 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.55)) drop-shadow(0 0 18px rgba(232, 196, 106, 0.18));
+}
+
+.cc-rise-in { animation: cc-rise-in 420ms var(--cc-ease-out) both; }
+.cc-fade-in { animation: cc-fade-in 300ms ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Tooltip entrance: a quick fade (no transform, so it doesn't fight the
+   inline translate used for positioning). */
+@keyframes cc-tooltip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

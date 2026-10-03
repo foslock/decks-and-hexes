@@ -5,25 +5,27 @@ import { BASE } from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
-import { renderSubtitlePart } from './SubtitlePartRenderer';
+import { renderSubtitle } from './SubtitlePartRenderer';
+import { CostLabel } from '../icons/Num';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 import { useCardZoom } from './CardZoomContext';
-
-const CARD_EMOJI: Record<string, string> = {
-  claim: '⚔️',
-  defense: '🛡️',
-  engine: '⚙️',
-  passive: '📜',
-};
+import Icon from '../icons/Icon';
 
 const ARCHETYPE_ORDER = ['shared', 'vanguard', 'swarm', 'fortress'];
 
 const ARCHETYPE_LABELS: Record<string, string> = {
-  shared: '🏪 Shared',
-  vanguard: '🗡️ Vanguard',
-  swarm: '🐝 Swarm',
-  fortress: '🏰 Fortress',
+  shared: 'Shared',
+  vanguard: 'Vanguard',
+  swarm: 'Swarm',
+  fortress: 'Fortress',
+};
+
+/** Archetype emblem art shown beside each section heading. */
+const ARCHETYPE_EMBLEMS: Record<string, string> = {
+  vanguard: '/assets/howtoplay/vanguard.webp',
+  swarm: '/assets/howtoplay/swarm.webp',
+  fortress: '/assets/howtoplay/fortress.webp',
 };
 
 const TYPE_ORDER: Record<string, number> = {
@@ -86,17 +88,8 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick, cardList }: { card:
           showZoom(displayCard, cardList);
         }
       }}
-      style={{
-        width: 154,
-        padding: 6,
-        background: flashAdded ? '#2a4a2e' : '#2a2a3e',
-        border: `1px solid ${flashAdded ? '#4a4' : color}`,
-        borderRadius: 6,
-        color: '#fff',
-        flexShrink: 0,
-        cursor: 'pointer',
-        transition: 'background 0.2s, border-color 0.2s',
-      }}
+      className={`cc-scr-cb-card${flashAdded ? ' is-flash' : ''}`}
+      style={{ ['--cb-color' as string]: color }}
     >
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
@@ -110,16 +103,16 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick, cardList }: { card:
               {displayCard.name}
             </span>
           </div>
-          <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>{displayCard.buy_cost != null ? `${displayCard.buy_cost}💰` : '—'}</span>
+          <span style={{ fontSize: 15, flexShrink: 0, color: 'var(--cc-gold)', fontWeight: 700, whiteSpace: 'nowrap' }}><CostLabel cost={displayCard.buy_cost} size={15} /></span>
         </div>
-        <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        <div style={{ fontSize: 15, color: 'var(--cc-text-dim)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
           <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
             if (el) {
               const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
               el.style.setProperty('--sub-scale', String(scale));
             }
           }}>
-          {buildCardSubtitle(displayCard).map((part, i) => renderSubtitlePart(part, i, { passiveVp: displayCard.passive_vp }))}
+          {renderSubtitle(buildCardSubtitle(displayCard), { fontSize: 15, passiveVp: displayCard.passive_vp })}
           </span>
         </div>
       </div>
@@ -301,78 +294,47 @@ export default function CardBrowser({ onClose, packSharedIds, packArchetypeIds, 
   return (
     <div
       onClick={onClose}
-      style={{
-        position: 'fixed', inset: 0,
-        background: 'rgba(0,0,0,0.75)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 5000,
-      }}
+      className="cc-scr-modal-backdrop"
+      style={{ zIndex: 5000 }}
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 'min(94vw, 900px)',
-          maxHeight: '85vh',
-          background: '#12122a',
-          border: '2px solid #4a4a6a',
-          borderRadius: 14,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
+        className="cc-panel cc-scr-modal cc-scr-cb"
       >
-        <style>{`
-          @media (max-width: 480px) {
-            .cb-hide-narrow { display: none !important; }
-          }
-        `}</style>
         {/* Header */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '10px 16px',
-          background: '#1a1a40',
-          borderBottom: '1px solid #333',
-          flexShrink: 0,
-        }}>
-          <span style={{ fontWeight: 'bold', fontSize: 15, color: '#fff' }}>
-            📖 Card Browser{packName ? ` — ${packName}` : ''}
+        <div className="cc-scr-modal-head cc-scr-cb-head">
+          <span className="cc-scr-modal-title">
+            Card Browser{packName ? ` — ${packName}` : ''}
           </span>
           {cards && (
-            <span style={{ fontSize: 12, color: '#888' }}>
+            <span className="cc-scr-cb-count">
               ({searchQuery ? `${filteredCards.length}/` : ''}{totalCount} cards)
             </span>
           )}
-          <span className="cb-hide-narrow" style={{ fontSize: 11, color: '#555', marginLeft: 4 }}>
+          <span className="cc-scr-cb-hint cc-scr-cb-hide-narrow">
             Hold shift to view upgrades
           </span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              type="text"
-              placeholder="Search..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                width: 120, minWidth: 0, flexShrink: 1,
-                padding: '3px 8px',
-                background: '#2a2a3e',
-                border: '1px solid #444',
-                borderRadius: 6,
-                color: '#fff',
-                fontSize: 11,
-                outline: 'none',
-              }}
-            />
-            <div className="cb-hide-narrow" style={{ display: 'flex', border: '1px solid #444', borderRadius: 6, overflow: 'hidden' }}>
+          <div className="cc-scr-cb-tools">
+            <div className="cc-scr-cb-search">
+              <input
+                type="text"
+                className="cc-scr-input"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </div>
+            <div className="cc-scr-seg cc-scr-seg-sm cc-scr-cb-hide-narrow">
               <button
                 onClick={() => setSortMode('cost')}
-                style={{ padding: '3px 10px', background: sortMode === 'cost' ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
+                className={`cc-scr-seg-btn${sortMode === 'cost' ? ' is-active' : ''}`}
               >
                 Cost
               </button>
               <button
                 onClick={() => setSortMode('type')}
-                style={{ padding: '3px 10px', background: sortMode === 'type' ? '#4a4aff' : '#2a2a3e', border: 'none', color: '#fff', fontSize: 11, cursor: 'pointer' }}
+                className={`cc-scr-seg-btn${sortMode === 'type' ? ' is-active' : ''}`}
               >
                 Type
               </button>
@@ -380,58 +342,48 @@ export default function CardBrowser({ onClose, packSharedIds, packArchetypeIds, 
             {/* Click any card to view full details */}
             <button
               onClick={onClose}
-              style={{ padding: '4px 10px', background: '#2a2a3e', border: '1px solid #555', borderRadius: 5, color: '#aaa', fontSize: 13, cursor: 'pointer' }}
+              className="cc-scr-close"
+              aria-label="Close"
             >
-              ✕
+              <Icon name="close" size={14} decorative />
             </button>
           </div>
         </div>
 
         {/* Content */}
-        <div style={{ overflowY: 'auto', padding: 16 }}>
+        <div className="cc-scr-modal-body cc-scr-cb-body">
           {error && (
-            <div style={{ color: '#ff6666', fontSize: 13, marginBottom: 12 }}>
+            <div className="cc-scr-error" style={{ marginBottom: 12 }}>
               Error: {error}. Make sure the backend is running.
             </div>
           )}
           {!cards && !error && (
-            <div style={{ color: '#888', fontSize: 13 }}>Loading cards...</div>
+            <div className="cc-scr-cb-empty">Loading cards...</div>
           )}
           {groups.map((group) => (
-            <div key={group.archetype} style={{ marginBottom: 16 }}>
+            <div key={group.archetype} className="cc-scr-cb-group">
               <button
                 onClick={() => toggleCollapse(group.archetype)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: '4px 0',
-                  marginBottom: 8,
-                  width: '100%',
-                  textAlign: 'left',
-                }}
+                className="cc-scr-cb-group-btn"
               >
-                <span style={{
-                  fontSize: 10,
-                  color: '#666',
-                  transition: 'transform 0.15s ease',
-                  transform: collapsed[group.archetype] ? 'rotate(-90deg)' : 'rotate(0deg)',
-                  display: 'inline-block',
-                }}>
-                  ▼
+                <span
+                  className="cc-scr-chevron"
+                  style={{ transform: collapsed[group.archetype] ? 'rotate(0deg)' : 'rotate(90deg)' }}
+                >
+                  <Icon name="chevron" size={10} decorative />
                 </span>
-                <span style={{ fontSize: 14, fontWeight: 'bold', color: '#ccc' }}>
+                {ARCHETYPE_EMBLEMS[group.archetype] && (
+                  <img src={ARCHETYPE_EMBLEMS[group.archetype]} alt="" draggable={false} />
+                )}
+                <span className="cc-scr-cb-group-label">
                   {group.label}
                 </span>
-                <span style={{ fontSize: 12, color: '#666' }}>
+                <span className="cc-scr-cb-group-count">
                   ({group.cards.length})
                 </span>
               </button>
               {!collapsed[group.archetype] && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                <div className="cc-scr-cb-grid">
                   {group.cards.map((card) => (
                     <BrowserCardCompact key={card.id} card={card} shiftHeld={shiftHeld} onShiftClick={onShiftClickCard} cardList={allVisibleCards} />
                   ))}
