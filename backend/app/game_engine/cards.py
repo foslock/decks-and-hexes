@@ -34,6 +34,11 @@ class Archetype(str, Enum):
     SHARED = "shared"
 
 
+# Immediate-timing effect types that don't change game state when the card is
+# played (they only matter elsewhere, e.g. at purchase), so they don't block undo.
+_INERT_ON_PLAY_EFFECTS = frozenset({"dynamic_buy_cost"})
+
+
 # Action slots per archetype
 ARCHETYPE_SLOTS = {
     Archetype.VANGUARD: 5,
@@ -107,6 +112,31 @@ class Card:
     name_upgraded: str = ""
 
     @property
+    def effective_reversible(self) -> bool:
+        """Whether a planned play of this card can be undone.
+
+        Undo only refunds the action cost and returns the card to hand, so a
+        card is undoable only when playing it changed nothing else: no cards
+        drawn, resources gained or actions granted on play. Otherwise
+        play → undo → play would farm those effects (e.g. Nest's immediate
+        draw, Entrench's action refund, Explore+'s draw). Mirrors what
+        ``play_card`` applies immediately.
+        """
+        if not self.reversible:
+            return False
+        if self.effective_action_return > 0:
+            return False
+        if self.timing == Timing.IMMEDIATE and (
+            self.effective_draw_cards > 0 or self.effective_resource_gain != 0
+        ):
+            return False
+        return not any(
+            getattr(e, "timing", None) == Timing.IMMEDIATE
+            and getattr(getattr(e, "type", None), "value", None) not in _INERT_ON_PLAY_EFFECTS
+            for e in self.effects
+        )
+
+    @property
     def effective_trash_on_use(self) -> bool:
         if self.is_upgraded and self.upgraded_trash_on_use is not None:
             return self.upgraded_trash_on_use
@@ -177,7 +207,7 @@ class Card:
             "trash_on_use": self.effective_trash_on_use,
             "stackable": self.stackable,
             "granted_stackable": self.granted_stackable,
-            "reversible": self.reversible,
+            "reversible": self.effective_reversible,
             "forced_discard": self.forced_discard,
             "draw_cards": self.effective_draw_cards,
             "defense_bonus": self.effective_defense_bonus,

@@ -1732,8 +1732,10 @@ def undo_planned_action(
 ) -> tuple[bool, str]:
     """Undo a planned action during the play phase, returning the card to hand.
 
-    Only works for cards tagged ``reversible`` — those with no immediate side
-    effects beyond consuming an action slot.
+    Only works for cards tagged ``reversible`` whose play had no immediate
+    side effects beyond consuming an action slot (see
+    ``Card.effective_reversible``): undo can't take back drawn cards, gained
+    resources or granted actions.
     """
     if game.current_phase != Phase.PLAY:
         return False, f"Not in Play phase (current: {game.current_phase.value})"
@@ -1750,7 +1752,7 @@ def undo_planned_action(
     action = player.planned_actions[action_index]
     card = action.card
 
-    if not card.reversible:
+    if not card.effective_reversible:
         return False, f"{card.name} cannot be undone"
 
     # Reverse: give back the action cost

@@ -300,7 +300,7 @@ cards:
     type: Defense
     buy_cost: 2
     action_return: 0
-    reversible: true
+    reversible: false
     power: 0
     draw_cards: 1
     effect: "One tile you own gains +1 defense this round for each other tile you own adjacent to it. Draw 1 card."

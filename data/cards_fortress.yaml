@@ -177,7 +177,7 @@ cards:
     type: Defense
     buy_cost: 1
     action_return: 1
-    reversible: true
+    reversible: false
     power: 0
     defense_bonus: 0
     effect: "One tile you own permanently gains +1 defense until it is captured. Gain 1 action."
