@@ -25,7 +25,7 @@ class EffectType(str, Enum):
     SELF_DISCARD = "self_discard"
     SELF_TRASH = "self_trash"
     TRASH_GAIN_BUY_COST = "trash_gain_buy_cost"  # Consolidate: trash + gain buy cost
-    TRASH_GAIN_POWER = "trash_gain_power"        # Arms Dealer: trash + gain 2× effective power as resources
+    TRASH_GAIN_POWER = "trash_gain_power"        # Arms Dealer: trash + gain (multiplier × power) as resources
 
     # Opponent-targeting
     FORCED_DISCARD = "forced_discard"
@@ -47,7 +47,7 @@ class EffectType(str, Enum):
     AUTO_CLAIM_ADJACENT_NEUTRAL = "auto_claim_adjacent_neutral"  # Breakthrough
     DRAW_NEXT_TURN = "draw_next_turn"      # Blitz secondary
     CONTEST_COST = "contest_cost"          # Rapid Assault
-    RESOURCE_REFUND_IF_NEUTRAL = "resource_refund_if_neutral"  # Overwhelming Force
+    RESOURCE_REFUND_IF_NEUTRAL = "resource_refund_if_neutral"  # legacy (Juggernaut now uses gain_resources + if_target_neutral)
 
     # On-failure effects
     ON_DEFEND_FORCED_DISCARD = "on_defend_forced_discard"  # War of Attrition
@@ -70,7 +70,7 @@ class EffectType(str, Enum):
 
     # Conditional draw effects
     CEASE_FIRE = "cease_fire"
-    ADJACENCY_BRIDGE = "adjacency_bridge"
+    ADJACENCY_BRIDGE = "adjacency_bridge"  # targeting restriction (no shipped card uses it; Road Builder now uses if_bridges_territory)
     DECK_PEEK = "deck_peek"
 
     # Trash opponent's card on successful claim
@@ -175,6 +175,7 @@ class ConditionType(str, Enum):
     HAND_SIZE_LTE = "hand_size_lte"                  # Spyglass: hand size <= threshold after draw
     IF_CARDS_PLAYED_THIS_ROUND_GTE = "if_cards_played_this_round_gte"  # Chatter
     IF_SUCCESSFUL_AND_STACKED_GTE = "if_successful_and_stacked_gte"    # Dog Pile+
+    IF_BRIDGES_TERRITORY = "if_bridges_territory"    # Road Builder: target joins two disconnected groups of yours
 
 
 @dataclass
@@ -271,6 +272,8 @@ class TurnModifiers:
         self.contest_costs.clear()
         # Cease fire bonus is resolved during reveal, reset after
         self.cease_fire_bonus = 0
+        # Surveyor's free re-rolls are "this round" only
+        self.free_rerolls = 0
 
 
 def parse_effect(data: dict[str, Any]) -> Optional[Effect]:

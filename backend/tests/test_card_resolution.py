@@ -348,10 +348,12 @@ class TestNeutralCeaseFire:
 
 class TestNeutralEminentDomain:
     def test_eminent_domain_ignores_adjacency(self, card_registry):
-        """Eminent Domain: Power 3, no adjacency required."""
+        """Eminent Domain: Power 2 (3 upgraded), no adjacency required, one-shot."""
         card = card_registry["neutral_eminent_domain"]
-        assert card.power == 3
+        assert card.power == 2
+        assert card.upgraded_power == 3
         assert card.adjacency_required is False
+        assert card.trash_on_use is True
 
     def test_eminent_domain_claims_distant_tile(self, card_registry):
         """Eminent Domain: can claim a non-adjacent neutral tile."""
@@ -582,10 +584,11 @@ class TestNeutralWatchtower:
 
 class TestNeutralSiegeTower:
     def test_siege_tower_high_power(self, card_registry):
-        """Siege Tower: Power 6, cost 8."""
+        """Siege Tower: Power 6, cost 9, Unique."""
         card = card_registry["neutral_siege_tower"]
         assert card.power == 6
-        assert card.buy_cost == 8
+        assert card.buy_cost == 9
+        assert card.unique is True
 
 
 class TestNeutralReclaim:
@@ -865,9 +868,11 @@ class TestVanguardSpoilsOfWar:
 
 class TestVanguardEliteVanguard:
     def test_elite_vanguard_base_power(self, card_registry):
-        """Elite Vanguard: power 6 at base."""
+        """Elite Vanguard: power 5 (7 upgraded), costs 1 action to play."""
         card = card_registry["vanguard_elite_vanguard"]
-        assert card.power == 6
+        assert card.power == 5
+        assert card.upgraded_power == 7
+        assert card.action_cost == 1
         assert card.card_type == CardType.CLAIM
         assert card.buy_cost == 9
 
@@ -905,10 +910,11 @@ class TestVanguardBattleGlory:
 
 class TestVanguardArsenal:
     def test_arsenal_vp_formula(self, card_registry):
-        """Arsenal: +1 VP per 10 cards in deck (vp_formula = deck_div_10)."""
+        """Arsenal: +1 VP per 12 cards in deck (vp_formula = deck_div_12), cost 6."""
         card = card_registry["vanguard_arsenal"]
-        assert card.vp_formula == "deck_div_10"
+        assert card.vp_formula == "deck_div_12"
         assert card.unplayable is True
+        assert card.buy_cost == 6
 
     def test_arsenal_vp_computation(self, card_registry):
         """Arsenal: verify actual VP computation with known deck sizes."""
@@ -924,17 +930,29 @@ class TestVanguardArsenal:
         # 1 card total → 0 VP from arsenal
         vp_base = compute_player_vp(game, "p0")
 
-        # Add 9 more dummy cards (10 total) → 1 VP from arsenal
+        # 10 total → still 0 (a fresh 10-card deck no longer pays out)
         for i in range(9):
             player.deck.discard.append(_make_card(f"dummy_{i}"))
-        vp_10 = compute_player_vp(game, "p0")
-        assert vp_10 == vp_base + 1
+        assert compute_player_vp(game, "p0") == vp_base
 
-        # Add 10 more (20 total) → 2 VP from arsenal
-        for i in range(10):
+        # 12 total → 1 VP from arsenal
+        for i in range(2):
+            player.deck.discard.append(_make_card(f"dummy_b{i}"))
+        vp_12 = compute_player_vp(game, "p0")
+        assert vp_12 == vp_base + 1
+
+        # 24 total → 2 VP from arsenal
+        for i in range(12):
             player.deck.discard.append(_make_card(f"dummy2_{i}"))
-        vp_20 = compute_player_vp(game, "p0")
-        assert vp_20 == vp_base + 2
+        vp_24 = compute_player_vp(game, "p0")
+        assert vp_24 == vp_base + 2
+
+        # Arsenal+: 1 VP per 10 → 24 cards = 2, 30 cards = 3
+        arsenal.is_upgraded = True
+        assert compute_player_vp(game, "p0") == vp_base + 2
+        for i in range(6):
+            player.deck.discard.append(_make_card(f"dummy3_{i}"))
+        assert compute_player_vp(game, "p0") == vp_base + 3
 
 
 class TestVanguardRally:
@@ -1110,10 +1128,11 @@ class TestBaseRaidPopups:
         assert r["target_player_id"] == "p1"
         assert r["source_player_id"] == "p0"
         assert r["card_name"] == "Raided"
-        assert r["effect"] == "+3 Rubble"  # 5 attacker - 2 defense = 3 rubble
-        assert r["value"] == 3
+        # 5 attacker vs 2 defense: Rubble is capped at 1 per raid
+        assert r["effect"] == "+1 Rubble"
+        assert r["value"] == 1
         assert r["added_card_name"] == "Rubble"
-        assert r["added_card_count"] == 3
+        assert r["added_card_count"] == 1
         assert r["source_q"] == p1_base.q and r["source_r"] == p1_base.r
 
         s = spoils[0]
@@ -1125,7 +1144,7 @@ class TestBaseRaidPopups:
         assert s["added_card_count"] == 1
 
         # Rubble/Spoils cards landed in the correct discard piles.
-        assert sum(1 for c in p1.deck.discard if c.name == "Rubble") == 3
+        assert sum(1 for c in p1.deck.discard if c.name == "Rubble") == 1
         assert sum(1 for c in p0.deck.discard if c.name == "Spoils") == 1
 
     def test_defended_raid_emits_defended_popup(self, card_registry):
@@ -1772,7 +1791,7 @@ class TestFortressOverwhelmingForce:
         assert card.power == 3
 
     def test_overwhelming_force_refund_on_neutral(self, card_registry):
-        """Overwhelming Force: gain 1 resource refund if target tile was neutral."""
+        """Juggernaut: gain 2 resources (once) when the target tile is neutral."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
         of = _copy_card(card_registry["fortress_overwhelming_force"], "test_of")
@@ -1789,11 +1808,13 @@ class TestFortressOverwhelmingForce:
 
         tile = game.grid.get_tile(q, r)
         assert tile.owner == "p0"
-        # Check exact refund: effect gives value=1 resource
-        refund_fx = [e for e in of.effects if e.type == EffectType.RESOURCE_REFUND_IF_NEUTRAL]
-        assert len(refund_fx) == 1
-        expected_refund = refund_fx[0].value
-        assert player.resources == initial_res + expected_refund
+        gain_fx = [
+            e for e in of.effects
+            if e.type == EffectType.GAIN_RESOURCES and e.condition == ConditionType.IF_TARGET_NEUTRAL
+        ]
+        assert len(gain_fx) == 1
+        assert of.resource_gain == 0  # no flat gain parsed from the text (B1)
+        assert player.resources == initial_res + 2
 
 
 class TestFortressSupplyLine:
@@ -2242,10 +2263,10 @@ class TestSwarmMobRule:
 
 class TestSwarmHiveMind:
     def test_hive_mind_stats(self, card_registry):
-        """Hive Mind: cost 6, trash on use."""
+        """Hive Mind: cost 6, reusable (no longer trashed on use)."""
         card = card_registry["swarm_hive_mind"]
         assert card.buy_cost == 6
-        assert card.trash_on_use is True
+        assert card.trash_on_use is False
         assert card.power == 1
 
     def test_hive_mind_multi_target_count(self, card_registry):
@@ -2872,10 +2893,10 @@ class TestNeutralDividends:
         assert len(card.effects) >= 1
         eff = card.effects[0]
         assert eff.type == EffectType.RESOURCE_SCALING
-        assert eff.value == 3  # divisor
+        assert eff.value == 2  # divisor
 
     def test_dividends_scales_with_resources(self, card_registry):
-        """Dividends gains floor(resources/3), min 1."""
+        """Dividends gains floor(resources/2), min 1."""
         card = card_registry.get("neutral_dividends")
         if not card:
             pytest.skip("Card not in registry")
@@ -2886,8 +2907,8 @@ class TestNeutralDividends:
         player.resources = 10
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        # floor(10/3) = 3 → resources = 10 + 3 = 13
-        assert player.resources == 13
+        # floor(10/2) = 5 → resources = 10 + 5 = 15
+        assert player.resources == 15
 
     def test_dividends_min_1(self, card_registry):
         """Dividends gains at least 1 even with 0 resources."""

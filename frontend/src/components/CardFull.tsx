@@ -7,164 +7,19 @@ import { renderDescription } from './renderDescription';
 import { useCardCatalog } from '../cardCatalog';
 import { useTooltips } from './SettingsContext';
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor, getCardDisplayType } from '../constants/cardColors';
-
-/** Fallback emoji per card type (used when no per-card art is defined) */
-const TYPE_EMOJI: Record<string, string> = {
-  claim: '⚔️',
-  defense: '🛡️',
-  engine: '⚙️',
-  passive: '📜',
-};
-
-/**
- * Per-card emoji art keyed by base card ID (without instance suffixes).
- * Provides a unique visual identity for each card in the art placeholder.
- */
-const CARD_ART: Record<string, string> = {
-  // ── Vanguard ──
-  vanguard_blitz: '⚡',
-  vanguard_overrun: '🐎',
-  vanguard_strike_team: '🎯',
-  vanguard_rapid_assault: '💨',
-  vanguard_spearhead: '🔱',
-  vanguard_coordinated_push: '🤝',
-  vanguard_double_time: '⏩',
-  vanguard_rally: '📯',
-  vanguard_forward_march: '🚩',
-  vanguard_war_cache: '🏴',
-  vanguard_breakthrough: '💥',
-  vanguard_flanking_strike: '🗡️',
-  vanguard_surge_protocol: '📡',
-  vanguard_spoils_of_war: '👑',
-  vanguard_elite_vanguard: '🦅',
-  vanguard_war_chest: '💰',
-  vanguard_battle_glory: '🏆',
-  vanguard_arsenal: '🗄️',
-  vanguard_counterattack: '↩️',
-  vanguard_rearguard: '🛡️',
-  vanguard_financier: '🏦',
-  vanguard_arms_dealer: '🏪',
-  vanguard_demon_pact: '😈',
-  vanguard_ultimatum: '⚠️',
-  vanguard_war_economy: '🏭',
-  vanguard_war_tithe: '💸',
-  vanguard_mobilize_forces: '📯',
-  vanguard_forward_scout: '🦅',
-  vanguard_commander: '🎖️',
-  vanguard_pursuit: '🏃',
-  vanguard_war_banner: '🎌',
-
-  // ── Swarm ──
-  swarm_scout: '👁️',
-  swarm_surge: '🌊',
-  swarm_overwhelm: '🐜',
-  swarm_swarm_tactics: '🐝',
-  swarm_proliferate: '🌱',
-  swarm_flood: '🌀',
-  swarm_rabble: '👥',
-  swarm_dog_pile: '🐺',
-  swarm_thin_the_herd: '✂️',
-  swarm_numbers_game: '🔢',
-  swarm_frenzy: '🔥',
-  swarm_scavenge: '🦴',
-  swarm_blitz_rush: '⚡',
-  swarm_nest: '🪹',
-  swarm_safety_in_numbers: '🫂',
-  swarm_mob_rule: '✊',
-  swarm_hive_mind: '🧠',
-  swarm_locust_swarm: '🦗',
-  swarm_consecrate: '⛪',
-  swarm_war_trophies: '🏅',
-  swarm_colony: '🏘️',
-  swarm_el_dorado: '🌟',
-  swarm_exodus: '🚶',
-  swarm_heady_brew: '🍺',
-  swarm_infestation: '🪲',
-  swarm_plague: '☠️',
-  swarm_second_wave: '↩️',
-  swarm_brood_memory: '🪺',
-  swarm_chatter: '💬',
-  swarm_drone_wave: '🪰',
-  swarm_hatching_grounds: '🥚',
-
-  // ── Fortress ──
-  fortress_fortify: '🧱',
-  fortress_bulwark: '🏗️',
-  fortress_siege_engine: '💣',
-  fortress_iron_wall: '🚧',
-  fortress_garrison: '🏰',
-  fortress_slow_advance: '🐢',
-  fortress_supply_line: '📦',
-  fortress_entrench: '⛏️',
-  fortress_war_of_attrition: '⏳',
-  fortress_stronghold: '🏯',
-  fortress_overwhelming_force: '🔨',
-  fortress_consolidate: '♻️',
-  fortress_battering_ram: '🪓',
-  fortress_citadel: '🏙️',
-  fortress_war_council: '📋',
-  fortress_iron_discipline: '⚖️',
-  fortress_fortified_position: '🏅',
-  fortress_diplomacy: '🕊️',
-  fortress_aegis: '🔰',
-  fortress_catch_up: '🏃',
-  fortress_mulligan: '🔄',
-  fortress_robin_hood: '🏹',
-  fortress_scorched_retreat: '🔥',
-  fortress_snowy_holiday: '❄️',
-  fortress_toll_road: '🛤️',
-  fortress_warden: '💂',
-  fortress_stockroom: '🗄️',
-  fortress_reserve_forces: '🪖',
-  fortress_master_engineer: '👷',
-  fortress_quartermaster: '📋',
-  fortress_watchful_keep: '👀',
-
-  // ── Neutral ──
-  neutral_explore: '🧭',
-  neutral_gather: '💎',
-  neutral_mercenary: '🗡️',
-  neutral_land_grant: '📜',
-  neutral_sabotage: '💀',
-  neutral_cease_fire: '🕊️',
-  neutral_road_builder: '🛤️',
-  neutral_prospector: '⛏️',
-  neutral_surveyor: '🔭',
-  neutral_militia: '🏹',
-  neutral_eminent_domain: '⚖️',
-  neutral_fortified_post: '🛡️',
-  neutral_forced_march: '🥁',
-  neutral_rally_cry: '📣',
-  neutral_war_bonds: '💰',
-  neutral_reduce: '✂️',
-  neutral_recruit: '🙋',
-  neutral_conscription: '📖',
-  neutral_watchtower: '🗼',
-  neutral_siege_tower: '🏗️',
-  neutral_reclaim: '💱',
-  neutral_diplomat: '🤝',
-  neutral_ambush: '🗡️',
-  neutral_cartographer: '🗺️',
-  neutral_conqueror: '⚔️',
-  neutral_dividends: '💰',
-  neutral_moat: '🏊',
-  neutral_mobilize: '🎺',
-  neutral_palisade: '🪵',
-  neutral_spyglass: '🔍',
-  neutral_supply_depot: '📦',
-  neutral_tax_collector: '🪙',
-  neutral_salvage: '🪤',
-  neutral_foresight: '🔮',
-  neutral_redemption: '🌅',
-  neutral_recall: '⏪',
-  neutral_sift: '⚗️',
-  neutral_caravan: '🐪',
-
-  // ── Special ──
-  neutral_debt: '⛓️',
-  neutral_rubble: '🪨',
-  neutral_spoils: '💎',
-};
+import {
+  cardImageUrl,
+  isCardImageMissing,
+  isCardImageReady,
+  markCardImageMissing,
+  markCardImageReady,
+  markCardImageWebpFailed,
+  onCardImageReady,
+  preloadCardImages,
+} from '../utils/cardImagePreload';
+import Icon from '../icons/Icon';
+import { CostLabel, IconValue } from '../icons/Num';
+import type { IconName } from '../icons/glyphs';
 
 const ARCHETYPE_LABEL: Record<string, string> = {
   vanguard: 'Vanguard',
@@ -180,15 +35,24 @@ const TYPE_LABEL: Record<string, string> = {
   passive: 'Passive',
 };
 
-/** Resolve the art emoji for a card. Keyed by `definition_id` (stable across instances). */
-function getCardArt(definitionId: string, cardType: string): string {
-  return CARD_ART[definitionId] ?? (TYPE_EMOJI[cardType] || '📄');
+/** Sigil shown when a card's art image is unavailable: its card type, with
+ *  a few token cards getting their own glyph. */
+function fallbackSigil(cardId: string, cardType: string): IconName {
+  if (cardId === 'neutral_debt' || cardId === 'debt') return 'debt';
+  if (cardId === 'neutral_rubble' || cardId === 'rubble') return 'rubble';
+  if (cardId === 'neutral_spoils' || cardId === 'spoils') return 'vp';
+  if (cardType === 'claim' || cardType === 'defense' || cardType === 'engine' || cardType === 'passive') return cardType;
+  return 'card';
 }
 
-/** Resolve the image URL for a card. Images in /public/cards/ are named by `definition_id`. */
-function getCardImageUrl(definitionId: string): string {
-  return `/cards/${definitionId}.png`;
-}
+/** Glyph for each stat-note pill. */
+const STAT_NOTE_ICONS: Record<string, IconName> = {
+  'Trashed after use.': 'trash',
+  'Stackable': 'stack',
+  'No adjacency required.': 'anywhere',
+  'Unique': 'unique',
+  'Immune': 'immune',
+};
 
 /** Standard card width for all full card views */
 export const CARD_FULL_WIDTH = 220;
@@ -220,6 +84,7 @@ function buildStatNotes(card: Card): string[] {
   if (card.stackable) statNotes.push('Stackable');
   if (!card.adjacency_required) statNotes.push('No adjacency required.');
   if (card.unique) statNotes.push('Unique');
+  if (card.effects?.some(e => e.type === 'tile_immunity')) statNotes.push('Immune');
   return statNotes;
 }
 
@@ -230,6 +95,7 @@ const STAT_NOTE_TOOLTIPS: Record<string, string> = {
   'Unique': KEYWORDS.Unique,
   'Trashed after use.': 'This card is removed from your deck permanently after it is played.',
   'No adjacency required.': 'This card can target any tile — it does not need to be next to a tile you already own.',
+  'Immune': 'The targeted tile cannot be claimed this round.',
 };
 
 /**
@@ -242,21 +108,32 @@ function extractKeywords(card: Card): { keyword: string; definition: string }[] 
   return extractKeywordsFromText(combined);
 }
 
-/** Art slot that tries to load a card image, falling back to emoji on error.
- *  Just drop a .png in public/cards/ named by base card ID — no config needed. */
-// Module-level caches: once an image URL succeeds or fails, remember it permanently.
-const imgOk = new Set<string>();
-const imgBad = new Set<string>();
-
+/** Art slot that loads a card image (WebP, then PNG), falling back to the
+ *  card-type sigil.
+ *  Drop a .png in public/cards/ named by definition id and run
+ *  frontend/scripts/optimize_images.py to generate its compressed .webp.
+ *  Art that was preloaded (see utils/cardImagePreload) paints immediately;
+ *  anything else shows a soft shimmer and fades in when it arrives. */
 function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
   cardId: string; cardName: string; cardType: string; typeColor: string;
 }) {
-  const imgUrl = getCardImageUrl(cardId);
-  // Start with cached knowledge; fall back to "try loading"
-  const [imgFailed, setImgFailed] = useState(() => imgBad.has(imgUrl));
+  const [imgFailed, setImgFailed] = useState(() => isCardImageMissing(cardId));
+  // Bumped when the WebP fails so the <img> re-renders with the PNG URL.
+  const [, setUrlEpoch] = useState(0);
+  const [loaded, setLoaded] = useState(() => isCardImageReady(cardId));
+  // Only animate the fade when the art wasn't already warm at mount.
+  const fadeIn = useRef(!loaded);
   const [showFull, setShowFull] = useState(false);
+  const imgUrl = cardImageUrl(cardId);
 
   const hasImage = !imgFailed;
+
+  useEffect(() => {
+    // Promote this card to the front of the preload queue (no-op if loaded).
+    preloadCardImages([cardId], 'high');
+    if (loaded) return;
+    return onCardImageReady(cardId, () => setLoaded(true));
+  }, [cardId, loaded]);
 
   // Close fullscreen on pointer/mouse up anywhere
   useEffect(() => {
@@ -284,7 +161,10 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
           height: 100,
           borderRadius: 8,
           border: `1px solid ${hasImage ? typeColor + '66' : typeColor + '44'}`,
-          background: '#151530',
+          background: hasImage && !loaded
+            ? 'linear-gradient(100deg, #151530 30%, #20204a 50%, #151530 70%) 0 0 / 300% 100%'
+            : '#151530',
+          animation: hasImage && !loaded ? 'cc-art-shimmer 1.2s linear infinite' : undefined,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -292,26 +172,52 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor }: {
           userSelect: 'none',
           flexShrink: 0,
           overflow: 'hidden',
+          position: 'relative',
           cursor: hasImage ? 'zoom-in' : undefined,
         }}
       >
+        {hasImage && (
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1,
+            boxShadow: 'inset 0 0 16px rgba(0,0,0,0.55), inset 0 0 0 1px rgba(0,0,0,0.35)',
+            borderRadius: 'inherit',
+          }} />
+        )}
         {hasImage ? (
           <img
             src={imgUrl}
             alt={cardName}
             draggable={false}
-            onLoad={() => { imgOk.add(imgUrl); }}
+            decoding="async"
+            onLoad={() => { markCardImageReady(cardId); setLoaded(true); }}
             onError={() => {
-              // Only mark as failed if this URL has never loaded successfully
-              if (!imgOk.has(imgUrl)) {
-                imgBad.add(imgUrl);
+              if (!imgUrl.endsWith('.png')) {
+                markCardImageWebpFailed(cardId);
+                setUrlEpoch(n => n + 1);
+              } else {
+                markCardImageMissing(cardId);
                 setImgFailed(true);
               }
             }}
-            style={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }}
+            style={{
+              display: 'block', width: '100%', height: '100%', objectFit: 'cover',
+              opacity: loaded ? 1 : 0,
+              transition: fadeIn.current ? 'opacity 220ms ease-out' : undefined,
+            }}
           />
         ) : (
-          getCardArt(cardId, cardType)
+          <span style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%',
+            background: `radial-gradient(circle at 50% 45%, ${typeColor}55 0%, rgba(0,0,0,0) 72%)`,
+          }}>
+            <Icon
+              name={fallbackSigil(cardId, cardType)}
+              size={46}
+              color="#f3e9d2"
+              title={`${cardName} (art unavailable)`}
+              style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.6))', ['--cc-icon-accent-opacity' as string]: 0.5 }}
+            />
+          </span>
         )}
       </div>
       {showFull && hasImage && createPortal(
@@ -391,10 +297,11 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
       // and a soft top-down highlight, so the card doesn't feel flat under the
       // 3D tilt and glare effects when zoomed.
       background:
-        'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 35%, rgba(0,0,0,0.18) 100%),' +
+        `linear-gradient(180deg, ${typeColor}33 0%, ${typeColor}0d 22%, rgba(0,0,0,0) 40%),` +
+        'linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0) 35%, rgba(0,0,0,0.22) 100%),' +
         'repeating-linear-gradient(45deg, rgba(255,255,255,0.018) 0 1px, rgba(0,0,0,0) 1px 3px),' +
         'repeating-linear-gradient(-45deg, rgba(255,255,255,0.014) 0 1px, rgba(0,0,0,0) 1px 4px),' +
-        '#1e1e3a',
+        '#1c1c38',
       border: `2px solid ${typeColor}`,
       borderRadius: 12,
       padding: '12px 14px 14px',
@@ -402,12 +309,13 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
       display: 'flex',
       flexDirection: 'column',
       gap: 7,
-      boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+      // Inner gold hairline + dark outer rim read as a printed card frame.
+      boxShadow: 'inset 0 0 0 1px rgba(232, 196, 106, 0.16), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(0,0,0,0.55), 0 10px 32px rgba(0,0,0,0.6)',
       ...style,
     }}>
       {/* Top row: title left-aligned, VP badge + cost badge top-right */}
       <div style={{ position: 'relative', textAlign: 'left', minHeight: 22 }}>
-        <div style={{ fontSize: 15, fontWeight: 'bold', lineHeight: 1.3, paddingRight: card.current_vp !== undefined ? 78 : 36, fontFamily: CARD_TITLE_FONT }}>
+        <div style={{ fontSize: 15.5, fontWeight: 'bold', lineHeight: 1.3, paddingRight: card.current_vp !== undefined ? 78 : 36, fontFamily: CARD_TITLE_FONT, letterSpacing: 0.2, textShadow: '0 1px 2px rgba(0,0,0,0.6)' }}>
           {card.is_upgraded && card.name_upgraded ? card.name_upgraded : card.name}
           {card.is_upgraded && !card.name.endsWith('+') && !(card.name_upgraded?.endsWith('+')) && <span style={{ color: '#ffd700' }}> +</span>}
         </div>
@@ -430,13 +338,14 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
                 fontSize: 12,
                 fontWeight: 'bold',
                 color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
-                background: '#2a2a4e',
-                borderRadius: 5,
-                padding: '1px 6px',
+                background: 'linear-gradient(180deg, #30305a, #20203e)',
+                borderRadius: 999,
+                padding: '1px 7px',
                 border: `1px solid ${card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#555'}`,
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
                 lineHeight: 1.3,
               }}>
-                {card.current_vp > 0 ? '+' : ''}{card.current_vp} ★
+                <IconValue icon="vp" value={`${card.current_vp > 0 ? '+' : ''}${card.current_vp}`} size={12} iconFirst={false} gap={2} decorative />
               </div>
             </Tooltip>
           )}
@@ -450,14 +359,18 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
                 cursor: 'help',
                 fontSize: 12,
                 fontWeight: 'bold',
-                color: isDiscounted ? '#4aff6a' : '#ffd700',
-                background: '#2a2a4e',
-                borderRadius: 5,
-                padding: '1px 6px',
-                border: '1px solid #555',
+                // Minted-coin cost badge (green when discounted).
+                color: isDiscounted ? '#0f3a1a' : '#2a1d05',
+                background: isDiscounted
+                  ? 'linear-gradient(180deg, #a6ffb8 0%, #4fd472 55%, #2e9e4e 100%)'
+                  : 'linear-gradient(180deg, #ffe9a8 0%, #e8c46a 50%, #b88a32 100%)',
+                borderRadius: 999,
+                padding: '1px 7px',
+                border: `1px solid ${isDiscounted ? '#c8ffd4' : '#f6dc94'}`,
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55), inset 0 -1px 0 rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.5)',
                 lineHeight: 1.3,
               }}>
-                {isDiscounted ? `${displayCost}*` : displayCost}💰
+                <CostLabel cost={displayCost} suffix={isDiscounted ? '*' : ''} size={12} />
               </div>
             </Tooltip>
           ) : (
@@ -477,15 +390,16 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
         </div>
       </div>
 
-      {/* Card art — tries image file, falls back to emoji */}
+      {/* Card art — tries image file, falls back to the card-type sigil */}
       <CardArtSlot key={card.definition_id} cardId={card.definition_id} cardName={card.name} cardType={card.card_type} typeColor={typeColor} />
 
       {/* Archetype — Type line */}
       <div style={{
         textAlign: 'center',
-        fontSize: 10,
-        color: '#999',
-        letterSpacing: 0.5,
+        fontSize: 9.5,
+        color: '#a3a1b8',
+        letterSpacing: 1.1,
+        textTransform: 'uppercase',
       }}>
         {ARCHETYPE_LABEL[card.archetype] || card.archetype}{' '}
         <span style={{ color: '#555' }}>—</span>{' '}
@@ -508,13 +422,14 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
 
       {/* Abilities box */}
       <div style={{
-        background: '#151530',
+        background: 'linear-gradient(180deg, rgba(12, 12, 32, 0.9), rgba(18, 18, 44, 0.9))',
         borderRadius: 8,
-        border: '1px solid #2a2a4e',
+        border: '1px solid rgba(232, 196, 106, 0.13)',
+        boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.45)',
         padding: '8px 10px',
         fontSize: 11,
         lineHeight: 1.5,
-        color: '#ccc',
+        color: '#d4d2e2',
         flex: 1,
       }}>
         {abilityParts.map((text, i) => (
@@ -541,7 +456,11 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
                   color: isUnique ? '#ffd700' : '#aaa',
                   fontWeight: isUnique ? 'bold' : undefined,
                   cursor: tooltipText ? 'help' : undefined,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
                 }}>
+                  {STAT_NOTE_ICONS[note] && <Icon name={STAT_NOTE_ICONS[note]} size={10} trim decorative />}
                   {note}
                 </span>
               );
@@ -572,15 +491,16 @@ export default function CardFull({ card, effectiveCost, remaining, style, showKe
         }}>
           {keywords.map(({ keyword, definition }) => (
             <div key={keyword} style={{
-              background: 'rgba(15, 15, 35, 0.95)',
-              border: '1px solid #3a3a5e',
-              borderRadius: 6,
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0) 50%), rgba(15, 15, 35, 0.96)',
+              border: '1px solid rgba(232, 196, 106, 0.2)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.45)',
+              borderRadius: 7,
               padding: '4px 8px',
               fontSize: 10,
               lineHeight: 1.4,
               color: '#bbb',
             }}>
-              <span style={{ color: '#fff', fontWeight: 'bold' }}>{keyword}:</span>{' '}
+              <span style={{ color: 'var(--cc-gold-bright)', fontWeight: 'bold' }}>{keyword}:</span>{' '}
               {definition}
             </div>
           ))}

@@ -8,13 +8,13 @@ Each round consists of five phases executed by all players simultaneously where 
 
 Performed individually, simultaneously by all players:
 
-1. **Debt distribution:** Starting from round 5, the current VP leader receives a **Debt** card in their discard pile. Debt is a dead ENGINE card that costs 1 action + 3 resources to trash. It cannot be trashed by other cards. Among tied VP leaders, the one closest in turn order to the first player receives the Debt.
-2. **Score VP hex tiles:** Earn 1 VP for each VP hex tile you already owned at the end of last turn. Tiles claimed last turn count; tiles claimed this turn do not yet count.
+1. **Debt distribution:** Starting from round 5, the current VP leader receives a **Debt** card in their discard pile. Debt is a dead ENGINE card that costs 1 action + 3 resources to play, which trashes it. Other trash effects can also remove it. Among tied VP leaders, the one closest in turn order to the first player receives the Debt.
+2. **VP is derived, not scored here:** VP is recomputed from the board and your cards at any moment (see `04_objectives_and_vp.md`); the win check happens at the **end** of each round.
 4. **Draw hand:** Draw cards up to your hand size from your personal draw pile.
    - If your draw pile is empty, shuffle your discard pile into a new draw pile, then draw.
    - Apply any **"draw X cards next turn"** bonuses earned last round now.
 5. **Reveal archetype market:** Three cards are drawn face-up from your archetype deck. These are available for purchase this turn only.
-6. **Apply upgrade credits:** If you hold any upgrade credit tokens, you may upgrade one card in your hand (see Upgrade Rules). Maximum one upgrade per turn. Upgrades happen before the Play Phase.
+6. **Apply upgrade credits:** If you hold any upgrade credits, you may spend them during the Play Phase to upgrade cards in your hand (see Upgrade Rules).
 
 ---
 
@@ -23,10 +23,9 @@ Performed individually, simultaneously by all players:
 All players simultaneously and secretly select cards from their hand to play this round.
 
 - Place selected cards **face-down** on the table in front of you, grouped by which tile they target.
-- Each card costs **1 action slot** to play. Players may not exceed their archetype's action slot limit (Vanguard/Swarm: 4, Fortress: 3).
+- Most cards cost **1 action** to play (a few heavy cards cost 2 or 3). Every archetype starts the round with **5 actions**. A card whose action return covers its cost ("Gain 1 action") can be played even with 0 actions left.
 - **Immediate effects** (action slot returns ↺ ↑ and card draws marked "draw immediately") resolve as each card is played during this phase, enabling chaining. For example, playing a ↑ Engine card grants 2 actions back immediately, which may then be spent on additional cards.
-- The maximum total actions in a single turn is **6**, regardless of cards played or chained.
-- Players may hold cards unplayed (they go to discard at end of turn).
+- There is no cap on total actions in a turn; chaining action-granting cards can exceed 5.
 - Players may hold cards unplayed (they go to discard at end of turn).
 
 ---
@@ -39,7 +38,7 @@ All players flip their played cards face-up simultaneously.
 1. **Claim resolution** – all tiles with at least one Claim card played on them are resolved:
    - Each Claim card contributes its **power value** to that tile.
    - A player may only play **one Claim card per tile per round**, unless they have a **stacking exception card** (Coordinated Push, Dog Pile, Juggernaut).
-   - The player with the **highest total power** on a tile wins it. Ties go to the **current owner** (defender wins ties). Neutral tiles (no owner) have a defense value of **0**.
+   - The player with the **highest total power** on a tile wins it. Ties go to the **current owner** (defender wins ties). Most neutral tiles have defense **0**; VP hexes have intrinsic defense (standard 2, premium 3) and tiles next to a premium hex have 1. Against a neutral tile's intrinsic defense, a tie goes to the **attacker**. A tie between two attackers on a tile nobody owns means nobody takes it.
    - Claimed tiles must be **adjacent to a tile the player already owns**, unless the card specifically states otherwise (e.g. Overrun, Proliferate, Eminent Domain).
    - Players cannot claim blocked terrain tiles unless they have the **Pathfinder** passive.
 2. **Post-resolution effects** – conditional effects that depend on Claim success or failure resolve now (e.g. "if successful, draw 1 card next turn"). Any forced discards triggered here apply to the **targeted opponent's next turn hand draw** — the opponent does not discard from their current hand.
@@ -47,14 +46,13 @@ All players flip their played cards face-up simultaneously.
 
 ---
 
-## Phase 4: Buy Phase (Sequential)
+## Phase 4: Buy Phase
 
-Players take turns buying in **player order** (starting from the current first player). Each player gets an exclusive buy window — other players can browse the shop but cannot purchase until it is their turn.
+In the digital game all players buy at the same time; each player signals when they're done.
 
 ### Archetype Market Options
-Before purchasing, the active buyer may adjust their archetype market using these options:
-- **Re-roll:** Pay 2 resources to discard your three archetype market cards and draw three new ones. May only be used once per turn.
-- **Retain:** Pay 1 resource to hold one specific archetype market card over to next turn. That card is set aside and will be the first card available in your market next turn. May only retain one card per turn.
+- **Re-roll:** Pay 1 resource to replace your archetype market cards with new ones (Surveyor grants free re-rolls for the round).
+- **Retain:** not implemented in the digital game (the `RETAIN_COST` constant is reserved).
 
 ### Purchasing Cards
 - **Archetype cards:** Buy from your personal three-card archetype market. Each card has a listed buy cost in resources. Purchased cards go to your **discard pile**.
@@ -64,7 +62,7 @@ Before purchasing, the active buyer may adjust their archetype market using thes
 - After each player finishes buying, their purchases are visible to all other players.
 
 ### Purchasing Upgrade Credits
-- Upgrade credits are purchased from the shared pool at a cost of **4 resources** each.
+- Upgrade credits cost **5 resources** each.
 - A player may hold multiple upgrade credits simultaneously.
 - Upgrade credits are **not cards** — they are tokens held between turns.
 
@@ -92,14 +90,13 @@ After the buy phase, any unpurchased archetype market cards are **discarded** (u
 | ↺ | 0 | Net-neutral. Costs 1 action, returns 1. Effectively free in tempo. |
 | ↑ | +1 | Net-positive. Costs 1 action, returns 2. Tempo gain. |
 
-**Hard cap:** A player may never exceed **6 total actions in a single turn** regardless of how many ↑ cards are played.
+There is no hard cap on total actions in a turn.
 
 ---
 
 ## Upgrade Rules
 
-- A player may spend **1 upgrade credit token** during Phase 1 (Start of Turn, before the Play Phase) to upgrade any one card in their current hand.
+- A player may spend upgrade credits during the Play Phase to upgrade cards in their current hand (one credit per card).
 - The upgraded version (marked with +) replaces the base card for this turn and all future turns.
 - Physically mark the card (e.g. a sticker or marker) to indicate it is permanently upgraded.
-- **Maximum one upgrade per turn.**
 - Upgrade credits do not expire — they persist until used.

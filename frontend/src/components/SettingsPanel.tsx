@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useSettings, type AnimationMode } from './SettingsContext';
 import { KEYWORDS } from './Keywords';
 import { downloadGameLog } from '../utils/downloadGameLog';
+import Icon from '../icons/Icon';
 
 interface SettingsPanelProps {
   isMultiplayer?: boolean;
@@ -23,162 +24,127 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
   const [glossarySearch, setGlossarySearch] = useState('');
   const [downloading, setDownloading] = useState(false);
 
+  const keywordEntries = Object.entries(KEYWORDS);
+  const filteredKeywords = keywordEntries.filter(([keyword, definition]) => {
+    if (!glossarySearch) return true;
+    const q = glossarySearch.toLowerCase();
+    return keyword.toLowerCase().includes(q) || definition.toLowerCase().includes(q);
+  });
+  const closeGlossary = () => { setShowGlossary(false); setGlossarySearch(''); };
+  const animClass = settings.animationMode !== 'off' ? ' cc-ov-anim' : '';
+
   return (
-    <div style={{ padding: 0 }}>
-      <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>SETTINGS</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 12, color: '#aaa' }}>Animations:</span>
-          {(['normal', 'fast', 'off'] as AnimationMode[]).map((mode) => (
-            <button
-              key={mode}
-              onClick={() => setAnimationMode(mode)}
-              style={{
-                padding: '2px 8px',
-                fontSize: 11,
-                background: settings.animationMode === mode ? '#4a9eff' : '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 4,
-                color: '#fff',
-                cursor: 'pointer',
-              }}
-            >
-              {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
-            </button>
-          ))}
+    <div className="cc-ov-set" style={{ padding: 0 }}>
+      <div className="cc-ov-set-heading">SETTINGS</div>
+      <div className="cc-ov-set-list">
+        <div className="cc-ov-set-row">
+          <span className="cc-ov-set-label">Animations:</span>
+          <div className="cc-ov-seg">
+            {(['normal', 'fast', 'off'] as AnimationMode[]).map((mode) => (
+              <button
+                key={mode}
+                className={`cc-ov-seg-btn${settings.animationMode === mode ? ' is-active' : ''}`}
+                onClick={() => setAnimationMode(mode)}
+              >
+                {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
+              </button>
+            ))}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 12, color: '#aaa' }}>Tooltips:</span>
-          {([true, false] as const).map((on) => (
-            <button
-              key={String(on)}
-              onClick={() => setTooltips(on)}
-              style={{
-                padding: '2px 8px',
-                fontSize: 11,
-                background: settings.tooltips === on ? '#4a9eff' : '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 4,
-                color: '#fff',
-                cursor: 'pointer',
-              }}
-            >
-              {on ? 'On' : 'Off'}
-            </button>
-          ))}
+        <div className="cc-ov-set-row">
+          <span className="cc-ov-set-label">Tooltips:</span>
+          <div className="cc-ov-seg">
+            {([true, false] as const).map((on) => (
+              <button
+                key={String(on)}
+                className={`cc-ov-seg-btn${settings.tooltips === on ? ' is-active' : ''}`}
+                onClick={() => setTooltips(on)}
+              >
+                {on ? 'On' : 'Off'}
+              </button>
+            ))}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 12, color: '#aaa' }}>Sound:</span>
-          {([true, false] as const).map((on) => (
-            <button
-              key={String(on)}
-              onClick={() => setSoundEnabled(on)}
-              style={{
-                padding: '2px 8px',
-                fontSize: 11,
-                background: settings.soundEnabled === on ? '#4a9eff' : '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 4,
-                color: '#fff',
-                cursor: 'pointer',
-              }}
-            >
-              {on ? 'On' : 'Off'}
-            </button>
-          ))}
+        <div className="cc-ov-set-row">
+          <span className="cc-ov-set-label">Sound:</span>
+          <div className="cc-ov-seg">
+            {([true, false] as const).map((on) => (
+              <button
+                key={String(on)}
+                className={`cc-ov-seg-btn${settings.soundEnabled === on ? ' is-active' : ''}`}
+                onClick={() => setSoundEnabled(on)}
+              >
+                {on ? 'On' : 'Off'}
+              </button>
+            ))}
+          </div>
           {settings.soundEnabled && (
             <input
               type="range"
+              className="cc-ov-range"
               min={0}
               max={1}
               step={0.05}
               value={settings.soundVolume}
               onChange={(e) => setSoundVolume(parseFloat(e.target.value))}
-              style={{ width: 60, accentColor: '#4a9eff' }}
+              style={{ width: 64, ['--pct' as string]: `${Math.round(settings.soundVolume * 100)}%` }}
             />
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontSize: 12, color: '#aaa' }}>Backgrounds:</span>
-          {([true, false] as const).map((on) => (
-            <button
-              key={String(on)}
-              onClick={() => setBackgroundImages(on)}
-              style={{
-                padding: '2px 8px',
-                fontSize: 11,
-                background: settings.backgroundImages === on ? '#4a9eff' : '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 4,
-                color: '#fff',
-                cursor: 'pointer',
-              }}
-            >
-              {on ? 'On' : 'Off'}
-            </button>
-          ))}
+        <div className="cc-ov-set-row">
+          <span className="cc-ov-set-label">Backgrounds:</span>
+          <div className="cc-ov-seg">
+            {([true, false] as const).map((on) => (
+              <button
+                key={String(on)}
+                className={`cc-ov-seg-btn${settings.backgroundImages === on ? ' is-active' : ''}`}
+                onClick={() => setBackgroundImages(on)}
+              >
+                {on ? 'On' : 'Off'}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Rotate grid */}
         {onRotateGrid && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ fontSize: 12, color: '#aaa' }}>Grid:</span>
+          <div className="cc-ov-set-row">
+            <span className="cc-ov-set-label">Grid:</span>
             <button
+              className="cc-btn-secondary cc-ov-btn-sm"
               onClick={onRotateGrid}
-              style={{
-                padding: '2px 8px',
-                fontSize: 11,
-                background: '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 4,
-                color: '#fff',
-                cursor: 'pointer',
-              }}
+              style={{ padding: '4px 10px' }}
             >
               Rotate 30°
             </button>
-            <span style={{ fontSize: 10, color: '#555' }}>R</span>
+            <span className="cc-ov-kbd">R</span>
           </div>
         )}
 
         {/* Map seed (read-only) */}
         {mapSeed && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, borderTop: '1px solid #333', paddingTop: 6 }}>
-            <span style={{ fontSize: 12, color: '#aaa' }}>Map Seed:</span>
-            <span
-              style={{
-                fontSize: 12,
-                color: '#fff',
-                fontFamily: 'monospace',
-                letterSpacing: 1,
-                background: '#2a2a3e',
-                padding: '2px 8px',
-                borderRadius: 4,
-                cursor: 'pointer',
-                userSelect: 'all',
-              }}
-              title="Click to copy"
-              onClick={() => navigator.clipboard.writeText(mapSeed)}
-            >
-              {mapSeed}
-            </span>
-          </div>
+          <>
+            <div className="cc-ov-set-sep" />
+            <div className="cc-ov-set-row">
+              <span className="cc-ov-set-label">Map Seed:</span>
+              <span
+                className="cc-ov-mono"
+                title="Click to copy"
+                onClick={() => navigator.clipboard.writeText(mapSeed)}
+              >
+                {mapSeed}
+              </span>
+            </div>
+          </>
         )}
         {/* Keyword Glossary */}
-        <div style={{ borderTop: '1px solid #333', paddingTop: 6 }}>
+        <div className="cc-ov-set-sep" />
+        <div>
           <button
+            className="cc-btn-secondary cc-ov-btn-sm"
             onClick={() => setShowGlossary(true)}
-            style={{
-              padding: '4px 10px',
-              fontSize: 11,
-              background: '#2a2a3e',
-              border: '1px solid #555',
-              borderRadius: 4,
-              color: '#fff',
-              cursor: 'pointer',
-              width: '100%',
-            }}
+            style={{ width: '100%' }}
           >
             Keyword Glossary
           </button>
@@ -188,6 +154,7 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
         {gameId && (
           <div>
             <button
+              className="cc-btn-secondary cc-ov-btn-sm"
               onClick={async () => {
                 if (downloading) return;
                 setDownloading(true);
@@ -201,14 +168,9 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
               }}
               disabled={downloading}
               style={{
-                padding: '4px 10px',
-                fontSize: 11,
-                background: '#2a2a3e',
-                border: '1px solid #555',
-                borderRadius: 4,
-                color: '#aaa',
-                cursor: downloading ? 'default' : 'pointer',
                 width: '100%',
+                color: 'var(--cc-text-dim)',
+                cursor: downloading ? 'default' : 'pointer',
               }}
               title="Download the full structured game log as JSON"
             >
@@ -218,11 +180,11 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
         )}
         {showGlossary && createPortal(
           <div
-            onClick={() => { setShowGlossary(false); setGlossarySearch(''); }}
+            className={`cc-ov-backdrop${animClass}`}
+            onClick={closeGlossary}
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0,0,0,0.75)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -230,105 +192,66 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
             }}
           >
             <div
+              className={`cc-ov-modal${animClass}`}
               onClick={(e) => e.stopPropagation()}
               style={{
                 width: '90%',
                 maxWidth: 480,
                 maxHeight: '80vh',
-                background: '#1a1a2e',
-                border: '2px solid #333',
-                borderRadius: 12,
                 display: 'flex',
                 flexDirection: 'column',
-                overflow: 'hidden',
               }}
             >
               {/* Header */}
-              <div style={{
-                padding: '12px 16px',
-                borderBottom: '1px solid #333',
-                display: 'flex',
-                alignItems: 'center',
-              }}>
-                <h3 style={{ margin: 0, flex: 1, color: '#fff' }}>Keyword Glossary</h3>
+              <div className="cc-ov-header">
+                <h3 className="cc-ov-title" style={{ flex: 1 }}>Keyword Glossary</h3>
                 <button
-                  onClick={() => { setShowGlossary(false); setGlossarySearch(''); }}
-                  style={{
-                    padding: '4px 12px',
-                    background: '#333',
-                    border: 'none',
-                    borderRadius: 4,
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontSize: 14,
-                  }}
+                  className="cc-ov-close"
+                  onClick={closeGlossary}
+                  aria-label="Close"
                 >
-                  ✕
+                  <Icon name="close" size={14} decorative />
                 </button>
               </div>
               {/* Search bar */}
-              <div style={{ padding: '8px 16px 0' }}>
+              <div style={{ padding: '12px 16px 4px' }}>
                 <input
                   type="text"
+                  className="cc-ov-input"
                   placeholder="Search keywords..."
                   value={glossarySearch}
                   onChange={(e) => setGlossarySearch(e.target.value)}
                   autoFocus
-                  style={{
-                    width: '100%',
-                    padding: '6px 10px',
-                    fontSize: 13,
-                    background: '#1e1e3a',
-                    border: '1px solid #555',
-                    borderRadius: 6,
-                    color: '#fff',
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
                 />
               </div>
               {/* Keywords list */}
               <div style={{
                 flex: 1,
                 overflowY: 'auto',
-                padding: 12,
+                padding: '8px 16px 12px',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 4,
+                gap: 6,
               }}>
-                {Object.entries(KEYWORDS)
-                  .filter(([keyword, definition]) => {
-                    if (!glossarySearch) return true;
-                    const q = glossarySearch.toLowerCase();
-                    return keyword.toLowerCase().includes(q) || definition.toLowerCase().includes(q);
-                  })
-                  .map(([keyword, definition]) => (
-                  <div key={keyword} style={{
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                    padding: '6px 10px',
-                    background: '#1e1e3a',
-                    borderRadius: 6,
-                    border: '1px solid #2a2a4e',
-                  }}>
-                    <span style={{ color: '#fff', fontWeight: 'bold' }}>{keyword}</span>
-                    <span style={{ color: '#555' }}> — </span>
-                    <span style={{ color: '#aaa' }}>{definition}</span>
+                {filteredKeywords.map(([keyword, definition]) => (
+                  <div key={keyword} className="cc-ov-kw">
+                    <span className="cc-ov-kw-name">{keyword}</span>
+                    <span style={{ color: 'var(--cc-text-faint)' }}> — </span>
+                    <span className="cc-ov-kw-def">{definition}</span>
                   </div>
                 ))}
+                {filteredKeywords.length === 0 && (
+                  <div style={{ color: 'var(--cc-text-faint)', textAlign: 'center', padding: 16, fontSize: 13 }}>
+                    No keywords match “{glossarySearch}”.
+                  </div>
+                )}
               </div>
               {/* Footer */}
-              <div style={{
-                padding: '8px 16px',
-                borderTop: '1px solid #333',
-                fontSize: 12,
-                color: '#666',
-                textAlign: 'center',
-              }}>
+              <div className="cc-ov-footer">
                 {glossarySearch
-                  ? `${Object.entries(KEYWORDS).filter(([k, d]) => { const q = glossarySearch.toLowerCase(); return k.toLowerCase().includes(q) || d.toLowerCase().includes(q); }).length} of ${Object.keys(KEYWORDS).length} keywords`
-                  : `${Object.keys(KEYWORDS).length} keywords`
-                } · Click outside or ✕ to close
+                  ? `${filteredKeywords.length} of ${keywordEntries.length} keywords`
+                  : `${keywordEntries.length} keywords`
+                } · Click outside or press close to dismiss
               </div>
             </div>
           </div>,
@@ -337,41 +260,33 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
 
         {/* Multiplayer game controls */}
         {isMultiplayer && (
-          <div style={{ display: 'flex', gap: 6, marginTop: 4, borderTop: '1px solid #333', paddingTop: 6 }}>
+          <>
+          <div className="cc-ov-set-sep" />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {onLeaveGame && (
               confirmLeave ? (
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <span style={{ fontSize: 11, color: '#ff6666' }}>Leave? Tiles go neutral.</span>
+                <div className="cc-ov-confirm">
+                  <span className="cc-ov-confirm-text">Leave? Tiles go neutral.</span>
                   <button
+                    className="cc-ov-btn-danger is-solid cc-ov-btn-sm"
                     onClick={() => { onLeaveGame(); setConfirmLeave(false); }}
-                    style={{
-                      padding: '2px 8px', fontSize: 11,
-                      background: '#cc2a2a', border: 'none',
-                      borderRadius: 4, color: '#fff', cursor: 'pointer',
-                    }}
+                    style={{ padding: '3px 10px' }}
                   >
                     Yes
                   </button>
                   <button
+                    className="cc-btn-secondary cc-ov-btn-sm"
                     onClick={() => setConfirmLeave(false)}
-                    style={{
-                      padding: '2px 8px', fontSize: 11,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', cursor: 'pointer',
-                    }}
+                    style={{ padding: '3px 10px' }}
                   >
                     No
                   </button>
                 </div>
               ) : (
                 <button
+                  className="cc-ov-btn-danger cc-ov-btn-sm"
                   onClick={() => setConfirmLeave(true)}
-                  style={{
-                    padding: '4px 10px', fontSize: 11,
-                    background: '#2a2a3e', border: '1px solid #555',
-                    borderRadius: 4, color: '#ff6666', cursor: 'pointer',
-                    flex: 1,
-                  }}
+                  style={{ flex: 1 }}
                 >
                   Leave Game
                 </button>
@@ -379,44 +294,35 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
             )}
             {isHost && onEndGame && (
               confirmEnd ? (
-                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-                  <span style={{ fontSize: 11, color: '#ff6666' }}>End for everyone?</span>
+                <div className="cc-ov-confirm">
+                  <span className="cc-ov-confirm-text">End for everyone?</span>
                   <button
+                    className="cc-ov-btn-danger is-solid cc-ov-btn-sm"
                     onClick={() => { onEndGame(); setConfirmEnd(false); }}
-                    style={{
-                      padding: '2px 8px', fontSize: 11,
-                      background: '#cc2a2a', border: 'none',
-                      borderRadius: 4, color: '#fff', cursor: 'pointer',
-                    }}
+                    style={{ padding: '3px 10px' }}
                   >
                     Yes
                   </button>
                   <button
+                    className="cc-btn-secondary cc-ov-btn-sm"
                     onClick={() => setConfirmEnd(false)}
-                    style={{
-                      padding: '2px 8px', fontSize: 11,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', cursor: 'pointer',
-                    }}
+                    style={{ padding: '3px 10px' }}
                   >
                     No
                   </button>
                 </div>
               ) : (
                 <button
+                  className="cc-ov-btn-danger cc-ov-btn-sm"
                   onClick={() => setConfirmEnd(true)}
-                  style={{
-                    padding: '4px 10px', fontSize: 11,
-                    background: '#2a2a3e', border: '1px solid #555',
-                    borderRadius: 4, color: '#ff6666', cursor: 'pointer',
-                    flex: 1,
-                  }}
+                  style={{ flex: 1 }}
                 >
                   End Game
                 </button>
               )
             )}
           </div>
+          </>
         )}
       </div>
     </div>

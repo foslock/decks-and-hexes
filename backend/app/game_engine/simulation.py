@@ -239,6 +239,9 @@ def _run_play_phase(game: GameState, cpus: dict[str, CPUPlayer],
         actions_this_turn = 0
         failed_card_ids: set[str] = set()
 
+        # Cash in banked upgrade credits before choosing plays.
+        cpu.spend_upgrade_credits(game)
+
         # Keep playing cards until CPU decides to stop
         max_iterations = 30  # safety limit
         iterations = 0

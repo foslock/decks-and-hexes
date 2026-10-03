@@ -26,6 +26,12 @@ const NO_OP_SOUNDS = {
   resolveBaseRaidHold: NO_OP,
   upgradeCard: NO_OP,
   beginJingle: NO_OP,
+  // Optional extras (not yet wired into components)
+  hoverTick: NO_OP,
+  coinSpend: NO_OP,
+  vpGain: NO_OP,
+  phaseChange: NO_OP,
+  invalidAction: NO_OP,
 };
 
 export type SoundApi = typeof NO_OP_SOUNDS;
@@ -63,6 +69,11 @@ export function useSound(): SoundApi {
       resolveBaseRaidHold: () => soundEngine.resolveBaseRaidHold(),
       upgradeCard: () => soundEngine.upgradeCard(),
       beginJingle: () => soundEngine.beginJingle(),
+      hoverTick: () => soundEngine.hoverTick(),
+      coinSpend: () => soundEngine.coinSpend(),
+      vpGain: () => soundEngine.vpGain(),
+      phaseChange: () => soundEngine.phaseChange(),
+      invalidAction: () => soundEngine.invalidAction(),
     };
   }, [soundEnabled]);
 }

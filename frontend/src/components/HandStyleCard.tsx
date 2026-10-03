@@ -1,7 +1,8 @@
 import type { Card } from '../types/game';
-import { CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground, MINI_CARD_SHADOW } from '../constants/cardColors';
 import { buildCardSubtitle } from './cardSubtitle';
-import { renderSubtitlePart } from './SubtitlePartRenderer';
+import { renderSubtitle } from './SubtitlePartRenderer';
+import { CostLabel } from '../icons/Num';
 
 /**
  * A compact card rendered at exactly the same dimensions and styling as the
@@ -30,9 +31,10 @@ export default function HandStyleCard({ card, border }: HandStyleCardProps) {
         width: HAND_CARD_WIDTH,
         height: HAND_CARD_MIN_HEIGHT,
         padding: 6,
-        background: '#2a2a3e',
+        background: miniCardBackground(typeColor),
         border: border || `2px solid ${typeColor}`,
-        borderRadius: 6,
+        borderRadius: 8,
+        boxShadow: MINI_CARD_SHADOW,
         color: '#fff',
         boxSizing: 'border-box',
         overflow: 'hidden',
@@ -70,7 +72,7 @@ export default function HandStyleCard({ card, border }: HandStyleCardProps) {
           </span>
         </div>
         <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>
-          {card.buy_cost != null ? `${card.buy_cost}💰` : '—'}
+          <CostLabel cost={card.buy_cost} size={13} />
         </span>
       </div>
       <div style={{ fontSize: 13, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
@@ -88,9 +90,7 @@ export default function HandStyleCard({ card, border }: HandStyleCardProps) {
             }
           }}
         >
-          {buildCardSubtitle(card).map((part, i) =>
-            renderSubtitlePart(part, i, { passiveVp: card.passive_vp })
-          )}
+          {renderSubtitle(buildCardSubtitle(card), { fontSize: 13, passiveVp: card.passive_vp })}
         </span>
       </div>
     </div>

@@ -7,10 +7,13 @@ import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
 import CardBrowser, { clearBrowserCollapseMemory } from './CardBrowser';
 import { savePlayerName } from '../utils/playerName';
+import Icon from '../icons/Icon';
 
 interface CardPackDef {
   id: string;
   name: string;
+  /** One-line, player-facing summary of the pack (from the backend). */
+  description?: string;
   shared_card_ids: string[] | null;
   archetype_card_ids: Record<string, string[]> | null;
 }
@@ -29,9 +32,9 @@ const PLAYER_COLOR_OPTIONS = [
 ];
 
 const ARCHETYPES = [
-  { id: 'vanguard', name: 'Vanguard', icon: '⚔️', desc: 'Vanguard — Aggressive, high-power claims. Excels at taking territory with brute force and punishing defenders.' },
-  { id: 'swarm', name: 'Swarm', icon: '🐝', desc: 'Swarm — Wide expansion with many small claims. Strength grows from controlling adjacent tiles and spreading fast.' },
-  { id: 'fortress', name: 'Fortress', icon: '🏰', desc: 'Fortress — Defensive and resilient. Specializes in holding territory with strong defenses and tile immunity.' },
+  { id: 'vanguard', name: 'Vanguard', emblem: '/assets/howtoplay/vanguard.webp', desc: 'Vanguard — Aggressive, high-power claims. Excels at taking territory with brute force and punishing defenders.' },
+  { id: 'swarm', name: 'Swarm', emblem: '/assets/howtoplay/swarm.webp', desc: 'Swarm — Wide expansion with many small claims. Strength grows from controlling adjacent tiles and spreading fast.' },
+  { id: 'fortress', name: 'Fortress', emblem: '/assets/howtoplay/fortress.webp', desc: 'Fortress — Defensive and resilient. Specializes in holding territory with strong defenses and tile immunity.' },
 ];
 
 const GRID_SIZES = [
@@ -140,6 +143,10 @@ export default function LobbyScreen({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
   const [cardPacks, setCardPacks] = useState<CardPackDef[]>([]);
+  const selectedPackId = lobby.config.card_pack || 'everything';
+  const selectedPackDescription = cardPacks.find(p =>
+    p.id === selectedPackId || (p.id.startsWith('daily_') && selectedPackId.startsWith('daily_')),
+  )?.description;
   const [showPackBrowser, setShowPackBrowser] = useState(false);
   const [showSeedHistory, setShowSeedHistory] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -417,79 +424,66 @@ export default function LobbyScreen({
 
   // ── Render ───────────────────────────────────────────────
 
+  const statusClass = status === 'connected' ? 'is-connected' : status === 'connecting' ? 'is-connecting' : 'is-disconnected';
+  const cardPackLabel = (lobby.config.card_pack || '').startsWith('daily_')
+    ? "This pack changes every day — a fresh selection of 10 shared market cards generated from today's date."
+    : "Decides which cards will be available in the game.";
+
   return (
-    <div style={{ background: '#1a1a2e', color: '#fff', minHeight: '100dvh' }}>
+    <div className="cc-scr-backdrop cc-scr-lobby">
       {/* Settings gear — top right */}
-      <div ref={settingsRef} style={{ position: 'fixed', top: 16, right: 16, zIndex: 100 }}>
+      <div ref={settingsRef} className="cc-scr-gear-wrap">
         <button
           onClick={() => setSettingsOpen(p => !p)}
-          style={{
-            padding: '6px 14px', borderRadius: 6,
-            background: settingsOpen ? '#3a3a6e' : '#2a2a3e',
-            border: '1px solid #555', color: '#aaa',
-            cursor: 'pointer', fontSize: 20,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}
+          className={`cc-btn-secondary cc-scr-gear${settingsOpen ? ' is-open' : ''}`}
           title="Settings"
         >
-          <span style={{ fontSize: 20 }}>⚙</span>
+          <Icon name="settings" size={20} decorative />
         </button>
         {settingsOpen && (
-          <div style={{
-            position: 'absolute', top: 42, right: 0,
-            background: '#2a2a3e', border: '1px solid #555',
-            borderRadius: 8, padding: 12, minWidth: 220,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-          }}>
-            <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>LOCAL SETTINGS</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-              <span style={{ fontSize: 12, color: '#aaa', minWidth: 75 }}>Animations:</span>
-              {(['normal', 'fast', 'off'] as AnimationMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setAnimationMode(mode)}
-                  style={{
-                    padding: '2px 8px', fontSize: 11,
-                    background: settings.animationMode === mode ? '#4a9eff' : '#1e1e36',
-                    border: '1px solid #555', borderRadius: 4,
-                    color: '#fff', cursor: 'pointer',
-                  }}
-                >
-                  {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
-                </button>
-              ))}
+          <div className="cc-panel cc-scr-gear-pop">
+            <div className="cc-scr-eyebrow">Local Settings</div>
+            <div className="cc-scr-gear-row">
+              <span>Animations</span>
+              <div className="cc-scr-seg cc-scr-seg-sm">
+                {(['normal', 'fast', 'off'] as AnimationMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setAnimationMode(mode)}
+                    className={`cc-scr-seg-btn${settings.animationMode === mode ? ' is-active' : ''}`}
+                  >
+                    {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 12, color: '#aaa', minWidth: 75 }}>Tooltips:</span>
-              {([true, false] as const).map((on) => (
-                <button
-                  key={String(on)}
-                  onClick={() => setTooltips(on)}
-                  style={{
-                    padding: '2px 8px', fontSize: 11,
-                    background: settings.tooltips === on ? '#4a9eff' : '#1e1e36',
-                    border: '1px solid #555', borderRadius: 4,
-                    color: '#fff', cursor: 'pointer',
-                  }}
-                >
-                  {on ? 'On' : 'Off'}
-                </button>
-              ))}
+            <div className="cc-scr-gear-row">
+              <span>Tooltips</span>
+              <div className="cc-scr-seg cc-scr-seg-sm">
+                {([true, false] as const).map((on) => (
+                  <button
+                    key={String(on)}
+                    onClick={() => setTooltips(on)}
+                    className={`cc-scr-seg-btn${settings.tooltips === on ? ' is-active' : ''}`}
+                  >
+                    {on ? 'On' : 'Off'}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
       </div>
 
-      <div style={{ maxWidth: 600, margin: '0 auto', padding: 24 }}>
+      <div className="cc-scr-lobby-inner">
         {/* Header with lobby code */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <h1 style={{ marginBottom: 8 }}>Card Clash Lobby</h1>
-          <div style={{ position: 'relative', display: 'inline-block' }}>
-            <div style={{
-              fontSize: 48, fontWeight: 'bold', letterSpacing: 12,
-              fontFamily: 'monospace', color: '#4a9eff',
-              cursor: 'pointer',
-            }}
+        <header className="cc-scr-lobby-header cc-rise-in">
+          <div className="cc-scr-eyebrow">Card Clash</div>
+          <h1 className="cc-title cc-scr-lobby-title">Lobby</h1>
+          <div className="cc-scr-joincode-wrap">
+            <div className="cc-scr-joincode-label">Join Code</div>
+            <div
+              className="cc-scr-joincode"
               title="Click to copy"
               onClick={() => {
                 navigator.clipboard.writeText(lobbyCode);
@@ -497,51 +491,28 @@ export default function LobbyScreen({
                 setTimeout(() => setShowCopied(false), 2000);
               }}
             >
-              {lobbyCode}
+              {lobbyCode.split('').map((ch, i) => (
+                <span key={i} className="cc-scr-code-char">{ch}</span>
+              ))}
               {showCopied && (
-                <span style={{
-                  position: 'absolute',
-                  right: -60,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  fontSize: 13,
-                  color: '#4aff6a',
-                  fontFamily: 'sans-serif',
-                  letterSpacing: 0,
-                  fontWeight: 'normal',
-                  animation: 'copiedFade 2s ease-out forwards',
-                }}>
-                  Copied!
-                </span>
+                <span className="cc-scr-copied">Copied!</span>
               )}
             </div>
-            <style>{`
-              @keyframes copiedFade {
-                0%, 50% { opacity: 1; }
-                100% { opacity: 0; }
-              }
-              @keyframes pulse {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.5; }
-              }
-              .diff-short { display: none; }
-              @media (max-width: 480px) {
-                .diff-full { display: none; }
-                .diff-short { display: inline; }
-              }
-            `}</style>
+            <div className="cc-scr-joincode-hint">
+              Click code to copy &middot; Share with friends to join
+            </div>
+            <div className={`cc-scr-status ${statusClass}`}>
+              {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected'}
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
-            Click code to copy &middot; Share with friends to join
-          </div>
-          <div style={{ fontSize: 11, color: status === 'connected' ? '#4aff6a' : '#ff6666', marginTop: 4 }}>
-            {status === 'connected' ? '● Connected' : status === 'connecting' ? '◌ Connecting...' : '○ Disconnected'}
-          </div>
-        </div>
+        </header>
 
         {/* Players list */}
-        <div style={{ marginBottom: 24 }}>
-          <h3 style={{ marginBottom: 8 }}>Players ({players.length})</h3>
+        <section className="cc-panel cc-scr-section" style={{ animationDelay: '60ms' }}>
+          <div className="cc-scr-section-head">
+            <h3 className="cc-scr-section-title">Players ({players.length})</h3>
+            <span className="cc-scr-section-meta">{players.length} / 6 seats</span>
+          </div>
           {players.map((p, playerIdx) => {
             const isSelf = p.id === playerId;
             const canEditArchetype = isSelf || (isHost && p.is_cpu);
@@ -550,10 +521,19 @@ export default function LobbyScreen({
             const usedColors = new Set(players.map(pl => pl.color));
             const isDragging = dragIdx === playerIdx;
             const isDragOver = dragOverIdx === playerIdx;
+            const draggable = isHost && players.length > 1;
+            const seatClass = [
+              'cc-scr-seat',
+              isSelf ? 'is-self' : '',
+              draggable ? 'is-draggable' : '',
+              isDragging ? 'is-dragging' : '',
+              isDragOver && dragIdx !== playerIdx ? 'is-dragover' : '',
+              colorPickerFor === p.id ? 'has-popover' : '',
+            ].filter(Boolean).join(' ');
             return (
               <div
                 key={p.id}
-                draggable={isHost && players.length > 1}
+                draggable={draggable}
                 onDragStart={(e) => {
                   if (!isHost) return;
                   setDragIdx(playerIdx);
@@ -583,323 +563,224 @@ export default function LobbyScreen({
                   setDragIdx(null);
                   setDragOverIdx(null);
                 }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  marginBottom: 8, padding: '8px 12px',
-                  background: isSelf ? '#2a2a4e' : '#1e1e36',
-                  border: isDragOver && dragIdx !== playerIdx
-                    ? '2px solid #4a9eff'
-                    : isSelf ? '1px solid #4a9eff' : '1px solid #333',
-                  borderRadius: 8,
-                  opacity: isDragging ? 0.4 : 1,
-                  cursor: isHost && players.length > 1 ? 'grab' : 'default',
-                  transition: 'border 0.15s ease, opacity 0.15s ease',
-                }}
+                className={seatClass}
+                style={{ ['--seat-color' as string]: playerColor, animationDelay: `${80 + playerIdx * 50}ms` }}
               >
-                {isHost && players.length > 1 && (
-                  <span style={{
-                    color: '#555', fontSize: 14, cursor: 'grab',
-                    flexShrink: 0, userSelect: 'none', lineHeight: 1,
-                  }}>
-                    ⠿
-                  </span>
-                )}
-                <span style={{ position: 'relative', flexShrink: 0 }}>
-                  <span
-                    onClick={canEditColor ? () => setColorPickerFor(colorPickerFor === p.id ? null : p.id) : undefined}
-                    style={{
-                      display: 'inline-block',
-                      width: 16, height: 16, borderRadius: '50%',
-                      background: playerColor,
-                      border: '2px solid rgba(255,255,255,0.3)',
-                      cursor: canEditColor ? 'pointer' : 'default',
-                      transition: 'transform 0.15s ease',
-                      transform: colorPickerFor === p.id ? 'scale(1.2)' : undefined,
-                    }}
-                    title={canEditColor ? 'Change color' : undefined}
-                  />
-                  {colorPickerFor === p.id && (
-                    <div
-                      ref={colorPickerRef}
-                      style={{
-                        position: 'absolute',
-                        top: 24, left: -4,
-                        background: '#2a2a3e', border: '1px solid #555',
-                        borderRadius: 8, padding: 8,
-                        display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)',
-                        gap: 6, zIndex: 200,
-                        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-                      }}
-                    >
-                      {PLAYER_COLOR_OPTIONS.map((c) => {
-                        const taken = usedColors.has(c) && c !== p.color;
-                        return (
-                          <span
-                            key={c}
-                            onClick={taken ? undefined : () => handleChangeColor(p.id, c)}
-                            style={{
-                              position: 'relative',
-                              width: 24, height: 24, borderRadius: '50%',
-                              background: c,
-                              border: c === p.color ? '2px solid #fff' : '2px solid transparent',
-                              cursor: taken ? 'not-allowed' : 'pointer',
-                              opacity: taken ? 0.25 : 1,
-                              transition: 'transform 0.1s ease',
-                              overflow: 'hidden',
-                            }}
-                            onMouseEnter={(e) => { if (!taken) (e.target as HTMLElement).style.transform = 'scale(1.2)'; }}
-                            onMouseLeave={(e) => { (e.target as HTMLElement).style.transform = ''; }}
-                          >
-                            {taken && (
-                              <svg viewBox="0 0 24 24" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
-                                <line x1="5" y1="5" x2="19" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-                                <line x1="19" y1="5" x2="5" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-                              </svg>
-                            )}
-                          </span>
-                        );
-                      })}
-                    </div>
+                <div className="cc-scr-seat-main">
+                  {draggable && (
+                    <span className="cc-scr-seat-handle"><Icon name="grip" size={12} decorative /></span>
                   )}
-                </span>
-                {isSelf && !p.is_cpu ? (
-                  <input
-                    value={localName}
-                    maxLength={12}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setLocalName(val);
-                      if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current);
-                      nameDebounceRef.current = setTimeout(() => {
-                        nameDebounceRef.current = null;
-                        handleUpdateSelf({ name: val });
-                      }, 300);
-                    }}
-                    onBlur={() => {
-                      // Flush immediately on blur so the name is saved when clicking away
-                      if (nameDebounceRef.current) {
-                        clearTimeout(nameDebounceRef.current);
-                        nameDebounceRef.current = null;
-                        handleUpdateSelf({ name: localNameRef.current });
-                      }
-                    }}
-                    style={{
-                      flex: 1, minWidth: 0, padding: '6px 10px',
-                      background: '#2a2a3e', border: '1px solid #444',
-                      borderRadius: 6, color: '#fff', fontSize: 14,
-                    }}
-                  />
-                ) : (
-                  <span style={{ flex: 1, minWidth: 0, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {p.name}
-                    {p.is_cpu && p.cpu_difficulty && !isHost && (
-                      <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>
-                        ({p.cpu_difficulty})
-                      </span>
+                  <span className="cc-scr-seat-num">{playerIdx + 1}</span>
+                  <span style={{ position: 'relative', flexShrink: 0, display: 'inline-flex' }}>
+                    <span
+                      onClick={canEditColor ? () => setColorPickerFor(colorPickerFor === p.id ? null : p.id) : undefined}
+                      className={`cc-scr-color-chip${canEditColor ? ' is-editable' : ''}${colorPickerFor === p.id ? ' is-open' : ''}`}
+                      title={canEditColor ? 'Change color' : undefined}
+                    />
+                    {colorPickerFor === p.id && (
+                      <div ref={colorPickerRef} className="cc-panel cc-scr-color-pop">
+                        {PLAYER_COLOR_OPTIONS.map((c) => {
+                          const taken = usedColors.has(c) && c !== p.color;
+                          return (
+                            <span
+                              key={c}
+                              onClick={taken ? undefined : () => handleChangeColor(p.id, c)}
+                              className={`cc-scr-swatch${c === p.color ? ' is-current' : ''}${taken ? ' is-taken' : ''}`}
+                              style={{ background: c }}
+                            >
+                              {taken && (
+                                <svg viewBox="0 0 24 24" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+                                  <line x1="5" y1="5" x2="19" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                                  <line x1="19" y1="5" x2="5" y2="19" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                                </svg>
+                              )}
+                            </span>
+                          );
+                        })}
+                      </div>
                     )}
                   </span>
-                )}
-                {p.is_cpu && isHost && (
-                  <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
-                    {DIFFICULTIES.map((d) => (
-                      <Tooltip key={d.id} content={d.desc}>
-                        <button
-                          onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
-                          style={{
-                            padding: '2px 6px', fontSize: 10,
-                            background: p.cpu_difficulty === d.id ? '#3a3a6e' : '#2a2a3e',
-                            border: p.cpu_difficulty === d.id ? '1px solid #4a9eff' : '1px solid #444',
-                            borderRadius: 4, color: p.cpu_difficulty === d.id ? '#fff' : '#888',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <span className="diff-full">{d.name}</span>
-                          <span className="diff-short">{d.short}</span>
-                        </button>
-                      </Tooltip>
-                    ))}
-                  </div>
-                )}
-                {canEditArchetype ? (
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {ARCHETYPES.map((arch) => (
-                      <Tooltip key={arch.id} content={arch.desc}>
-                        <button
-                          onClick={() => {
-                            if (isSelf) handleUpdateSelf({ archetype: arch.id });
-                            else if (isHost && p.is_cpu) handleUpdatePlayer(p.id, { archetype: arch.id });
-                          }}
-                          style={{
-                            padding: '4px 8px',
-                            background: p.archetype === arch.id ? '#3a3a6e' : '#2a2a3e',
-                            border: p.archetype === arch.id ? '2px solid #4a9eff' : '1px solid #444',
-                            borderRadius: 6, color: '#fff', cursor: 'pointer', fontSize: 14,
-                          }}
-                        >
-                          {arch.icon}
-                        </button>
-                      </Tooltip>
-                    ))}
-                  </div>
-                ) : (
-                  (() => {
-                    const arch = ARCHETYPES.find(a => a.id === p.archetype);
-                    return arch ? (
-                      <span style={{
-                        padding: '4px 8px',
-                        background: '#3a3a6e',
-                        border: '1px solid #555',
-                        borderRadius: 6, fontSize: 13, color: '#ccc',
-                      }}>
-                        {arch.icon} {arch.name}
-                      </span>
-                    ) : null;
-                  })()
-                )}
-                {p.is_host && (
-                  <span style={{
-                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
-                    background: '#ffd700', color: '#000', fontWeight: 'bold',
-                  }}>
-                    HOST
-                  </span>
-                )}
-                {!p.has_returned && !p.is_cpu && (
-                  <span style={{
-                    fontSize: 9, padding: '2px 6px', borderRadius: 6,
-                    background: '#555', color: '#ffaa4a', fontWeight: 'bold',
-                    animation: 'pulse 2s ease-in-out infinite',
-                  }}>
-                    WAITING
-                  </span>
-                )}
-                {isHost && !p.is_host && (
-                  <button
-                    onClick={() => handleRemovePlayer(p.id)}
-                    style={{
-                      padding: '4px 8px', background: 'transparent',
-                      border: '1px solid #555', borderRadius: 4,
-                      color: '#ff6666', cursor: 'pointer', fontSize: 11,
-                    }}
-                  >
-                    ✕
-                  </button>
-                )}
+                  {isSelf && !p.is_cpu ? (
+                    <input
+                      className="cc-scr-input cc-scr-seat-name-input"
+                      value={localName}
+                      maxLength={12}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setLocalName(val);
+                        if (nameDebounceRef.current) clearTimeout(nameDebounceRef.current);
+                        nameDebounceRef.current = setTimeout(() => {
+                          nameDebounceRef.current = null;
+                          handleUpdateSelf({ name: val });
+                        }, 300);
+                      }}
+                      onBlur={() => {
+                        // Flush immediately on blur so the name is saved when clicking away
+                        if (nameDebounceRef.current) {
+                          clearTimeout(nameDebounceRef.current);
+                          nameDebounceRef.current = null;
+                          handleUpdateSelf({ name: localNameRef.current });
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span className="cc-scr-seat-name">
+                      {p.name}
+                      {p.is_cpu && p.cpu_difficulty && !isHost && (
+                        <span className="cc-scr-seat-sub">
+                          ({p.cpu_difficulty})
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </div>
+                <div className="cc-scr-seat-controls">
+                  {p.is_cpu && isHost && (
+                    <div className="cc-scr-seg cc-scr-seg-sm" style={{ flexShrink: 0 }}>
+                      {DIFFICULTIES.map((d) => (
+                        <Tooltip key={d.id} content={d.desc} wrapperStyle={{ display: 'flex' }}>
+                          <button
+                            onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
+                            className={`cc-scr-seg-btn${p.cpu_difficulty === d.id ? ' is-active' : ''}`}
+                          >
+                            <span className="cc-scr-diff-full">{d.name}</span>
+                            <span className="cc-scr-diff-short">{d.short}</span>
+                          </button>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  )}
+                  {canEditArchetype ? (
+                    <div className="cc-scr-arch-pick">
+                      {ARCHETYPES.map((arch) => (
+                        <Tooltip key={arch.id} content={arch.desc} wrapperStyle={{ display: 'flex' }}>
+                          <button
+                            onClick={() => {
+                              if (isSelf) handleUpdateSelf({ archetype: arch.id });
+                              else if (isHost && p.is_cpu) handleUpdatePlayer(p.id, { archetype: arch.id });
+                            }}
+                            className={`cc-scr-arch-btn${p.archetype === arch.id ? ' is-active' : ''}`}
+                          >
+                            <img src={arch.emblem} alt={arch.name} draggable={false} />
+                          </button>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  ) : (
+                    (() => {
+                      const arch = ARCHETYPES.find(a => a.id === p.archetype);
+                      return arch ? (
+                        <span className="cc-scr-arch-badge">
+                          <img src={arch.emblem} alt="" draggable={false} /> {arch.name}
+                        </span>
+                      ) : null;
+                    })()
+                  )}
+                  {p.is_host && (
+                    <span className="cc-scr-badge cc-scr-badge-host">
+                      HOST
+                    </span>
+                  )}
+                  {!p.has_returned && !p.is_cpu && (
+                    <span className="cc-scr-badge cc-scr-badge-waiting">
+                      WAITING
+                    </span>
+                  )}
+                  {isHost && !p.is_host && (
+                    <button
+                      onClick={() => handleRemovePlayer(p.id)}
+                      className="cc-scr-remove"
+                      aria-label={`Remove ${p.name}`}
+                    >
+                      <Icon name="close" size={11} decorative />
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
           {isHost && players.length < 6 && (
-            <div style={{ marginTop: 8 }}>
-              <button
-                onClick={() => handleAddCpu('vanguard')}
-                style={{
-                  width: '100%', padding: '8px', fontSize: 12,
-                  background: '#2a2a3e', border: '1px solid #444',
-                  borderRadius: 6, color: '#aaa', cursor: 'pointer',
-                }}
-              >
-                + CPU Player
-              </button>
-            </div>
+            <button
+              onClick={() => handleAddCpu('vanguard')}
+              className="cc-scr-add-seat"
+            >
+              + CPU Player
+            </button>
           )}
-        </div>
+        </section>
 
         {/* Game Settings (host editable, non-host read-only) */}
-        <div style={{ marginBottom: 24 }}>
-          <h3 style={{ marginBottom: 8 }}>Game Settings</h3>
+        <section className="cc-panel cc-scr-section" style={{ animationDelay: '120ms' }}>
+          <div className="cc-scr-section-head">
+            <h3 className="cc-scr-section-title">Game Settings</h3>
+            {!isHost && <span className="cc-scr-section-meta">Set by host</span>}
+          </div>
           {/* Settings rows — consistent style */}
-          <div style={{
-            display: 'flex', flexDirection: 'column', gap: 1,
-            background: '#333', borderRadius: 8,
-          }}>
+          <div className="cc-scr-rows">
             {/* Card Pack */}
-            <div style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-              borderRadius: '8px 8px 0 0',
-            }}>
-              <div style={{ width: 90, flexShrink: 0 }}>
-                <Tooltip content={(lobby.config.card_pack || '').startsWith('daily_')
-                  ? "This pack changes every day — a fresh selection of 10 shared market cards generated from today's date."
-                  : "Decides which cards will be available in the game."}>
-                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Card Pack</span>
+            <div className="cc-scr-row">
+              <div style={{ width: 'auto' }}>
+                <Tooltip content={cardPackLabel}>
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>Card Pack</span>
                 </Tooltip>
               </div>
-              {isHost && cardPacks.length > 0 ? (
-                <select
-                  value={(lobby.config.card_pack || 'everything').startsWith('daily_') ? 'daily' : (lobby.config.card_pack || 'everything')}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    handleConfigChange('card_pack', val === 'daily' ? getDailyPackId() : val);
+              <div className="cc-scr-row-controls" style={{ flex: 1, flexWrap: 'nowrap' }}>
+                {isHost && cardPacks.length > 0 ? (
+                  <select
+                    className="cc-scr-select"
+                    value={(lobby.config.card_pack || 'everything').startsWith('daily_') ? 'daily' : (lobby.config.card_pack || 'everything')}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      handleConfigChange('card_pack', val === 'daily' ? getDailyPackId() : val);
+                    }}
+                  >
+                    {cardPacks.map(p => {
+                      // Collapse all daily_* packs into a single "daily" option
+                      if (p.id.startsWith('daily_')) {
+                        return <option key="daily" value="daily" title={p.description}>{p.name}</option>;
+                      }
+                      return <option key={p.id} value={p.id} title={p.description}>{p.name}</option>;
+                    })}
+                  </select>
+                ) : (
+                  <strong className="cc-scr-row-value">
+                    {cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything') || (p.id.startsWith('daily_') && (lobby.config.card_pack || '').startsWith('daily_')))?.name || lobby.config.card_pack || 'Everything'}
+                  </strong>
+                )}
+                <button
+                  onClick={() => {
+                    // Reset any prior collapse memory so the lobby browser opens
+                    // in its canonical default (Neutral expanded, archetypes
+                    // collapsed) regardless of in-game interactions earlier.
+                    clearBrowserCollapseMemory();
+                    setShowPackBrowser(true);
                   }}
-                  style={{
-                    background: '#2a2a3e', color: '#fff', border: '1px solid #555',
-                    borderRadius: 4, padding: '0 8px', height: 26, fontSize: 13, cursor: 'pointer',
-                  }}
+                  className="cc-scr-chip-btn"
+                  style={{ flexShrink: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}
                 >
-                  {cardPacks.map(p => {
-                    // Collapse all daily_* packs into a single "daily" option
-                    if (p.id.startsWith('daily_')) {
-                      return <option key="daily" value="daily">{p.name}</option>;
-                    }
-                    return <option key={p.id} value={p.id}>{p.name}</option>;
-                  })}
-                </select>
-              ) : (
-                <strong style={{ color: '#fff' }}>
-                  {cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything') || (p.id.startsWith('daily_') && (lobby.config.card_pack || '').startsWith('daily_')))?.name || lobby.config.card_pack || 'Everything'}
-                </strong>
-              )}
-              <button
-                onClick={() => {
-                  // Reset any prior collapse memory so the lobby browser opens
-                  // in its canonical default (Neutral expanded, archetypes
-                  // collapsed) regardless of in-game interactions earlier.
-                  clearBrowserCollapseMemory();
-                  setShowPackBrowser(true);
-                }}
-                style={{
-                  fontSize: 13, padding: '0 8px', height: 26,
-                  background: '#2a2a3e', border: '1px solid #555',
-                  borderRadius: 4, color: '#aaa', cursor: 'pointer',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  flexShrink: 1, minWidth: 0,
-                }}
-              >
-                Cards
-              </button>
+                  Cards
+                </button>
+              </div>
             </div>
+            {selectedPackDescription && (
+              <div className="cc-scr-pack-desc">{selectedPackDescription}</div>
+            )}
 
             {/* Map Size */}
-            <div style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-              borderRadius: '0 0 8px 8px',
-            }}>
-              <div style={{ width: 90, flexShrink: 0 }}>
+            <div className="cc-scr-row">
+              <div>
                 <Tooltip content="The size of the hex grid.">
-                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Map Size</span>
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>Map Size</span>
                 </Tooltip>
               </div>
-              <div style={{ display: 'flex', gap: 4, flex: 1, minWidth: 0 }}>
+              <div className={`cc-scr-seg${isHost ? '' : ' is-readonly'}`} style={{ display: 'flex', flex: 1 }}>
                 {GRID_SIZES.map((size) => (
                   <Tooltip key={size.id} content={`${size.name}: ${size.tiles} tiles, ${size.players} players`}
-                    wrapperStyle={{ display: 'block', flex: '1 1 0', minWidth: 0 }}>
+                    wrapperStyle={{ display: 'flex', flex: '1 1 0', minWidth: 0 }}>
                     <button
                       onClick={() => isHost && handleConfigChange('grid_size', size.id)}
-                      style={{
-                        padding: '0 4px', height: 26, width: '100%',
-                        fontSize: 13,
-                        background: lobby.config.grid_size === size.id ? '#4a9eff' : '#2a2a3e',
-                        border: '1px solid #555',
-                        borderRadius: 4,
-                        color: '#fff',
-                        cursor: isHost ? 'pointer' : 'default',
-                        fontWeight: lobby.config.grid_size === size.id ? 'bold' : 'normal',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}
+                      className={`cc-scr-seg-btn${lobby.config.grid_size === size.id ? ' is-active' : ''}`}
+                      style={{ width: '100%', padding: '0 4px' }}
                     >
                       {isNarrow ? size.short : size.name}
                     </button>
@@ -909,22 +790,18 @@ export default function LobbyScreen({
             </div>
 
             {/* VP Target */}
-            <div style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-              borderRadius: '0 0 8px 8px',
-            }}>
-              <div style={{ width: 90, flexShrink: 0 }}>
+            <div className="cc-scr-row">
+              <div>
                 <Tooltip content="The number of Victory Points a player needs to win.">
-                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>VP Target</span>
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>VP Target</span>
                 </Tooltip>
               </div>
               {isHost ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="cc-scr-row-controls">
                   <input
                     type="number"
                     min={1}
+                    className="cc-scr-input cc-scr-input-num"
                     value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -932,71 +809,46 @@ export default function LobbyScreen({
                         handleConfigChange('vp_target', val);
                       }
                     }}
-                    style={{
-                      width: 52, padding: '0 6px', height: 26,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', fontSize: 13,
-                      fontWeight: 'bold', textAlign: 'center',
-                    }}
                   />
                   {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size, players.length) && (
                     <button
                       onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size, players.length))}
-                      style={{
-                        fontSize: 13, padding: '0 8px', height: 26,
-                        background: '#2a2a3e', border: '1px solid #555',
-                        borderRadius: 4, color: '#888', cursor: 'pointer',
-                      }}
+                      className="cc-scr-chip-btn"
                     >
                       Reset ({computeRecommendedVp(lobby.config.grid_size, players.length)})
                     </button>
                   )}
                 </div>
               ) : (
-                <strong style={{ color: '#fff' }}>
+                <strong className="cc-scr-row-value">
                   {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
                 </strong>
               )}
             </div>
-
           </div>
 
           {/* Advanced settings (collapsible) */}
           <button
             onClick={() => setShowAdvanced(prev => !prev)}
-            style={{
-              width: '100%', padding: '8px 12px', marginTop: 8,
-              background: '#1e1e36', border: '1px solid #333',
-              borderRadius: showAdvanced ? '8px 8px 0 0' : 8,
-              color: '#888', fontSize: 13, fontWeight: 'bold',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-              textAlign: 'left',
-            }}
+            className={`cc-scr-advanced-toggle${showAdvanced ? ' is-open' : ''}`}
           >
-            <span style={{ transform: showAdvanced ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', display: 'inline-block' }}>▶</span>
+            <span className="cc-scr-chevron"><Icon name="chevron" size={10} decorative /></span>
             Advanced
           </button>
           {showAdvanced && (
-          <div style={{
-            display: 'flex', flexDirection: 'column', gap: 1,
-            background: '#333', borderRadius: '0 0 8px 8px',
-          }}>
+          <div className="cc-scr-rows is-advanced">
             {/* Map Seed */}
-            <div ref={seedHistoryRef} style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-              position: 'relative',
-            }}>
-              <div style={{ width: 90, flexShrink: 0 }}>
+            <div ref={seedHistoryRef} className="cc-scr-row">
+              <div>
                 <Tooltip content="Determines the layout of the grid.">
-                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Map Seed</span>
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>Map Seed</span>
                 </Tooltip>
               </div>
               {isHost ? (
-                <>
+                <div className="cc-scr-row-controls">
                   <input
                     type="text"
+                    className="cc-scr-input cc-scr-input-mono"
                     value={lobby.config.map_seed || ''}
                     onChange={(e) => {
                       const val = e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 6);
@@ -1009,46 +861,28 @@ export default function LobbyScreen({
                       }
                     }}
                     maxLength={6}
-                    style={{
-                      width: 72, padding: '0 6px', height: 26,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', fontSize: 13,
-                      fontWeight: 'bold', textAlign: 'center',
-                      fontFamily: 'monospace', letterSpacing: 1,
-                    }}
+                    style={{ width: 84, textAlign: 'center' }}
                   />
                   <button
                     onClick={() => handleConfigChange('map_seed', generateClientSeed())}
                     title="Random seed"
-                    style={{
-                      fontSize: 14, padding: '0 6px', height: 26,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, cursor: 'pointer', lineHeight: 1,
-                    }}
+                    className="cc-scr-chip-btn"
+                    style={{ padding: '0 8px', fontSize: 15 }}
+                    aria-label="Random seed"
                   >
-                    🎲
+                    <Icon name="reroll" size={15} decorative />
                   </button>
                   {getRecentSeeds().length > 0 && (
                     <button
                       onClick={() => setShowSeedHistory(p => !p)}
                       title="Recent seeds"
-                      style={{
-                        fontSize: 13, padding: '0 8px', height: 26,
-                        background: showSeedHistory ? '#3a3a6e' : '#2a2a3e',
-                        border: '1px solid #555',
-                        borderRadius: 4, color: '#aaa', cursor: 'pointer',
-                      }}
+                      className={`cc-scr-chip-btn${showSeedHistory ? ' is-active' : ''}`}
                     >
-                      History ▾
+                      History<Icon name="chevron" size={9} decorative style={{ marginLeft: 4, transform: 'rotate(90deg)', verticalAlign: '-0.05em' }} />
                     </button>
                   )}
                   {showSeedHistory && (
-                    <div style={{
-                      position: 'absolute', top: '100%', left: 80, zIndex: 100,
-                      background: '#1a1a2e', border: '1px solid #555', borderRadius: 6,
-                      padding: 4, minWidth: 200, marginTop: 4,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                    }}>
+                    <div className="cc-panel cc-scr-dropdown">
                       {getRecentSeeds().map((s, i) => (
                         <div
                           key={i}
@@ -1057,40 +891,31 @@ export default function LobbyScreen({
                             handleConfigChange('grid_size', s.gridSize);
                             setShowSeedHistory(false);
                           }}
-                          style={{
-                            padding: '4px 8px', cursor: 'pointer', borderRadius: 4,
-                            display: 'flex', justifyContent: 'space-between', gap: 12,
-                            fontSize: 12,
-                          }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#2a2a4e')}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                          className="cc-scr-dropdown-item"
                         >
-                          <span style={{ fontFamily: 'monospace', color: '#fff', fontWeight: 'bold' }}>{s.seed}</span>
-                          <span style={{ color: '#666' }}>{s.gridSize} · {formatRelativeDate(s.date)}</span>
+                          <span style={{ fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--cc-text)', fontWeight: 'bold' }}>{s.seed}</span>
+                          <span style={{ color: 'var(--cc-text-faint)' }}>{s.gridSize} · {formatRelativeDate(s.date)}</span>
                         </div>
                       ))}
                     </div>
                   )}
-                </>
+                </div>
               ) : (
-                <span style={{ fontFamily: 'monospace', color: '#fff', fontWeight: 'bold', letterSpacing: 1 }}>
+                <span className="cc-scr-row-value" style={{ fontFamily: 'ui-monospace, Menlo, monospace', letterSpacing: 1 }}>
                   {lobby.config.map_seed || '------'}
                 </span>
               )}
             </div>
 
             {/* Round Limit */}
-            <div style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <span>⏱ Round Limit:</span>
+            <div className="cc-scr-row">
+              <span className="cc-scr-row-label" style={{ cursor: 'default' }}>Round Limit</span>
               {isHost ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="cc-scr-row-controls">
                   <input
                     type="number"
                     min={5}
+                    className="cc-scr-input cc-scr-input-num"
                     value={lobby.config.max_rounds ?? 20}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -1098,51 +923,38 @@ export default function LobbyScreen({
                         handleConfigChange('max_rounds', val);
                       }
                     }}
-                    style={{
-                      width: 52, padding: '0 6px', height: 26,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', fontSize: 13,
-                      fontWeight: 'bold', textAlign: 'center',
-                    }}
                   />
                   {lobby.config.max_rounds !== 20 && (
                     <button
                       onClick={() => handleConfigChange('max_rounds', 20)}
-                      style={{
-                        fontSize: 13, padding: '0 8px', height: 26,
-                        background: '#2a2a3e', border: '1px solid #555',
-                        borderRadius: 4, color: '#888', cursor: 'pointer',
-                      }}
+                      className="cc-scr-chip-btn"
                     >
                       Reset (20)
                     </button>
                   )}
-                  <span style={{ fontSize: 11, color: '#666' }}>(recommended: 20)</span>
+                  <span className="cc-scr-row-hint">(recommended: 20)</span>
                 </div>
               ) : (
-                <strong style={{ color: '#fff' }}>
+                <strong className="cc-scr-row-value">
                   {lobby.config.max_rounds ?? 20}
                 </strong>
               )}
             </div>
 
             {/* Actions */}
-            <div style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}>
-              <div style={{ width: 90, flexShrink: 0 }}>
+            <div className="cc-scr-row">
+              <div>
                 <Tooltip content="The number of actions each player starts their round with.">
-                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Actions</span>
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>Actions</span>
                 </Tooltip>
               </div>
               {isHost ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="cc-scr-row-controls">
                   <input
                     type="number"
                     min={1}
                     max={10}
+                    className="cc-scr-input cc-scr-input-num"
                     value={lobby.config.granted_actions ?? 5}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -1150,51 +962,37 @@ export default function LobbyScreen({
                         handleConfigChange('granted_actions', val);
                       }
                     }}
-                    style={{
-                      width: 52, padding: '0 6px', height: 26,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', fontSize: 13,
-                      fontWeight: 'bold', textAlign: 'center',
-                    }}
                   />
                   {lobby.config.granted_actions !== null && lobby.config.granted_actions !== 5 && (
                     <button
                       onClick={() => handleConfigChange('granted_actions', 5)}
-                      style={{
-                        fontSize: 13, padding: '0 8px', height: 26,
-                        background: '#2a2a3e', border: '1px solid #555',
-                        borderRadius: 4, color: '#888', cursor: 'pointer',
-                      }}
+                      className="cc-scr-chip-btn"
                     >
                       Reset (5)
                     </button>
                   )}
                 </div>
               ) : (
-                <strong style={{ color: '#fff' }}>
+                <strong className="cc-scr-row-value">
                   {lobby.config.granted_actions ?? 5}
                 </strong>
               )}
             </div>
 
             {/* Archetype Market Size */}
-            <div style={{
-              fontSize: 13, color: '#aaa',
-              padding: '8px 12px', background: '#1e1e36',
-              display: 'flex', alignItems: 'center', gap: 8,
-              borderRadius: !isHost ? '0 0 8px 8px' : undefined,
-            }}>
-              <div style={{ width: 90, flexShrink: 0 }}>
+            <div className="cc-scr-row">
+              <div>
                 <Tooltip content="The number of archetype cards available to buy each round.">
-                  <span style={{ color: '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Market Size</span>
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>Market Size</span>
                 </Tooltip>
               </div>
               {isHost ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div className="cc-scr-row-controls">
                   <input
                     type="number"
                     min={1}
                     max={10}
+                    className="cc-scr-input cc-scr-input-num"
                     value={lobby.config.archetype_market_size ?? 5}
                     onChange={(e) => {
                       const val = parseInt(e.target.value, 10);
@@ -1202,28 +1000,18 @@ export default function LobbyScreen({
                         handleConfigChange('archetype_market_size', val);
                       }
                     }}
-                    style={{
-                      width: 52, padding: '0 6px', height: 26,
-                      background: '#2a2a3e', border: '1px solid #555',
-                      borderRadius: 4, color: '#fff', fontSize: 13,
-                      fontWeight: 'bold', textAlign: 'center',
-                    }}
                   />
                   {(lobby.config.archetype_market_size ?? 5) !== 5 && (
                     <button
                       onClick={() => handleConfigChange('archetype_market_size', 5)}
-                      style={{
-                        fontSize: 13, padding: '0 8px', height: 26,
-                        background: '#2a2a3e', border: '1px solid #555',
-                        borderRadius: 4, color: '#888', cursor: 'pointer',
-                      }}
+                      className="cc-scr-chip-btn"
                     >
                       Reset (5)
                     </button>
                   )}
                 </div>
               ) : (
-                <strong style={{ color: '#fff' }}>
+                <strong className="cc-scr-row-value">
                   {lobby.config.archetype_market_size ?? 5}
                 </strong>
               )}
@@ -1231,85 +1019,56 @@ export default function LobbyScreen({
 
             {/* Test Mode (host only) */}
             {isHost && (
-              <div style={{
-                fontSize: 13, color: '#aaa',
-                padding: '8px 12px', background: '#1e1e36',
-                display: 'flex', alignItems: 'center', gap: 8,
-                borderRadius: '0 0 8px 8px',
-              }}>
-                <div style={{ width: 90, flexShrink: 0 }}>
+              <div className="cc-scr-row">
+                <div>
                   <Tooltip content="Enables game-breaking settings for testing.">
-                    <span style={{ color: lobby.config.test_mode ? '#ffaa4a' : '#888', fontSize: 13, fontWeight: 'bold', cursor: 'help' }}>Test Mode</span>
+                    <span className={`cc-scr-row-label${lobby.config.test_mode ? ' is-warn' : ''}`} style={{ display: 'block' }}>Test Mode</span>
                   </Tooltip>
                 </div>
-                {([false, true] as const).map((on) => (
-                  <button
-                    key={String(on)}
-                    onClick={() => handleConfigChange('test_mode', on)}
-                    style={{
-                      padding: '0 8px', height: 26,
-                      fontSize: 13,
-                      background: lobby.config.test_mode === on ? (on ? '#ffaa4a' : '#4a9eff') : '#2a2a3e',
-                      border: '1px solid #555',
-                      borderRadius: 4,
-                      color: lobby.config.test_mode === on ? (on ? '#000' : '#fff') : '#fff',
-                      cursor: 'pointer',
-                      fontWeight: lobby.config.test_mode === on ? 'bold' : 'normal',
-                    }}
-                  >
-                    {on ? 'On' : 'Off'}
-                  </button>
-                ))}
+                <div className="cc-scr-seg">
+                  {([false, true] as const).map((on) => (
+                    <button
+                      key={String(on)}
+                      onClick={() => handleConfigChange('test_mode', on)}
+                      className={`cc-scr-seg-btn${on ? ' is-warn' : ''}${lobby.config.test_mode === on ? ' is-active' : ''}`}
+                    >
+                      {on ? 'On' : 'Off'}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
           )}
-        </div>
+        </section>
 
         {/* Error display */}
         {error && (
-          <div style={{ textAlign: 'center', color: '#ff4a4a', padding: 12, marginBottom: 12 }}>
+          <div className="cc-scr-error" style={{ marginBottom: 12 }}>
             {error}
           </div>
         )}
 
         {/* Countdown overlay */}
         {countdown !== null && (
-          <div style={{
-            position: 'fixed', inset: 0,
-            background: 'rgba(0, 0, 0, 0.7)',
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center',
-            zIndex: 1000,
-          }}>
-            <div style={{ fontSize: 72, fontWeight: 'bold', color: '#4a9eff' }}>
+          <div className="cc-scr-countdown">
+            <div key={countdown} className="cc-title cc-scr-countdown-num">
               {countdown}
             </div>
-            <div style={{
-              width: 300, height: 8, background: '#333',
-              borderRadius: 4, overflow: 'hidden', marginTop: 16,
-            }}>
-              <div style={{
-                width: `${progressAnim * 100}%`, height: '100%',
-                background: '#4a9eff', borderRadius: 4,
-                transition: 'width 30ms linear',
-              }} />
+            <div className="cc-scr-countdown-bar">
+              <div className="cc-scr-countdown-fill" style={{ width: `${progressAnim * 100}%` }} />
             </div>
-            <div style={{ fontSize: 14, color: '#aaa', marginTop: 12 }}>
+            <div className="cc-scr-countdown-label">
               Game starting...
             </div>
           </div>
         )}
 
         {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="cc-scr-lobby-actions">
           <button
             onClick={handleLeave}
-            style={{
-              flex: 1, padding: 14, background: '#2a2a3e',
-              border: '1px solid #555', borderRadius: 8,
-              color: '#fff', fontSize: 14, cursor: 'pointer',
-            }}
+            className="cc-btn-secondary"
           >
             {isHost ? 'Close Lobby' : 'Leave Lobby'}
           </button>
@@ -1321,13 +1080,7 @@ export default function LobbyScreen({
                 onClick={handleStart}
                 disabled={cantStart}
                 title={waitingForReturn ? 'Waiting for all players to return' : undefined}
-                style={{
-                  flex: 2, padding: 14,
-                  background: cantStart ? '#333' : lobby.config.test_mode ? '#ffaa4a' : '#4a9eff',
-                  border: 'none', borderRadius: 8,
-                  color: '#fff', fontSize: 16, fontWeight: 'bold',
-                  cursor: cantStart ? 'not-allowed' : 'pointer',
-                }}
+                className={`cc-btn-primary${lobby.config.test_mode ? ' cc-scr-btn-test' : ''}`}
               >
                 {starting ? 'Starting...' : waitingForReturn ? 'Waiting for Players...' : lobby.config.test_mode ? 'Start Test Game' : 'Start Game'}
               </button>
@@ -1337,7 +1090,7 @@ export default function LobbyScreen({
 
         {/* Non-host waiting message */}
         {!isHost && (
-          <div style={{ textAlign: 'center', color: '#666', fontSize: 13, marginTop: 12 }}>
+          <div className="cc-scr-waiting-note">
             Waiting for host to start the game...
           </div>
         )}

@@ -5,9 +5,10 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from app.game_engine.cards import Archetype, CardType, Card
+from app.game_engine.effects import EffectType
 
 
 @dataclass
@@ -25,11 +26,14 @@ class CardPack:
     shared_card_ids: Optional[list[str]] = None
     archetype_card_ids: Optional[dict[str, list[str]]] = None
     starter_overrides: Optional[dict[str, Any]] = None
+    # One-line, player-facing summary shown in the lobby's pack picker.
+    description: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
+            "description": self.description,
             "shared_card_ids": self.shared_card_ids,
             "archetype_card_ids": self.archetype_card_ids,
         }
@@ -39,87 +43,98 @@ CARD_PACKS: dict[str, CardPack] = {
     "everything": CardPack(
         id="everything",
         name="Everything",
+        description="Every shared market card.",
         shared_card_ids=None,
         archetype_card_ids=None,
     ),
 
     # ── Full packs (10 neutral market cards + all archetype cards) ──────
+    # Comment costs/effects below mirror data/cards_neutral.yaml — keep them
+    # in sync when card numbers change. Power 2 takes a standard VP hex and
+    # power 3 a premium one (a tie against neutral intrinsic defense goes to
+    # the attacker).
 
     "iron_and_coin": CardPack(
         id="iron_and_coin",
         name="Iron & Coin",
+        description="Economy fuels combat: big money, bigger claims.",
         # Theme: Economy fuels combat. Resource generation + strong claims.
         # Synergies:
-        #   1. Tax Collector + VP tile claims → snowball resources into Siege Tower / Mercenary
-        #   2. Dividends + Prospector/Tithe → compound resource generation
-        #   3. Mobilize + cheap cards (Levy, Cull) → action chaining into big plays
+        #   1. Tax Collector + held VP hexes → 3 res per connected hex funds Siege Tower / Mercenary
+        #   2. Dividends + Prospector/Tithe → bank resources, then Dividends pays 1 per 2 held
+        #   3. Mercenary + Tax Collector / Tithe → the economy covers Mercenary's 2 res play cost every turn
         #   4. Vanguard War Tithe / Plunder + Mercenary → claims pay for themselves
-        #   5. Swarm Scavenge + Dividends → resource engine even at 0 actions
-        #   6. Fortress Supply Line + Dividends → economy doubling
-        #   7. Salvage + Mercenary / Tax Collector → recur your best money card
+        #   5. Salvage + Mercenary / Tax Collector → recur your best claim or money card
+        #   6. Vanguard Arms Dealer + Mercenary → scrap a spare Mercenary for 3 res and an action
+        #   7. Fortress Supply Line + Dividends → cheaper buys while the bank compounds
+        #   8. Militia + wide territory → power 4 when surrounded; Swarm's way into VP hexes
         shared_card_ids=[
-            "neutral_reduce",          # Cull: deck thinning (1💰)
-            "neutral_recruit",         # Levy: cheap claim + action (2💰)
-            "neutral_prospector",      # Prospector: 2 resources (2💰)
-            "neutral_war_bonds",       # Tithe: 2 resources + 1 action (3💰)
-            "neutral_salvage",         # Salvage: recur a card from discard (3💰)
-            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
-            "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
-            "neutral_dividends",       # Dividends: resources scale with wealth (4💰)
-            "neutral_mobilize",        # Mobilize: actions per cards played, trash (4💰)
-            "neutral_siege_tower",     # Siege Tower: power 6 finisher (8💰)
+            "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
+            "neutral_recruit",         # Levy: Claim P1 + 1 action (cost 2)
+            "neutral_prospector",      # Prospector: +4 resources (cost 3)
+            "neutral_war_bonds",       # Tithe: +2 resources, draw 1, +1 action (cost 3)
+            "neutral_salvage",         # Salvage: discard → hand, 1 card (cost 3)
+            "neutral_mercenary",       # Mercenary: Claim P3, pay 2 res to play (cost 3)
+            "neutral_tax_collector",   # Tax Collector: +3 resources per connected VP hex (cost 3)
+            "neutral_dividends",       # Dividends: +1 resource per 2 held (cost 4)
+            "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
+            "neutral_siege_tower",     # Siege Tower: Claim P6, 2 actions, unique (cost 9)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
     "frontier_tactics": CardPack(
         id="frontier_tactics",
         name="Frontier Tactics",
+        description="Board position: bridge, surround, and seize territory.",
         # Theme: Board position and strategic territory control.
         # Synergies:
-        #   1. Road Builder + Eminent Domain → claim disconnected tiles, bridge them together
-        #   2. Diplomat + Land Grant → flood VP passives; Swarm Colony rewards disconnected groups
-        #   3. Cease Fire + Fortress defensive play → draw cards while turtling
-        #   4. Surveyor + archetype market → find key archetype cards faster
-        #   5. Palisade + Barricade → cheap action-neutral defense to hold newly bridged tiles
-        #   6. Palisade (action chain) → set up bigger plays while still fortifying
-        #   7. Supply Depot + Cease Fire → stack next-turn value while playing defensively
+        #   1. Eminent Domain + Road Builder → drop a remote tile, then bridge to it at power 5
+        #   2. Swarm Proliferate / Vanguard Flanking Strike + Road Builder → any gap you leave becomes a power-5 bridge
+        #   3. Diplomat → you bank 2 Land Grants (opponents 1); pairs with Land Grant for a VP push
+        #   4. Swarm Colony vs Road Builder → choose: keep groups apart for Colony VP or bridge them for connected VP hexes
+        #   5. Militia + Road Builder → surround a hex for power 4, or bridge your groups for power 5
+        #   6. Palisade + Barricade → round defense on top of permanent defense to hold a bridged VP hex
+        #   7. Surveyor → 2 free re-rolls to dig for key archetype cards
         shared_card_ids=[
-            "neutral_reduce",          # Cull: deck thinning (2💰)
-            "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
-            "neutral_road_builder",    # Road Builder: bridge territory (2💰)
-            "neutral_palisade",        # Palisade: +1 def + 1 action (2💰)
-            "neutral_cease_fire",      # Cease Fire: draw if peaceful (3💰)
-            "neutral_fortified_post",  # Barricade: +2 permanent defense (5💰)
-            "neutral_diplomat",        # Diplomat: land grants for all (3💰)
-            "neutral_land_grant",      # Land Grant: +1 VP passive (5💰)
-            "neutral_eminent_domain",  # Eminent Domain: claim any neutral (5💰)
-            "neutral_supply_depot",    # Supply Depot: next-turn draw + resource (6💰)
+            "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
+            "neutral_surveyor",        # Surveyor: 2 free archetype re-rolls + 1 action (cost 2)
+            "neutral_road_builder",    # Road Builder: Claim P1, P5 if it bridges your groups (cost 3)
+            "neutral_palisade",        # Palisade: +3 defense this round, draw 1 (cost 3)
+            "neutral_cease_fire",      # Cease Fire: draw 2 next round if you captured no enemy tile (cost 3)
+            "neutral_fortified_post",  # Barricade: +2 permanent defense (cost 5)
+            "neutral_diplomat",        # Diplomat: you get 2 Land Grants, opponents 1, trashed (cost 5)
+            "neutral_land_grant",      # Land Grant: worth 1 VP, dead card (cost 7)
+            "neutral_eminent_domain",  # Eminent Domain: Claim P2 on any neutral tile, trashed (cost 5)
+            "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
     "shock_and_awe": CardPack(
         id="shock_and_awe",
         name="Shock & Awe",
+        description="Aggressive tempo and overwhelming force.",
         # Theme: Aggressive tempo, disruption, and overwhelming force.
         # Synergies:
-        #   1. Rally Cry (stackable all claims) + Coordinated Push / Dog Pile → massive tile stacks
-        #   2. Ambush + aggressive claiming → punish contested tiles with bonus power
-        #   3. Sabotage + Swarm Infestation/Plague → multi-axis opponent disruption
-        #   4. Forced March + Militia → actions for big territorial claims
-        #   5. Conqueror + Siege Tower → two finisher options: anti-defense vs raw power
-        #   6. Forced March / Mobilize → fuel the 2-action cost of Conqueror / Siege Tower
-        #   7. Spyglass + action-hungry archetypes → cheap draw when hand is low
+        #   1. Rally Cry + Coordinated Push / Dog Pile / Militia → stack every claim on one hex;
+        #      Rally Cry+ adds +1 power to each of your next 5 claims
+        #   2. Ambush → power 4 against any opponent-owned or contested tile; punishes their pushes
+        #   3. Sabotage + Swarm Infestation / Plague → multi-axis disruption of the leader
+        #   4. Forced March → covers the 2-action cost of Conqueror / Siege Tower on the same turn
+        #   5. Conqueror (ignores round defense) vs Siege Tower (raw P6) → one of each per player (unique)
+        #   6. Militia + wide territory → power 4 when you surround the target; Swarm's natural hex breaker
+        #   7. Levy → cheap chaining claim; Levy+ is power 2, enough for a standard VP hex
+        #   8. Watchtower → +2 defense that refunds its action; holds a hex without losing tempo
         shared_card_ids=[
-            "neutral_reduce",          # Cull: deck thinning (2💰)
-            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
-            "neutral_recruit",         # Levy: cheap claim + action (2💰)
-            "neutral_militia",         # Militia: territorial power claim (3💰)
-            "neutral_forced_march",    # Forced March: 2 actions (3💰)
-            "neutral_ambush",          # Ambush: contested power boost (4💰)
-            "neutral_conqueror",       # Conqueror: P5 anti-defense, 2 actions (7💰)
-            "neutral_rally_cry",       # Rally Cry: all claims stackable (5💰)
-            "neutral_sabotage",        # Sabotage: opponent draws fewer (5💰)
-            "neutral_siege_tower",     # Siege Tower: power 6 finisher (8💰)
+            "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
+            "neutral_watchtower",      # Watchtower: +2 defense this round, +1 action (cost 2)
+            "neutral_recruit",         # Levy: Claim P1 + 1 action (cost 2)
+            "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
+            "neutral_forced_march",    # Forced March: +2 actions, others +1 next round (cost 3)
+            "neutral_ambush",          # Ambush: Claim P2, P4 vs owned/contested tiles (cost 4)
+            "neutral_conqueror",       # Conqueror: Claim P5, ignores round defense, 2 actions, unique (cost 7)
+            "neutral_rally_cry",       # Rally Cry: claims in hand gain Stackable, trashed (cost 5)
+            "neutral_sabotage",        # Sabotage: target draws 1 fewer next round (cost 4)
+            "neutral_siege_tower",     # Siege Tower: Claim P6, 2 actions, unique (cost 9)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -127,29 +142,31 @@ CARD_PACKS: dict[str, CardPack] = {
     "grand_strategy": CardPack(
         id="grand_strategy",
         name="Grand Strategy",
+        description="Draw, cycle, and sculpt your deck into huge turns.",
         # Theme: Engine & sculpt. Draw, cycle, and manipulate your deck so
         # every round plays a long chain of archetype cards into the perfect
         # finish. The only pack anchored by Muster, Caravan, and Foresight.
+        # Militia is the only shared Claim: the payoff for a long chained turn.
         # Synergies:
-        #   1. Cull + Sift + Cartographer → shape the top of the deck, guaranteeing key draws
-        #   2. Muster + Caravan → generate actions AND cards, chain huge turns
-        #   3. Foresight → on a big turn, pull 2–3 key archetype cards straight into hand
-        #   4. Forced March + Mobilize → two different action multipliers for turn-by-turn flex
-        #   5. Supply Depot + sculpt tools → invest in a front-loaded next round
-        #   6. Spyglass → cheap cantrip that becomes a cantrip-plus-action when drawing down
-        #   7. Caravan (discard 1) + Salvage (not in pack) forces players to lean on
-        #      Redemption-style archetype trash recovery instead — keeps the pack lean
+        #   1. Cull + Sift + Cartographer → thin, then stack the top of the deck for key draws
+        #   2. Muster + Caravan → both draw and gain actions; chain them into huge turns
+        #   3. Foresight → pull 2 key archetype cards (claims, finishers) straight into hand
+        #   4. Mobilize last in a long chain → turns a big turn's card count into actions
+        #   5. Supply Depot + sculpt tools → front-load next round with 2 extra draws
+        #   6. Spyglass → cheap cantrip; gains an action once your hand is drawn down
+        #   7. Fortress Grand Strategy / Swarm Chatter → archetype draw engines stack with the shared ones
+        #   8. Long chain + Militia → cash a big turn in on the board (power 4 when surrounded)
         shared_card_ids=[
-            "neutral_reduce",          # Cull: deck thinning (1💰)
-            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
-            "neutral_cartographer",    # Cartographer: discard 2, draw 2 (3💰)
-            "neutral_sift",            # Sift: filter top of draw pile (3💰)
-            "neutral_forced_march",    # Forced March: 2 actions (3💰)
-            "neutral_conscription",    # Muster: draw 2/3 + 1 action (4💰)
-            "neutral_caravan",         # Caravan: discard 1 + 2 actions (4💰)
-            "neutral_mobilize",        # Mobilize: actions per cards played, trash (4💰)
-            "neutral_supply_depot",    # Supply Depot: next-turn draw + resource (6💰)
-            "neutral_foresight",       # Foresight: pick top-of-deck cards (7💰)
+            "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
+            "neutral_spyglass",        # Spyglass: draw 1, +1 action if hand ≤ 3 (cost 1)
+            "neutral_cartographer",    # Cartographer: discard 2, draw 2, +1 action (cost 3)
+            "neutral_sift",            # Sift: look at top 2, keep or discard, +1 action (cost 2)
+            "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
+            "neutral_conscription",    # Muster: draw 2, +1 action (cost 4)
+            "neutral_caravan",         # Caravan: discard 1, draw 1, +2 actions (cost 4)
+            "neutral_mobilize",        # Mobilize: +1 action per card played (max 3), trashed (cost 4)
+            "neutral_supply_depot",    # Supply Depot: next round draw 2 + 3 resources (cost 6)
+            "neutral_foresight",       # Foresight: take up to 2 cards from your draw pile (cost 7)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -157,27 +174,29 @@ CARD_PACKS: dict[str, CardPack] = {
     "second_wind": CardPack(
         id="second_wind",
         name="Second Wind",
+        description="Risk, recur, rebuild: bring your best cards back.",
         # Theme: Risk, recur, rebuild. Commit big cards, absorb losses, and
         # return your best plays from discard and trash. The only pack
         # anchored by Redemption alongside Salvage.
         # Synergies:
-        #   1. Mobilize (trash) + Redemption → sacrifice Mobilize for a big turn, then bring it back
-        #   2. Siege Tower / Conqueror / Mercenary + Salvage → recur your premium claim
-        #   3. Ambush + contested tiles → lean into fights, reward bravery
-        #   4. Watchtower + Spyglass → draw fuel to find the pieces after a recurring turn
-        #   5. Cull + Redemption → intentionally trash a finisher to free a slot, then recur it
-        #   6. Spyglass (conditional action) → thrives when your hand has been recycled thin
+        #   1. Vanguard Spearhead + Redemption → a second P8 strike after Spearhead trashes itself
+        #   2. Swarm Consecrate + Redemption → raise a VP hex's value twice
+        #   3. Mobilize (trashed) + Redemption → sacrifice it for a big turn, then bring it back
+        #   4. Siege Tower / Conqueror / Mercenary + Salvage → recur your premium claim (unique doesn't stop recursion)
+        #   5. Ambush → lean into fights; power 4 against any opponent-owned or contested tile
+        #   6. Swarm Hatching Grounds / Fortress Master Engineer + Redemption → seed a second batch of cards
+        #   7. Watchtower → +2 defense for free (gains its action back) to hold what you recur into
         shared_card_ids=[
-            "neutral_reduce",          # Cull: deck thinning (1💰)
-            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
-            "neutral_salvage",         # Salvage: recur a card from discard (3💰)
-            "neutral_watchtower",      # Watchtower: +2 defense + draw + 1 action (3💰)
-            "neutral_ambush",          # Ambush: contested power boost (4💰)
-            "neutral_mobilize",        # Mobilize: actions per cards played, trash (4💰)
-            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
-            "neutral_redemption",      # Redemption: recur a card from trash, trash self (5💰)
-            "neutral_conqueror",       # Conqueror: P5 anti-defense, 2 actions (7💰)
-            "neutral_siege_tower",     # Siege Tower: power 6 finisher (8💰)
+            "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
+            "neutral_spyglass",        # Spyglass: draw 1, +1 action if hand ≤ 3 (cost 1)
+            "neutral_salvage",         # Salvage: discard → hand, 1 card (cost 3)
+            "neutral_watchtower",      # Watchtower: +2 defense this round, +1 action (cost 2)
+            "neutral_ambush",          # Ambush: Claim P2, P4 vs owned/contested tiles (cost 4)
+            "neutral_mobilize",        # Mobilize: +1 action per card played (max 3), trashed (cost 4)
+            "neutral_mercenary",       # Mercenary: Claim P3, pay 2 res to play (cost 3)
+            "neutral_redemption",      # Redemption: trash → hand, 1 card; trashes itself (cost 5)
+            "neutral_conqueror",       # Conqueror: Claim P5, ignores round defense, 2 actions, unique (cost 7)
+            "neutral_siege_tower",     # Siege Tower: Claim P6, 2 actions, unique (cost 9)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -185,29 +204,30 @@ CARD_PACKS: dict[str, CardPack] = {
     "hold_the_line": CardPack(
         id="hold_the_line",
         name="Hold the Line",
+        description="Slow and defensive, no shared claims. Favors Fortress.",
         # Theme: Pure defense — fortify, turtle, and out-tempo opponents through attrition.
         # No neutral Claim cards: rely on Explore (starter) and your archetype's claims to expand,
-        # while the neutral market is dedicated to keeping what you take.
+        # while the neutral market is dedicated to keeping what you take. Favors Fortress.
         # Synergies:
-        #   1. Palisade + Watchtower + Moat → layered defense across multiple tiles, action-neutral
-        #   2. Barricade (permanent) + Watchtower / Moat (round) → temporary stacks on top of permanent
-        #   3. Cease Fire + defensive play → constant card draw without ever attacking
-        #   4. Tax Collector + holding VP tiles → snowball economy from territory you defend
-        #   5. Diplomat → seeds Land Grants, rewards turtle strategies that just sit on VP
-        #   6. Supply Depot + slow play → invest an action now for a fully-loaded next round
-        #   7. Surveyor + archetype defense cards → find Fortify / Iron Wall / Stronghold faster
-        #   8. Cull → thin starter Explores for tighter draws of defense cards
+        #   1. Palisade + Watchtower + Moat → layered round defense across several tiles
+        #   2. Barricade (permanent) + round defense → stacks that big claims can't break
+        #   3. Cease Fire → steady card draw for a player who never attacks
+        #   4. Tax Collector + held VP hexes → 3 res per connected hex; snowballs a defended lead
+        #   5. Diplomat → you bank 2 Land Grants (opponents 1); rewards sitting on VP
+        #   6. Supply Depot + slow play → invest an action now for a loaded next round
+        #   7. Surveyor + archetype defense → dig for Fortify / Iron Wall / Stronghold
+        #   8. Fortress Watchful Keep / Quartermaster → paid off by a hand full of defense
         shared_card_ids=[
-            "neutral_reduce",          # Cull: deck thinning (2💰)
-            "neutral_palisade",        # Palisade: +1 defense + 1 action (2💰)
-            "neutral_surveyor",        # Surveyor: free market re-roll (2💰)
-            "neutral_watchtower",      # Watchtower: +2 defense + draw (3💰)
-            "neutral_cease_fire",      # Cease Fire: draw if peaceful (3💰)
-            "neutral_diplomat",        # Diplomat: land grants for all (3💰)
-            "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
-            "neutral_fortified_post",  # Barricade: +2 permanent defense (5💰)
-            "neutral_moat",            # Moat: +2 defense on 3 tiles + 1 action (6💰)
-            "neutral_supply_depot",    # Supply Depot: next-turn draw + resource (6💰)
+            "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
+            "neutral_palisade",        # Palisade: +3 defense this round, draw 1 (cost 3)
+            "neutral_surveyor",        # Surveyor: 2 free archetype re-rolls + 1 action (cost 2)
+            "neutral_watchtower",      # Watchtower: +2 defense this round, +1 action (cost 2)
+            "neutral_cease_fire",      # Cease Fire: draw 2 next round if you captured no enemy tile (cost 3)
+            "neutral_diplomat",        # Diplomat: you get 2 Land Grants, opponents 1, trashed (cost 5)
+            "neutral_tax_collector",   # Tax Collector: +3 resources per connected VP hex (cost 3)
+            "neutral_fortified_post",  # Barricade: +2 permanent defense (cost 5)
+            "neutral_moat",            # Moat: +2 defense on 3 tiles this round, +1 action (cost 4)
+            "neutral_supply_depot",    # Supply Depot: next round draw 2 + 3 resources (cost 6)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -217,59 +237,62 @@ CARD_PACKS: dict[str, CardPack] = {
     "mini_lean_machine": CardPack(
         id="mini_lean_machine",
         name="Mini: Lean Machine",
+        description="Thin and cycle your deck so your best cards come up more.",
         # Theme: Deck efficiency — thin, cycle, sculpt, and recur every card.
         # Synergies:
-        #   1. Cull + Reclaim → trash junk cards AND gain resources from their buy cost
-        #   2. Sift + Cartographer → push junk to discard, then cycle into fresh draws
-        #   3. Recall + Cartographer → fish a card back, then immediately re-cycle
-        #   4. Cull/Reclaim + Recall → trash junk so Recall always pulls something useful
-        #   5. Works great with Swarm Thin the Herd / Spoils Hoard (VP from trash pile)
-        #   6. Fortress Consolidate + Reclaim → double trash-for-value engine
+        #   1. Cull + Reclaim → trash starters, and Reclaim pays half the buy cost of what it trashes
+        #   2. Sift + Cartographer → push junk to discard, then cycle into fresh draws (both gain an action)
+        #   3. A thin deck + Militia → draw your hex-taking claim far more often
+        #   4. Swarm Spoils Hoard + Cull / Reclaim / Thin the Herd → +1 VP per 5 trashed cards
+        #   5. Fortress Consolidate + Reclaim → double trash-for-value engine
+        #   6. Vanguard Arms Dealer → trash a spare Claim for resources equal to its power
         shared_card_ids=[
-            "neutral_reduce",          # Cull: trash cards from hand (1💰)
-            "neutral_recall",          # Recall: discard → top of draw pile (2💰)
-            "neutral_reclaim",         # Reclaim: trash for resources (2💰)
-            "neutral_sift",            # Sift: filter top of draw pile (3💰)
-            "neutral_cartographer",    # Cartographer: discard 2, draw 2 (3💰)
+            "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
+            "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
+            "neutral_reclaim",         # Reclaim: trash 1, gain half its buy cost (cost 3)
+            "neutral_sift",            # Sift: look at top 2, keep or discard, +1 action (cost 2)
+            "neutral_cartographer",    # Cartographer: discard 2, draw 2, +1 action (cost 3)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
     "mini_rapid_advance": CardPack(
         id="mini_rapid_advance",
         name="Mini: Rapid Advance",
-        # Theme: Every neutral card pumps actions — chain a long turn out of
-        # the shared market alone. Pairs well with action-hungry archetypes.
+        description="Every shared card refunds actions: chain long turns.",
+        # Theme: Chain a long turn out of the shared market — cards that draw
+        # and refund actions. Pairs well with action-hungry archetypes.
         # Synergies:
-        #   1. Muster + Caravan back-to-back → draw 2/3, gain 2 actions, sculpt, keep chaining
-        #   2. Palisade on a newly claimed tile → defense that doesn't cost the turn's tempo
-        #   3. Forced March early → unlocks 2-cost Conqueror / Siege Tower-style archetype finishers
-        #   4. Spyglass on low hand → conditional +1 action, chain continuation
-        #   5. Pair with Vanguard Regroup+ / Fortress Iron Discipline+ for monster actions rounds
+        #   1. Muster + Caravan back-to-back → draw, gain actions, keep chaining
+        #   2. Watchtower on a newly claimed tile → +2 defense that refunds its action
+        #   3. Forced March → covers 2-action archetype finishers (Overrun, Mob Rule, Battering Ram)
+        #   4. Spyglass on a drawn-down hand → +1 action keeps the chain going
+        #   5. Vanguard Regroup+ / Fortress Iron Discipline+ → monster action rounds
         shared_card_ids=[
-            "neutral_spyglass",        # Spyglass: draw + conditional action (1💰)
-            "neutral_palisade",        # Palisade: +1 defense + 1 action (2💰)
-            "neutral_forced_march",    # Forced March: 2 actions (3💰)
-            "neutral_conscription",    # Muster: draw 2/3 + 1 action (4💰)
-            "neutral_caravan",         # Caravan: discard 1 + 2 actions (4💰)
+            "neutral_spyglass",        # Spyglass: draw 1, +1 action if hand ≤ 3 (cost 1)
+            "neutral_watchtower",      # Watchtower: +2 defense this round, +1 action (cost 2)
+            "neutral_forced_march",    # Forced March: +2 actions, others +1 next round (cost 3)
+            "neutral_conscription",    # Muster: draw 2, +1 action (cost 4)
+            "neutral_caravan",         # Caravan: discard 1, draw 1, +2 actions (cost 4)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
     "mini_war_economy": CardPack(
         id="mini_war_economy",
         name="Mini: War Economy",
+        description="Resources through combat: every claim pays.",
         # Theme: Resources through combat — every claim pays dividends.
         # Synergies:
         #   1. Levy → cheap early claim + action chaining into Militia/Mercenary
-        #   2. Tax Collector + VP tile control → snowball resources for Mercenary purchases
-        #   3. Ambush + Militia → read opponents, punish contested tiles, reward territory
+        #   2. Prospector (+4 res flat) → funds Mercenary's 2 res play cost without needing to hold hexes first
+        #   3. Militia + wide territory → power 4 when surrounded; Mercenary for the hexes it can't reach
         #   4. Vanguard War Tithe + Mercenary → claims generate resources to buy more claims
-        #   5. Fortress Robin Hood + losing tiles → economic comeback into Mercenary power
+        #   5. Fortress Robin Hood → 3 res per tile actually captured from you; an economic comeback
         shared_card_ids=[
-            "neutral_recruit",         # Levy: cheap claim + action (2💰)
-            "neutral_militia",         # Militia: territorial power claim (3💰)
-            "neutral_war_bonds",       # Tithe: 2 resources + 1 action (3💰)
-            "neutral_mercenary",       # Mercenary: power 3 claim (4💰)
-            "neutral_tax_collector",   # Tax Collector: resources per connected VP tile (4💰)
+            "neutral_recruit",         # Levy: Claim P1 + 1 action (cost 2)
+            "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
+            "neutral_war_bonds",       # Tithe: +2 resources, draw 1, +1 action (cost 3)
+            "neutral_mercenary",       # Mercenary: Claim P3, pay 2 res to play (cost 3)
+            "neutral_prospector",      # Prospector: +4 resources (cost 3)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -286,6 +309,16 @@ def _get_purchasable_neutrals(card_registry: dict[str, Card]) -> list[Card]:
     ]
 
 
+def _gains_resources(card: Card) -> bool:
+    """True for cards that put resources in your pool when played."""
+    if card.effective_resource_gain > 0:
+        return True
+    return any(
+        e.type in (EffectType.RESOURCE_SCALING, EffectType.RESOURCE_PER_VP_HEX)
+        for e in card.effects
+    )
+
+
 def generate_daily_pack(seed: int, card_registry: dict[str, Card]) -> CardPack:
     """Generate a deterministic 10-card daily pack from a date seed (YYYYMMDD)."""
     neutrals = _get_purchasable_neutrals(card_registry)
@@ -295,32 +328,40 @@ def generate_daily_pack(seed: int, card_registry: dict[str, Card]) -> CardPack:
     selected = neutrals[:9]
     remaining = neutrals[9:]
 
-    # Constraint check: at least 1 Claim, 1 Engine, 1 low-cost (1-2), 1 high-cost (4+)
-    constraints: list[tuple[str, Any, Any]] = [
-        ("type", CardType.CLAIM, lambda c: c.card_type == CardType.CLAIM),
-        ("type", CardType.ENGINE, lambda c: c.card_type == CardType.ENGINE),
-        ("cost_low", None, lambda c: c.buy_cost is not None and c.buy_cost <= 2),
-        ("cost_high", None, lambda c: c.buy_cost is not None and c.buy_cost >= 4),
+    # Coverage guarantees. Power 2 is the bar for a "hex-capable" Claim: a tie
+    # against a neutral tile's intrinsic defense goes to the attacker, so it
+    # takes a standard VP hex. Without these, ~14% of days had no reusable
+    # hex-capable Claim, ~23% no Defense and ~48% no resource card.
+    checks: list[Callable[[Card], bool]] = [
+        lambda c: c.card_type == CardType.CLAIM,
+        lambda c: c.card_type == CardType.ENGINE,
+        lambda c: c.buy_cost is not None and c.buy_cost <= 2,
+        lambda c: c.buy_cost is not None and c.buy_cost >= 4,
+        lambda c: (c.card_type == CardType.CLAIM and c.effective_power >= 2
+                   and not c.trash_on_use),
+        lambda c: c.card_type == CardType.DEFENSE,
+        _gains_resources,
     ]
 
-    for _label, _val, check_fn in constraints:
-        if any(check_fn(c) for c in selected):
+    def covered(cards: list[Card], check: Callable[[Card], bool]) -> bool:
+        return any(check(c) for c in cards)
+
+    for check in checks:
+        if covered(selected, check):
             continue
-        # Find a replacement from remaining pool
-        candidates = [c for c in remaining if check_fn(c)]
+        candidates = [c for c in remaining if check(c)]
         if not candidates:
             continue
         replacement = candidates[0]
-        # Swap out a card whose traits are redundantly represented
+        # Swap out the last card whose removal keeps every guarantee that is
+        # already met.
+        already_met = [g for g in checks if covered(selected, g)]
         for i in range(len(selected) - 1, -1, -1):
-            card = selected[i]
-            # Check this card's type and cost tier are still covered by others
-            others = [c for j, c in enumerate(selected) if j != i]
-            type_covered = any(c.card_type == card.card_type for c in others)
-            if type_covered:
-                selected[i] = replacement
+            trial = selected[:i] + [replacement] + selected[i + 1:]
+            if all(covered(trial, g) for g in already_met):
                 remaining.remove(replacement)
-                remaining.append(card)
+                remaining.append(selected[i])
+                selected = trial
                 break
 
     # Wildcard: 1 more card from remaining
@@ -340,6 +381,7 @@ def generate_daily_pack(seed: int, card_registry: dict[str, Card]) -> CardPack:
         name=name,
         shared_card_ids=[c.id for c in selected],
         archetype_card_ids=None,
+        description="A new random selection of 10 shared cards every day.",
     )
 
 

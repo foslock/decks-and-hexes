@@ -1,0 +1,13 @@
+/* In-game HUD, hand and board chrome. Builds on global.css. */
+
+/* Top-right HUD buttons (Cards / Deck / Shop / gear). Inline styles set the
+   resting look; hover/press feedback lives here. */
+.hud-btn {
+  transition: transform 140ms var(--cc-ease-out), border-color 160ms ease, filter 160ms ease;
+}
+.hud-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(232, 196, 106, 0.6) !important;
+  filter: brightness(1.12);
+}
+.hud-btn:active { transform: translateY(1px); }

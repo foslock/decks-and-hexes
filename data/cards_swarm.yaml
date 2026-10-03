@@ -1,6 +1,6 @@
 # Card Clash – Swarm Card Pool
 # Archetype: Fast + Cheap
-# Action Slots: 4
+# Action Slots: 5 (all archetypes: 5 actions, 5-card hand)
 # Identity: Low power, cheap to buy, floods the board with many tiles
 #
 # EDITING NOTES:
@@ -63,11 +63,10 @@ cards:
     type: Claim
     buy_cost: 4
     action_return: 0
-    action_cost: 2
     reversible: true
     power: 1
-    effect: "Claim: Power 1. +1 power for each other tile you own adjacent to the target tile. Costs 2 actions to play."
-    effect_upgraded: "Claim: Power 2. +1 power for each other tile you own adjacent to the target tile. Costs 2 actions to play."
+    effect: "Claim: Power 1. +1 power for each tile you own adjacent to the target tile."
+    effect_upgraded: "Claim: Power 2. +1 power for each tile you own adjacent to the target tile."
     secondary_effect: null
     secondary_timing: null
 
@@ -89,10 +88,17 @@ cards:
     draw_cards: 1
     upgraded_draw_cards: 2
     upgraded_action_return: 1
-    effect: "Draw 1 card. Gain 1 action."
-    effect_upgraded: "Draw 2 cards. Gain 1 action."
+    effect: "Draw 1 card. Gain 1 action. The next Claim you play this round gets +1 power."
+    effect_upgraded: "Draw 2 cards. Gain 1 action. The next Claim you play this round gets +1 power."
     secondary_effect: null
     secondary_timing: null
+
+    effects:
+      - type: claim_buff_next_n
+        value: 1
+        upgraded_value: 1
+        timing: immediate
+        metadata: {power_bonus: 1, draw_next_round_on_success: 0}
 
 
   - id: swarm_proliferate
@@ -255,7 +261,7 @@ cards:
     name: Stampede
     name_upgraded: Stampede+
     type: Engine
-    buy_cost: 4
+    buy_cost: 2
     action_return: 3
     upgraded_action_return: 4
     power: 0
@@ -272,7 +278,7 @@ cards:
     name: Consecrate
     name_upgraded: Consecrate+
     type: Engine
-    buy_cost: 3
+    buy_cost: 4
     action_return: 0
     power: 0
     trash_on_use: true
@@ -319,12 +325,12 @@ cards:
     action_return: 0
     reversible: true
     power: 0
-    defense_target_count: 2
-    upgraded_defense_target_count: 2
+    defense_target_count: 4
+    upgraded_defense_target_count: 4
     defense_bonus: 1
     upgraded_defense_bonus: 2
-    effect: "Two tiles you own gain +1 defense this round."
-    effect_upgraded: "Two tiles you own gain +2 defense this round."
+    effect: "Up to four tiles you own each gain +1 defense this round."
+    effect_upgraded: "Up to four tiles you own each gain +2 defense this round."
     secondary_effect: null
     secondary_timing: null
 
@@ -356,11 +362,11 @@ cards:
     buy_cost: 6
     action_return: 0
     power: 1
-    trash_on_use: true
+    upgraded_power: 2
     multi_target_count: 3
     upgraded_multi_target_count: 4
-    effect: "Claim: Power 1 on up to 4 adjacent tiles simultaneously. Trash this card."
-    effect_upgraded: "Claim: Power 2 on up to 5 adjacent tiles simultaneously. Trash this card."
+    effect: "Claim: Power 1 on up to 4 adjacent tiles simultaneously."
+    effect_upgraded: "Claim: Power 2 on up to 5 adjacent tiles simultaneously."
     secondary_effect: null
     secondary_timing: null
 
@@ -371,11 +377,10 @@ cards:
     buy_cost: 7
     action_return: 0
     power: 0
-    trash_on_use: true
     multi_target_count: 1
     upgraded_multi_target_count: 2
-    effect: "Claim: Power equal to the number of tiles you own divided by 3 (rounded down). Targets up to 2 tiles. Trash this card."
-    effect_upgraded: "Claim: Power equal to the number of tiles you own divided by 2 (rounded down). Targets up to 3 tiles. Trash this card."
+    effect: "Claim: Power equal to the number of tiles you own divided by 3 (rounded down). Targets up to 2 tiles."
+    effect_upgraded: "Claim: Power equal to the number of tiles you own divided by 2 (rounded down). Targets up to 3 tiles."
     secondary_effect: null
     secondary_timing: null
 
@@ -505,13 +510,13 @@ cards:
     buy_cost: 2
     action_return: 1
     power: 0
-    effect: "Search your discard pile for 1 card; put it in your hand. Gain 1 action."
-    effect_upgraded: "Search your discard pile for 1 card; put it in your hand. Gain 1 action and 1 resource."
+    effect: "Search your discard pile for 1 Claim card; put it in your hand. Gain 1 action."
+    effect_upgraded: "Search your discard pile for 1 Claim card; put it in your hand. Gain 1 action and 1 resource."
     resource_gain: 0
     upgraded_resource_gain: 1
     secondary_effect: null
     secondary_timing: null
-    note: "The chain enabler. The first surge of drones falls back; a second crests over them. Cheap, action-positive, and refuels your hand mid-combo."
+    note: "The chain enabler. The first surge of drones falls back; a second crests over them. Cheap, action-positive, and pulls a spent Claim back into your hand mid-combo."
 
     effects:
       - type: search_zone
@@ -522,6 +527,7 @@ cards:
           source: discard
           targets: [hand]
           min: 0
+          filter: {card_type: claim}
 
   - id: swarm_brood_memory
     name: Brood Memory

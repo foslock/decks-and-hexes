@@ -463,21 +463,35 @@ class TestVPPursuit:
         # cost penalty — exactly the regression we were trying to fix on Hard.
         assert action["card_id"] != "neutral_land_grant"
 
-    def test_hard_cpu_saves_over_cheap_buy_when_vp_card_near(self, card_registry):
+    def test_hard_cpu_saves_for_clearly_better_shared_card(self, card_registry, monkeypatch):
+        """Hard skips a mediocre buy when a much better shared-market card is
+        reachable with next turn's income (the shared market persists; the
+        archetype market re-rolls, so only shared cards are saving targets)."""
         from app.game_engine.cpu_player import CPUPlayer, HARD
         game = self._make_game(card_registry, [Archetype.VANGUARD, Archetype.SWARM])
-        self._set_progress(game, 0.5)
-        self._clear_shared_market(game)
         first_pid = next(iter(game.players))
         player = game.players[first_pid]
-        # 5 resources: Land Grant (7) is unaffordable but within +3.
         player.resources = 5
-        self._force_market(player, card_registry, [
-            "neutral_land_grant", "neutral_explore",
-        ])
+        cheap = {"source": "archetype", "card_id": "x", "definition_id": "x"}
+        big = {"source": "shared", "card_id": "y", "definition_id": "y"}
+        options = [(2.0, 2, cheap, None), (9.0, 7, big, None)]
         cpu = CPUPlayer(first_pid, noise=0.0, difficulty=HARD)
-        action = cpu.pick_next_purchase(game)
-        assert action is None, "Hard CPU should save resources for visible Land Grant"
+        monkeypatch.setattr(cpu, "_purchase_options", lambda *a, **k: options)
+        assert cpu.pick_next_purchase(game) is None
+
+    def test_hard_cpu_does_not_save_for_archetype_card(self, card_registry, monkeypatch):
+        """An unaffordable archetype-market card is not a saving target — the
+        private market re-rolls before next turn."""
+        from app.game_engine.cpu_player import CPUPlayer, HARD
+        game = self._make_game(card_registry, [Archetype.VANGUARD, Archetype.SWARM])
+        first_pid = next(iter(game.players))
+        game.players[first_pid].resources = 5
+        cheap = {"source": "shared", "card_id": "x", "definition_id": "x"}
+        big = {"source": "archetype", "card_id": "y", "definition_id": "y"}
+        options = [(2.0, 2, cheap, None), (9.0, 7, big, None)]
+        cpu = CPUPlayer(first_pid, noise=0.0, difficulty=HARD)
+        monkeypatch.setattr(cpu, "_purchase_options", lambda *a, **k: options)
+        assert cpu.pick_next_purchase(game) is cheap
 
     def test_easy_cpu_does_not_save_resources(self, card_registry):
         from app.game_engine.cpu_player import CPUPlayer, EASY
@@ -495,32 +509,21 @@ class TestVPPursuit:
         # Easy CPU spends rather than saves — buys something cheap.
         assert action is not None
 
-    def test_medium_cpu_saves_only_late_game(self, card_registry):
-        """Medium activates the saving gate only once progress >= 0.5."""
+    def test_medium_cpu_never_saves(self, card_registry, monkeypatch):
+        """Medium spends what it has rather than saving for a better card."""
         from app.game_engine.cpu_player import CPUPlayer, MEDIUM
-        first_pid = "cpu_0"
-
-        def attempt_at(progress: float):
-            game = self._make_game(
-                card_registry, [Archetype.VANGUARD, Archetype.SWARM]
-            )
-            self._set_progress(game, progress)
-            self._clear_shared_market(game)
-            player = game.players[first_pid]
-            player.resources = 5
-            self._force_market(player, card_registry, [
-                "neutral_land_grant", "neutral_explore",
-            ])
-            cpu = CPUPlayer(first_pid, noise=0.0, difficulty=MEDIUM)
-            return cpu.pick_next_purchase(game)
-
-        early = attempt_at(0.3)  # below medium threshold (0.5)
-        late = attempt_at(0.7)   # above medium threshold
-        assert early is not None, "Medium should buy normally before progress 0.5"
-        assert late is None, "Medium should save once progress >= 0.5"
+        game = self._make_game(card_registry, [Archetype.VANGUARD, Archetype.SWARM])
+        first_pid = next(iter(game.players))
+        game.players[first_pid].resources = 5
+        cheap = {"source": "archetype", "card_id": "x", "definition_id": "x"}
+        big = {"source": "shared", "card_id": "y", "definition_id": "y"}
+        options = [(2.0, 2, cheap, None), (9.0, 7, big, None)]
+        cpu = CPUPlayer(first_pid, noise=0.0, difficulty=MEDIUM)
+        monkeypatch.setattr(cpu, "_purchase_options", lambda *a, **k: options)
+        assert cpu.pick_next_purchase(game) is cheap
 
     def test_formula_vp_scales_with_deck_size(self, card_registry):
-        """Arsenal (deck_div_10) scores higher with a fat deck than a thin one."""
+        """Arsenal (deck_div_12) scores higher with a fat deck than a thin one."""
         import dataclasses
         from app.game_engine.cpu_player import CPUPlayer, ARCHETYPE_WEIGHTS, HARD
         game = self._make_game(card_registry, [Archetype.VANGUARD, Archetype.SWARM])
@@ -532,7 +535,7 @@ class TestVPPursuit:
 
         # Thin deck (10 cards default at start)
         thin_score = cpu._score_card_for_purchase(
-            arsenal, player, weights, cost=5, game=game,
+            arsenal, player, weights, cost=6, game=game,
         )
         # Pad the deck out to 40 cards
         filler = [
@@ -540,7 +543,7 @@ class TestVPPursuit:
         ]
         player.deck.discard.extend(filler)
         fat_score = cpu._score_card_for_purchase(
-            arsenal, player, weights, cost=5, game=game,
+            arsenal, player, weights, cost=6, game=game,
         )
         assert fat_score > thin_score
 

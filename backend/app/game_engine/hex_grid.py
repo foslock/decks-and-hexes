@@ -52,6 +52,10 @@ class HexTile:
     permanent_defense_bonus: int = 0  # Entrench: persists until tile is captured
     held_since_turn: Optional[int] = None  # track when ownership started
     capture_count: int = 0  # number of times this tile has changed hands between players
+    # Players whose ownership of this tile has ended (captured from them or
+    # abandoned). Warden only counts a tile for its owner while the owner is
+    # not in this list, i.e. they've held it continuously since first claiming it.
+    lost_by: list[str] = field(default_factory=list)
     is_base: bool = False  # True for starting corner tiles (permanently owned)
     base_owner: Optional[str] = None  # player_id of the base's permanent owner
 
@@ -172,6 +176,64 @@ class HexGrid:
             "tiles": {k: _tile_to_dict(v) for k, v in self.tiles.items()},
             "starting_positions": self.starting_positions,
         }
+
+
+def mark_tile_lost(tile: HexTile, player_id: Optional[str]) -> None:
+    """Record that *player_id*'s ownership of *tile* ended (for Warden)."""
+    if player_id and player_id not in tile.lost_by:
+        tile.lost_by.append(player_id)
+
+
+def tile_bridges_territory(grid: HexGrid, player_id: str, q: int, r: int) -> bool:
+    """Return True if claiming tile (q, r) would connect two or more currently
+    disconnected groups of *player_id*'s territory.
+
+    Counts the distinct groups of the player's owned tiles that touch (q, r);
+    two or more means the tile bridges them. Used by Road Builder's
+    ``if_bridges_territory`` power condition (and the legacy
+    ``adjacency_bridge`` targeting restriction).
+    """
+    tile = grid.get_tile(q, r)
+    if not tile:
+        return False
+
+    owned_neighbors: list[tuple[int, int]] = []
+    for nq, nr in tile.neighbors():
+        n = grid.get_tile(nq, nr)
+        if n and n.owner == player_id:
+            owned_neighbors.append((nq, nr))
+    if len(owned_neighbors) < 2:
+        return False
+
+    # BFS among ALL the player's owned tiles to count distinct groups touching
+    # the target. If the target is already owned it joins its neighbours into
+    # one group, so an owned tile never counts as a new bridge.
+    all_owned = {
+        (t.q, t.r) for t in grid.tiles.values()
+        if t.owner == player_id
+    }
+    visited: set[tuple[int, int]] = set()
+    groups_touching_target = 0
+    for start in owned_neighbors:
+        if start in visited:
+            continue
+        group: set[tuple[int, int]] = {start}
+        queue = deque([start])
+        while queue:
+            cq, cr = queue.popleft()
+            ct = grid.get_tile(cq, cr)
+            if not ct:
+                continue
+            for nnq, nnr in ct.neighbors():
+                if (nnq, nnr) in group or (nnq, nnr) not in all_owned:
+                    continue
+                group.add((nnq, nnr))
+                queue.append((nnq, nnr))
+        visited |= group
+        groups_touching_target += 1
+        if groups_touching_target >= 2:
+            return True
+    return False
 
 
 def _tile_to_dict(tile: HexTile) -> dict[str, Any]:

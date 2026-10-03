@@ -3,7 +3,7 @@
 # Each market card gets N×2 copies (N = player count). When exhausted, the stack is gone for the game.
 # Buying out a neutral card stack is a valid denial strategy.
 #
-# NOTE: Advance and Gather are special starter cards. Every player begins with copies
+# NOTE: Explore and Gather are special starter cards. Every player begins with copies
 # in their starting deck. They are NOT part of the shared market and cannot be purchased.
 # All other cards below ARE purchasable from the shared market.
 #
@@ -66,7 +66,7 @@ cards:
     effect: "Dead weight from a base raid. Takes up a hand slot."
     effect_upgraded: null
     trash_on_use: false
-    note: "Generated when an opponent raids your base. Wastes a hand slot when drawn. Trashing Rubble is a key recovery mechanism."
+    note: "Generated when an opponent raids your base: each successful raid adds exactly 1 Rubble to the defender's discard pile, however much the claim power beat the base's defense. Worth 0 VP; it wastes a hand slot when drawn. Trashing Rubble is a key recovery mechanism."
 
   - id: spoils
     name: Spoils
@@ -82,7 +82,7 @@ cards:
     effect: "Spoils of a successful base raid. Worth 1 VP."
     effect_upgraded: null
     trash_on_use: false
-    note: "Awarded to the attacker when they successfully raid an opponent's base. Worth 1 VP but clogs your deck."
+    note: "Awarded to the attacker (1 per successful raid) when they successfully raid an opponent's base. Worth 1 VP but clogs your deck."
 
   # ── MARKET CARDS (purchasable) ────────────────────────────────────────────
 
@@ -120,7 +120,7 @@ cards:
     name: Sabotage
     name_upgraded: Sabotage+
     type: Engine
-    buy_cost: 5
+    buy_cost: 4
 
     action_return: 0
     power: 0
@@ -146,7 +146,6 @@ cards:
         timing: on_resolution
         value: 2
         upgraded_value: 3
-        upgraded_value: 3
 
   - id: neutral_road_builder
     name: Road Builder
@@ -156,13 +155,18 @@ cards:
 
     action_return: 0
     reversible: true
-    power: 5
-    effect: "Claim: Power 5. Must target a tile that would connect two of your disconnected territory groups."
-    effect_upgraded: "Claim: Power 6. Must target a tile that would connect two of your disconnected territory groups."
+    power: 1
+    upgraded_power: 2
+    effect: "Claim: Power 1. If the target tile connects two of your disconnected territory groups, power is 5 instead."
+    effect_upgraded: "Claim: Power 2. If the target tile connects two of your disconnected territory groups, power is 6 instead."
     trash_on_use: false
+    note: "A cheap pathing claim with a big payoff for reconnecting split territory. The bridge check uses the board as it is when you play the card."
     effects:
-      - type: adjacency_bridge
+      - type: power_modifier
+        value: 4
+        upgraded_value: 4
         timing: on_resolution
+        condition: if_bridges_territory
 
   - id: neutral_prospector
     name: Prospector
@@ -182,15 +186,15 @@ cards:
     type: Engine
     buy_cost: 2
 
-    action_return: 0
+    action_return: 1
     power: 0
-    effect: "Gain 1 free archetype market re-roll this round."
-    effect_upgraded: "Gain 2 free archetype market re-rolls this round."
+    effect: "Gain 2 free archetype market re-rolls this round. Gain 1 action."
+    effect_upgraded: "Gain 3 free archetype market re-rolls this round. Gain 1 action."
     trash_on_use: false
     effects:
       - type: free_reroll
-        value: 1
-        upgraded_value: 2
+        value: 2
+        upgraded_value: 3
         timing: on_resolution
 
   - id: neutral_militia
@@ -221,12 +225,13 @@ cards:
 
     action_return: 0
     reversible: true
-    power: 3
+    power: 2
+    upgraded_power: 3
     adjacency_required: false
     unoccupied_only: true
-    effect: "Claim: Power 3 on any neutral tile on the board, ignoring adjacency restrictions."
-    effect_upgraded: "Claim: Power 4 on any neutral tile on the board, ignoring adjacency restrictions."
-    trash_on_use: false
+    effect: "Claim: Power 2 on any neutral tile on the board, ignoring adjacency restrictions. Trash this card."
+    effect_upgraded: "Claim: Power 3 on any neutral tile on the board, ignoring adjacency restrictions. Trash this card."
+    trash_on_use: true
 
   - id: neutral_fortified_post
     name: Barricade
@@ -253,12 +258,14 @@ cards:
     type: Defense
     buy_cost: 3
 
-    action_return: 1
+    action_return: 0
     power: 0
     defense_bonus: 3
     upgraded_defense_bonus: 5
-    effect: "One tile you own gains +3 defense this round. Gain 1 action."
-    effect_upgraded: "One tile you own gains +5 defense this round. Gain 1 action."
+    draw_cards: 1
+    upgraded_draw_cards: 1
+    effect: "One tile you own gains +3 defense this round. Draw 1 card."
+    effect_upgraded: "One tile you own gains +5 defense this round. Draw 1 card."
     trash_on_use: false
 
   - id: neutral_moat
@@ -304,12 +311,19 @@ cards:
 
     action_return: 0
     power: 0
+    draw_cards: 0
+    upgraded_draw_cards: 1
     effect: "All Claim cards in your hand gain Stackable this round. Trash this card."
-    effect_upgraded: "All Claim cards in your hand gain Stackable and +1 power this round. Draw 1 card. Trash this card."
+    effect_upgraded: "All Claim cards in your hand gain Stackable this round. Your next 5 Claims this round each get +1 power. Draw 1 card. Trash this card."
     trash_on_use: true
     effects:
       - type: grant_stackable
         timing: immediate
+      - type: claim_buff_next_n
+        value: 0
+        upgraded_value: 5
+        timing: immediate
+        metadata: {power_bonus: 1, draw_next_round_on_success: 0}
 
   - id: neutral_war_bonds
     name: Tithe
@@ -392,12 +406,14 @@ cards:
     name: Siege Tower
     name_upgraded: Siege Tower+
     type: Claim
-    buy_cost: 8
+    buy_cost: 9
 
     action_return: 0
     action_cost: 2
     reversible: true
+    unique: true
     power: 6
+    upgraded_power: 8
     effect: "Claim: Power 6. Costs 2 actions to play."
     effect_upgraded: "Claim: Power 8. Costs 2 actions to play."
     trash_on_use: false
@@ -411,12 +427,13 @@ cards:
     action_return: 0
     action_cost: 2
     reversible: true
+    unique: true
     power: 5
     upgraded_power: 6
     effect: "Claim: Power 5. Ignores temporary defense bonuses on targeted tile. Costs 2 actions to play."
     effect_upgraded: "Claim: Power 6. Ignores temporary defense bonuses on targeted tile. Costs 2 actions to play."
     trash_on_use: false
-    note: "Premium anti-defense finisher. Bypasses round-based defense cards (Fortify, Watchtower, Moat, etc.) but still respects intrinsic terrain defense and permanent fortifications (Entrench, Barricade, Twin Cities)."
+    note: "Premium anti-defense finisher. Unique — you may own only one copy. Bypasses round-based defense cards (Fortify, Watchtower, Moat, etc.) but still respects intrinsic terrain defense and permanent fortifications (Entrench, Barricade, Twin Cities)."
 
     effects:
       - type: ignore_defense
@@ -449,13 +466,14 @@ cards:
     action_return: 0
     power: 0
     trash_on_use: true
-    effect: "You receive a Land Grant in your discard pile. All opponents also receive a Land Grant. Trash this card."
-    effect_upgraded: "You receive 2 Land Grants in your discard pile. All opponents also receive a Land Grant. Trash this card."
+    effect: "You receive 2 Land Grants in your discard pile. All opponents receive 1 Land Grant each. Trash this card."
+    effect_upgraded: "You receive 2 Land Grants in your discard pile. Opponents receive none. Trash this card."
     trash_on_use: true
     effects:
       - type: grant_land_grants
         timing: on_resolution
         target: all_players
+        metadata: {self_count: 2, upgraded_self_count: 2, others_count: 1, upgraded_others_count: 0}
 
   # ── NEW SYNERGY CARDS ─────────────────────────────────────────────────
 
@@ -488,13 +506,15 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 1 resource for every 3 resources you already have (rounded down, minimum 1)."
-    effect_upgraded: "Draw 1 card. Gain 1 resource for every 3 resources you already have (rounded down, minimum 1)."
+    draw_cards: 0
+    upgraded_draw_cards: 1
+    effect: "Gain 1 resource for every 2 resources you already have (rounded down, minimum 1)."
+    effect_upgraded: "Draw 1 card. Gain 1 resource for every 2 resources you already have (rounded down, minimum 1)."
     trash_on_use: false
     effects:
       - type: resource_scaling
         timing: immediate
-        value: 3
+        value: 2
         condition: per_resources_held
     note: "Rewards banking resources instead of spending them every round. Synergizes with Prospector, Tithe, and the Hoarder passive."
 
@@ -504,10 +524,10 @@ cards:
     type: Engine
     buy_cost: 3
 
-    action_return: 0
+    action_return: 1
     power: 0
-    effect: "Discard 2 cards. Draw 2 cards."
-    effect_upgraded: "Discard 2 cards. Draw 4 cards."
+    effect: "Discard 2 cards. Draw 2 cards. Gain 1 action."
+    effect_upgraded: "Discard 2 cards. Draw 4 cards. Gain 1 action."
     trash_on_use: false
     effects:
       - type: cycle
@@ -560,8 +580,9 @@ cards:
     action_return: 0
     reversible: true
     power: 2
-    effect: "Claim: Power 2. If the target tile was also claimed by an opponent this round, power is 4 instead."
-    effect_upgraded: "Claim: Power 2. If the target tile was also claimed by an opponent this round, power is 5 instead. Gain 1 resource."
+    upgraded_resource_gain: 1
+    effect: "Claim: Power 2. If the target tile is owned by an opponent or also claimed by an opponent this round, power is 4 instead."
+    effect_upgraded: "Claim: Power 2. If the target tile is owned by an opponent or also claimed by an opponent this round, power is 5 instead. Gain 1 resource."
     trash_on_use: false
     effects:
       - type: power_modifier
@@ -569,7 +590,7 @@ cards:
         upgraded_value: 3
         timing: on_resolution
         condition: if_contested
-    note: "A read-your-opponent card. Weak on uncontested tiles, powerful when you predict a collision. Rewards game knowledge."
+    note: "An anti-player card. Weak on neutral tiles nobody else wants; strong against opponent-owned tiles and when you predict a collision."
 
   - id: neutral_supply_depot
     name: Supply Depot
@@ -627,10 +648,9 @@ cards:
     buy_cost: 7
 
     action_return: 0
-    action_cost: 2
     power: 0
-    effect: "Look at your entire draw pile. Choose up to 2 cards — put each into your hand or on top of your draw pile. Costs 2 actions to play."
-    effect_upgraded: "Look at your entire draw pile. Choose up to 3 cards — put each into your hand or on top of your draw pile. Costs 2 actions to play."
+    effect: "Look at your entire draw pile. Choose up to 2 cards — put each into your hand or on top of your draw pile."
+    effect_upgraded: "Look at your entire draw pile. Choose up to 3 cards — put each into your hand or on top of your draw pile."
     trash_on_use: false
     effects:
       - type: search_zone
@@ -699,9 +719,10 @@ cards:
 
     action_return: 2
     power: 0
-    effect: "Discard 1 card. Gain 2 actions."
-    effect_upgraded: "Discard 1 card. Draw 1 card. Gain 2 actions."
-    upgraded_draw_cards: 1
+    effect: "Discard 1 card. Draw 1 card. Gain 2 actions."
+    effect_upgraded: "Discard 1 card. Draw 2 cards. Gain 2 actions."
+    draw_cards: 1
+    upgraded_draw_cards: 2
     trash_on_use: false
     effects:
       - type: self_discard
@@ -709,18 +730,18 @@ cards:
         timing: immediate
         requires_choice: true
         metadata: {discard_first: true}
-    note: "A second shared AR2 without Forced March's opponent-gift downside. Costs a card from hand as tempo tax."
+    note: "Swap a dead card for a fresh one and bank 2 actions — no opponent-gift downside like Forced March. You discard before drawing, so the drawn card can't be cycled away."
 
   - id: neutral_sift
     name: Sift
     name_upgraded: Sift+
     type: Engine
-    buy_cost: 3
+    buy_cost: 2
 
-    action_return: 0
+    action_return: 1
     power: 0
-    effect: "Look at the top 2 cards of your draw pile; put any number on top of your draw pile or in your discard pile."
-    effect_upgraded: "Look at the top 3 cards of your draw pile; put any number on top of your draw pile or in your discard pile."
+    effect: "Look at the top 2 cards of your draw pile; put any number on top of your draw pile or in your discard pile. Gain 1 action."
+    effect_upgraded: "Look at the top 3 cards of your draw pile; put any number on top of your draw pile or in your discard pile. Gain 1 action."
     trash_on_use: false
     effects:
       - type: search_zone

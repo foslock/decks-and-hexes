@@ -86,6 +86,12 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     else:
         timing = Timing.IMMEDIATE
 
+    # Text-regex fallbacks below fill in a stat ONLY when the YAML entry omits
+    # the field entirely. An explicit value (including 0) always wins, so a
+    # card whose effect handler already grants the resource/draw can set the
+    # stat to 0 and never be double-counted from its display text. The
+    # effect-type skip lists are a second guard for entries that omit it.
+
     # Parse resource_gain from effect text if not explicit
     # Skip if a gain_resources effect already handles it (conditional gains)
     resource_gain = _safe_int(entry.get("resource_gain", 0))
@@ -95,11 +101,13 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             "gain_resources", "resources_per_claims_last_round", "resource_scaling",
             "resource_per_vp_hex", "resources_per_tiles_lost", "resources_per_tiles_owned",
             "resources_per_tiles_captured_last_round", "gain_resources_per_card_in_hand",
-            "next_turn_bonus", "abandon_and_block",
+            "next_turn_bonus", "abandon_and_block", "resource_refund_if_neutral",
+            "trash_gain_buy_cost", "trash_gain_power",
         )
         for e in entry.get("effects", [])
     )
-    if resource_gain == 0 and "gain" in effect.lower() and "resource" in effect.lower() and not has_gain_resources_effect:
+    if ("resource_gain" not in entry and "gain" in effect.lower() and "resource" in effect.lower()
+            and not has_gain_resources_effect):
         match = re.search(r'[Gg]ain\s+(\d+)\s+resource', effect)
         if match:
             resource_gain = int(match.group(1))
@@ -112,9 +120,11 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
             "cycle", "actions_per_cards_played", "mulligan", "global_claim_ban",
             "swap_draw_discard", "draw_per_debt", "draw_per_connected_vp",
             "draw_per_tiles_owned", "draw_per_tiles_with_defense_bonus", "conditional_draw",
+            "resource_scaling", "resources_per_claims_last_round",
         ) for e in entry.get("effects", [])
     )
-    if draw_cards == 0 and "draw" in effect.lower() and "next turn" not in effect.lower() and "next round" not in effect.lower() and not has_cycle_effect:
+    if ("draw_cards" not in entry and "draw" in effect.lower() and "next turn" not in effect.lower()
+            and "next round" not in effect.lower() and not has_cycle_effect):
         match = re.search(r'[Dd]raw\s+(\d+)\s+card', effect)
         if match:
             draw_cards = int(match.group(1))
@@ -124,7 +134,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         e.get("type") == "permanent_defense" for e in entry.get("effects", [])
     )
     defense_bonus = _safe_int(entry.get("defense_bonus", 0))
-    if defense_bonus == 0 and "defense" in effect.lower() and not has_permanent_defense_effect:
+    if "defense_bonus" not in entry and "defense" in effect.lower() and not has_permanent_defense_effect:
         match = re.search(r'\+(\d+)\s+defense', effect)
         if match:
             defense_bonus = int(match.group(1))
@@ -134,7 +144,8 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         e.get("type") == "self_discard" for e in entry.get("effects", [])
     )
     forced_discard = _safe_int(entry.get("forced_discard", 0))
-    if forced_discard == 0 and "discard" in effect.lower() and not has_self_discard_effect and not has_cycle_effect:
+    if ("forced_discard" not in entry and "discard" in effect.lower() and not has_self_discard_effect
+            and not has_cycle_effect):
         match = re.search(r'[Dd]iscard\w*\s+(\d+)', effect)
         if match:
             forced_discard = int(match.group(1))

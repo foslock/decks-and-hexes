@@ -14,22 +14,11 @@ export default function GameLog({ entries }: GameLogProps) {
   }, [entries.length]);
 
   return (
-    <div
-      style={{
-        maxHeight: 200,
-        overflowY: 'auto',
-        background: '#111',
-        borderRadius: 6,
-        padding: 8,
-        fontSize: 12,
-        fontFamily: 'monospace',
-        color: '#aaa',
-      }}
-    >
+    <div className="cc-ov-inset cc-ov-minilog">
       {entries.map((entry, i) => (
-        <div key={i} style={{ marginBottom: 2 }}>
+        <div key={i} className="cc-ov-minilog-row">
           {entry.startsWith('===') ? (
-            <strong style={{ color: '#4a9eff' }}>{entry}</strong>
+            <strong>{entry}</strong>
           ) : (
             entry
           )}

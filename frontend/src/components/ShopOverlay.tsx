@@ -1,31 +1,16 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
 import type { Card, MarketStack, CursorPosition, SharedPurchaseEvent } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
-import { renderWithKeywords } from './Keywords';
 import { useAnimationMode } from './SettingsContext';
 import CardFull from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import { buildCardSubtitle } from './cardSubtitle';
-import { renderSubtitlePart } from './SubtitlePartRenderer';
+import { renderSubtitle } from './SubtitlePartRenderer';
+import Icon from '../icons/Icon';
 import { useSound } from '../audio/useSound';
-import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground } from '../constants/cardColors';
 import { useCardZoom } from './CardZoomContext';
-
-const CARD_EMOJI: Record<string, string> = {
-  claim: '⚔️',
-  defense: '🛡️',
-  engine: '⚙️',
-};
-
-const ARCHETYPE_EMOJI: Record<string, string> = {
-  vanguard: '🗡️',
-  swarm: '🐝',
-  fortress: '🏰',
-  shared: '⬜',
-};
-
-
 
 interface ShopOverlayProps {
   archetypeMarket: Card[];
@@ -72,24 +57,79 @@ interface HoverState {
   effectiveCost?: number | null;
 }
 
-function StatChip({ value }: { value: string }) {
+/** Normalise a card display color to 6-digit hex (miniCardBackground appends alpha). */
+function hex6(color: string): string {
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color;
+  const m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(color);
+  return m ? `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}` : '#555555';
+}
+
+/** Gold coin glyph used for prices inside the shop. */
+function Coin() {
+  return <Icon name="resource" size="1em" trim decorative style={{ color: 'var(--cc-gold)' }} />;
+}
+
+function ChestIcon() {
   return (
-    <span style={{
-      fontSize: 11,
-      padding: '2px 6px',
-      borderRadius: 6,
-      background: '#252545',
-      color: '#ccc',
-    }}>
-      {value}
-    </span>
+    <svg className="cc-ov-shop-head-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 10.5C3 7.2 5.4 5 8 5h8c2.6 0 5 2.2 5 5.5H3z" fill="currentColor" fillOpacity="0.2" />
+      <path d="M3 10.5V18a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-7.5" />
+      <path d="M3 13.5h7.5M13.5 13.5H21" />
+      <rect x="10.5" y="11.5" width="3" height="4.2" rx="0.7" fill="currentColor" />
+    </svg>
   );
 }
 
+function RerollIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" />
+      <path d="M4 3v5h5" />
+      <path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" />
+      <path d="M20 21v-5h-5" />
+    </svg>
+  );
+}
+
+function UpgradeIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 12l6-6 6 6" />
+      <path d="M6 18l6-6 6 6" />
+    </svg>
+  );
+}
+
+/** Small colored initials for other players hovering a market item. */
+function CursorBadges({ cursors, cursorClicks }: { cursors: CursorPosition[]; cursorClicks?: Record<string, number> }) {
+  return (
+    <div style={{ display: 'flex', gap: 3, position: 'absolute', top: -14, left: 4, zIndex: 5 }}>
+      {cursors.map(c => {
+        const isClicking = cursorClicks?.[c.player_id] && (Date.now() - cursorClicks[c.player_id]) < 600;
+        return (
+          <Tooltip key={c.player_id} content={c.player_name}>
+            <span
+              className="cc-ov-cursor"
+              style={{
+                background: c.player_color,
+                boxShadow: isClicking
+                  ? `0 0 0 4px ${c.player_color}40, 0 0 12px ${c.player_color}80`
+                  : `0 0 4px ${c.player_color}60`,
+                transition: 'box-shadow 0.3s ease',
+                animation: isClicking ? undefined : 'cursorPulse 2s ease-in-out infinite',
+              }}
+            >
+              {(c.player_name.match(/[a-zA-Z]/)?.[0] ?? c.player_name.charAt(0)).toUpperCase()}
+            </span>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+}
 
 /** Compact card width — matches CardHand CARD_WIDTH */
 const COMPACT_CARD_WIDTH = 154;
-/** Compact card height — matches CardHand CARD_MIN_HEIGHT */
 
 function CompactShopCard({
   card,
@@ -107,6 +147,10 @@ function CompactShopCard({
   cursors,
   cursorClicks,
   onCardHoverChange,
+  viewOnly,
+  animate,
+  animIndex = 0,
+  justBought,
 }: {
   card: Card;
   remaining: number | null;
@@ -128,11 +172,20 @@ function CompactShopCard({
   cursorClicks?: Record<string, number>;
   /** Called when hover state changes for cursor broadcasting */
   onCardHoverChange?: (hovering: boolean) => void;
+  /** Shop is browse-only (outside the buy phase / done buying): keep affordable
+   *  tiles at full strength so the market still reads at a glance. */
+  viewOnly?: boolean;
+  /** Play the staggered entrance animation. */
+  animate?: boolean;
+  /** Position in the stagger sequence. */
+  animIndex?: number;
+  /** This card was just bought — play the purchase pop. */
+  justBought?: boolean;
 }) {
   const { showZoom } = useCardZoom();
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
-  const typeColor = getCardDisplayColor(card);
+  const typeColor = hex6(getCardDisplayColor(card));
   const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
   const soldOut = remaining === 0;
 
@@ -161,7 +214,6 @@ function CompactShopCard({
     // current_vp guards against in-place mutations (e.g. VP updates).
   }, [card.id, card.name, card.current_vp, card.description]);
   const isTrulySoldOut = soldOut && !sellingOut;
-  const buyColor = (isTrulySoldOut || !canAfford || disabled) ? '#333' : sellingOut ? '#cc8833' : '#4a9eff';
   const purchaseLines = hasCurrentTurnPurchase
     ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this round`).join('\n')
     : '';
@@ -175,97 +227,56 @@ function CompactShopCard({
         `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
         purchaseLines,
       ].filter(Boolean).join('\n');
-  const buyLabel = isTrulySoldOut ? 'Sold Out' : sellingOut ? 'Selling Out!' : remaining !== null ? `Buy (${remaining} left)` : 'Buy';
+  // Visual state: sold out > can't afford > blocked (per-card reason, or any
+  // disabled reason while the shop is purchasable).
+  const stateClass = isTrulySoldOut
+    ? ' is-soldout'
+    : !canAfford
+    ? ' is-unaffordable'
+    : disabled && (!viewOnly || !!disabledTooltip)
+    ? ' is-dim'
+    : '';
+  const costClass = isDiscounted ? ' is-discount' : !canAfford && !isTrulySoldOut ? ' is-short' : '';
   return (
     <div
       data-card-id={card.id}
+      className={`cc-ov-shop-item${stateClass}${animate ? ' cc-ov-anim' : ''}${justBought ? ' is-bought' : ''}`}
       onMouseEnter={(e) => { onHover(e, card, effectiveCost); onCardHoverChange?.(true); }}
       onMouseLeave={() => { onLeave(); onCardHoverChange?.(false); }}
       onClick={() => showZoom(card)}
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-        opacity: isTrulySoldOut ? 0.35 : disabled || !canAfford ? 0.5 : 1,
-        position: 'relative',
-      }}
+      style={animate ? { ['--i' as string]: Math.min(animIndex, 16) } : undefined}
     >
       {/* Other players' cursor indicators */}
       {cursors && cursors.length > 0 && (
-        <div style={{ display: 'flex', gap: 3, position: 'absolute', top: -14, left: 4, zIndex: 5 }}>
-          {cursors.map(c => {
-            const isClicking = cursorClicks?.[c.player_id] && (Date.now() - cursorClicks[c.player_id]) < 600;
-            return (
-              <Tooltip key={c.player_id} content={c.player_name}>
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 16,
-                  height: 16,
-                  borderRadius: '50%',
-                  background: c.player_color,
-                  color: '#fff',
-                  fontSize: 9,
-                  fontWeight: 'bold',
-                  boxShadow: isClicking
-                    ? `0 0 0 4px ${c.player_color}40, 0 0 12px ${c.player_color}80`
-                    : `0 0 4px ${c.player_color}60`,
-                  transition: 'box-shadow 0.3s ease',
-                  animation: isClicking ? undefined : 'cursorPulse 2s ease-in-out infinite',
-                }}>
-                  {(c.player_name.match(/[a-zA-Z]/)?.[0] ?? c.player_name.charAt(0)).toUpperCase()}
-                </span>
-              </Tooltip>
-            );
-          })}
-        </div>
+        <CursorBadges cursors={cursors} cursorClicks={cursorClicks} />
       )}
       {/* Card element — same dimensions as CardHand compact cards */}
-      <div style={{
-        width: COMPACT_CARD_WIDTH,
-        padding: 6,
-        background: '#2a2a3e',
-        border: `2px solid ${canAfford && !disabled ? typeColor : '#333'}`,
-        borderRadius: 6,
-        color: '#fff',
-        boxSizing: 'border-box',
-        overflow: 'hidden',
-      }}>
+      <div
+        className="cc-ov-shop-card"
+        style={{
+          ['--cc-type' as string]: typeColor,
+          background: miniCardBackground(typeColor),
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+          <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT }}>
             <span ref={titleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }}>
               {card.name}
             </span>
           </div>
-          <span style={{ fontSize: 15, flexShrink: 0, color: isDiscounted ? '#ffd700' : '#aaa', fontWeight: isDiscounted ? 'bold' : undefined, textShadow: isDiscounted ? '0 0 6px rgba(255,215,0,0.6)' : undefined, whiteSpace: 'nowrap' }}>
-            {displayCost != null ? `${displayCost} 💰` : '—'}
+          <span className={`cc-ov-cost${costClass}`}>
+            {displayCost != null ? <>{displayCost}<Coin /></> : '—'}
           </span>
         </div>
-        <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }} title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
+        <div className="cc-ov-shop-sub" title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
           <span ref={subtitleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }}>
-          {buildCardSubtitle(card).map((part, i) => renderSubtitlePart(part, i, { passiveVp: card.passive_vp }))}
+          {renderSubtitle(buildCardSubtitle(card), { fontSize: 15, passiveVp: card.passive_vp })}
           </span>
         </div>
       </div>
-      {/* Selling Out badge */}
+      {/* Selling Out ribbon */}
       {sellingOut && (
-        <div style={{
-          position: 'absolute',
-          top: 2,
-          right: 2,
-          background: '#cc8833',
-          color: '#fff',
-          fontSize: 9,
-          fontWeight: 'bold',
-          padding: '1px 5px',
-          borderRadius: 4,
-          zIndex: 5,
-          textTransform: 'uppercase',
-          letterSpacing: 0.5,
-        }}>
-          Selling Out
-        </div>
+        <div className="cc-ov-ribbon">Selling Out</div>
       )}
       {/* Buy button below card */}
       <IrreversibleButton
@@ -273,20 +284,15 @@ function CompactShopCard({
         disabled={disabled || !canAfford || isTrulySoldOut}
         tooltip={buyTooltip}
         tooltipDelay={undefined}
-        style={{
-          width: COMPACT_CARD_WIDTH,
-          padding: '3px 0',
-          background: buyColor,
-          border: 'none',
-          borderRadius: 4,
-          color: '#fff',
-          fontSize: 11,
-          fontWeight: 'bold',
-          cursor: disabled || !canAfford || isTrulySoldOut ? 'not-allowed' : 'pointer',
-          ...(purchaseHighlight || hasCurrentTurnPurchase ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
-        }}
+        className={`cc-ov-buy${sellingOut ? ' is-selling-out' : ''}`}
+        style={purchaseHighlight || hasCurrentTurnPurchase ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : undefined}
       >
-        {buyLabel}
+        {isTrulySoldOut ? 'Sold Out' : sellingOut ? 'Selling Out!' : (
+          <>
+            Buy
+            {remaining !== null && <span className="cc-ov-buy-stock">{remaining} left</span>}
+          </>
+        )}
       </IrreversibleButton>
     </div>
   );
@@ -296,7 +302,7 @@ function CompactShopCard({
 export function PurchaseFlyAnimation({ event, onDone }: { event: SharedPurchaseEvent; onDone: () => void }) {
   const [style, setStyle] = useState<React.CSSProperties>({ display: 'none' });
 
-  const typeColor = getCardDisplayColor(event.card);
+  const typeColor = hex6(getCardDisplayColor(event.card));
   const subtitle = buildCardSubtitle(event.card);
   const displayCost = event.card.buy_cost;
 
@@ -334,27 +340,24 @@ export function PurchaseFlyAnimation({ event, onDone }: { event: SharedPurchaseE
 
   return (
     <div style={style}>
-      <div style={{
-        width: COMPACT_CARD_WIDTH,
-        padding: 6,
-        background: '#2a2a3e',
-        border: `2px solid ${typeColor}`,
-        borderRadius: 6,
-        color: '#fff',
-        boxSizing: 'border-box',
-        overflow: 'hidden',
-        boxShadow: `0 0 12px ${event.player_color}80, 0 2px 8px rgba(0,0,0,0.5)`,
-      }}>
+      <div
+        className="cc-ov-shop-card"
+        style={{
+          ['--cc-type' as string]: typeColor,
+          background: miniCardBackground(typeColor),
+          boxShadow: `0 0 14px ${event.player_color}90, 0 4px 12px rgba(0,0,0,0.55)`,
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
+          <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT }}>
             {event.card.name}
           </div>
-          <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>
-            {displayCost != null ? `${displayCost} 💰` : '—'}
+          <span className="cc-ov-cost">
+            {displayCost != null ? <>{displayCost}<Coin /></> : '—'}
           </span>
         </div>
-        <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-          {subtitle.map((part, i) => renderSubtitlePart(part, i, { passiveVp: event.card.passive_vp }))}
+        <div className="cc-ov-shop-sub">
+          {renderSubtitle(subtitle, { fontSize: 15, passiveVp: event.card.passive_vp })}
         </div>
       </div>
     </div>
@@ -418,19 +421,36 @@ export default function ShopOverlay({
     });
   }, [archetypeMarket]);
 
+  // Purely visual: remember the card just bought so its tile (or the
+  // "Purchased!" placeholder that replaces it) can play a quick pop.
+  const [recentBuy, setRecentBuy] = useState<string | null>(null);
+  const recentBuyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flagRecentBuy = useCallback((cardId: string) => {
+    setRecentBuy(cardId);
+    if (recentBuyTimerRef.current) clearTimeout(recentBuyTimerRef.current);
+    recentBuyTimerRef.current = setTimeout(() => setRecentBuy(null), 1200);
+  }, []);
+
   const buyArchetypeWithSound = useCallback((cardId: string) => {
     sound.cardPurchase();
+    flagRecentBuy(cardId);
     onBuyArchetype(cardId);
-  }, [onBuyArchetype, sound]);
+  }, [onBuyArchetype, sound, flagRecentBuy]);
 
   const buyNeutralWithSound = useCallback((cardId: string) => {
     sound.cardPurchase();
+    flagRecentBuy(cardId);
     onBuyShared(cardId);
-  }, [onBuyShared, sound]);
+  }, [onBuyShared, sound, flagRecentBuy]);
 
   // Floating "+1 Credit" animation state
   const [showCreditFloat, setShowCreditFloat] = useState(false);
   const creditFloatTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (recentBuyTimerRef.current) clearTimeout(recentBuyTimerRef.current);
+    if (creditFloatTimerRef.current) clearTimeout(creditFloatTimerRef.current);
+  }, []);
 
   const buyUpgradeWithSound = useCallback(() => {
     sound.cardPurchase();
@@ -583,117 +603,77 @@ export default function ShopOverlay({
   }, [animMode]);
 
   const speed = animMode === 'fast' ? 0.5 : 1;
-  const panelTransition = animMode !== 'off'
-    ? `opacity ${0.25 * speed}s ease, transform ${0.25 * speed}s ease`
+  const animate = animMode !== 'off';
+  const panelTransition = animate
+    ? `opacity ${0.3 * speed}s var(--cc-ease-out), transform ${0.3 * speed}s var(--cc-ease-out)`
     : 'none';
+
+  const sortedArchetypeSlots = [...archetypeSlots].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0));
+  const sortedShared = [...sharedMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0));
 
   return (
     <>
-      <style>{`
-        @keyframes shopPurchasePulse {
-          0%, 100% { box-shadow: 0 0 4px rgba(255, 170, 74, 0.3); outline: 2px solid rgba(255, 170, 74, 0.3); outline-offset: -1px; }
-          50% { box-shadow: 0 0 12px rgba(255, 170, 74, 0.7), 0 0 4px rgba(255, 170, 74, 0.4); outline: 2px solid rgba(255, 170, 74, 0.85); outline-offset: -1px; }
-        }
-        @keyframes cursorPulse {
-          0%, 100% { transform: scale(1); opacity: 0.85; }
-          50% { transform: scale(1.15); opacity: 1; }
-        }
-        @keyframes purchaseFly {
-          0% { transform: translate(0, 0) scale(1); opacity: 1; }
-          20% { transform: translate(0, -12px) scale(1.1); opacity: 1; }
-          90% { transform: translate(calc(var(--fly-dx) * 0.95), calc(var(--fly-dy) * 0.95)) scale(0.35); opacity: 1; }
-          100% { transform: translate(var(--fly-dx), var(--fly-dy)) scale(0.3); opacity: 0; }
-        }
-      `}</style>
       {/* Shop panel — centered over the entire window with backdrop */}
       <div
+        className="cc-ov-backdrop"
         onClick={onClose}
         onMouseMove={handleMouseMove}
         style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.75)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 5000,
         opacity: visible ? 1 : 0,
-        transition: animMode !== 'off' ? `opacity ${0.25 * speed}s ease` : 'none',
+        transition: animate ? `opacity ${0.25 * speed}s ease` : 'none',
       }}>
         <div
+          className="cc-ov-modal cc-ov-shop"
           onClick={(e) => e.stopPropagation()}
           style={{
-          width: 'min(92vw, 850px)',
-          background: '#12122a',
-          border: '2px solid #4a4a6a',
-          borderRadius: 12,
-          boxShadow: '0 8px 40px rgba(0,0,0,0.8)',
-          display: 'flex',
-          flexDirection: 'column',
-          maxHeight: '85vh',
+          ['--cc-ov-speed' as string]: speed,
           opacity: visible ? 1 : 0,
-          transform: visible ? 'scale(1)' : 'scale(0.95)',
+          transform: visible ? 'none' : 'translateY(10px) scale(0.96)',
           transition: panelTransition,
         }}>
         {/* Header */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 14px',
-          background: '#1a1a40',
-          borderRadius: '10px 10px 0 0',
-          borderBottom: '1px solid #333',
-          flexShrink: 0,
-        }}>
-          <span style={{ fontWeight: 'bold', color: '#fff', fontSize: 14 }}>🛒 Shop</span>
-          <span style={{ fontSize: 16, fontWeight: 'bold', color: '#fff' }}>
-            · You have <span style={{ color: '#ffcc00' }}>{playerResources}</span> resource{playerResources !== 1 ? 's' : ''}
-          </span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="cc-ov-header">
+          <ChestIcon />
+          <span className="cc-ov-title">Shop</span>
+          {disabled && <span className="cc-ov-tag">View only</span>}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+            <span className="cc-ov-purse" title={`You have ${playerResources} resource${playerResources !== 1 ? 's' : ''}`}>
+              <Coin />
+              <span key={playerResources} className={`cc-ov-purse-value${animate ? ' cc-ov-anim' : ''}`}>{playerResources}</span>
+              <span className="cc-ov-purse-label">resource{playerResources !== 1 ? 's' : ''}</span>
+            </span>
             {onClose && (
-              <button
-                onClick={onClose}
-                style={{
-                  padding: '3px 8px',
-                  background: '#2a2a3e',
-                  border: '1px solid #555',
-                  borderRadius: 4,
-                  color: '#aaa',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                ✕
+              <button className="cc-ov-close" onClick={onClose} title="Close" aria-label="Close">
+                <Icon name="close" size={14} decorative />
               </button>
             )}
           </div>
         </div>
 
         {/* Content */}
-          <div style={{ overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="cc-ov-shop-body">
             {/* Archetype Market */}
-            <div>
-              <div style={{ textAlign: 'center', marginBottom: 12 }}>
-                <Tooltip content="These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.">
-                  <span style={{ fontSize: 20, fontWeight: 'bold', color: '#ccc', cursor: 'help' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
-                </Tooltip>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>New card options every round</div>
+            <section>
+              <div className="cc-ov-section-head">
+                <div className="cc-ov-section-title">
+                  <Tooltip content="These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.">
+                    <span style={{ cursor: 'help' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
+                  </Tooltip>
+                </div>
+                <div className="cc-ov-section-sub">New card options every round</div>
               </div>
               {/* Archetype cards — full-width wrap row, centered */}
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  flexWrap: 'wrap',
-                  justifyContent: 'center',
-                  alignItems: 'flex-start',
-                }}
-              >
+              <div className="cc-ov-shop-grid">
                   {archetypeSlots.length === 0 && (
-                    <span style={{ color: '#666', fontSize: 12 }}>No cards available</span>
+                    <span style={{ color: 'var(--cc-text-faint)', fontSize: 12 }}>No cards available</span>
                   )}
-                  {[...archetypeSlots].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map(({ card, purchased }) => {
+                  {sortedArchetypeSlots.map(({ card, purchased }, idx) => {
                     if (purchased) {
                       // Render the real card invisibly to preserve exact dimensions,
                       // with a "Purchased!" overlay on top
@@ -703,56 +683,25 @@ export default function ShopOverlay({
                           width: cardW,
                           display: 'flex',
                           flexDirection: 'column',
-                          gap: 4,
+                          gap: 5,
                         }}>
                           <div style={{ position: 'relative', width: cardW }}>
                             {/* Invisible card — preserves height */}
                             <div style={{ visibility: 'hidden' }}>
-                              <div style={{
-                                    width: COMPACT_CARD_WIDTH,
-                                    padding: 6,
-                                    background: '#2a2a3e',
-                                    border: '2px solid #333',
-                                    borderRadius: 6,
-                                    boxSizing: 'border-box',
-                                    overflow: 'hidden',
-                                  }}>
+                              <div className="cc-ov-shop-card">
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
                                       <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT }}>{card.name}</div>
                                     </div>
-                                    <div style={{ fontSize: 15, color: '#aaa' }}>&nbsp;</div>
+                                    <div style={{ fontSize: 15 }}>&nbsp;</div>
                                   </div>
                             </div>
                             {/* Overlay — exact same size */}
-                            <div style={{
-                              position: 'absolute',
-                              inset: 0,
-                              background: '#1a1a2e',
-                              border: '2px dashed #333',
-                              borderRadius: 6,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              boxSizing: 'border-box',
-                            }}>
-                              <span style={{ color: '#4a9eff', fontWeight: 'bold', fontSize: 13 }}>Purchased!</span>
+                            <div className={`cc-ov-purchased${animate && recentBuy === card.id ? ' cc-ov-anim' : ''}`}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+                              <span>Purchased!</span>
                             </div>
                           </div>
-                          <button
-                            disabled
-                            style={{
-                              width: cardW,
-                              padding: '3px 0',
-                              background: '#333',
-                              border: 'none',
-                              borderRadius: 4,
-                              color: '#fff',
-                              fontSize: 11,
-                              fontWeight: 'bold',
-                              cursor: 'not-allowed',
-                              opacity: 0.55,
-                            }}
-                          >
+                          <button disabled className="cc-ov-buy" style={{ opacity: 0.55 }}>
                             Buy
                           </button>
                         </div>
@@ -777,33 +726,29 @@ export default function ShopOverlay({
                           : alreadyOwnsUnique ? 'You already own a copy of this Unique card.'
                           : undefined
                         }
+                        viewOnly={disabled}
+                        animate={animate}
+                        animIndex={idx}
+                        justBought={animate && recentBuy === card.id}
                       />
                     );
                   })}
                 </div>
 
               {/* Re-roll — below archetype cards, matching the upgrade-credit row style */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginTop: 12 }}>
+              <div className="cc-ov-action-row" style={{ marginTop: 14 }}>
                 <div style={{ flexShrink: 0 }}>
                   {freeRerolls > 0 ? (
                     <Tooltip content={`You have ${freeRerolls} free re-roll${freeRerolls !== 1 ? 's' : ''} remaining (from Surveyor).`}>
                       <button
+                        className="cc-ov-action is-deal"
                         onClick={onReroll}
                         disabled={disabled || (freeRerolls <= 0 && playerResources < 1)}
-                        style={{
-                          fontSize: 14,
-                          padding: '8px 16px',
-                          background: '#2a5a2e',
-                          border: '1px solid #4aff6a',
-                          borderRadius: 6,
-                          color: !disabled ? '#fff' : '#555',
-                          cursor: disabled ? 'not-allowed' : 'pointer',
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                          ...(disabled ? {} : { animation: 'shopPurchasePulse 2s ease-in-out infinite' }),
-                        }}
+                        style={disabled ? undefined : { animation: 'shopPurchasePulse 2s ease-in-out infinite' }}
                       >
-                        {`Re-roll (${freeRerolls} free)`}
+                        <RerollIcon />
+                        Re-roll
+                        <span className="cc-ov-action-cost">{freeRerolls} free</span>
                       </button>
                     </Tooltip>
                   ) : (() => {
@@ -811,52 +756,44 @@ export default function ShopOverlay({
                     const canAffordReroll = playerResources >= effectiveRerollCost;
                     const rerollButton = (
                       <button
+                        className={`cc-ov-action${rerollDiscounted ? ' is-deal' : ''}`}
                         onClick={onReroll}
                         disabled={disabled || !canAffordReroll}
-                        style={{
-                          fontSize: 14,
-                          padding: '8px 16px',
-                          background: rerollDiscounted && !disabled ? '#2a5a2e' : (canAffordReroll && !disabled ? '#cc7a2a' : '#333'),
-                          border: `1px solid ${rerollDiscounted && !disabled ? '#4aff6a' : (canAffordReroll && !disabled ? '#cc7a2a' : '#555')}`,
-                          borderRadius: 6,
-                          color: canAffordReroll && !disabled ? '#fff' : '#555',
-                          cursor: disabled || !canAffordReroll ? 'not-allowed' : 'pointer',
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                          ...(rerollDiscounted && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
-                        }}
+                        style={rerollDiscounted && !disabled ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : undefined}
                       >
-                        {rerollDiscounted ? (
-                          <>
-                            Re-roll · <span style={{ textDecoration: 'line-through', opacity: 0.6, marginRight: 4 }}>1</span>
-                            <span style={{ color: '#ffd700', fontWeight: 'bold' }}>{effectiveRerollCost} 💰</span>
-                          </>
-                        ) : `Re-roll · ${effectiveRerollCost} 💰`}
+                        <RerollIcon />
+                        Re-roll
+                        <span className="cc-ov-action-cost">
+                          {rerollDiscounted && <span className="cc-ov-strike">1</span>}
+                          {effectiveRerollCost}<Coin />
+                        </span>
                       </button>
                     );
                     return rerollDiscounted ? (
-                      <Tooltip content={`Discounted from 1 💰 to ${effectiveRerollCost} 💰 by an active cost reduction.`}>
+                      <Tooltip content={`Discounted from 1 resource to ${effectiveRerollCost} by an active cost reduction.`}>
                         {rerollButton}
                       </Tooltip>
                     ) : rerollButton;
                   })()}
                 </div>
-                <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
+                <span className="cc-ov-hint">
                   Cards given from a re-roll are guaranteed to be different from existing cards.
                 </span>
               </div>
-            </div>
+            </section>
 
             {/* Shared Market */}
-            <div>
-              <div style={{ textAlign: 'center', marginBottom: 12 }}>
-                <Tooltip content="Purchases from the shared market are visible to all players. Each card has limited copies — once they're gone, they're gone for the game.">
-                  <span style={{ fontSize: 20, fontWeight: 'bold', color: '#ccc', cursor: 'help' }}>Shared Market</span>
-                </Tooltip>
-                <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>Limit 1 copy of each card per round</div>
+            <section>
+              <div className="cc-ov-section-head">
+                <div className="cc-ov-section-title">
+                  <Tooltip content="Purchases from the shared market are visible to all players. Each card has limited copies — once they're gone, they're gone for the game.">
+                    <span style={{ cursor: 'help' }}>Shared Market</span>
+                  </Tooltip>
+                </div>
+                <div className="cc-ov-section-sub">Limit 1 copy of each card per round</div>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'center' }}>
-                {[...sharedMarket].sort((a, b) => (a.card.buy_cost ?? 0) - (b.card.buy_cost ?? 0)).map((stack) => {
+              <div className="cc-ov-shop-grid">
+                {sortedShared.map((stack, idx) => {
                   const effCost = effectiveBuyCosts?.[stack.card.id] ?? stack.card.buy_cost;
                   const canAfford = effCost !== null && playerResources >= (effCost ?? 0);
                   const purchasedBy = neutralPurchaseMap.get(stack.card.id);
@@ -894,14 +831,18 @@ export default function ShopOverlay({
                       cursors={cardCursors}
                       cursorClicks={cursorClicks}
                       onCardHoverChange={onCardHoverChange ? (hovering) => onCardHoverChange(hovering ? stack.card.id : null, hovering ? 'shared' : null) : undefined}
+                      viewOnly={disabled}
+                      animate={animate}
+                      animIndex={sortedArchetypeSlots.length + idx}
+                      justBought={animate && recentBuy === stack.card.id}
                     />
                   );
                 })}
               </div>
-            </div>
+            </section>
 
             {/* Upgrade Credit — below shared market */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <div className="cc-ov-action-row">
               <div
                 style={{ position: 'relative', flexShrink: 0 }}
                 onMouseEnter={() => onCardHoverChange?.('__upgrade_credit', 'shared')}
@@ -913,86 +854,29 @@ export default function ShopOverlay({
                     c => c.hovered_card_id === '__upgrade_credit' && c.source === 'shared'
                   );
                   return upgCursors.length > 0 ? (
-                    <div style={{ display: 'flex', gap: 3, position: 'absolute', top: -14, left: 4, zIndex: 5 }}>
-                      {upgCursors.map(c => {
-                        const isClicking = cursorClicks?.[c.player_id] && (Date.now() - cursorClicks[c.player_id]) < 600;
-                        return (
-                          <Tooltip key={c.player_id} content={c.player_name}>
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              width: 16,
-                              height: 16,
-                              borderRadius: '50%',
-                              background: c.player_color,
-                              color: '#fff',
-                              fontSize: 9,
-                              fontWeight: 'bold',
-                              boxShadow: isClicking
-                                ? `0 0 0 4px ${c.player_color}40, 0 0 12px ${c.player_color}80`
-                                : `0 0 4px ${c.player_color}60`,
-                              transition: 'box-shadow 0.3s ease',
-                              animation: isClicking ? undefined : 'cursorPulse 2s ease-in-out infinite',
-                            }}>
-                              {(c.player_name.match(/[a-zA-Z]/)?.[0] ?? c.player_name.charAt(0)).toUpperCase()}
-                            </span>
-                          </Tooltip>
-                        );
-                      })}
-                    </div>
+                    <CursorBadges cursors={upgCursors} cursorClicks={cursorClicks} />
                   ) : null;
                 })()}
                 {showCreditFloat && (
-                  <>
-                    <style>{`
-                      @keyframes creditFloatUp {
-                        0% { opacity: 1; transform: translate(-50%, 0); }
-                        100% { opacity: 0; transform: translate(-50%, -32px); }
-                      }
-                    `}</style>
-                    <span style={{
-                      position: 'absolute',
-                      top: -4,
-                      left: '50%',
-                      color: '#4aff6a',
-                      fontWeight: 'bold',
-                      fontSize: 14,
-                      pointerEvents: 'none',
-                      animation: 'creditFloatUp 1s ease-out forwards',
-                      zIndex: 10,
-                      whiteSpace: 'nowrap',
-                    }}>
-                      +1 Credit
-                    </span>
-                  </>
+                  <span className="cc-ov-credit-float">+1 Credit</span>
                 )}
               {(() => {
                 const upgDiscounted = effectiveUpgradeCreditCost < 5;
                 const canAffordUpg = playerResources >= effectiveUpgradeCreditCost;
+                const isDeal = upgDiscounted && canAffordUpg && !disabled && !buyLocked;
                 const upgradeButton = (
                   <button
+                    className={`cc-ov-action${isDeal ? ' is-deal' : ''}`}
                     onClick={buyUpgradeWithSound}
                     disabled={disabled || !!buyLocked || !canAffordUpg}
-                    style={{
-                      fontSize: 14,
-                      padding: '8px 16px',
-                      background: upgDiscounted && canAffordUpg && !disabled && !buyLocked ? '#2a5a2e' : (canAffordUpg && !disabled && !buyLocked ? '#cc7a2a' : '#333'),
-                      border: `1px solid ${upgDiscounted && canAffordUpg && !disabled && !buyLocked ? '#4aff6a' : (canAffordUpg && !disabled && !buyLocked ? '#cc7a2a' : '#555')}`,
-                      borderRadius: 6,
-                      color: canAffordUpg && !disabled && !buyLocked ? '#fff' : '#555',
-                      cursor: disabled || buyLocked || !canAffordUpg ? 'not-allowed' : 'pointer',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0,
-                      ...(upgDiscounted && canAffordUpg && !disabled && !buyLocked ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : {}),
-                    }}
+                    style={isDeal ? { animation: 'shopPurchasePulse 2s ease-in-out infinite' } : undefined}
                   >
-                    {upgDiscounted ? (
-                      <>
-                        Buy Upgrade Credit · <span style={{ textDecoration: 'line-through', opacity: 0.6, marginRight: 4 }}>5</span>
-                        <span style={{ color: '#ffd700', fontWeight: 'bold' }}>{effectiveUpgradeCreditCost} 💰</span>
-                      </>
-                    ) : `Buy Upgrade Credit · ${effectiveUpgradeCreditCost} 💰`}
+                    <UpgradeIcon />
+                    Buy Upgrade Credit
+                    <span className="cc-ov-action-cost">
+                      {upgDiscounted && <span className="cc-ov-strike">5</span>}
+                      {effectiveUpgradeCreditCost}<Coin />
+                    </span>
                   </button>
                 );
                 if (buyLocked) {
@@ -1004,7 +888,7 @@ export default function ShopOverlay({
                 }
                 if (upgDiscounted) {
                   return (
-                    <Tooltip content={`Discounted from 5 💰 to ${effectiveUpgradeCreditCost} 💰 by an active cost reduction.`}>
+                    <Tooltip content={`Discounted from 5 resources to ${effectiveUpgradeCreditCost} by an active cost reduction.`}>
                       {upgradeButton}
                     </Tooltip>
                   );
@@ -1012,7 +896,7 @@ export default function ShopOverlay({
                 return upgradeButton;
               })()}
               </div>
-              <span style={{ fontSize: 11, color: '#888', maxWidth: 260 }}>
+              <span className="cc-ov-hint">
                 Upgrade credits can be spent during your play phase to upgrade any card in your hand.
               </span>
             </div>
@@ -1036,6 +920,7 @@ export default function ShopOverlay({
               fontSize: 11,
               fontWeight: 'bold',
               color: '#4aff6a',
+              textShadow: '0 1px 2px rgba(0,0,0,0.8)',
             }}>
               Upgraded
             </div>
@@ -1045,25 +930,11 @@ export default function ShopOverlay({
             const turnPurchases = currentTurnSharedPurchases.get(displayedHover.card.id);
             if (!buyer && !turnPurchases) return null;
             return (
-              <div style={{
-                textAlign: 'center',
-                marginTop: 6,
-                background: '#111122',
-                border: '1px solid #555',
-                borderRadius: 6,
-                padding: '4px 10px',
-                fontSize: 11,
-                color: '#ffaa4a',
-                fontWeight: 'bold',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2,
-              }}>
+              <div className="cc-ov-preview-note">
                 {turnPurchases?.map((p, i) => (
                   <div key={i}>{p.playerName} bought {p.count} this round</div>
                 ))}
-                {buyer && <div style={{ color: '#888' }}>{buyer} purchased this last round</div>}
+                {buyer && <div style={{ color: 'var(--cc-text-dim)' }}>{buyer} purchased this last round</div>}
               </div>
             );
           })()}

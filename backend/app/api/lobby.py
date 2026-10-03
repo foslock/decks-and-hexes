@@ -623,11 +623,11 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
 
     # Pick a random name not already used in this lobby
     used_names = {p.name for p in lobby.players.values()}
-    available = [n for n in _CPU_NAMES if f"\U0001F916 {n}" not in used_names]
+    available = [n for n in _CPU_NAMES if n not in used_names]
     cpu_name = random.choice(available) if available else f"CPU {len(lobby.players)}"
     cpu = LobbyPlayer(
         id=player_id,
-        name=f"\U0001F916 {cpu_name}",
+        name=cpu_name,
         archetype=req.archetype,
         color=_next_available_color(lobby),
         is_cpu=True,

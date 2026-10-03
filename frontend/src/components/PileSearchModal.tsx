@@ -4,6 +4,8 @@ import type { Card, PendingSearch, SearchSelection, SearchZoneTarget } from '../
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import HandStyleCard, { HAND_CARD_WIDTH as CARD_WIDTH } from './HandStyleCard';
 import { IrreversibleButton } from './Tooltip';
+import { useAnimationMode } from './SettingsContext';
+import Icon from '../icons/Icon';
 
 const SOURCE_LABELS: Record<PendingSearch['source'], { header: string; verb: string }> = {
   discard: { header: 'Search your discard pile', verb: 'take' },
@@ -88,7 +90,10 @@ function SelectableCompactCard({
         style={{
           outline: targetColor ? `2px solid ${targetColor}` : 'none',
           outlineOffset: 2,
-          borderRadius: 6,
+          borderRadius: 8,
+          boxShadow: targetColor ? `0 0 14px ${targetColor}55` : undefined,
+          transform: targetColor ? 'translateY(-2px)' : undefined,
+          transition: 'transform 140ms var(--cc-ease-out)',
         }}
       >
         <HandStyleCard card={card} border="" />
@@ -111,7 +116,9 @@ function SelectableCompactCard({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.6)',
+            boxShadow: '0 2px 6px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.45)',
+            border: '1.5px solid rgba(0,0,0,0.35)',
+            fontFamily: 'var(--cc-font-display)',
             zIndex: 2,
           }}
         >
@@ -139,25 +146,19 @@ function SelectableCompactCard({
           {allowedTargets.map((target) => (
             <button
               key={target}
+              className="cc-ov-target-pill"
               onClick={(e) => {
                 e.stopPropagation();
                 onChangeTarget(target);
               }}
               style={{
                 background:
-                  selectionTarget === target ? targetColors[target] : 'transparent',
+                  selectionTarget === target ? targetColors[target] : 'rgba(10, 10, 26, 0.92)',
                 color: selectionTarget === target ? '#000' : targetColors[target],
                 border: `1px solid ${targetColors[target]}`,
-                borderRadius: 3,
-                padding: '3px 7px',
-                fontSize: 10,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
               }}
             >
-              → {targetLabels[target]}
+              <Icon name="then" size={11} decorative style={{ marginRight: 5, verticalAlign: '-0.1em' }} />{targetLabels[target]}
             </button>
           ))}
         </div>
@@ -234,6 +235,7 @@ export default function PileSearchModal({
    * so we use an array keyed by card instance id, not a Set.
    */
   const [selections, setSelections] = useState<SelectionEntry[]>([]);
+  const animClass = useAnimationMode() !== 'off' ? ' cc-ov-anim' : '';
 
   const { header, verb } = SOURCE_LABELS[pending.source];
   const allowed = pending.allowed_targets;
@@ -338,6 +340,7 @@ export default function PileSearchModal({
 
   return createPortal(
     <div
+      className={`cc-ov-backdrop${animClass}`}
       // Stop any pointer events from reaching the underlying HexGrid / HUD.
       // Mouse enter/leave/move on the overlay swallows hover on the grid too.
       onPointerDownCapture={(e) => e.stopPropagation()}
@@ -347,7 +350,6 @@ export default function PileSearchModal({
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.78)',
         zIndex: 5000,
         display: 'flex',
         flexDirection: 'column',
@@ -358,36 +360,21 @@ export default function PileSearchModal({
         pointerEvents: 'auto',
       }}
     >
+      <div className={`cc-ov-modal cc-ov-pile${animClass}`}>
       {/* Header */}
-      <div
-        style={{
-          color: '#fff',
-          fontSize: 22,
-          fontWeight: 'bold',
-          marginBottom: 6,
-          textShadow: '0 2px 6px rgba(0,0,0,0.9)',
-        }}
-      >
+      <div className="cc-ov-title">
         {header}
       </div>
-      <div
-        style={{
-          color: '#ccc',
-          fontSize: 14,
-          marginBottom: 16,
-          textAlign: 'center',
-          maxWidth: 680,
-        }}
-      >
+      <div className="cc-ov-pile-instr">
         {instructionOverride ?? defaultInstruction}
         {pending.source === 'draw' && (
-          <div style={{ marginTop: 4, color: '#999', fontSize: 12, fontStyle: 'italic' }}>
+          <div className="cc-ov-pile-note" style={{ fontStyle: 'italic' }}>
             Cards are not shown in draw order.
             {forceCommit && ' Your play is committed — you can no longer cancel.'}
           </div>
         )}
         {allowed.length > 1 && (
-          <div style={{ marginTop: 4, color: '#999', fontSize: 12 }}>
+          <div className="cc-ov-pile-note">
             Choose a destination for each selected card.
           </div>
         )}
@@ -400,11 +387,12 @@ export default function PileSearchModal({
           outline (offset:2) to sit without being clipped by the scroll
           container — `overflow: auto` on either axis clips both axes. */}
       {eligibleCards.length === 0 ? (
-        <div style={{ color: '#999', fontSize: 14 }}>
+        <div style={{ color: 'var(--cc-text-dim)', fontSize: 14, padding: '24px 0' }}>
           No eligible cards in the {pending.source === 'draw' ? 'draw pile' : pending.source}.
         </div>
       ) : (
         <div
+          className="cc-ov-pile-grid"
           style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -442,56 +430,31 @@ export default function PileSearchModal({
       )}
 
       {/* Footer */}
-      <div
-        style={{
-          marginTop: 20,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          background: 'rgba(20,20,30,0.92)',
-          padding: '10px 16px',
-          borderRadius: 8,
-          border: '1px solid #444',
-        }}
-      >
-        <span style={{ color: '#fff', fontSize: 14 }}>
-          {selections.length} of {pending.count} selected
+      <div className="cc-ov-pile-footer">
+        <span className="cc-ov-pile-count">
+          <b>{selections.length}</b> of {pending.count} selected
           {pending.min_count === 0 && ' (optional)'}
         </span>
         {!forceCommit && (
           <button
+            className="cc-btn-secondary"
             onClick={onCancel}
             disabled={!canCancel}
-            style={{
-              background: 'transparent',
-              color: canCancel ? '#aaa' : '#555',
-              border: `1px solid ${canCancel ? '#aaa' : '#333'}`,
-              borderRadius: 4,
-              padding: '6px 14px',
-              fontSize: 13,
-              cursor: canCancel ? 'pointer' : 'not-allowed',
-            }}
+            style={{ cursor: canCancel ? 'pointer' : 'not-allowed' }}
           >
             Cancel
           </button>
         )}
         <IrreversibleButton
+          className="cc-btn-primary"
           onClick={handleConfirm}
           disabled={!canConfirm}
           tooltip="Selected cards will move to their chosen destinations."
-          style={{
-            background: canConfirm ? '#4aff6a' : '#2a4a2e',
-            color: canConfirm ? '#000' : '#555',
-            border: 'none',
-            borderRadius: 4,
-            padding: '8px 18px',
-            fontSize: 14,
-            fontWeight: 'bold',
-            cursor: canConfirm ? 'pointer' : 'not-allowed',
-          }}
+          style={{ cursor: canConfirm ? 'pointer' : 'not-allowed' }}
         >
           Confirm
         </IrreversibleButton>
+      </div>
       </div>
     </div>,
     document.body

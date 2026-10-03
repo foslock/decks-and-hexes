@@ -6,10 +6,17 @@ import GameScreen from './components/GameScreen';
 import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
 import ResolveAnimationPreview from './components/ResolveAnimationPreview';
+import SoundPreview from './audio/SoundPreview';
+import IconPreview from './icons/IconPreview';
 import { useWebSocket } from './hooks/useWebSocket';
 import * as api from './api/client';
 import { CardZoomProvider } from './components/CardZoomContext';
 import { getSavedPlayerName } from './utils/playerName';
+import { preloadCatalogArt } from './cardCatalog';
+import { preloadCardImages, STARTER_CARD_IDS } from './utils/cardImagePreload';
+
+// Starter art (Explore / Gather) is in every opening hand — fetch it at boot.
+preloadCardImages(STARTER_CARD_IDS, 'high');
 
 /** Catches render-time crashes so the whole app doesn't white-screen. */
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -94,6 +101,11 @@ function AppInner() {
     }
     return { type: 'home' };
   });
+  // Start warming card art as soon as the player heads into a lobby or game
+  // (idle-time only; starters first). The home screen stays lightweight.
+  useEffect(() => {
+    if (screen.type === 'lobby' || screen.type === 'game') preloadCatalogArt();
+  }, [screen.type]);
   const [multiplayerGameState, setMultiplayerGameState] = useState<GameState | null>(null);
   // Track if this player was removed from lobby (e.g. kicked by host while viewing game over)
   const [removedFromLobby, setRemovedFromLobby] = useState(false);
@@ -291,6 +303,8 @@ function AppInner() {
       </SettingsProvider>
     );
   }
+  if (previewMode === 'sounds') return <SoundPreview />;
+  if (previewMode === 'icons') return <IconPreview />;
 
   // ── Render ───────────────────────────────────────────────
   console.log('[App] render — screen:', screen.type, 'hasGameState:', !!multiplayerGameState);

@@ -22,6 +22,7 @@ from app.game_engine.game_state import (
     advance_resolve,
     auto_play_cpu_buys,
     auto_play_cpu_plays,
+    plan_cpu_purchases,
     buy_card,
     create_game,
     end_buy_phase,
@@ -615,12 +616,11 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
         game = await store.get(game_id)
         if not game or game.current_phase != Phase.BUY:
             return
-        purchases: list[dict[str, Any]] = []
-        for _ in range(10):
-            purchase = cpu.pick_next_purchase(game)
-            if purchase is None:
-                break
-            purchases.append(purchase)
+        # Plan against a scratch copy so each pick sees the resources and
+        # markets left by the previous buy (planning on the live state
+        # returned the same top pick repeatedly, so CPUs effectively bought
+        # one card per round).
+        purchases = plan_cpu_purchases(game, pid)
 
     # Simulate browsing for each purchase
     for purchase in purchases:

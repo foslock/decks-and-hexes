@@ -1,8 +1,8 @@
 import React from 'react';
 import type { Card } from '../types/game';
-import { CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground, MINI_CARD_SHADOW } from '../constants/cardColors';
 import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
-import { renderSubtitlePart } from './SubtitlePartRenderer';
+import { renderSubtitle } from './SubtitlePartRenderer';
 import { useCardZoom } from './CardZoomContext';
 
 const COL_W = 134;
@@ -30,9 +30,10 @@ export default function CompactCard({ card, subtitleContext, effectiveResourceGa
       style={{
       width: COL_W,
       padding: '3px 6px',
-      background: '#2a2a3e',
+      background: miniCardBackground(typeColor),
       border: `1px solid ${typeColor}`,
-      borderRadius: 5,
+      borderRadius: 6,
+      boxShadow: MINI_CARD_SHADOW,
       color: '#fff',
       cursor: 'pointer',
     }}>
@@ -48,7 +49,7 @@ export default function CompactCard({ card, subtitleContext, effectiveResourceGa
             el.style.setProperty('--sub-scale', String(scale));
           }
         }}>
-          {statParts.map((part, j) => renderSubtitlePart(part, j))}
+          {renderSubtitle(statParts, { fontSize: 11, passiveVp: card.passive_vp })}
         </span>
       </div>
     </div>

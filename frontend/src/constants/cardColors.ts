@@ -38,3 +38,20 @@ export function getCardDisplayType(card: { name: string; card_type: string }): s
   const TYPE_LABELS: Record<string, string> = { claim: 'Claim', defense: 'Defense', engine: 'Engine', passive: 'Passive' };
   return TYPE_LABELS[card.card_type] || card.card_type;
 }
+
+/**
+ * Layered surface for compact card chips (hand cards, In Play list, compact
+ * market tiles): a type-colored wash at the top, a faint top highlight and a
+ * darker foot so the chip reads as a physical card rather than a label.
+ * `typeColor` must be a 6-digit hex (alpha suffixes are appended).
+ */
+export function miniCardBackground(typeColor: string, base = '#23233a'): string {
+  return [
+    `linear-gradient(180deg, ${typeColor}40 0%, ${typeColor}14 40%, rgba(0,0,0,0) 62%)`,
+    'linear-gradient(180deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0) 32%, rgba(0,0,0,0.24) 100%)',
+    base,
+  ].join(', ');
+}
+
+/** Drop shadow + top bevel paired with miniCardBackground. */
+export const MINI_CARD_SHADOW = 'inset 0 1px 0 rgba(255,255,255,0.1), 0 3px 8px rgba(0,0,0,0.45)';

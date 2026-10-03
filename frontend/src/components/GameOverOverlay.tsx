@@ -135,8 +135,20 @@ export default function GameOverOverlay({
     return () => timers.forEach(clearTimeout);
   }, [bannerVisible, leaderboard.length]);
 
-  const bannerColor = isVictory ? '#4a9eff' : '#ff4a4a';
   const bannerText = isVictory ? 'Victory' : 'Defeat';
+
+  // Winner(s) for the ribbon under the banner, in their player colors.
+  const winnerEntries = leaderboard.filter(e => e.isWinner);
+
+  // A handful of rising embers behind a victory banner. Deterministic
+  // positions so re-renders don't reshuffle them.
+  const embers = useMemo(() => Array.from({ length: 14 }, (_, i) => ({
+    left: `${(i * 37 + 11) % 100}%`,
+    delay: `${((i * 0.73) % 5).toFixed(2)}s`,
+    duration: `${(6 + (i % 5) * 1.3).toFixed(1)}s`,
+    drift: `${((i % 2 === 0 ? 1 : -1) * (14 + (i * 7) % 30))}px`,
+    scale: 0.6 + ((i * 3) % 5) * 0.18,
+  })), []);
 
   if (hidden) {
     return (
@@ -151,6 +163,7 @@ export default function GameOverOverlay({
         }} />
         {/* Show Results button */}
         <button
+          className="cc-btn-secondary cc-ov-btn-sm"
           onClick={() => setHidden(false)}
           style={{
             position: 'fixed',
@@ -158,13 +171,9 @@ export default function GameOverOverlay({
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 40000,
-            padding: '6px 14px',
-            background: 'rgba(20, 20, 50, 0.85)',
-            border: '1px solid #555',
-            borderRadius: 8,
-            color: '#aaa',
+            padding: '7px 16px',
+            borderRadius: 999,
             fontSize: 12,
-            cursor: 'pointer',
           }}
         >
           Show Results (Esc)
@@ -174,63 +183,58 @@ export default function GameOverOverlay({
   }
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      zIndex: 40000,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'rgba(0, 0, 0, 0.85)',
-      opacity: bannerVisible ? 1 : 0,
-      transition: 'opacity 0.6s ease',
-    }}>
-      <style>{`
-        .go-row:hover { background: rgba(74, 158, 255, 0.1) !important; }
-        .go-btn { transition: box-shadow 0.2s ease, transform 0.2s ease; }
-        .go-btn:not(:disabled):hover { box-shadow: 0 0 12px rgba(160, 170, 255, 0.45); transform: translateY(-1px); }
-      `}</style>
-
-      {/* Victory / Defeat banner */}
-      <div style={{
-        fontSize: 64,
-        fontWeight: 900,
-        fontFamily: "'Cinzel', serif",
-        textTransform: 'uppercase',
-        letterSpacing: 12,
-        color: bannerColor,
-        textShadow: `0 0 40px ${bannerColor}66, 0 4px 12px rgba(0,0,0,0.8)`,
+    <div
+      className={`cc-ov-go-root ${isVictory ? 'is-victory' : 'is-defeat'}`}
+      style={{
         opacity: bannerVisible ? 1 : 0,
-        transform: bannerVisible ? 'translateY(0)' : 'translateY(-20px)',
-        transition: 'opacity 0.8s ease, transform 0.8s ease',
-        marginBottom: 40,
-      }}>
-        {bannerText}
+        transition: 'opacity 0.6s ease',
+      }}
+    >
+      {isVictory && bannerVisible && (
+        <div className="cc-ov-go-embers" aria-hidden="true">
+          {embers.map((e, i) => (
+            <span
+              key={i}
+              className="cc-ov-ember"
+              style={{
+                left: e.left,
+                animationDelay: e.delay,
+                animationDuration: e.duration,
+                ['--drift' as string]: e.drift,
+                width: 6 * e.scale,
+                height: 6 * e.scale,
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="cc-ov-go-stage">
+      {/* Victory / Defeat banner */}
+      <div className={`cc-ov-go-banner${bannerVisible ? ' is-in' : ''}`}>
+        {isVictory && <div className="cc-ov-go-rays" aria-hidden="true" />}
+        <div className="cc-ov-go-word">{bannerText}</div>
+        <div className="cc-ov-go-sub">
+          {winnerEntries.length > 0 ? (
+            <span>
+              {winnerEntries.map((w, i) => (
+                <span key={w.playerId}>
+                  {i > 0 && (i === winnerEntries.length - 1 ? ' & ' : ', ')}
+                  <span className="cc-ov-go-winner" style={{ color: w.color }}>{w.name}</span>
+                </span>
+              ))}
+              {winnerEntries.length > 1 ? ' share the victory' : ' claims victory'}
+            </span>
+          ) : (
+            <span>The war is over</span>
+          )}
+        </div>
       </div>
 
       {/* Leaderboard table */}
-      <div style={{
-        width: 'min(680px, 92vw)',
-        background: '#12122a',
-        border: '1px solid #3a3a5a',
-        borderRadius: 14,
-        overflow: 'hidden',
-        boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
-      }}>
+      <div className="cc-ov-modal cc-ov-go-board">
         {/* Header */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: '40px 1fr 78px 78px 78px',
-          gap: 10,
-          padding: '13px 20px',
-          background: '#1a1a3a',
-          fontSize: 14,
-          color: '#666',
-          fontWeight: 'bold',
-          textTransform: 'uppercase',
-          letterSpacing: 1,
-        }}>
+        <div className="cc-ov-go-grid cc-ov-go-head">
           <div />
           <div>Player</div>
           <div style={{ textAlign: 'right' }}>VP</div>
@@ -242,66 +246,64 @@ export default function GameOverOverlay({
         {leaderboard.map((entry, i) => {
           const visible = i < rowsVisible;
           const isFirst = i === 0;
+          const bd = vpBreakdowns[entry.playerId];
           return (
             <div
-              className="go-row"
+              className={`cc-ov-go-grid cc-ov-go-row${isFirst ? ' is-first' : ''}${visible ? ' is-shown' : ''}`}
               key={entry.playerId}
               onClick={() => visible && setViewingDeck(entry.playerId)}
+              title={visible ? `View ${entry.name}'s deck` : undefined}
               style={{
-                display: 'grid',
-                gridTemplateColumns: '40px 1fr 78px 78px 78px',
-                gap: 10,
-                padding: isFirst ? '18px 20px' : '13px 20px',
-                borderTop: '1px solid #2a2a4a',
-                background: isFirst ? '#111a30' : 'transparent',
-                fontSize: isFirst ? 20 : 17,
-                fontWeight: isFirst ? 'bold' : 'normal',
-                color: visible ? '#fff' : 'transparent',
+                ['--cc-player' as string]: entry.color,
+                ['--cc-player-soft' as string]: `${entry.color.length === 7 ? entry.color : '#888888'}33`,
                 opacity: visible ? 1 : 0,
                 transform: visible ? 'translateY(0)' : 'translateY(10px)',
-                transition: 'opacity 0.4s ease, transform 0.4s ease, background 0.15s ease',
-                alignItems: 'center',
+                transition: 'opacity 0.4s ease, transform 0.45s var(--cc-ease-out), background-color 0.15s ease',
                 cursor: visible ? 'pointer' : 'default',
               }}
             >
               {/* Crown / rank */}
-              <div style={{ textAlign: 'center', fontSize: isFirst ? 24 : 16, color: isFirst ? '#ffd700' : '#555' }}>
-                {isFirst ? '👑' : `#${i + 1}`}
+              <div>
+                <div className={`cc-ov-rank${i < 3 ? ` r${i + 1}` : ''}`}>
+                  {isFirst ? (
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-label="1st">
+                      <path d="M3 8.5l4.2 3.3L12 5l4.8 6.8L21 8.5l-1.8 9.5H4.8L3 8.5z" />
+                      <rect x="4.8" y="19" width="14.4" height="1.8" rx="0.6" />
+                    </svg>
+                  ) : `${i + 1}`}
+                </div>
               </div>
               {/* Name + archetype */}
-              <div>
-                <span style={{ color: entry.hasLeft ? '#666' : entry.color }}>{entry.name}</span>
-                <span style={{ fontSize: 13, color: '#666', marginLeft: 8 }}>
-                  {entry.archetype.charAt(0).toUpperCase() + entry.archetype.slice(1)}
-                </span>
-                {entry.hasLeft && (
-                  <span style={{
-                    fontSize: 10,
-                    padding: '1px 5px',
-                    borderRadius: 6,
-                    background: '#333',
-                    color: '#888',
-                    fontWeight: 'bold',
-                    marginLeft: 6,
-                  }}>
-                    Left
+              <div className="cc-ov-go-name">
+                <div className="cc-ov-go-name-line">
+                  <span className="cc-ov-go-player" style={{ color: entry.hasLeft ? 'var(--cc-text-faint)' : entry.color }}>{entry.name}</span>
+                  <span className="cc-ov-go-arch">
+                    {entry.archetype.charAt(0).toUpperCase() + entry.archetype.slice(1)}
                   </span>
+                  {entry.hasLeft && (
+                    <span className="cc-ov-go-left">Left</span>
+                  )}
+                </div>
+                {bd && (
+                  <div className="cc-ov-go-bd">
+                    Tiles <b>{bd.tileCount}</b> · Bonus <b>{bd.bonusTiles}</b> · Cards <b>{bd.cards}</b>
+                  </div>
                 )}
               </div>
               {/* VP */}
               <div
-                style={{ textAlign: 'right', color: '#ffd700', fontWeight: 'bold', cursor: 'help' }}
+                className="cc-ov-go-vp"
                 onPointerEnter={(e) => setVpTooltip({ pid: entry.playerId, x: e.clientX, y: e.clientY })}
                 onPointerLeave={() => setVpTooltip(null)}
               >
                 {entry.vp}
               </div>
               {/* Tiles */}
-              <div style={{ textAlign: 'right', color: '#aaa' }}>
+              <div className="cc-ov-go-stat">
                 {entry.tiles}
               </div>
               {/* Deck size */}
-              <div style={{ textAlign: 'right', color: '#aaa' }}>
+              <div className="cc-ov-go-stat">
                 {entry.deckSize}
               </div>
             </div>
@@ -310,13 +312,10 @@ export default function GameOverOverlay({
       </div>
 
       {/* Buttons */}
-      <div style={{
-        display: 'flex',
-        gap: 12,
-        marginTop: 32,
+      <div className="cc-ov-go-actions" style={{
         opacity: buttonsVisible ? 1 : 0,
         transform: buttonsVisible ? 'translateY(0)' : 'translateY(10px)',
-        transition: 'opacity 0.4s ease, transform 0.4s ease',
+        transition: 'opacity 0.4s ease, transform 0.4s var(--cc-ease-out)',
       }}>
         {isMultiplayer && (() => {
           const disabled = returnedToLobby || removedFromLobby;
@@ -327,44 +326,24 @@ export default function GameOverOverlay({
               : 'Return to Lobby';
           return (
             <button
-              className="go-btn"
+              className={removedFromLobby ? 'cc-btn-secondary is-removed' : 'cc-btn-primary'}
               onClick={() => { if (!disabled) { setReturnedToLobby(true); onReturnToLobby(); } }}
               disabled={disabled}
-              style={{
-                padding: '12px 32px',
-                fontSize: 16,
-                fontWeight: 'bold',
-                background: removedFromLobby ? '#3a2a2a' : disabled ? '#2a4a3e' : '#2a6e3e',
-                border: `1px solid ${removedFromLobby ? '#5a3a3a' : disabled ? '#3a6a4e' : '#3a8e5e'}`,
-                borderRadius: 8,
-                color: removedFromLobby ? '#ff6666' : '#fff',
-                cursor: disabled ? 'default' : 'pointer',
-                opacity: removedFromLobby ? 0.8 : 1,
-              }}
+              style={{ cursor: disabled ? 'default' : 'pointer' }}
             >
               {label}
             </button>
           );
         })()}
         <button
-          className="go-btn"
+          className="cc-btn-secondary"
           onClick={() => setShowRoundBreakdown(true)}
-          style={{
-            padding: '12px 24px',
-            fontSize: 14,
-            fontWeight: 'bold',
-            background: '#1f2a44',
-            border: '1px solid #3a4a6a',
-            borderRadius: 8,
-            color: '#cfd8ea',
-            cursor: 'pointer',
-          }}
           title="View per-round stats for each player"
         >
           Round Breakdown
         </button>
         <button
-          className="go-btn"
+          className="cc-btn-secondary"
           onClick={async () => {
             if (downloadingLog) return;
             setDownloadingLog(true);
@@ -377,47 +356,26 @@ export default function GameOverOverlay({
             }
           }}
           disabled={downloadingLog}
-          style={{
-            padding: '12px 24px',
-            fontSize: 14,
-            fontWeight: 'bold',
-            background: '#1f2a44',
-            border: '1px solid #3a4a6a',
-            borderRadius: 8,
-            color: '#cfd8ea',
-            cursor: downloadingLog ? 'default' : 'pointer',
-          }}
+          style={{ cursor: downloadingLog ? 'default' : 'pointer' }}
           title="Download the structured JSON log of this game"
         >
           {downloadingLog ? 'Preparing…' : 'Download Game Log'}
         </button>
         <button
-          className="go-btn"
+          className={isMultiplayer ? 'cc-btn-secondary' : 'cc-btn-primary'}
           onClick={onExitGame}
-          style={{
-            padding: '12px 32px',
-            fontSize: 16,
-            fontWeight: 'bold',
-            background: '#2a2a3e',
-            border: '1px solid #555',
-            borderRadius: 8,
-            color: '#fff',
-            cursor: 'pointer',
-          }}
         >
           Exit Game
         </button>
       </div>
 
       {/* Hint to view map */}
-      <div style={{
-        marginTop: 14,
-        fontSize: 12,
-        color: '#555',
+      <div className="cc-ov-go-hint" style={{
         opacity: buttonsVisible ? 1 : 0,
         transition: 'opacity 0.6s ease 0.3s',
       }}>
-        Press <span style={{ color: '#777' }}>Esc</span> to view the map
+        Press <span className="cc-ov-kbd">Esc</span> to view the map
+      </div>
       </div>
 
       {/* VP breakdown tooltip */}
@@ -425,24 +383,16 @@ export default function GameOverOverlay({
         const bd = vpBreakdowns[vpTooltip.pid];
         if (!bd) return null;
         return (
-          <div style={{
+          <div className="cc-ov-tooltip" style={{
             position: 'fixed',
-            left: vpTooltip.x + 12,
+            left: Math.min(vpTooltip.x + 12, window.innerWidth - 170),
             top: vpTooltip.y - 8,
-            background: '#1a1a3a',
-            border: '1px solid #4a4a6a',
-            borderRadius: 8,
-            padding: '8px 12px',
-            fontSize: 13,
-            color: '#ccc',
-            pointerEvents: 'none',
             zIndex: 50000,
-            whiteSpace: 'nowrap',
           }}>
-            <div style={{ fontWeight: 'bold', color: '#ffd700', marginBottom: 4 }}>VP Breakdown</div>
-            <div>Tiles: {bd.tileCount}</div>
-            <div>Bonus Tiles: {bd.bonusTiles}</div>
-            <div>Cards: {bd.cards}</div>
+            <div className="cc-ov-tooltip-title">VP Breakdown</div>
+            <div className="cc-ov-tooltip-row"><span>Tiles</span><b>{bd.tileCount}</b></div>
+            <div className="cc-ov-tooltip-row"><span>Bonus Tiles</span><b>{bd.bonusTiles}</b></div>
+            <div className="cc-ov-tooltip-row"><span>Cards</span><b>{bd.cards}</b></div>
           </div>
         );
       })()}

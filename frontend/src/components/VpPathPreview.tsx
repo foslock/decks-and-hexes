@@ -301,7 +301,7 @@ export default function VpPathPreview() {
           Reset
         </button>
         <span style={{ fontSize: 12, color: '#888', marginLeft: 'auto' }}>
-          VP Paths: {vpPaths.filter(p => !p.breaking).length} | Connected ★: {connectedCount} | Phase: {fadePhase}
+          VP Paths: {vpPaths.filter(p => !p.breaking).length} | Connected VP tiles: {connectedCount} | Phase: {fadePhase}
         </span>
       </div>
       <div style={{ flex: 1, position: 'relative' }}>
@@ -316,8 +316,8 @@ export default function VpPathPreview() {
       <div style={{ padding: '12px 24px', borderTop: '1px solid #333', fontSize: 13, color: '#aaa', lineHeight: 1.6 }}>
         <strong style={{ color: '#fff' }}>How it works:</strong>{' '}
         Click any tile to cycle its owner (<span style={{ color: '#5599ff' }}>Blue</span> → <span style={{ color: '#ff5555' }}>Red</span> → <span style={{ color: '#55cc66' }}>Green</span> → Neutral).
-        Bezier lines connect each player's ★ VP tiles to their base via the shortest owned-territory path.
-        Stars are <span style={{ color: '#ffd700' }}>★ gold</span> when connected, <span style={{ color: '#888' }}>☆ grey</span> when disconnected.
+        Bezier lines connect each player's VP tiles to their base via the shortest owned-territory path.
+        Stars are <span style={{ color: '#ffd700' }}>gold</span> when connected, <span style={{ color: '#888' }}>grey outlines</span> when disconnected.
         Base and blocked tiles cannot be changed.
       </div>
     </div>

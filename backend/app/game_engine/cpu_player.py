@@ -28,8 +28,19 @@ from .cards import (
     DEF_ID_SPOILS,
     Timing,
 )
+from .cpu_valuation import (
+    ValuationContext,
+    ValuationTuning,
+    active_cards,
+    best_upgrade_gain,
+    build_context,
+    purchase_value,
+    upgrade_gain,
+)
+from .effect_resolver import land_grant_counts, tile_has_defense_bonus
 from .effects import ConditionType, EffectType
-from .hex_grid import HexGrid, HexTile
+from .game_state import RAID_RUBBLE_CAP
+from .hex_grid import HexGrid, HexTile, tile_bridges_territory
 
 # Stable definition IDs for the starter and thinning cards whose identity
 # matters to CPU decision logic. Display names are rendering-only.
@@ -74,6 +85,54 @@ def _game_progress(game: Any) -> float:
     max_r = getattr(game, "max_rounds", 20) or 20
     progress = (game.current_round - 1) / max(1, max_r - 1)
     return min(1.0, max(0.0, float(progress)))
+
+
+# Typical game length by grid size; the VP race usually ends well before the
+# round limit (small 2p games last ~7 rounds, not 20).
+_EXPECTED_ROUNDS = {"small": 9, "medium": 13, "large": 16, "mega": 18, "ultra": 20}
+
+
+def _race_progress(game: Any) -> float:
+    """Progress through the game measured by the VP race rather than the
+    round limit: the larger of the leader's share of the VP target and the
+    round count against a typical game length for this grid size."""
+    from .game_state import compute_player_vp
+
+    target = getattr(game, "vp_target", 10) or 10
+    leader = max((compute_player_vp(game, pid) for pid in game.players), default=0)
+    size = getattr(getattr(getattr(game, "grid", None), "size", None), "value", "small")
+    expected = _EXPECTED_ROUNDS.get(size, 12)
+    round_prog = (game.current_round - 1) / max(1, expected - 1)
+    return float(min(1.0, max(leader / target, round_prog, _game_progress(game))))
+
+
+def _opponent_near_win(game: Any, self_id: str, margin: int = 1) -> bool:
+    """True if some opponent is within *margin* VP of the target and at
+    least level with us — they can close the game this round."""
+    from .game_state import compute_player_vp
+
+    target = getattr(game, "vp_target", 10) or 10
+    mine = compute_player_vp(game, self_id)
+    for pid, p in game.players.items():
+        if pid == self_id or getattr(p, "has_left", False):
+            continue
+        vp = compute_player_vp(game, pid)
+        if vp >= target - margin and vp >= mine:
+            return True
+    return False
+
+
+def _claim_beats_defense(tile: Any, power: float) -> bool:
+    """Whether *power* alone takes *tile* against its current defense.
+
+    Owned tiles: ties go to the owner, so the claim must exceed the defense.
+    Unowned tiles: a tie against intrinsic defense goes to the attacker
+    (rules/03), so matching it is enough — e.g. power 2 takes a standard VP
+    hex.
+    """
+    if tile.owner is None:
+        return bool(power >= tile.defense_power)
+    return bool(power > tile.defense_power)
 
 
 def _is_vp_leader(game: Any, player_id: str, strict: bool = True) -> bool:
@@ -153,9 +212,11 @@ def _is_limited_use_claim(card: Card) -> bool:
     """True if a claim card has a targeting constraint so narrow that its
     raw power overstates its real value.
 
-    Currently flags adjacency-bridge claims (Road Builder): the card can only
-    target tiles that connect two disconnected territory groups, so it is
-    unplayable most turns regardless of its printed power.
+    Flags claims with the ``adjacency_bridge`` targeting restriction (only
+    legal on a tile that joins two disconnected territory groups). No shipped
+    card uses it any more: Road Builder is now a normal power-2 Claim whose
+    power rises to 5 on a bridging tile (``if_bridges_territory``), which
+    _estimate_effective_power handles per tile.
     """
     if card.card_type != CardType.CLAIM:
         return False
@@ -298,10 +359,11 @@ def _projected_formula_vp(card: Card, player: Any, game: Any) -> float:
     is_upgraded = getattr(card, "is_upgraded", False)
     growth = 0.0
 
-    if formula == "deck_div_10":
-        # Assume ~6 more buys this game
+    if formula == "deck_div_12":
+        # Arsenal. Assume ~6 more buys this game
+        from .game_state import arsenal_divisor
         all_cards = player.deck.cards + player.hand + player.deck.discard
-        divisor = 8 if is_upgraded else 10
+        divisor = arsenal_divisor(is_upgraded)
         projected_total = (len(all_cards) + 6) // divisor
         growth = max(0, projected_total - current)
     elif formula == "trash_div_5":
@@ -454,6 +516,64 @@ def _reconnection_bridge_tiles(
     return bridges
 
 
+def _connectivity_cut_values(grid: Any, player_id: str) -> dict[tuple[int, int], int]:
+    """For each non-base tile *player_id* owns, the VP-hex value that would
+    drop out of scoring (become disconnected from base) if that tile were
+    lost — excluding the tile's own VP value. Only tiles that are bridges to
+    connected VP hexes appear in the result.
+
+    VP hexes only score while connected to their owner's base, so a cheap
+    plain tile on the only path to two VP hexes can be worth more than a
+    VP hex itself.
+    """
+    base = None
+    owned: set[tuple[int, int]] = set()
+    for t in grid.tiles.values():
+        if t.owner == player_id and not t.is_blocked:
+            owned.add((t.q, t.r))
+        if t.is_base and t.base_owner == player_id:
+            base = (t.q, t.r)
+    if base is None or base not in owned:
+        return {}
+
+    def _reach(skip: Optional[tuple[int, int]]) -> set[tuple[int, int]]:
+        seen = {base}
+        stack = [base]
+        while stack:
+            q, r = stack.pop()
+            for dq, dr in ((1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)):
+                k = (q + dq, r + dr)
+                if k in seen or k == skip or k not in owned:
+                    continue
+                seen.add(k)
+                stack.append(k)
+        return seen
+
+    def _vp(keys: set[tuple[int, int]]) -> int:
+        total = 0
+        for q, r in keys:
+            t = grid.get_tile(q, r)
+            if t is not None and t.is_vp:
+                total += t.vp_value
+        return total
+
+    full = _reach(None)
+    full_vp = _vp(full)
+    if full_vp == 0:
+        return {}
+    result: dict[tuple[int, int], int] = {}
+    for key in full:
+        if key == base:
+            continue
+        reach = _reach(key)
+        own = grid.get_tile(*key)
+        own_vp = own.vp_value if own is not None and own.is_vp else 0
+        loss = full_vp - _vp(reach) - own_vp
+        if loss > 0:
+            result[key] = loss
+    return result
+
+
 def _opponent_threat_count(game: Any, self_id: str) -> int:
     """Return total count of known high-impact threat cards held by opponents
     in their active decks (hand + draw + discard)."""
@@ -488,7 +608,10 @@ def _deficit_panic_active(game: Any, self_id: str, profile: "DifficultyProfile")
     the CPU should abandon long-term plans and contest VP directly."""
     if not profile.vp_deficit_panic:
         return False
-    if _game_progress(game) < profile.vp_deficit_progress:
+    if profile.endgame_awareness and _opponent_near_win(game, self_id):
+        return True  # they close the game this round unless we break them
+    progress = _race_progress(game) if profile.endgame_awareness else _game_progress(game)
+    if progress < profile.vp_deficit_progress:
         return False
     return _vp_leader_deficit(game, self_id) >= profile.vp_deficit_threshold
 
@@ -670,6 +793,38 @@ class DifficultyProfile:
     # reconnection path.
     vp_connectivity_enforcement: bool = True
 
+    # ── Deck-aware economy (cpu_valuation) ────────────────────────
+    # Score purchases by marginal deck value (play value over the deck
+    # average × expected remaining draws) instead of the legacy
+    # cost-divided heuristics, which over-bought 1–2 cost filler.
+    value_purchasing: bool = True
+    # Minimum marginal value (resource-equivalents) worth buying.
+    purchase_value_floor: float = 0.75
+    # Read the board (reachable VP hex defenses, frontier size, opponent
+    # claim power) when valuing cards; off = static card curve only.
+    board_aware_valuation: bool = True
+    # Skip a mediocre buy to afford a much better shared-market card next turn.
+    purchase_saving: bool = True
+    # Spend banked upgrade credits on the best card in hand each turn.
+    spend_upgrade_credits: bool = True
+    # Threat-aware play: anticipate opponents' simultaneous claims when
+    # deciding where to defend and which contested targets are winnable.
+    threat_modeling: bool = True
+    # Target opponents' bridge tiles whose loss disconnects their VP hexes
+    # from base (and guard our own bridges).
+    connectivity_cuts: bool = True
+    # Endgame: measure progress by the VP race (not the 20-round limit),
+    # buy the VP card that wins on the spot, and go all-in on denial when an
+    # opponent can close the game this round.
+    endgame_awareness: bool = True
+    # Valuation weights (see cpu_valuation.ValuationTuning).
+    val_claim_mult: float = 1.0
+    val_defense_mult: float = 1.0
+    val_engine_mult: float = 1.0
+    val_draw_mult: float = 1.0
+    val_vp_re: float = 7.5
+    val_upgrade_mult: float = 1.0
+
 
 # Feature flags in the order they're counted for allocation. Keep this list
 # in sync with DifficultyProfile booleans — the difficulty_check script and
@@ -743,6 +898,13 @@ _EASY_PROFILE = DifficultyProfile(
     opponent_threat_reaction=False,
     claim_power_consolidation=False,
     vp_connectivity_enforcement=False,
+    # Deck-aware economy — Easy keeps the legacy cost-divided buy heuristic.
+    value_purchasing=False,
+    board_aware_valuation=False,
+    purchase_saving=False,
+    threat_modeling=False,
+    connectivity_cuts=False,
+    endgame_awareness=False,
 )
 
 # Normal: ~60% of flags on (11/18). Core heuristics + sound fundamentals,
@@ -795,6 +957,18 @@ _MEDIUM_PROFILE = DifficultyProfile(
     claim_power_consolidation=True,
     consolidation_progress=0.5,
     vp_connectivity_enforcement=True,
+    # Deck-aware economy: Medium values cards on the static curve only,
+    # over-weights economy relative to claim power (the classic intermediate
+    # habit — benchmarked at ~35–40% vs Hard), never saves up for a big buy,
+    # and doesn't model opponents' simultaneous claims, bridges or endgame.
+    value_purchasing=True,
+    purchase_value_floor=1.0,
+    board_aware_valuation=False,
+    purchase_saving=False,
+    threat_modeling=False,
+    connectivity_cuts=False,
+    endgame_awareness=False,
+    val_claim_mult=0.7,
 )
 
 # Hard: every flag on, all tunings at their strongest.
@@ -850,6 +1024,10 @@ class CPUPlayer:
         self._disconnected_vp: list[HexTile] = []
         self._panic_active: bool = False
         self._opponent_threats: int = 0
+        self._opp_models: list[dict[str, Any]] = []
+        self._threat_cache: dict[Any, Any] = {}
+        self._enemy_cut_value: dict[tuple[int, int], int] = {}
+        self._own_cut_value: dict[tuple[int, int], int] = {}
 
     # ── CPU decision reasoning (for game log validation) ─────────
     # These helpers produce structured (flags, score) dicts that get emitted
@@ -1073,6 +1251,20 @@ class CPUPlayer:
             self._opponent_threats = _opponent_threat_count(game, self.player_id)
         else:
             self._opponent_threats = 0
+        self._threat_cache = {}
+        if self.profile.threat_modeling and game.grid is not None:
+            self._opp_models = self._build_opponent_models(game)
+        else:
+            self._opp_models = []
+        self._enemy_cut_value = {}
+        self._own_cut_value = {}
+        if self.profile.connectivity_cuts and game.grid is not None:
+            for pid in game.players:
+                cuts = _connectivity_cut_values(game.grid, pid)
+                if pid == self.player_id:
+                    self._own_cut_value = cuts
+                else:
+                    self._enemy_cut_value.update(cuts)
 
     # ── Weights helper ────────────────────────────────────────────
 
@@ -1125,27 +1317,24 @@ class CPUPlayer:
             # Fully random among all options
             return self.rng.choice(scored)[1]
 
-        # Weighted random: blend between deterministic and uniform
-        # Shift scores to be positive, then apply softmax-like weighting
+        # Near-best sampling: take the top option with probability
+        # (1 - noise); otherwise make a "plausible mistake" by sampling the
+        # options in proportion to their (shifted) scores. The previous
+        # implementation always sampled proportionally — even Hard at
+        # noise 0.05 picked an 8-point option over a 10-point one ~45% of the
+        # time, which flattened the gap between difficulty tiers.
+        best = max(scored, key=lambda x: x[0])
+        if len(scored) == 1 or self.rng.random() >= self.noise:
+            return best[1]
         min_score = min(s for s, _ in scored)
         shifted = [(s - min_score + 0.1, item) for s, item in scored]
         total = sum(s for s, _ in shifted)
-
-        # Blend: (1-noise) * score_weight + noise * uniform
-        weights = []
-        uniform = 1.0 / len(shifted)
-        for s, _ in shifted:
-            score_weight = s / total if total > 0 else uniform
-            w = (1.0 - self.noise) * score_weight + self.noise * uniform
-            weights.append(w)
-
-        # Weighted random selection
-        r = self.rng.random() * sum(weights)
+        r = self.rng.random() * total
         cumulative = 0.0
-        for i, w in enumerate(weights):
-            cumulative += w
+        for s, item in shifted:
+            cumulative += s
             if r <= cumulative:
-                return shifted[i][1]
+                return item
         return shifted[-1][1]
 
     # ── Play Phase ────────────────────────────────────────────────
@@ -1374,6 +1563,16 @@ class CPUPlayer:
         tile = game.grid.tiles.get(f"{q},{r}")
         if tile is None or tile.owner != self.player_id:
             return False
+        if self._opp_models:
+            # Threat model: urgent when the card meaningfully protects the
+            # tile (value cached by _score_defense_targets).
+            card_index = action.get("card_index")
+            player = game.players[self.player_id]
+            if card_index is not None and 0 <= card_index < len(player.hand):
+                cached = self._threat_cache.get(
+                    ("def_save", player.hand[card_index].id, q, r))
+                if cached is not None:
+                    return bool(cached >= 6.0)
         adj = game.grid.get_adjacent(q, r)
         enemy_neighbors = sum(
             1 for t in adj
@@ -1503,8 +1702,9 @@ class CPUPlayer:
                 est_power = self._estimate_effective_power(game, player, tile, card)
                 total_power = est_power + combined_prior
                 if tile.owner is None:
-                    # Ties-to-defender on neutral means we need > defense.
-                    if total_power <= tile.defense_power:
+                    # A tie against a neutral tile's intrinsic defense goes
+                    # to the attacker, so matching it is enough.
+                    if total_power < tile.defense_power:
                         continue
                 else:
                     # Enemy-owned: only bother if we can actually take it, or
@@ -2020,7 +2220,13 @@ class CPUPlayer:
                     if tile.owner == self.player_id:
                         power += ev
                 elif effect.condition.value == "if_target_has_defense":
-                    if tile.defense_power > 0 or tile.permanent_defense_bonus > 0:
+                    # Battering Ram: only defense *bonuses* count, not
+                    # intrinsic hex/base defense.
+                    if tile_has_defense_bonus(tile):
+                        power += ev
+                elif effect.condition.value == "if_bridges_territory":
+                    # Road Builder: power 5 (6 upgraded) on a bridging tile.
+                    if tile_bridges_territory(game.grid, self.player_id, tile.q, tile.r):
                         power += ev
                 elif effect.condition.value == "cards_in_hand":
                     power = max(0, len(player.hand) - 1) + ev
@@ -2076,6 +2282,171 @@ class CPUPlayer:
         # Many ring-2 enemies — tile may fall to a flood-style claim soon.
         return 0.5
 
+    # ── Threat model (threat_modeling profiles) ───────────────────
+    #
+    # Purchases are public, so every opponent's deck composition is known;
+    # their hand is not. These helpers turn deck composition into the chance
+    # an opponent holds a claim strong enough to take (or a card strong
+    # enough to hold) a given tile this round, assuming a random 5-card hand.
+
+    _P_ATTACK_VP = 0.85     # chance a reachable VP hex of ours is attacked
+    _P_ATTACK_BASE = 0.45
+    _P_ATTACK_PLAIN = 0.25
+    _P_CONTEST_NEUTRAL_VP = 0.6   # chance an opponent also claims a neutral VP hex
+    _P_CONTEST_NEUTRAL = 0.12
+    _P_DEFEND_VP = 0.6      # chance an opponent reinforces a VP hex we attack
+    _P_DEFEND_PLAIN = 0.2
+
+    def _build_opponent_models(self, game: Any) -> list[dict[str, Any]]:
+        models: list[dict[str, Any]] = []
+        if game.grid is None:
+            return models
+        for pid, p in game.players.items():
+            if pid == self.player_id or getattr(p, "has_left", False):
+                continue
+            tiles = game.grid.get_player_tiles(pid)
+            n_tiles = len(tiles)
+            claims: list[tuple[float, bool, int, bool]] = []
+            holds: list[float] = []
+            cards = active_cards(p)
+            for c in cards:
+                if c.unplayable:
+                    continue
+                if c.card_type == CardType.CLAIM:
+                    power = float(c.effective_power)
+                    for e in c.effects:
+                        if e.type == EffectType.POWER_PER_TILES_OWNED:
+                            div = e.effective_value(c.is_upgraded) or 3
+                            bonus = n_tiles // div
+                            power = float(bonus) if e.metadata.get("replaces_base_power") else power + bonus
+                        elif e.type == EffectType.POWER_MODIFIER:
+                            power += e.effective_value(c.is_upgraded) * 0.5
+                    claims.append((power, c.adjacency_required, c.claim_range,
+                                   c.effective_unoccupied_only))
+                    if not c.effective_unoccupied_only:
+                        holds.append(power)  # a claim on one's own tile adds power
+                elif c.card_type == CardType.DEFENSE:
+                    d = float(c.effective_defense_bonus)
+                    for e in c.effects:
+                        if e.type in (EffectType.PERMANENT_DEFENSE, EffectType.DEFENSE_PER_ADJACENT):
+                            d += max(1, e.effective_value(c.is_upgraded))
+                        elif e.type == EffectType.TILE_IMMUNITY:
+                            d += 99.0
+                    holds.append(d)
+            models.append({
+                "pid": pid,
+                "tiles": tiles,
+                "n": max(1, len(cards)),
+                "h": getattr(p, "hand_size", 5) or 5,
+                "claims": claims,
+                "holds": holds,
+            })
+        return models
+
+    @staticmethod
+    def _p_holds_any(n: int, k: int, h: int) -> float:
+        """P(a random h-card hand from an n-card deck holds >= 1 of k cards)."""
+        if k <= 0:
+            return 0.0
+        if k >= n:
+            return 1.0
+        none = 1.0
+        for i in range(min(h, n)):
+            if n - i <= 0:
+                break
+            none *= max(0.0, (n - k - i)) / (n - i)
+        return 1.0 - none
+
+    def _opp_distance(self, model: dict[str, Any], tile: HexTile) -> int:
+        cache = self._threat_cache.setdefault(("dist", model["pid"]), {})
+        key = (tile.q, tile.r)
+        if key not in cache:
+            cache[key] = min((t.distance_to(tile) for t in model["tiles"]), default=99)
+        return int(cache[key])
+
+    def _p_opp_attack_power_over(self, model: dict[str, Any], tile: HexTile,
+                                 threshold: float, at_least: bool = False) -> float:
+        """P(opponent holds a claim that can reach *tile* with power above
+        *threshold* (or >= when *at_least*)."""
+        d = self._opp_distance(model, tile)
+        k = 0
+        for power, adj_req, rng, unocc in model["claims"]:
+            if unocc and tile.owner is not None:
+                continue
+            if adj_req and d > rng:
+                continue
+            if power > threshold or (at_least and power >= threshold):
+                k += 1
+        return self._p_holds_any(model["n"], k, model["h"])
+
+    def _p_lose_tile(self, game: Any, tile: HexTile, defense: float) -> float:
+        """Chance we lose an owned *tile* this round if it ends the round
+        with *defense* total (intrinsic + temporary + our claims on it)."""
+        if tile.is_vp:
+            p_att = self._P_ATTACK_VP
+        elif tile.is_base:
+            p_att = self._P_ATTACK_BASE
+        elif self._own_cut_value.get((tile.q, tile.r), 0) > 0:
+            p_att = 0.5  # a bridge to our VP hexes is a natural target
+        else:
+            p_att = self._P_ATTACK_PLAIN
+        hold = 1.0
+        for m in self._opp_models:
+            hold *= 1.0 - p_att * self._p_opp_attack_power_over(m, tile, defense)
+        return 1.0 - hold
+
+    def _planned_defense_on(self, player: Any, tile: HexTile) -> float:
+        """Defense we've already committed to *tile* this round (defense cards
+        plus our own claims stacked on it)."""
+        total = 0.0
+        for a in player.planned_actions:
+            hit = (a.target_q == tile.q and a.target_r == tile.r) or any(
+                (q, r) == (tile.q, tile.r) for q, r in (a.extra_targets or [])
+            )
+            if not hit:
+                continue
+            if a.card.card_type == CardType.DEFENSE:
+                total += a.card.effective_defense_bonus
+            elif a.card.card_type == CardType.CLAIM:
+                total += a.card.effective_power
+        return total
+
+    def _p_win_claim(self, game: Any, tile: HexTile, power: float) -> float:
+        """Chance a claim of total *power* on a non-owned *tile* succeeds,
+        accounting for the owner reinforcing it and rival claimants."""
+        defense = float(tile.defense_power)
+        if not _claim_beats_defense(tile, power):
+            return 0.0
+        margin = power - defense
+        p = 1.0
+        for m in self._opp_models:
+            if m["pid"] == tile.owner:
+                p_def = self._P_DEFEND_VP if tile.is_vp else self._P_DEFEND_PLAIN
+                k = sum(1 for v in m["holds"] if v >= margin)
+                p *= 1.0 - p_def * self._p_holds_any(m["n"], k, m["h"])
+            else:
+                if tile.owner is None:
+                    p_con = self._P_CONTEST_NEUTRAL_VP if tile.is_vp else self._P_CONTEST_NEUTRAL
+                else:
+                    p_con = self._P_ATTACK_VP * 0.5 if tile.is_vp else self._P_CONTEST_NEUTRAL
+                # A rival claimant matching our power ties (nobody wins).
+                p *= 1.0 - p_con * self._p_opp_attack_power_over(m, tile, power, at_least=True)
+        return max(0.0, p)
+
+    def _tile_stake(self, tile: HexTile, weights: StrategyWeights) -> float:
+        """Play-score units at stake if we lose an owned tile — calibrated to
+        the bonuses _score_tile_for_claim awards for capturing a tile."""
+        if tile.is_vp:
+            vp_mult = 1.0 if tile.vp_value <= 1 else 3.5 if tile.vp_value == 2 else float(
+                math.pow(tile.vp_value, 1.8))
+            cut = self._own_cut_value.get((tile.q, tile.r), 0)
+            return (vp_mult * 40.0 + cut * 30.0) * max(1.0, weights.vp_hex_priority)
+        cut = self._own_cut_value.get((tile.q, tile.r), 0)
+        cut_stake = cut * 30.0 * max(1.0, weights.vp_hex_priority)
+        if tile.is_base:
+            return 22.0 + cut_stake
+        return 7.0 + cut_stake
+
     def _combined_prior_power_on(self, player: Any, tile: HexTile) -> int:
         """Sum effective power of this player's claim cards already planned
         onto *tile* this turn. Enables combined-stack reasoning when scoring
@@ -2097,7 +2468,7 @@ class CPUPlayer:
 
         # Pre-compute power vs defense for VP-specific bonuses.
         effective_power = self._estimate_effective_power(game, player, tile, card)
-        can_win = effective_power > tile.defense_power
+        can_win = _claim_beats_defense(tile, effective_power)
 
         # Combined stackable power: if we've already planned claims on this
         # tile this turn, our new card adds to that total for the resolution
@@ -2108,7 +2479,13 @@ class CPUPlayer:
         else:
             combined_prior = 0
         combined_total = effective_power + combined_prior
-        can_win_combined = combined_total > tile.defense_power
+        can_win_combined = _claim_beats_defense(tile, combined_total)
+
+        # Threat model: replace the binary "power beats current defense"
+        # test with the chance the claim actually lands once the owner's
+        # possible reinforcements and rival claimants are accounted for.
+        threat = bool(self._opp_models) and tile.owner != self.player_id
+        p_win = self._p_win_claim(game, tile, combined_total) if threat else 0.0
 
         # VP-value scaling: premium (vp=2) tiles dominate standard (vp=1)
         # rather than scaling linearly. A vp=2 tile is worth closer to 3.5×
@@ -2130,7 +2507,9 @@ class CPUPlayer:
             vp_mult = _vp_mult(tile)
             score += vp_mult * 12.0 * weights.vp_hex_priority * passive_vp_mult * panic_vp_mult
             # Massive bonus when we can actually capture this VP tile
-            if can_win:
+            if threat:
+                score += vp_mult * 15.0 * weights.vp_hex_priority * panic_vp_mult * p_win
+            elif can_win:
                 score += vp_mult * 15.0 * weights.vp_hex_priority * panic_vp_mult
             # Combined-stack breakthrough: if this claim alone can't win but
             # the running stack total would, treat it as nearly as valuable
@@ -2148,7 +2527,15 @@ class CPUPlayer:
         # hedge only fires when a contest is plausible, and scale down
         # versus offensive VP captures so this never outranks taking an
         # enemy-held VP hex.
-        if (
+        if tile.owner == self.player_id and self._opp_models:
+            # Threat model: a claim on our own tile adds its power to our
+            # defense. Value it by how much it cuts the chance of losing the
+            # tile this round.
+            current = float(tile.defense_power) + self._planned_defense_on(player, tile)
+            save = (self._p_lose_tile(game, tile, current)
+                    - self._p_lose_tile(game, tile, current + effective_power))
+            score += save * self._tile_stake(tile, weights) * (0.4 if panic else 1.0)
+        elif (
             tile.owner == self.player_id
             and (tile.is_vp or tile.is_base)
         ):
@@ -2177,6 +2564,8 @@ class CPUPlayer:
             if steps is not None and (can_win or can_win_combined):
                 distance_discount = 1.0 if steps <= 1 else 0.75 if steps == 2 else 0.5
                 base_bonus = self.profile.reachable_vp_bonus * _vp_mult(tile)
+                if threat:
+                    base_bonus *= p_win
                 score += base_bonus * distance_discount * weights.vp_hex_priority
 
         # VP denial: any opponent-held VP hex is a high-priority contest target,
@@ -2191,7 +2580,9 @@ class CPUPlayer:
             vp_mult = _vp_mult(tile)
             score += vp_mult * 10.0 * weights.vp_hex_priority * passive_vp_mult * panic_vp_mult
             # Even higher bonus when we have the power to actually take it
-            if can_win:
+            if threat:
+                score += vp_mult * 20.0 * weights.vp_hex_priority * panic_vp_mult * p_win
+            elif can_win:
                 score += vp_mult * 20.0 * weights.vp_hex_priority * panic_vp_mult
             # Extra bonus when the tile is about to score (held since a prior round).
             held_since = getattr(tile, "held_since_turn", None)
@@ -2222,15 +2613,21 @@ class CPUPlayer:
         elif tile.owner != self.player_id:
             # Enemy tile — factor in defense
             defense = tile.defense_power
-            if can_win:
-                score += 5.0 * weights.aggression
-                # Base raid bonus: raiding generates Rubble (-1 VP each) in opponent's deck
+            if threat and can_win:
+                score += 5.0 * weights.aggression * p_win
                 if tile.is_base and self.profile.base_raid_priority:
-                    rubble_count = effective_power - defense
+                    rubble_count = min(RAID_RUBBLE_CAP, effective_power - defense)
+                    score += rubble_count * 3.0 * weights.aggression * p_win
+            elif can_win:
+                score += 5.0 * weights.aggression
+                # Base raid bonus: a raid gives the opponent 1 Rubble (a dead
+                # card; capped at RAID_RUBBLE_CAP per raid) and us a Spoils (+1 VP).
+                if tile.is_base and self.profile.base_raid_priority:
+                    rubble_count = min(RAID_RUBBLE_CAP, effective_power - defense)
                     score += rubble_count * 3.0 * weights.aggression
                     # Prioritize base raids further when the breakthrough is
-                    # substantial (power >= 4 generates multiple Rubble and
-                    # spoils-equivalent card pollution in the enemy deck).
+                    # substantial (power >= 4 lands the Spoils with margin to
+                    # spare against a last-second Defense card).
                     if effective_power >= 4:
                         score += 6.0 * weights.aggression
             elif (
@@ -2240,7 +2637,7 @@ class CPUPlayer:
             ):
                 # Stack breakthrough against an enemy tile: reward combining
                 # claims so stackable follow-ups are scored highly.
-                rubble_count = combined_total - defense
+                rubble_count = min(RAID_RUBBLE_CAP, combined_total - defense)
                 score += 4.0 * weights.aggression
                 if tile.is_base and self.profile.base_raid_priority:
                     score += rubble_count * 3.0 * weights.aggression
@@ -2250,6 +2647,18 @@ class CPUPlayer:
                 score += 1.0 * weights.aggression  # tie goes to defender, risky
             else:
                 score -= 2.0  # likely to lose
+
+        # Connectivity cut: taking this enemy tile disconnects VP hexes from
+        # their owner's base, wiping that VP until they reconnect.
+        if (
+            self.profile.connectivity_cuts
+            and tile.owner is not None
+            and tile.owner != self.player_id
+        ):
+            cut = self._enemy_cut_value.get((tile.q, tile.r), 0)
+            if cut > 0:
+                landing = p_win if threat else (1.0 if (can_win or can_win_combined) else 0.0)
+                score += cut * 25.0 * weights.vp_hex_priority * landing
 
         # Strategic position: tiles adjacent to VP hexes
         assert game.grid is not None
@@ -2506,6 +2915,29 @@ class CPUPlayer:
                 if enemy_neighbors > owned_neighbors:
                     score -= 2.0
 
+            if self._opp_models:
+                # Threat model: value the card by how much it cuts the chance
+                # of losing this tile this round, in capture-score units.
+                current = float(tile.defense_power) + self._planned_defense_on(player, tile)
+                if any(e.type == EffectType.TILE_IMMUNITY for e in card.effects):
+                    after = current + 99.0
+                else:
+                    bonus = float(card.effective_defense_bonus)
+                    if has_defense_per_adjacent:
+                        bonus += owned_neighbors
+                    if has_permanent_defense:
+                        bonus += max(1, next(
+                            (e.effective_value(card.is_upgraded) for e in card.effects
+                             if e.type == EffectType.PERMANENT_DEFENSE), 1))
+                    after = current + bonus
+                save = (self._p_lose_tile(game, tile, current)
+                        - self._p_lose_tile(game, tile, after))
+                threat_value = save * self._tile_stake(tile, weights)
+                if has_permanent_defense:
+                    threat_value *= 1.5  # keeps paying in later rounds
+                score = 0.35 * score + threat_value
+                self._threat_cache[("def_save", card.id, tile.q, tile.r)] = threat_value
+
             tile_scores.append((score, tile))
 
         # For multi-tile defense cards, pick the best primary target
@@ -2559,7 +2991,12 @@ class CPUPlayer:
         # freely. We skip the card entirely here rather than penalising its
         # score, because _pick() shifts negative scores back into the positive
         # range and would still let noise pick it.
-        if any(e.type == EffectType.GRANT_LAND_GRANTS for e in card.effects):
+        # Diplomat+ gives opponents nothing, so it's always safe to play.
+        if any(
+            e.type == EffectType.GRANT_LAND_GRANTS
+            and land_grant_counts(e, card.is_upgraded)[1] > 0
+            for e in card.effects
+        ):
             if not _is_vp_leader(game, self.player_id, strict=True):
                 return None
 
@@ -2597,20 +3034,16 @@ class CPUPlayer:
                         score -= 5.0  # can't use it — no valid targets
 
             elif effect.type == EffectType.GRANT_LAND_GRANTS:
-                # We only get here when _is_vp_leader is True (see the hard veto
-                # at the top of this function). Score the grant based on its
-                # net VP advantage to us vs opponents.
+                # Opponent-gifting versions only get here when we're the strict
+                # VP leader (hard veto above). Score by net VP advantage.
+                self_grants, per_opp = land_grant_counts(effect, card.is_upgraded)
                 if effect.target == "chosen_player":
-                    # Fortress Diplomacy: you get 1/2, target opponent gets 1
-                    self_grants = 2 if card.is_upgraded else 1
-                    net_advantage = self_grants - 1  # 0 base, +1 upgraded
+                    net_advantage = self_grants - per_opp
                     score += (net_advantage + 1.5) * 5.0
                 else:
-                    # Neutral Diplomat: you get 1/2, ALL opponents get 1
+                    # Diplomat: you get 2; each opponent gets 1 (0 upgraded)
                     num_opponents = len(game.players) - 1
-                    self_grants = 2 if card.is_upgraded else 1
-                    # Net is worse with more opponents
-                    net_advantage = self_grants - num_opponents
+                    net_advantage = self_grants - per_opp * num_opponents
                     score += max(net_advantage + 2.0, 1.0) * 4.0
 
             elif effect.type == EffectType.VP_FROM_CONTESTED_WINS:
@@ -2857,7 +3290,7 @@ class CPUPlayer:
                 tiles_with_def = 0
                 if game.grid:
                     for t in game.grid.get_player_tiles(self.player_id):
-                        if t.permanent_defense_bonus > 0 or t.defense_power > 0:
+                        if tile_has_defense_bonus(t):
                             tiles_with_def += 1
                 draws = min(tiles_with_def * per, max_draws)
                 score += draws * 2.0 * weights.card_draw_value
@@ -2900,6 +3333,10 @@ class CPUPlayer:
                 # Small premium for deck-bloat engine synergy with VP-from-
                 # trash or spoils-hoard strategies (not modeled precisely).
                 score += 1.0
+
+            elif effect.type == EffectType.DRAW_NEXT_TURN and effect.condition == ConditionType.ALWAYS:
+                # Plunder / Battle Cry / Iron Discipline: a bigger hand next round.
+                score += effect.effective_value(card.is_upgraded) * 1.2 * weights.card_draw_value
 
             elif effect.type == EffectType.GRANT_ACTIONS_NEXT_ROUND_PER_SUCCESSFUL_CLAIM:
                 # Surge+: delayed action return per successful claim this round.
@@ -2976,7 +3413,18 @@ class CPUPlayer:
         # Handle Diplomacy/Diplomat target selection
         for effect in card.effects:
             if effect.type == EffectType.GRANT_LAND_GRANTS and effect.target == "chosen_player":
-                # Fortress Diplomacy: pick the opponent with the lowest VP (help least threatening)
+                # Pick the opponent with the lowest VP (help least threatening)
+                target_pid = self._pick_diplomacy_target(game, player)
+                if target_pid:
+                    action_dict["target_player_id"] = target_pid
+            elif (
+                effect.type == EffectType.GRANT_ACTIONS_NEXT_TURN
+                and effect.target == "chosen_player"
+                and effect.effective_value(card.is_upgraded) > 0
+                and "target_player_id" not in action_dict
+            ):
+                # Battle Cry: the extra action must go to an opponent; give it
+                # to the least threatening one (the rules require a target).
                 target_pid = self._pick_diplomacy_target(game, player)
                 if target_pid:
                     action_dict["target_player_id"] = target_pid
@@ -3340,9 +3788,174 @@ class CPUPlayer:
         weights = self._get_weights(player, game)
         return self._pick_best_purchase(game, player, weights)
 
+    # ── Deck-aware purchasing (value_purchasing profiles) ─────────
+
+    def _valuation_context(self, game: Any) -> ValuationContext:
+        p = self.profile
+        tuning = ValuationTuning(
+            claim_mult=p.val_claim_mult,
+            defense_mult=p.val_defense_mult,
+            engine_mult=p.val_engine_mult,
+            draw_mult=p.val_draw_mult,
+            vp_re=p.val_vp_re,
+            upgrade_mult=p.val_upgrade_mult,
+        )
+        return build_context(
+            game, self.player_id, board_aware=p.board_aware_valuation, tuning=tuning,
+        )
+
+    def _purchase_options(
+        self, game: Any, player: Any, ctx: ValuationContext,
+        weights: StrategyWeights, include_unaffordable: bool = False,
+    ) -> list[tuple[float, int, dict[str, Any], Optional[Card]]]:
+        """(marginal value, cost, action, card) for every legal purchase."""
+        from .game_state import (
+            UPGRADE_CREDIT_COST,
+            _preview_cost_reductions,
+            _preview_cost_reductions_flat,
+            calculate_dynamic_buy_cost,
+            player_owns_card_definition,
+        )
+
+        options: list[tuple[float, int, dict[str, Any], Optional[Card]]] = []
+
+        def _add(card: Card, source: str, card_id: str) -> None:
+            if card.unique and player_owns_card_definition(player, card.definition_id):
+                return
+            cost = _preview_cost_reductions(
+                player, card, calculate_dynamic_buy_cost(game, player, card),
+            )
+            if cost > player.resources and not include_unaffordable:
+                return
+            pv = purchase_value(card, player, game, ctx, weights)
+            options.append((pv, cost, {
+                "source": source,
+                "card_id": card_id,
+                "definition_id": card.definition_id,
+            }, card))
+
+        for card in player.archetype_market:
+            _add(card, "archetype", card.id)
+        already_bought = {
+            p["card_id"] for p in game.buy_phase_purchases.get(self.player_id, [])
+            if p["source"] == "shared"
+        }
+        for base_id, copies in game.shared_market.stacks.items():
+            if copies and base_id not in already_bought:
+                _add(copies[0], "shared", base_id)
+
+        upgrade_cost = _preview_cost_reductions_flat(player, UPGRADE_CREDIT_COST)
+        if upgrade_cost <= player.resources or include_unaffordable:
+            cards = active_cards(player)
+            # A credit only pays off once a good target is in hand; discount
+            # for the wait and for credits already banked.
+            pending = player.upgrade_credits
+            gain = best_upgrade_gain(player, game, ctx, cards, weights)
+            pv = gain * 0.8 * (0.6 ** pending)
+            options.append((pv, upgrade_cost, {
+                "source": "upgrade", "card_id": None, "definition_id": None,
+            }, None))
+        return options
+
+    def _pick_best_purchase_by_value(
+        self, game: Any, player: Any, weights: StrategyWeights,
+    ) -> Optional[dict[str, Any]]:
+        ctx = self._valuation_context(game)
+        options = self._purchase_options(
+            game, player, ctx, weights, include_unaffordable=self.profile.purchase_saving,
+        )
+        affordable = [o for o in options if o[1] <= player.resources]
+
+        # Lethal buy: the VP target is checked at the end of the round, after
+        # buying — a passive-VP card that reaches it wins on the spot.
+        if self.profile.endgame_awareness:
+            from .game_state import compute_player_vp
+            need = game.vp_target - compute_player_vp(game, self.player_id)
+            lethal = [
+                (cost, action) for _pv, cost, action, card in affordable
+                if card is not None and card.passive_vp >= need > 0
+            ]
+            if lethal:
+                return min(lethal, key=lambda x: x[0])[1]
+
+        floor = self.profile.purchase_value_floor
+        viable = [(pv, action) for pv, _c, action, _card in affordable if pv > floor]
+        if not viable:
+            return None
+        best_pv = max(pv for pv, _ in viable)
+
+        # Save for a clearly better shared-market card that next turn's
+        # income should cover (the archetype market re-rolls, so only shared
+        # stacks are dependable savings targets).
+        if self.profile.purchase_saving and ctx.rounds_left > 2:
+            reach = player.resources + max(2.0, ctx.income_per_hand)
+            for pv, cost, action, _card in options:
+                if cost <= player.resources or cost > reach:
+                    continue
+                if action["source"] != "shared":
+                    continue
+                if pv > best_pv * 1.6 + 2.0:
+                    return None
+
+        chosen = self._pick(viable)
+        if chosen is not None:
+            self._attach_purchase_reasoning(game, player, chosen, viable)
+        return chosen
+
+    def spend_upgrade_credits(self, game: Any) -> int:
+        """Spend banked upgrade credits on the most valuable cards in hand.
+
+        Called by the play-phase drivers before any card is played. Returns
+        the number of credits spent. Without this the CPU bought credits and
+        never cashed them in.
+        """
+        from .game_state import spend_upgrade_credit
+
+        if not self.profile.spend_upgrade_credits:
+            return 0
+        player = game.players[self.player_id]
+        spent = 0
+        weights = self._get_weights(player, game)
+        while player.upgrade_credits > 0 and player.hand:
+            ctx = self._valuation_context(game)
+            best_i, best_gain = -1, 0.5
+            for i, card in enumerate(player.hand):
+                g = upgrade_gain(card, player, game, ctx, weights)
+                if g > best_gain:
+                    best_i, best_gain = i, g
+            if best_i < 0:
+                break
+            ok, _msg = spend_upgrade_credit(game, self.player_id, best_i)
+            if not ok:
+                break
+            spent += 1
+        return spent
+
+    def _should_reroll_by_value(self, game: Any, player: Any) -> bool:
+        from .game_state import REROLL_COST
+
+        free_reroll = player.turn_modifiers.free_rerolls > 0  # Surveyor
+        if player.resources < REROLL_COST + 3 and not free_reroll:
+            return False
+        weights = self._get_weights(player, game)
+        ctx = self._valuation_context(game)
+        options = self._purchase_options(game, player, ctx, weights, include_unaffordable=True)
+        arch = [pv for pv, cost, a, _c in options
+                if a["source"] == "archetype" and cost <= player.resources + 2]
+        other = [pv for pv, cost, a, _c in options
+                 if a["source"] != "archetype" and cost <= player.resources]
+        best_arch = max(arch, default=0.0)
+        best_other = max(other, default=0.0)
+        # Re-roll when the private market is weak relative to what the shared
+        # market already offers — a fresh 3-card draw is worth the resource.
+        return best_arch < max(2.5, 0.6 * best_other)
+
     def _pick_best_purchase(self, game: Any, player: Any,
                             weights: StrategyWeights) -> Optional[dict[str, Any]]:
         """Score all available purchases and pick one."""
+        if self.profile.value_purchasing:
+            self._refresh_turn_context(game)
+            return self._pick_best_purchase_by_value(game, player, weights)
         from .game_state import calculate_dynamic_buy_cost, UPGRADE_CREDIT_COST, player_owns_card_definition
 
         # Refresh tactical context so _score_card_for_purchase can read
@@ -3928,9 +4541,13 @@ class CPUPlayer:
         """Decide whether to reroll the archetype market."""
         from .game_state import REROLL_COST, calculate_dynamic_buy_cost
         player = game.players[self.player_id]
+        free_reroll = player.turn_modifiers.free_rerolls > 0  # Surveyor
 
-        if player.resources < REROLL_COST:
+        if player.resources < REROLL_COST and not free_reroll:
             return False
+
+        if self.profile.value_purchasing:
+            return self._should_reroll_by_value(game, player)
 
         weights = self._get_weights(player, game)
         profile = self.profile

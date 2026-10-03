@@ -490,6 +490,8 @@ def _serialize_tile(tile: HexTile) -> dict[str, Any]:
         d["held_since_turn"] = tile.held_since_turn
     if tile.capture_count != 0:
         d["capture_count"] = tile.capture_count
+    if tile.lost_by:
+        d["lost_by"] = list(tile.lost_by)
     if tile.is_base:
         d["is_base"] = True
     if tile.base_owner is not None:
@@ -510,6 +512,7 @@ def _deserialize_tile(data: dict[str, Any]) -> HexTile:
         permanent_defense_bonus=data.get("permanent_defense_bonus", 0),
         held_since_turn=data.get("held_since_turn"),
         capture_count=data.get("capture_count", 0),
+        lost_by=list(data.get("lost_by", [])),
         is_base=data.get("is_base", False),
         base_owner=data.get("base_owner"),
     )

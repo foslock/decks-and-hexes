@@ -7,8 +7,8 @@ Every card in Card Clash is one of three types:
 ### Claim
 Asserts power on a target tile. All board interaction — both expanding to neutral tiles and attacking opponent-owned tiles — uses Claim cards. The target tile must be adjacent to a tile the player already owns, unless the card states otherwise.
 
-- Neutral tiles have an implicit defense of **0**. Any Claim card wins automatically.
-- Opponent tiles have a defense value equal to the sum of all Defense cards played on them that round, plus any permanent defense bonuses (e.g. from Entrench).
+- Most neutral tiles have defense **0**, so any Claim (even Explore's power 0) takes them if nobody else claims them. VP hexes have intrinsic defense (standard 2, premium 3) and tiles next to a premium hex have 1; a claim that **ties** a neutral tile's intrinsic defense still takes it.
+- Owned tiles defend with their intrinsic defense (bases 3, VP hexes 2/3) plus any permanent bonuses (Entrench, Barricade, Twin Cities), the Defense cards played on them that round, and any Claims their owner stacks on them.
 - The player with the highest total Claim power on a tile wins it. Ties go to the current owner.
 
 ### Defense
@@ -27,7 +27,7 @@ Each card has the following properties:
 Name        – Card's display name
 Type        – Claim / Defense / Engine
 Buy Cost    – Resource cost to purchase from the market
-Action Cost – Always 1 (flat for all cards)
+Action Cost – Usually 1; a few heavy cards cost 2 or 3 (shown on the card)
 Effect      – What the card does when played
 Timing      – When the effect resolves (see below)
 Upgraded    – The "+" version of this card (after spending an upgrade credit)
@@ -38,7 +38,7 @@ Archetype   – Vanguard / Swarm / Fortress / Shared
 
 ## Effect Timing
 
-All cards cost 1 action to play. Effects resolve at one of three moments:
+Most cards cost 1 action to play. Effects resolve at one of three moments:
 
 ### Immediate (During Plan Phase)
 Resolves as the card is played during the Plan Phase, before the next card is selected. This enables chaining — a ↑ Engine card played first grants extra actions that can immediately be spent on additional cards.
@@ -54,6 +54,14 @@ Conditional effects that depend on whether a Claim succeeded or failed. These re
 - **Forced discards** from on-resolution effects always apply to the **targeted opponent's next turn** — the opponent draws one fewer card at the start of their following turn. The active player must designate the target opponent at the time the card is played. The opponent does not discard from their current hand.
 
 **Keyword:** "If successful," "if the defender holds," or similar conditional language.
+
+For a **Defense** card, "if an opponent's claim on this tile fails" (Counterattack) is checked after Claims resolve: it fires when at least one opponent claimed the tile and you still own it.
+
+### When conditional Claim power is decided
+A Claim's power is worked out when you play it. If a conditional bonus already applies then, that power is locked in. If it doesn't apply yet, the condition is checked again when Claims resolve. So:
+- **Strike Team** gets its +2 if you play any other Claim this round, before or after it (Explore counts).
+- **Battering Ram** sees Defense cards the owner plays on its target this round (Defense resolves before Claims).
+- **Road Builder** is the exception: whether the tile bridges your territory is judged only when you play it.
 
 ### Next Turn (Delayed)
 Effects that carry forward to the start of the following round. Purchased cards entering the discard pile also fall into this category — they can only appear in hand next turn or later (after a shuffle).
@@ -71,6 +79,7 @@ The following cards are exceptions and allow multiple Claim cards to be played o
 - **Vanguard:** Coordinated Push
 - **Swarm:** Dog Pile
 - **Fortress:** Juggernaut
+- **Shared:** Rally Cry grants Stackable to the Claims in your hand for one round
 
 These cards must be played in the same round as the additional Claim cards they stack with. The stacking exception card itself counts as the "unlock" — all combined power is resolved together at the Reveal Phase.
 

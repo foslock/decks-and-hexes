@@ -1,6 +1,6 @@
 # Card Clash – Fortress Card Pool
 # Archetype: Cheap + Strong
-# Action Slots: 3
+# Action Slots: 5 (all archetypes: 5 actions, 5-card hand)
 # Identity: High power, deliberate cycle, defensive turtling
 #
 # EDITING NOTES:
@@ -25,7 +25,7 @@ cards:
     effect_upgraded: "+1 VP for every 6 non-base tiles you own that have never changed hands since you claimed them."
     secondary_effect: null
     secondary_timing: null
-    note: "Rewards holding ground permanently. Tiles lost and recaptured don't count. Takes up a hand slot when drawn."
+    note: "Rewards holding ground permanently. A tile counts while you've held it continuously since you first claimed it, including tiles you took from an opponent. Tiles you lost (or abandoned) and later retook don't count. Takes up a hand slot when drawn."
 
     effects:
       - type: vp_from_uncaptured_tiles
@@ -240,16 +240,19 @@ cards:
     action_return: 0
     reversible: false
     power: 3
+    upgraded_power: 4
+    resource_gain: 0
+    upgraded_resource_gain: 0
     effect: "Claim: Power 3. Stackable. If the target tile is neutral, gain 2 resources."
     effect_upgraded: "Claim: Power 4. Stackable. If the target tile is neutral, gain 3 resources."
     secondary_effect: null
     secondary_timing: null
     stackable: true
     effects:
-      - type: resource_refund_if_neutral
+      - type: gain_resources
         value: 2
         upgraded_value: 3
-        timing: on_resolution
+        timing: immediate
         condition: if_target_neutral
 
   - id: fortress_consolidate
@@ -280,8 +283,8 @@ cards:
     action_cost: 2
     reversible: true
     power: 5
-    effect: "Claim: Power 5. If the target tile has any defense bonuses, gain +2 power. Costs 2 actions to play."
-    effect_upgraded: "Claim: Power 7. If the target tile has any defense bonuses, gain +3 power. Costs 2 actions to play."
+    effect: "Claim: Power 5. If the target tile has any defense bonuses (from Defense cards or permanent fortifications), gain +2 power. Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 7. If the target tile has any defense bonuses (from Defense cards or permanent fortifications), gain +3 power. Costs 2 actions to play."
     secondary_effect: null
     secondary_timing: null
 
@@ -335,14 +338,23 @@ cards:
     name: Iron Discipline
     name_upgraded: Iron Discipline+
     type: Engine
-    buy_cost: 3
+    buy_cost: 4
     action_return: 1
     upgraded_action_return: 2
     power: 0
-    effect: "Gain 2 resources. Draw 1 card. Gain 1 action."
-    effect_upgraded: "Gain 3 resources. Draw 2 cards. Gain 2 actions."
+    resource_gain: 2
+    upgraded_resource_gain: 3
+    draw_cards: 1
+    upgraded_draw_cards: 2
+    effect: "Gain 2 resources. Draw 1 card. Gain 1 action. Draw 1 card next round."
+    effect_upgraded: "Gain 3 resources. Draw 2 cards. Gain 2 actions. Draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
+
+    effects:
+      - type: draw_next_turn
+        value: 1
+        timing: immediate
 
 
   - id: fortress_fortified_position
@@ -579,8 +591,8 @@ cards:
     action_return: 0
     upgraded_action_return: 2
     power: 0
-    effect: "Draw 1 card for every tile you own with any defense bonus (max 3). Next round, draw 1 additional card."
-    effect_upgraded: "Draw 1 card for every tile you own with any defense bonus (max 4). Next round, draw 2 additional cards. Gain 2 actions."
+    effect: "Draw 1 card for every tile you own with any defense bonus above its intrinsic defense (max 3). Next round, draw 1 additional card."
+    effect_upgraded: "Draw 1 card for every tile you own with any defense bonus above its intrinsic defense (max 4). Next round, draw 2 additional cards. Gain 2 actions."
     secondary_effect: null
     secondary_timing: null
     note: "Turns Entrench/Iron Wall investment into sustained card draw. Watchtower with depth."
