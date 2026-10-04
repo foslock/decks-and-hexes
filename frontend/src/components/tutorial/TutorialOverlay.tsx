@@ -800,7 +800,11 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
       {pops.map(p => (
         <div key={p.id} className={`cc-tut-pop is-${p.tone}${p.down ? ' is-down' : ''}`} style={{ left: p.x, top: p.y }}>{p.text}</div>
       ))}
-      {flights.map(f => <FlightCard key={f.key} flight={f} onDone={onFlightDone} />)}
+      {/* Cards in flight pass under the narration panel, like the hand they
+          come from and land in. */}
+      <div className="cc-tut-flights">
+        {flights.map(f => <FlightCard key={f.key} flight={f} onDone={onFlightDone} />)}
+      </div>
       {stars.map(f => <StarMote key={f.key} f={f} onDone={onStarDone} />)}
       {arrow && <TargetArrow from={arrow.from} to={arrow.to} state="valid" />}
 
