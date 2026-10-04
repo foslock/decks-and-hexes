@@ -103,6 +103,14 @@ interface GameBoardProps {
 
 // ── Labels ──────────────────────────────────────────────────────────────
 
+/** A tile's card row height: the size it's growing to (a resolving card
+ *  eases up to it), else its current box. */
+function stackHeight(el: HTMLElement | undefined): number {
+  if (!el) return 0;
+  const target = Number(el.querySelector<HTMLElement>('[data-stack-h]')?.dataset.stackH);
+  return target || el.offsetHeight;
+}
+
 interface TileLabel { key: string; lift: number; rows: LabelRow[]; prominent?: boolean }
 
 function effVal(card: Card, eff: { value: number; upgraded_value?: number }): number {
@@ -258,7 +266,7 @@ export default function GameBoard(props: GameBoardProps) {
           const host = hostRef.current;
           const pt = { x: 0, y: 0 };
           if (!host) return null;
-          const h = tileCardEls.current.get(key)?.offsetHeight || CARD_FULL_HEIGHT * boardCardScale(labelScaleRef.current);
+          const h = stackHeight(tileCardEls.current.get(key)) || CARD_FULL_HEIGHT * boardCardScale(labelScaleRef.current);
           const placed = placeStackRef.current(engine, key, h, pt);
           if (placed === null) return null;
           const r = host.getBoundingClientRect();
@@ -700,8 +708,10 @@ export default function GameBoard(props: GameBoardProps) {
   const labelByKey = useMemo(() => new Map(labels.map(l => [l.key, l])), [labels]);
   const labelByKeyRef = useRef(labelByKey);
   labelByKeyRef.current = labelByKey;
-  /** Where a tile's card stack sits: above the tile's label when it has one
-   *  (planned power / defense readout), else just above the tile. */
+  /** Where a tile's card stack sits (its bottom-center): above the tile's
+   *  label when it has one (planned power / defense readout), and always clear
+   *  of the hexagon itself — a resolving card grows upward from here without
+   *  covering the tile it's resolving on. */
   const tileCardAnchorRef = useRef((engine: BoardEngine, key: string, out: { x: number; y: number }): boolean => {
     const tile = live.current.tiles[key];
     if (!tile) return false;
@@ -711,6 +721,8 @@ export default function GameBoard(props: GameBoardProps) {
     if (!w) return false;
     engine.projectWorld(w, out);
     if (l) out.y -= l.rows.length * 21 * labelScaleRef.current + 4;
+    const span = engine.tileScreenSpan(key);
+    if (span) out.y = Math.min(out.y, span.top - 4 * labelScaleRef.current);
     return true;
   });
   /** Place a stack `height` px tall: above the tile, or hanging below it
@@ -718,17 +730,19 @@ export default function GameBoard(props: GameBoardProps) {
   const placeStackRef = useRef((engine: BoardEngine, key: string, height: number, out: { x: number; y: number }): boolean | null => {
     if (!tileCardAnchorRef.current(engine, key, out)) return null;
     if (out.y - height >= 6) return false;
+    // Hang below the hexagon instead (still clear of the tile).
+    const span = engine.tileScreenSpan(key);
     const g = engine.tileWorld(key, 0.04);
     if (!g) return false;
     engine.projectWorld(g, out);
-    out.y += 12 * labelScaleRef.current;
+    out.y = span ? span.bottom + 6 * labelScaleRef.current : out.y + 12 * labelScaleRef.current;
     return true;
   });
   const positionTileCards = (engine: BoardEngine) => {
     const pt = { x: 0, y: 0 };
     const keys = tileCardKeysRef.current;
     // Read sizes first, then write transforms (no layout thrash).
-    const heights = keys.map(k => tileCardEls.current.get(k)?.offsetHeight ?? 0);
+    const heights = keys.map(k => stackHeight(tileCardEls.current.get(k)));
     keys.forEach((key, i) => {
       const el = tileCardEls.current.get(key);
       if (!el) return;

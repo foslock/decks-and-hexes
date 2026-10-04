@@ -243,6 +243,9 @@ export function TileCardStack({ entries, scale, focus, open, faded, onOpen, onUn
   return (
     <div
       className={focus ? 'cc-tile-stack is-focus' : 'cc-tile-stack'}
+      // Final height (the box eases toward it) — the board places the row
+      // above or below its tile by the size it's growing to.
+      data-stack-h={Math.round(h)}
       onPointerEnter={() => setHot(true)}
       onPointerLeave={() => setHot(false)}
       style={{

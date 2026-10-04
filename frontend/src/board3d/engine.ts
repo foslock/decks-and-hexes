@@ -475,6 +475,26 @@ export class BoardEngine {
     return new Vector3(tl.x, this.layout.heightAt(tl.x, tl.z) + lift, tl.z);
   }
 
+  /** On-screen vertical extent (container px) of a tile's hexagon — its six
+   *  corners at ground height. Things that float over a tile (its played
+   *  cards) sit above `top` so they never cover the tile itself. */
+  tileScreenSpan(key: string): { top: number; bottom: number } | null {
+    const tl = this.layout?.byKey.get(key);
+    if (!tl || !this.layout) return null;
+    const y = this.layout.heightAt(tl.x, tl.z);
+    const v = new Vector3();
+    const p = { x: 0, y: 0 };
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (let k = 0; k < 6; k++) {
+      const a = (Math.PI / 3) * k;
+      this.rig.project(v.set(tl.x + Math.cos(a), y, tl.z + Math.sin(a)), p);
+      if (p.y < top) top = p.y;
+      if (p.y > bottom) bottom = p.y;
+    }
+    return { top, bottom };
+  }
+
   /** 0..1 visibility of a tile during the build-in (matches the terrain stagger). */
   buildAlpha(key: string): number {
     if (this.build >= 1) return 1;

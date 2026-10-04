@@ -906,11 +906,17 @@
 .cc-scr-add-seat:hover { border-color: rgba(232, 196, 106, 0.8); color: var(--cc-gold-bright); background: rgba(232, 196, 106, 0.07); }
 .cc-scr-add-seat:active { transform: scale(0.99); }
 
-/* Difficulty labels collapse to initials on phones */
-.cc-scr-diff-short { display: none; }
-@media (max-width: 480px) {
-  .cc-scr-diff-full { display: none; }
-  .cc-scr-diff-short { display: inline; }
+/* CPU difficulty: a segmented control on wide screens, a small dropdown in
+   the compact seat layout (see the 640px rules below). */
+.cc-scr-diff-select {
+  display: none;
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 22px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--cc-gold-bright);
+  background-position: right 7px center;
 }
 
 /* Settings rows */
@@ -1125,23 +1131,27 @@
   color: var(--cc-text-dim);
 }
 
-@media (max-width: 480px) {
-  .cc-scr-section { padding: 12px 10px 10px; }
-  .cc-scr-row { padding: 8px 10px; }
-  .cc-scr-row-label { width: 78px; font-size: 11px; }
-  .cc-scr-code-char { width: 44px; height: 56px; font-size: 32px; }
-  /* A seat stays on one line on phones: the name truncates and the
-     controls tighten (a CPU seat carries difficulty + archetype + remove). */
+/* Compact seats (phones, landscape phones, small tablets): every seat stays
+   on one line — the name truncates, difficulty becomes a dropdown, the
+   controls tighten (a CPU seat carries difficulty + archetype + remove). */
+@media (max-width: 640px) {
   .cc-scr-seat { flex-wrap: nowrap; gap: 6px; padding: 7px 6px 7px 10px; }
   /* Touch can't drag-reorder seats, so the grip only costs room. */
   .cc-scr-seat-handle { display: none; }
   .cc-scr-seat-num { width: 14px; }
   .cc-scr-seat-main { flex: 1 1 0; gap: 6px; }
   .cc-scr-seat-controls { flex-wrap: nowrap; flex-shrink: 0; gap: 4px; }
-  .cc-scr-seat .cc-scr-seg-sm .cc-scr-seg-btn { padding: 0 5px; }
+  .cc-scr-diff-seg { display: none; }
+  .cc-scr-diff-select { display: inline-block; }
   .cc-scr-arch-pick { gap: 2px; }
-  .cc-scr-arch-btn { width: 28px; height: 28px; }
   .cc-scr-remove { width: 24px; height: 24px; }
+}
+@media (max-width: 480px) {
+  .cc-scr-section { padding: 12px 10px 10px; }
+  .cc-scr-row { padding: 8px 10px; }
+  .cc-scr-row-label { width: 78px; font-size: 11px; }
+  .cc-scr-code-char { width: 44px; height: 56px; font-size: 32px; }
+  .cc-scr-arch-btn { width: 28px; height: 28px; }
 }
 @media (max-width: 360px) {
   /* Smallest phones: the list order already shows the seat order. */
