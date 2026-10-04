@@ -4,6 +4,7 @@ import CardBrowser from './CardBrowser';
 import Icon from '../icons/Icon';
 import HowToPlay from './HowToPlay';
 import HeroAnimation from './HeroAnimation';
+import LobbyBrowser from './LobbyBrowser';
 import packageJson from '../../package.json';
 import { appHasBooted, signalAppReady, waitForFonts } from '../utils/appReady';
 
@@ -43,7 +44,11 @@ function HomeEmbers() {
 export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenProps) {
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
-  const [showJoinDialog, setShowJoinDialog] = useState(false);
+  /** Join → choose (enter a code or browse) → code entry. */
+  const [joinMode, setJoinMode] = useState<'closed' | 'choose' | 'code'>('closed');
+  const showJoinDialog = joinMode === 'code';
+  const setShowJoinDialog = (open: boolean) => setJoinMode(open ? 'code' : 'closed');
+  const [showBrowser, setShowBrowser] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
@@ -123,6 +128,25 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
       <div className="cc-scr-home-actions">
         {/* Create / Join Lobby */}
         <div className="cc-scr-home-row">
+          {joinMode === 'choose' ? (
+            // Join: enter a code, or browse public games.
+            <div className="cc-scr-join-choice">
+              <button className="cc-btn-secondary cc-scr-btn-xl" onClick={() => setJoinMode('code')} autoFocus>
+                Enter Code
+              </button>
+              <button className="cc-btn-primary cc-scr-btn-xl" onClick={() => setShowBrowser(true)}>
+                Browse Games
+              </button>
+              <button
+                className="cc-scr-join-cancel"
+                onClick={() => setJoinMode('closed')}
+                aria-label="Cancel"
+              >
+                <Icon name="close" size={12} decorative />
+              </button>
+            </div>
+          ) : (
+          <>
           <button
             className="cc-btn-primary cc-scr-btn-xl"
             onClick={() => onCreateLobby()}
@@ -132,7 +156,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
           {!showJoinDialog ? (
             <button
               className="cc-btn-secondary cc-scr-btn-xl"
-              onClick={() => setShowJoinDialog(true)}
+              onClick={() => { setJoinMode('choose'); setJoinError(null); }}
             >
               Join
             </button>
@@ -169,6 +193,8 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
                 <Icon name="close" size={12} decorative />
               </button>
             </div>
+          )}
+          </>
           )}
         </div>
         {joinError && (
@@ -213,6 +239,9 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
       )}
       {showCardBrowser && (
         <CardBrowser onClose={() => setShowCardBrowser(false)} />
+      )}
+      {showBrowser && (
+        <LobbyBrowser onJoin={onJoinLobby} onClose={() => setShowBrowser(false)} />
       )}
     </div>
   );

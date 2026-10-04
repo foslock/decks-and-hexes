@@ -261,9 +261,11 @@ describe('SetupScreen', () => {
     expect(onCreateLobby).toHaveBeenCalled();
   });
 
-  it('shows join code input when Join clicked', async () => {
+  it('Join offers a code or the game browser; Enter Code shows the code input', async () => {
     render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={async () => {}} />);
     await userEvent.click(screen.getByText('Join'));
+    expect(screen.getByText('Browse Games')).toBeInTheDocument();
+    await userEvent.click(screen.getByText('Enter Code'));
     expect(screen.getByPlaceholderText('CODE')).toBeInTheDocument();
   });
 });

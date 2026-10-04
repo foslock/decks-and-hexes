@@ -369,20 +369,33 @@ def generate_daily_pack(seed: int, card_registry: dict[str, Card]) -> CardPack:
     if remaining:
         selected.append(remaining[0])
 
-    # Format display name from seed
-    try:
-        date_obj = datetime.strptime(str(seed), "%Y%m%d")
-        name = f"The Daily — {date_obj.strftime('%b')} {date_obj.day}"
-    except ValueError:
-        name = "The Daily"
-
     return CardPack(
         id=f"daily_{seed}",
-        name=name,
+        name=daily_pack_name(seed),
         shared_card_ids=[c.id for c in selected],
         archetype_card_ids=None,
         description="A new random selection of 10 shared cards every day.",
     )
+
+
+def daily_pack_name(seed: int) -> str:
+    """Display name of a daily pack from its date seed (e.g. "The Daily — Oct 4")."""
+    try:
+        date_obj = datetime.strptime(str(seed), "%Y%m%d")
+        return f"The Daily — {date_obj.strftime('%b')} {date_obj.day}"
+    except ValueError:
+        return "The Daily"
+
+
+def pack_display_name(pack_id: str) -> str:
+    """Display name for any pack id, daily packs included (no registry needed)."""
+    if pack_id.startswith("daily_"):
+        try:
+            return daily_pack_name(int(pack_id.split("_", 1)[1]))
+        except (ValueError, IndexError):
+            return "The Daily"
+    pack = CARD_PACKS.get(pack_id)
+    return pack.name if pack else pack_id
 
 
 def get_today_daily_pack(card_registry: dict[str, Card]) -> CardPack:

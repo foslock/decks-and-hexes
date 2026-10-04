@@ -151,7 +151,70 @@ interface BuyPurchase {
   card_type?: string;
 }
 
-import { CARD_TYPE_COLORS, DEBT_CARD_COLOR } from '../constants/cardColors';
+import { CARD_TITLE_FONT, CARD_TYPE_COLORS, DEBT_CARD_COLOR } from '../constants/cardColors';
+import { cardTrimTier, metalGradient } from '../constants/cardTrim';
+
+/** One purchase in the player panel, dressed like a sliver of the compact
+ *  card: a cost-tiered metal trim, a navy body washed with the card type's
+ *  colour, the name in the card title face and the cost on a gold coin. */
+function PurchaseChip({ p, onHover, onLeave }: {
+  p: BuyPurchase;
+  onHover?: (e: React.MouseEvent, cardId: string, definitionId?: string) => void;
+  onLeave?: () => void;
+}) {
+  const wash = p.card_name === 'Debt'
+    ? DEBT_CARD_COLOR
+    : p.card_type ? (CARD_TYPE_COLORS[p.card_type] || '#555') : (p.source === 'upgrade' ? '#ffaa4a' : '#555');
+  const tier = cardTrimTier({ buy_cost: p.cost, starter: false });
+  return (
+    <span
+      onMouseEnter={onHover ? (e) => onHover(e, p.card_id, p.definition_id) : undefined}
+      onMouseLeave={onLeave}
+      style={{
+        display: 'inline-flex',
+        padding: 1.5,
+        borderRadius: 6,
+        background: metalGradient(tier, 145),
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.45), 0 0 0 1px rgba(0,0,0,0.55), 0 2px 5px rgba(0,0,0,0.45)',
+        cursor: onHover ? 'pointer' : undefined,
+        maxWidth: '100%',
+      }}
+    >
+      <span style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        minWidth: 0,
+        padding: '1px 2px 1px 6px',
+        borderRadius: 4.5,
+        background: `linear-gradient(90deg, ${wash}66 0%, ${wash}22 60%, rgba(0,0,0,0) 100%), #17172f`,
+        boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.6)',
+      }}>
+        <span style={{
+          fontFamily: CARD_TITLE_FONT, fontWeight: 700, fontSize: 11, lineHeight: 1.35,
+          color: '#fff6e2', textShadow: '0 1px 1px rgba(0,0,0,0.85)',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0,
+        }}>
+          <CardName name={p.card_name} />
+        </span>
+        <span style={{
+          flexShrink: 0,
+          fontSize: 9.5,
+          fontWeight: 'bold',
+          lineHeight: 1.35,
+          padding: '0 4px',
+          borderRadius: 999,
+          color: '#2a1d05',
+          background: 'linear-gradient(180deg, #ffe9a8 0%, #e8c46a 50%, #b88a32 100%)',
+          border: '1px solid #f6dc94',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55), 0 1px 2px rgba(0,0,0,0.55)',
+        }}>
+          <CostLabel cost={p.cost} size={9.5} />
+        </span>
+      </span>
+    </span>
+  );
+}
 
 interface PlayerHudProps {
   player: Player;
@@ -302,12 +365,12 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
             {player.name}
             {player.is_cpu && (
               <span
-                title={player.cpu_difficulty ? `Computer player (${player.cpu_difficulty})` : 'Computer player'}
+                title={player.cpu_difficulty ? `Bot (${player.cpu_difficulty})` : 'Bot'}
                 style={{
                   marginLeft: 5, fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', verticalAlign: '0.15em',
                   color: 'var(--cc-text-faint)', border: '1px solid var(--cc-panel-border-strong)', borderRadius: 3, padding: '0 3px',
                 }}
-              >CPU</span>
+              >BOT</span>
             )}
           </span>
         </span>
@@ -370,25 +433,9 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
 
       {/* Purchases made this buy phase */}
       {purchases && purchases.length > 0 && (
-        <div style={{ marginTop: 4, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+        <div style={{ marginTop: 5, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
           {purchases.map((p, i) => (
-            <span
-              key={i}
-              onMouseEnter={onPurchaseHover ? (e) => onPurchaseHover(e, p.card_id, p.definition_id) : undefined}
-              onMouseLeave={onPurchaseLeave}
-              style={{
-                fontSize: 10,
-                padding: '1px 5px',
-                background: '#1a1a2e',
-                border: `1px solid ${p.card_name === 'Debt' ? DEBT_CARD_COLOR : p.card_type ? (CARD_TYPE_COLORS[p.card_type] || '#555') : (p.source === 'upgrade' ? '#ffaa4a' : '#555')}`,
-                borderRadius: 4,
-                color: '#ccc',
-                whiteSpace: 'nowrap',
-                cursor: onPurchaseHover ? 'pointer' : undefined,
-              }}
-            >
-              <CardName name={p.card_name} /> (<CostLabel cost={p.cost} size={10} />)
-            </span>
+            <PurchaseChip key={i} p={p} onHover={onPurchaseHover} onLeave={onPurchaseLeave} />
           ))}
         </div>
       )}

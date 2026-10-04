@@ -474,6 +474,20 @@
   transition: color 150ms ease;
 }
 .cc-scr-join-cancel:hover { color: var(--cc-text); }
+/* Join → "Enter Code" or "Browse Games", across the whole row. */
+.cc-scr-join-choice {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 10px;
+  align-items: center;
+  animation: cc-fade-in 0.2s ease-out both;
+}
+.cc-scr-join-choice .cc-scr-btn-xl { font-size: 16px; letter-spacing: 0.06em; padding: 0 10px; }
+@media (max-width: 400px) {
+  .cc-scr-join-choice { gap: 6px; }
+  .cc-scr-join-choice .cc-scr-btn-xl { font-size: 13px; letter-spacing: 0.04em; padding: 0 6px; }
+}
 
 .cc-scr-home-footer {
   flex-shrink: 0;
@@ -806,6 +820,17 @@
   min-width: 0;
   font-size: 15px;
   font-weight: 700;
+}
+.cc-scr-seat-name-input.is-invalid,
+.cc-scr-seat-name-input.is-invalid:focus {
+  border-color: rgba(255, 110, 120, 0.9);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.55), 0 0 0 3px rgba(255, 90, 100, 0.2);
+}
+.cc-scr-name-error {
+  margin: -4px 0 10px 14px;
+  font-size: 12px;
+  color: #ff8b97;
+  animation: cc-fade-in 0.2s ease-out both;
 }
 .cc-scr-seat-sub { font-size: 11px; font-weight: 400; color: var(--cc-text-faint); margin-left: 6px; text-transform: capitalize; }
 

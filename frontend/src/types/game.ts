@@ -303,6 +303,43 @@ export interface LobbyConfig {
   max_rounds: number;
   map_seed: string;
   archetype_market_size: number;
+  /** Listed in the home page lobby browser (default on). */
+  open_to_public?: boolean;
+}
+
+/** A public lobby waiting for players (home page browser). */
+export interface BrowseLobby {
+  code: string;
+  host_name: string;
+  host_color: string;
+  grid_size: string;
+  card_pack: string;
+  card_pack_name: string;
+  players: number;
+  humans: number;
+  cpus: number;
+  max_players: number;
+  full: boolean;
+  /** Counting down to start — can't be joined. */
+  starting: boolean;
+}
+
+/** A public game in progress (home page browser). */
+export interface BrowseGame {
+  code: string;
+  host_name: string;
+  host_color: string;
+  grid_size: string;
+  card_pack: string;
+  card_pack_name: string;
+  players: number;
+  humans: number;
+  cpus: number;
+  round: number;
+  max_rounds: number;
+  vp_target: number;
+  /** Everyone tied for the VP lead. */
+  leaders: { name: string; color: string; vp: number }[];
 }
 
 export interface LobbyState {
