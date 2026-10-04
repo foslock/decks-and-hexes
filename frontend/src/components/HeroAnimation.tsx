@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import type { HexTile } from '../types/game';
 import { BoardEngine } from '../board3d/engine';
+import { useVisualQuality } from './SettingsContext';
 import { PLAYER_COLORS } from '../board3d/boardTypes';
 import { axialToWorld } from '../board3d/layout';
 import { waitForImages } from '../utils/appReady';
@@ -115,6 +116,8 @@ interface HeroAnimationProps {
 export default function HeroAnimation({ start = true, onReady, paused = false }: HeroAnimationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BoardEngine | null>(null);
+  // Read once when the diorama is built (it isn't rebuilt on a change).
+  const antialiasRef = useRef(useVisualQuality() === 'high');
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const blueCardRef = useRef<HTMLDivElement>(null);
   const redCardRef = useRef<HTMLDivElement>(null);
@@ -170,7 +173,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       placeCard(redCardRef.current, { x: restR, y: centerY, rotation: restAngleR, alpha: 1 });
     };
 
-    const engine = new BoardEngine(canvasHost, { hero: true });
+    const engine = new BoardEngine(canvasHost, { hero: true, antialias: antialiasRef.current });
     engineRef.current = engine;
     let onLayoutChange: (() => void) | null = null;
     const ro = typeof ResizeObserver === 'function'

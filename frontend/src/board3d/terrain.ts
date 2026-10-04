@@ -1,5 +1,5 @@
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, CircleGeometry, DataTexture, LinearFilter,
+  BufferAttribute, BufferGeometry, CircleGeometry, DataTexture, LinearFilter,
   Mesh, RedFormat, ShaderMaterial, UnsignedByteType, Vector3,
 } from 'three';
 import type { HexTile } from '../types/game';
@@ -174,6 +174,7 @@ uniform float uExtent;
 uniform float uDistMax;
 uniform float uDistMin;
 uniform float uRadius;
+uniform float uGlowR;
 varying vec2 vXZ;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -211,15 +212,21 @@ void main() {
   col = mix(col, vec3(0.78, 0.82, 0.8), clamp(lap * 0.85 + band * 0.45, 0.0, 1.0) * foamOn);
 
   float alpha = pow(1.0 - smoothstep(uRadius * 0.3, uRadius * 0.98, r), 1.5);
-  alpha *= smoothstep(0.0, 0.12, uBuild);
-  gl_FragColor = vec4(col, alpha * 0.96);
+  alpha *= smoothstep(0.0, 0.12, uBuild) * 0.96;
+  gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
+  // Soft glow under and around the island (reads as depth on the dark
+  // backdrop), seen through the water's fade. Premultiplied output: the
+  // same result as drawing the glow additively and the water over it.
+  float g = (1.0 - smoothstep(0.2, 1.0, r / uGlowR)) * 0.15 * smoothstep(0.0, 0.6, uBuild);
+  gl_FragColor = vec4(gl_FragColor.rgb * alpha + vec3(0.35, 0.42, 0.6) * g * (1.0 - alpha), alpha);
 }
 `;
 
 export function buildWater(layout: BoardLayout, shared: SharedUniforms): { mesh: Mesh; dispose: () => void } {
   const extent = layout.radius + 4.5;
+  const glowR = layout.radius + 6;
   const res = 160;
   const distMax = 4;
   const distMin = -1;
@@ -249,11 +256,14 @@ export function buildWater(layout: BoardLayout, shared: SharedUniforms): { mesh:
       uDistMax: { value: distMax },
       uDistMin: { value: distMin },
       uRadius: { value: extent },
+      uGlowR: { value: glowR },
     },
     transparent: true,
+    premultipliedAlpha: true,
     depthWrite: false,
   });
-  const geo = new CircleGeometry(extent, 96);
+  // Out to the glow's rim; past the water's own edge only the glow shows.
+  const geo = new CircleGeometry(glowR, 96);
   geo.rotateX(-Math.PI / 2);
   const mesh = new Mesh(geo, material);
   mesh.position.y = WATER_Y;
@@ -262,23 +272,4 @@ export function buildWater(layout: BoardLayout, shared: SharedUniforms): { mesh:
     mesh,
     dispose: () => { geo.dispose(); material.dispose(); tex.dispose(); },
   };
-}
-
-/** Soft additive vignette glow under the island (reads as depth on dark bg). */
-export function buildUnderGlow(layout: BoardLayout, shared: SharedUniforms): Mesh {
-  const geo = new CircleGeometry(layout.radius + 6, 48);
-  geo.rotateX(-Math.PI / 2);
-  const material = new ShaderMaterial({
-    vertexShader: `varying vec2 vUv2; void main(){ vUv2 = position.xz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);} `,
-    fragmentShader: `uniform float uR; uniform float uBuild; varying vec2 vUv2; void main(){ float r = length(vUv2)/uR; float a = (1.0 - smoothstep(0.2, 1.0, r)) * 0.15 * smoothstep(0.0, 0.6, uBuild); gl_FragColor = vec4(vec3(0.35,0.42,0.6)*a, 0.0); }`,
-    uniforms: { uR: { value: layout.radius + 6 }, uBuild: shared.uBuild },
-    transparent: true,
-    blending: AdditiveBlending,
-    premultipliedAlpha: true,
-    depthWrite: false,
-  });
-  const m = new Mesh(geo, material);
-  m.position.y = WATER_Y - 0.05;
-  m.renderOrder = -2;
-  return m;
 }

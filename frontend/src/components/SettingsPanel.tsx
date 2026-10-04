@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useSettings, type AnimationMode } from './SettingsContext';
+import { useSettings, type AnimationMode, type VisualQuality } from './SettingsContext';
 import { KEYWORDS } from './Keywords';
 import { downloadGameLog } from '../utils/downloadGameLog';
 import Icon from '../icons/Icon';
@@ -17,7 +17,7 @@ interface SettingsPanelProps {
 }
 
 export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, playerId, onLeaveGame, onEndGame, onRotateGrid }: SettingsPanelProps) {
-  const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume } = useSettings();
+  const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setVisualQuality } = useSettings();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
@@ -47,6 +47,20 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
                 onClick={() => setAnimationMode(mode)}
               >
                 {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="cc-ov-set-row" title="Low turns off antialiasing for a smoother frame rate on large or high-resolution screens.">
+          <span className="cc-ov-set-label">Visual Quality:</span>
+          <div className="cc-ov-seg">
+            {(['low', 'high'] as VisualQuality[]).map((q) => (
+              <button
+                key={q}
+                className={`cc-ov-seg-btn${settings.visualQuality === q ? ' is-active' : ''}`}
+                onClick={() => setVisualQuality(q)}
+              >
+                {q === 'low' ? 'Low' : 'High'}
               </button>
             ))}
           </div>

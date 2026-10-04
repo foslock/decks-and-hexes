@@ -1,12 +1,15 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
 export type AnimationMode = 'normal' | 'fast' | 'off';
+/** Board rendering quality. Low turns off antialiasing for a faster frame rate. */
+export type VisualQuality = 'high' | 'low';
 
 interface Settings {
   animationMode: AnimationMode;
   tooltips: boolean;
   soundEnabled: boolean;
   soundVolume: number;
+  visualQuality: VisualQuality;
 }
 
 interface SettingsContextValue {
@@ -15,9 +18,14 @@ interface SettingsContextValue {
   setTooltips: (on: boolean) => void;
   setSoundEnabled: (on: boolean) => void;
   setSoundVolume: (v: number) => void;
+  setVisualQuality: (q: VisualQuality) => void;
 }
 
 const STORAGE_KEY = 'cardclash_settings';
+
+const DEFAULT_SETTINGS: Settings = {
+  animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5, visualQuality: 'high',
+};
 
 function loadSettings(): Settings {
   try {
@@ -29,10 +37,11 @@ function loadSettings(): Settings {
         tooltips: parsed.tooltips !== false,  // default true
         soundEnabled: parsed.soundEnabled !== false,  // default true
         soundVolume: typeof parsed.soundVolume === 'number' ? parsed.soundVolume : 0.5,
+        visualQuality: parsed.visualQuality === 'low' ? 'low' : 'high',
       };
     }
   } catch { /* ignore */ }
-  return { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5 };
+  return { ...DEFAULT_SETTINGS };
 }
 
 function saveSettings(settings: Settings) {
@@ -42,11 +51,12 @@ function saveSettings(settings: Settings) {
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
-  settings: { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5 },
+  settings: DEFAULT_SETTINGS,
   setAnimationMode: () => {},
   setTooltips: () => {},
   setSoundEnabled: () => {},
   setSoundVolume: () => {},
+  setVisualQuality: () => {},
 });
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -84,8 +94,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setVisualQuality = useCallback((q: VisualQuality) => {
+    setSettings((prev) => {
+      const next = { ...prev, visualQuality: q };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
   return (
-    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume }}>
+    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setVisualQuality }}>
       {children}
     </SettingsContext.Provider>
   );
@@ -128,4 +146,9 @@ export function useAnimationMode() {
 export function useTooltips() {
   const { settings } = useSettings();
   return settings.tooltips;
+}
+
+export function useVisualQuality() {
+  const { settings } = useSettings();
+  return settings.visualQuality;
 }

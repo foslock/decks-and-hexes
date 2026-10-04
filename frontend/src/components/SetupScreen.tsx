@@ -9,13 +9,6 @@ import LobbyBrowser from './LobbyBrowser';
 import packageJson from '../../package.json';
 import { appHasBooted, signalAppReady, waitForFonts } from '../utils/appReady';
 
-/** Set once a player has seen (or skipped) the How to Play tour. */
-export const TUTORIAL_SEEN_KEY = 'cardclash_tutorial_seen';
-
-function tutorialSeen(): boolean {
-  try { return localStorage.getItem(TUTORIAL_SEEN_KEY) === '1'; } catch { return true; }
-}
-
 interface SetupScreenProps {
   onCreateLobby: () => void;
   onJoinLobby: (code: string) => Promise<void>;
@@ -85,16 +78,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
     return () => clearTimeout(t);
   }, [ready, fontsReady, heroReady]);
 
-  // New players get the How to Play tour as soon as the home screen is up.
-  useEffect(() => {
-    if (!ready || tutorialSeen()) return;
-    const t = setTimeout(() => setShowTutorial(true), 900);
-    return () => clearTimeout(t);
-  }, [ready]);
-  const closeTutorial = useCallback(() => {
-    setShowTutorial(false);
-    try { localStorage.setItem(TUTORIAL_SEEN_KEY, '1'); } catch { /* private mode */ }
-  }, []);
+  const closeTutorial = useCallback(() => setShowTutorial(false), []);
 
   useEffect(() => {
     fetch(`${BASE}/version`)

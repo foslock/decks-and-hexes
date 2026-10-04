@@ -8,6 +8,7 @@ import CardHand from '../components/CardHand';
 import MarketPanel from '../components/MarketPanel';
 import GameLog from '../components/GameLog';
 import SetupScreen from '../components/SetupScreen';
+import SettingsPanel from '../components/SettingsPanel';
 import { makePlayer, makeCard, makeGameState } from './fixtures';
 
 function WithSettings({ children }: { children: ReactNode }) {
@@ -276,5 +277,22 @@ describe('SetupScreen', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Enter Code' }));
     expect(screen.getByPlaceholderText('CODE')).toBeInTheDocument();
     vi.unstubAllGlobals();
+  });
+});
+
+describe('Visual Quality setting', () => {
+  it('defaults to High, and Low is saved with the other settings', () => {
+    localStorage.removeItem('cardclash_settings');
+    const { unmount } = render(<SettingsProvider><SettingsPanel /></SettingsProvider>);
+    expect(screen.getByText('Visual Quality:')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'High' })).toHaveClass('is-active');
+    fireEvent.click(screen.getByRole('button', { name: 'Low' }));
+    expect(screen.getByRole('button', { name: 'Low' })).toHaveClass('is-active');
+    expect(JSON.parse(localStorage.getItem('cardclash_settings')!).visualQuality).toBe('low');
+    unmount();
+    // Remembered next time.
+    render(<SettingsProvider><SettingsPanel /></SettingsProvider>);
+    expect(screen.getByRole('button', { name: 'Low' })).toHaveClass('is-active');
+    localStorage.removeItem('cardclash_settings');
   });
 });
