@@ -118,6 +118,20 @@ describe('CardHand', () => {
     expect(screen.getByLabelText('Discard: 1 card')).toBeInTheDocument();
   });
 
+  it('deals drawn cards onto the right of the hand, even ones it held before', () => {
+    const c = (id: string, name: string) => makeCard({ id, name, card_type: 'engine', power: 0 });
+    const [a, b, d, e] = [c('a', 'Alpha'), c('b', 'Bravo'), c('d', 'Delta'), c('e', 'Echo')];
+    const hand = (cs: ReturnType<typeof makeCard>[]) => (
+      <WithSettings><CardHand playerId="p0" cards={cs} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>
+    );
+    const shown = () => [...document.querySelectorAll('[data-card-slot]')].map(el => el.getAttribute('aria-label'));
+    const { rerender } = render(hand([a, b, d]));
+    rerender(hand([b, d]));
+    // Alpha comes back (reshuffled and drawn again) ahead of Echo in the server's order.
+    rerender(hand([b, a, d, e]));
+    expect(shown()).toEqual(['Bravo', 'Delta', 'Alpha', 'Echo']);
+  });
+
   it('shows resource gain for engine cards', () => {
     render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
     expect(screen.getByRole('img', { name: /\+2 resources/ })).toBeInTheDocument();

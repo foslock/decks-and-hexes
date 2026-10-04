@@ -42,6 +42,10 @@ export interface CardSubtitleContext {
   /** True when the active player has already played a Claim card this round
    *  (drives Strike Team's if_played_claim_this_turn power_modifier). */
   hasPlayedClaimThisRound?: boolean;
+  /** Actions the player has left to spend this round (Scavenge). */
+  actionsLeft?: number;
+  /** The player controls the fewest tiles of any player, ties included (Resilience). */
+  hasFewestTiles?: boolean;
 }
 
 /**
@@ -247,8 +251,18 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       const hasSameNamePowerScaling = card.effects?.some(e =>
         e.type === 'power_per_same_name' && (!e.metadata?.upgraded_only || isUpgraded)
       );
-      const powerSuffix = hasSameNamePowerScaling ? '+' : '';
-      parts.push(p(`{power}${card.power}${powerSuffix}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
+      const sameNameEff = hasSameNamePowerScaling ? card.effects?.find(e => e.type === 'power_per_same_name') : undefined;
+      if (sameNameEff && ctx?.playedCardNames !== undefined) {
+        // Rabble+: +N power for each other Rabble already played this round.
+        const baseName = card.name.replace(/\+$/, '');
+        const others = ctx.playedCardNames.filter(n => n.replace(/\+$/, '') === baseName).length;
+        const per = isUpgraded && sameNameEff.upgraded_value != null ? sameNameEff.upgraded_value : sameNameEff.value;
+        const pow = card.power + per * others;
+        parts.push(p(`{power}${pow}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`, others > 0));
+      } else {
+        const powerSuffix = hasSameNamePowerScaling ? '+' : '';
+        parts.push(p(`{power}${card.power}${powerSuffix}${stackIcon}${targetAnyIcon}${rangedIcon}${claimTileSuffix}`));
+      }
     }
 
     // Granted stackable indicator (Rally Cry) — shown as a separate glowing part
@@ -438,8 +452,10 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'gain_resources' && eff.condition && eff.condition !== 'always') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         // Conditional gains (Resilience: "If you control the fewest tiles...")
-        // are shown in parentheses to signal the condition.
-        if (val > 0) parts.push(p(`(+${val}{resource})`));
+        // are shown in parentheses to signal the condition; Resilience's glows
+        // while you do control the fewest.
+        const met = eff.condition === 'fewest_tiles' && ctx?.hasFewestTiles === true && !ctx?.powerFrozen;
+        if (val > 0) parts.push(pg(`(+${val}{resource})`, met));
       }
       if (eff.type === 'draw_next_turn' || eff.type === 'cease_fire') {
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
@@ -457,11 +473,12 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       }
       if (eff.type === 'resource_scaling') {
         const divisor = eff.value || 2;
+        // Dynamic (glowing) only above its minimum of 1.
         if (ctx?.effectiveResourceGain !== undefined) {
-          parts.push(p(`+${ctx.effectiveResourceGain}{resource}`, true));
+          parts.push(p(`+${ctx.effectiveResourceGain}{resource}`, ctx.effectiveResourceGain > 1));
         } else if (ctx?.resourcesHeld !== undefined) {
           const gained = Math.max(1, Math.floor(ctx.resourcesHeld / divisor));
-          parts.push(p(`+${gained}{resource}`, true));
+          parts.push(p(`+${gained}{resource}`, gained > 1));
         } else {
           parts.push(p(`+1{resource}/${divisor}{resource}`));
         }
@@ -512,8 +529,16 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       }
       if (eff.type === 'enhance_vp_tile') parts.push(p('{vpTile}+1'));
       if (eff.type === 'draw_per_connected_vp') {
+        // Toll Road: N cards per connected VP tile.
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        parts.push(p(`+${val}{card}/{vpTile}`));
+        if (ctx?.effectiveDrawCards !== undefined) {
+          parts.push(p(`+${ctx.effectiveDrawCards}{card}`, ctx.effectiveDrawCards > 0));
+        } else if (ctx?.vpHexCount !== undefined) {
+          const drawn = ctx.vpHexCount * val;
+          parts.push(p(`+${drawn}{card}`, drawn > 0));
+        } else {
+          parts.push(p(`+${val}{card}/{vpTile}`));
+        }
       }
       if (eff.type === 'draw_per_debt') {
         if (ctx?.effectiveDrawCards !== undefined) {
@@ -538,10 +563,13 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'conditional_action') {
         const threshold = eff.condition_threshold ?? 3;
         const condParts = `≤${threshold}{hand}, +${eff.value}{action}`;
+        // Glows when your hand after playing it (and drawing) is small enough.
+        const handAfter = ctx?.handSize !== undefined ? ctx.handSize - 1 + card.draw_cards : undefined;
+        const met = handAfter !== undefined && handAfter <= threshold && !ctx?.powerFrozen;
         if (isUpgraded) {
-          parts.push(p(`${condParts} · +1{resource}`));
+          parts.push(pg(`${condParts} · +1{resource}`, met));
         } else {
-          parts.push(p(condParts));
+          parts.push(pg(condParts, met));
         }
       }
       if (eff.type === 'conditional_action_return' && eff.condition === 'if_played_same_name') {
@@ -576,15 +604,26 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         parts.push(p('({opponent}{trash})'));
       }
       if (eff.type === 'grant_actions' && eff.condition === 'zero_actions') {
+        // Scavenge: glows when playing it would spend your last action.
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        if (val > 0) parts.push(p(`(+${val}{action})`));
+        const left = ctx?.actionsLeft;
+        const cost = card.action_cost ?? 1;
+        const met = left !== undefined && left >= cost && left - cost + card.action_return <= 0 && !ctx?.powerFrozen;
+        if (val > 0) parts.push(pg(`(+${val}{action})`, met));
       }
       if (eff.type === 'buy_restriction') {
         parts.push(p('{!buy}'));
       }
+      if (eff.type === 'grant_actions_if_stacked') {
+        // Coordinated Push: "(+N action)" if stacked on a tile with your other
+        // Claim — glows when you already have a Claim out to stack onto.
+        const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (val > 0) parts.push(pg(`(+${val}{action})`, ctx?.hasPlayedClaimThisRound === true && !ctx?.powerFrozen));
+      }
       if (eff.type === 'stacking_power_bonus') {
-        // Dog Pile: each other claim you stack here gains +1 power
-        parts.push(p('{power}+'));
+        // Dog Pile: each other claim you stack here gains +1 power — glows
+        // when you already have a Claim out to stack onto.
+        parts.push(pg('{power}+', ctx?.hasPlayedClaimThisRound === true && !ctx?.powerFrozen));
       }
       if (eff.type === 'on_defend_forced_discard') {
         // Attrition: if defender holds, they draw 1 fewer card next round
@@ -616,7 +655,13 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         const max = isUpgraded
           ? ((eff.metadata?.upgraded_max as number) ?? 4)
           : ((eff.metadata?.max as number) ?? 3);
-        parts.push(p(`+≤${max}{action}`));
+        if (ctx?.playedCardNames !== undefined && !ctx.powerFrozen) {
+          // +1 action per other card already played this round, up to the max.
+          const gained = Math.min(ctx.playedCardNames.length * eff.value, max);
+          parts.push(p(`+${gained}{action}`, gained > 0));
+        } else {
+          parts.push(p(`+≤${max}{action}`));
+        }
         if (isUpgraded) parts.push(p('+1{card}'));
       }
       if (eff.type === 'next_turn_bonus') {
@@ -713,7 +758,8 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'conditional_draw_next_round') {
         // Commander: "If you played a Claim this round, draw N cards next round."
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        if (val > 0) parts.push(p(`(+${val}{nextRound}{card})`));
+        const met = ctx?.hasPlayedClaimThisRound === true && !ctx?.powerFrozen;
+        if (val > 0) parts.push(pg(`(+${val}{nextRound}{card})`, met));
       }
       if (eff.type === 'conditional_draw') {
         // Chatter: "If this is your 3rd or later card played this round, draw N

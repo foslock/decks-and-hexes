@@ -155,3 +155,29 @@ export function shiftLayout(l: HandLayout, dx: number): HandLayout {
     strips: l.strips.map(st => ({ left: st.left + dx, right: st.right + dx })),
   };
 }
+
+/**
+ * The player's arrangement of their hand (card ids, left → right) after the
+ * hand or the cards in play change. Cards stay where they are, and a card
+ * played this round keeps its slot so an undo slides it back. Anything else
+ * that joins the hand (drawn, tutored, the next round's deal) goes on the
+ * right, even when that card id sat in the hand in an earlier round.
+ *
+ * `held` is every id that was in the hand or in play before the change.
+ */
+export function reconcileHandOrder(
+  prevOrder: readonly string[],
+  held: ReadonlySet<string>,
+  hand: readonly string[],
+  inPlay: ReadonlySet<string>,
+): string[] {
+  const inHand = new Set(hand);
+  const out: string[] = [];
+  const placed = new Set<string>();
+  for (const id of prevOrder) {
+    if (placed.has(id)) continue;
+    if (inHand.has(id) ? held.has(id) : inPlay.has(id)) { out.push(id); placed.add(id); }
+  }
+  for (const id of hand) if (!placed.has(id)) { out.push(id); placed.add(id); }
+  return out;
+}
