@@ -9,6 +9,7 @@ import VpPathPreview from './components/VpPathPreview';
 import ResolveAnimationPreview from './components/ResolveAnimationPreview';
 import SoundPreview from './audio/SoundPreview';
 import IconPreview from './icons/IconPreview';
+import CardsPreview, { HandPreview } from './components/CardsPreview';
 import { useWebSocket } from './hooks/useWebSocket';
 import * as api from './api/client';
 import { CardZoomProvider } from './components/CardZoomContext';
@@ -312,6 +313,20 @@ function AppInner() {
   }
   if (previewMode === 'sounds') return <SoundPreview />;
   if (previewMode === 'icons') return <IconPreview />;
+  if (previewMode === 'hand') {
+    return (
+      <SettingsProvider>
+        <HandPreview />
+      </SettingsProvider>
+    );
+  }
+  if (previewMode === 'cards') {
+    return (
+      <SettingsProvider>
+        <CardsPreview />
+      </SettingsProvider>
+    );
+  }
 
   // ── Render ───────────────────────────────────────────────
   console.log('[App] render — screen:', screen.type, 'hasGameState:', !!multiplayerGameState);

@@ -304,6 +304,11 @@ export const GLYPHS = {
       { d: 'M8 7 L14.2 13.2 L12.2 15.2 L8 11 L3.8 15.2 L1.8 13.2 Z' },
     ],
   },
+  upgraded: {
+    // Thick up-arrow shown before an upgraded card's name.
+    label: 'Upgraded', group: 'modifier',
+    layers: [{ d: 'M8 0.6 L15.2 8.2 L10.9 8.2 L10.9 15.4 L5.1 15.4 L5.1 8.2 L0.8 8.2 Z' }],
+  },
   debt: {
     label: 'Debt', group: 'card',
     layers: [

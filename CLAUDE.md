@@ -49,6 +49,19 @@ PNG. After adding or replacing art, regenerate the WebPs (incremental):
 Preloading is handled by `frontend/src/utils/cardImagePreload.ts` (hand/deck/markets
 at high priority, the rest of the catalog during idle time).
 
+### Cards, Hand & Piles (frontend)
+- `CardFull` is the one full card face (fixed 220 × 308, metallic trim tiered by
+  cost via `constants/cardTrim.ts`, ability text auto-fitted). Smaller summaries
+  (`CompactCard`, `HandStyleCard`, shop tiles) stay for tight spots.
+- Upgraded names: the engine names them "Blitz+"; render names through
+  `CardName` (gold arrow glyph first, no "+"), `plainCardName()` for text.
+- `CardHand` owns the hand fan, the 3D draw/discard piles and every card
+  animation; helpers live in `components/hand/` (`handLayout`, `cardMotion`,
+  `CardPile`, `TargetArrow`, `TrashBurn`).
+- Dev pages: `?preview=cards` (every card face, base/upgraded) and
+  `?preview=hand` (a sandbox for draw, play, undo, discard, trash, shuffles,
+  purchases and end of turn).
+
 ### Game Log Analysis
 When the user refers to a "game log" they mean a JSON file produced by
 `GET /api/games/{game_id}/log` or the in-app **Download Log** button — typically

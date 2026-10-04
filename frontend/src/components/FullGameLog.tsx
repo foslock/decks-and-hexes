@@ -3,6 +3,8 @@ import * as api from '../api/client';
 import { useAnimationMode } from './SettingsContext';
 import type { LogEntry } from '../api/client';
 import Icon from '../icons/Icon';
+import { renderUpgradedNames } from './CardName';
+import { useCardCatalog } from '../cardCatalog';
 
 interface FullGameLogProps {
   gameId: string;
@@ -27,6 +29,7 @@ export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: Full
   const [filterRound, setFilterRound] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const animClass = useAnimationMode() !== 'off' ? ' cc-ov-anim' : '';
+  const catalog = useCardCatalog();
 
   useEffect(() => {
     let cancelled = false;
@@ -148,7 +151,7 @@ export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: Full
                   {PHASE_LABELS[entry.phase] || entry.phase}
                 </span>
                 <span className="cc-ov-log-msg">
-                  {entry.message}
+                  {renderUpgradedNames(entry.message, catalog.upgradedNamePattern)}
                 </span>
               </div>
             ))

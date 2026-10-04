@@ -4,6 +4,7 @@ import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground, MINI_CARD_SHA
 import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
 import { renderSubtitle } from './SubtitlePartRenderer';
 import { useCardZoom } from './CardZoomContext';
+import CardName from './CardName';
 
 const COL_W = 134;
 
@@ -39,7 +40,7 @@ export default function CompactCard({ card, subtitleContext, effectiveResourceGa
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
         <div style={{ fontWeight: 'bold', fontSize: 14, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {card.name}
+          <CardName name={card.name} upgraded={card.is_upgraded} />
         </div>
       </div>
       <div style={{ fontSize: 11, lineHeight: '13px', color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>

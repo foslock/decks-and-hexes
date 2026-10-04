@@ -11,6 +11,7 @@ import { useShiftKey } from '../hooks/useShiftKey';
 import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 import { useCardZoom } from './CardZoomContext';
 import Icon from '../icons/Icon';
+import CardName from './CardName';
 
 const ARCHETYPE_ORDER = ['shared', 'vanguard', 'swarm', 'fortress'];
 
@@ -100,7 +101,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick, cardList }: { card:
                 el.style.setProperty('--title-scale', String(scale));
               }
             }}>
-              {displayCard.name}
+              <CardName name={displayCard.name} upgraded={displayCard.is_upgraded} />
             </span>
           </div>
           <span style={{ fontSize: 15, flexShrink: 0, color: 'var(--cc-gold)', fontWeight: 700, whiteSpace: 'nowrap' }}><CostLabel cost={displayCard.buy_cost} size={15} /></span>
