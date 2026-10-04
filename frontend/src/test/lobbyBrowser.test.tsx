@@ -59,6 +59,14 @@ describe('LobbyBrowser', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('offers Create Game when there are no open lobbies', async () => {
+    vi.stubGlobal('fetch', mockFetch({ open: [], in_progress: [] }));
+    const onCreate = vi.fn();
+    render(<LobbyBrowser onJoin={async () => {}} onCreate={onCreate} onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Game' }));
+    expect(onCreate).toHaveBeenCalled();
+  });
+
   it('disables Join for full or starting lobbies', async () => {
     vi.stubGlobal('fetch', mockFetch({ open: [{ ...lobby, full: true }], in_progress: [] }));
     render(<LobbyBrowser onJoin={async () => {}} onClose={() => {}} />);
