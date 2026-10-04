@@ -191,7 +191,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
         borderRadius: 14 * scale,
         opacity: entry.arriving ? 0 : 1,
         boxShadow: glow ? `0 0 0 2px ${glow}, 0 0 10px 3px ${glow}cc, 0 0 22px 6px ${glow}55` : undefined,
-        transition: `opacity 0.18s ease, transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1), width ${SIZE_EASE}, height ${SIZE_EASE}, left ${SIZE_EASE}, box-shadow 0.25s ease`,
+        transition: `opacity 0.18s ease, transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1), width ${SIZE_EASE}, height ${SIZE_EASE}, left ${SIZE_EASE}, box-shadow 0.25s ease, filter 0.45s ease-out`,
         touchAction: 'none',
         ...style,
       }}
