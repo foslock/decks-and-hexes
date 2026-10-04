@@ -7,7 +7,7 @@ import CompactCard, { COMPACT_CARD_WIDTH } from './CompactCard';
 import type { IconName } from '../icons/glyphs';
 import { ACTION_SIZE, BoardLabelRow, TILE_SIZE, defenseRow, row, type LabelRow } from './BoardLabel';
 import { HEX_DIRS, type GridTransform } from '../utils/hexGeometry';
-import { BoardEngine } from '../board3d/engine';
+import { BoardEngine, type CameraShot } from '../board3d/engine';
 import { CARD_FULL_HEIGHT } from './CardFull';
 import { boardCardScale } from './BoardCards';
 import { TOKEN_LABEL_LIFT, type TokenKind, type TokenSpec } from '../board3d/markers';
@@ -30,6 +30,8 @@ export interface BoardControls {
   toggleTilt(): void;
   resetView(): void;
   zoom(factor: number): void;
+  /** Scripted camera glide (the tutorial). */
+  flyTo(shot: CameraShot): void;
   /** Where a tile's card stack sits on screen — its bottom-center, or its
    *  top-center when it hangs below the tile (`below`, near the board's top
    *  edge) — and the board's label zoom. Lets a played card land right on it. */
@@ -264,6 +266,7 @@ export default function GameBoard(props: GameBoardProps) {
         toggleTilt: () => engine.toggleTilt(),
         resetView: () => engine.resetView(),
         zoom: (f) => engine.zoomBy(f),
+        flyTo: (shot) => engine.flyTo(shot),
         tileAnchor: (key) => {
           const host = hostRef.current;
           const pt = { x: 0, y: 0 };

@@ -3,10 +3,18 @@ import { BASE } from '../api/client';
 import CardBrowser from './CardBrowser';
 import Icon from '../icons/Icon';
 import HowToPlay from './HowToPlay';
+import TutorialOverlay from './tutorial/TutorialOverlay';
 import HeroAnimation from './HeroAnimation';
 import LobbyBrowser from './LobbyBrowser';
 import packageJson from '../../package.json';
 import { appHasBooted, signalAppReady, waitForFonts } from '../utils/appReady';
+
+/** Set once a player has seen (or skipped) the How to Play tour. */
+export const TUTORIAL_SEEN_KEY = 'cardclash_tutorial_seen';
+
+function tutorialSeen(): boolean {
+  try { return localStorage.getItem(TUTORIAL_SEEN_KEY) === '1'; } catch { return true; }
+}
 
 interface SetupScreenProps {
   onCreateLobby: () => void;
@@ -44,13 +52,9 @@ function HomeEmbers() {
 export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenProps) {
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
-  /** Join → choose (enter a code or browse) → code entry. */
-  const [joinMode, setJoinMode] = useState<'closed' | 'choose' | 'code'>('closed');
-  const showJoinDialog = joinMode === 'code';
-  const setShowJoinDialog = (open: boolean) => setJoinMode(open ? 'code' : 'closed');
+  const [showTutorial, setShowTutorial] = useState(false);
+  /** Join opens the game browser (open games, or join by code). */
   const [showBrowser, setShowBrowser] = useState(false);
-  const [joinCode, setJoinCode] = useState('');
-  const [joinError, setJoinError] = useState<string | null>(null);
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
 
   // Boot gate: the whole home intro (title, diorama, buttons) waits until the
@@ -81,6 +85,17 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
     return () => clearTimeout(t);
   }, [ready, fontsReady, heroReady]);
 
+  // New players get the How to Play tour as soon as the home screen is up.
+  useEffect(() => {
+    if (!ready || tutorialSeen()) return;
+    const t = setTimeout(() => setShowTutorial(true), 900);
+    return () => clearTimeout(t);
+  }, [ready]);
+  const closeTutorial = useCallback(() => {
+    setShowTutorial(false);
+    try { localStorage.setItem(TUTORIAL_SEEN_KEY, '1'); } catch { /* private mode */ }
+  }, []);
+
   useEffect(() => {
     fetch(`${BASE}/version`)
       .then(r => r.json())
@@ -88,23 +103,6 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
       .catch(() => setBackendVersion(null));
   }, []);
 
-
-  const attemptJoin = async () => {
-    if (joinCode.length === 0) return;
-    setJoinError(null);
-    try {
-      await onJoinLobby(joinCode);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (/full/i.test(msg)) {
-        setJoinError('Lobby is full and cannot be joined.');
-      } else if (/not found/i.test(msg) || /invalid/i.test(msg) || /404/i.test(msg)) {
-        setJoinError('Lobby not found. Check the code and try again.');
-      } else {
-        setJoinError(msg);
-      }
-    }
-  };
 
   return (
     <div className={`cc-scr-backdrop cc-scr-home${ready ? '' : ' is-booting'}`} aria-busy={!ready}>
@@ -121,93 +119,32 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
 
       {/* Hero animation — fills space between title and buttons */}
       <div className="cc-scr-home-hero">
-        <HeroAnimation start={ready} onReady={handleHeroReady} />
+        <HeroAnimation start={ready} onReady={handleHeroReady} paused={showTutorial} />
       </div>
 
       {/* Bottom buttons — pinned to bottom */}
       <div className="cc-scr-home-actions">
         {/* Create / Join Lobby */}
         <div className="cc-scr-home-row">
-          {joinMode === 'choose' ? (
-            // Join: enter a code, or browse public games.
-            <div className="cc-scr-join-choice">
-              <button className="cc-btn-secondary cc-scr-btn-xl" onClick={() => setJoinMode('code')} autoFocus>
-                Enter Code
-              </button>
-              <button className="cc-btn-primary cc-scr-btn-xl" onClick={() => setShowBrowser(true)}>
-                Browse Games
-              </button>
-              <button
-                className="cc-scr-join-cancel"
-                onClick={() => setJoinMode('closed')}
-                aria-label="Cancel"
-              >
-                <Icon name="close" size={12} decorative />
-              </button>
-            </div>
-          ) : (
-          <>
           <button
             className="cc-btn-primary cc-scr-btn-xl"
             onClick={() => onCreateLobby()}
           >
             Create
           </button>
-          {!showJoinDialog ? (
-            <button
-              className="cc-btn-secondary cc-scr-btn-xl"
-              onClick={() => { setJoinMode('choose'); setJoinError(null); }}
-            >
-              Join
-            </button>
-          ) : (
-            <div className="cc-scr-join-box">
-              <input
-                className="cc-scr-join-input"
-                value={joinCode}
-                onChange={(e) => { setJoinCode(e.target.value.toUpperCase().slice(0, 4)); setJoinError(null); }}
-                placeholder="CODE"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    attemptJoin();
-                  } else if (e.key === 'Escape') {
-                    setShowJoinDialog(false);
-                    setJoinCode('');
-                    setJoinError(null);
-                  }
-                }}
-              />
-              <button
-                className="cc-btn-primary cc-scr-join-go"
-                onClick={attemptJoin}
-                disabled={joinCode.length === 0}
-              >
-                Join
-              </button>
-              <button
-                className="cc-scr-join-cancel"
-                onClick={() => { setShowJoinDialog(false); setJoinCode(''); setJoinError(null); }}
-                aria-label="Cancel"
-              >
-                <Icon name="close" size={12} decorative />
-              </button>
-            </div>
-          )}
-          </>
-          )}
+          <button
+            className="cc-btn-secondary cc-scr-btn-xl"
+            onClick={() => setShowBrowser(true)}
+          >
+            Join
+          </button>
         </div>
-        {joinError && (
-          <div className="cc-scr-error" style={{ marginBottom: 10 }}>
-            {joinError}
-          </div>
-        )}
 
         {/* How to Play / Card Browser */}
         <div className="cc-scr-home-secondary">
           <button
             className="cc-btn-secondary cc-scr-btn-md"
-            onClick={() => setShowHowToPlay(true)}
+            onClick={() => setShowTutorial(true)}
           >
             <span className="cc-scr-btn-icon" aria-hidden="true"><Icon name="passive" size={15} decorative /></span>
             How to Play
@@ -234,6 +171,14 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
         </span>
       </footer>
 
+      {showTutorial && (
+        <TutorialOverlay
+          onClose={closeTutorial}
+          onPlay={() => { closeTutorial(); onCreateLobby(); }}
+          onRules={() => setShowHowToPlay(true)}
+          covered={showHowToPlay}
+        />
+      )}
       {showHowToPlay && (
         <HowToPlay onClose={() => setShowHowToPlay(false)} />
       )}

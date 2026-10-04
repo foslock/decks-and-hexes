@@ -47,6 +47,10 @@ export class CameraRig {
   readonly raycaster = new Raycaster();
   /** True while any value is still easing toward its target. */
   moving = false;
+  /** A scripted glide (tutorial): eases from where the camera was to the
+   *  targets over a fixed time instead of damping, optionally pulling back
+   *  mid-flight (`arc`) for a swoop. */
+  private flight: { from: { rotation: number; tilt: number; zoom: number; panX: number; panZ: number }; start: number; dur: number; arc: number } | null = null;
 
   constructor() {
     this.camera = new PerspectiveCamera(FOV, 1, 0.1, 200);
@@ -93,6 +97,19 @@ export class CameraRig {
     this.cur.panX = this.pan.x;
     this.cur.panZ = this.pan.y;
     this.damping = 1.6;
+  }
+
+  /** Glide from the current view to the targets over `seconds` (wall-clock
+   *  time, so it lands on schedule even if frames drop). */
+  beginFlight(seconds: number, arc = 0): void {
+    this.flight = { from: { ...this.cur }, start: performance.now() / 1000, dur: Math.max(0.05, seconds), arc };
+  }
+
+  /** Point the target view at a ground point (it lands mid-frame). Set the
+   *  target rotation and tilt first — the fitted center depends on them. */
+  centerOn(x: number, z: number): void {
+    const f = this.fit(this.rotation, this.tilt);
+    this.pan.set(x - f.cx, z - f.cz);
   }
 
   shake(strength: number, durationMs = 350): void {
@@ -167,17 +184,30 @@ export class CameraRig {
     const k = 1 - Math.exp(-dt * this.damping);
     const c = this.cur;
     const before = c.rotation + c.tilt + c.zoom + c.panX + c.panZ;
-    c.rotation += (this.rotation - c.rotation) * k;
-    c.tilt += (this.tilt - c.tilt) * k;
-    c.zoom += (this.zoom - c.zoom) * k;
-    c.panX += (this.pan.x - c.panX) * k;
-    c.panZ += (this.pan.y - c.panZ) * k;
+    const fl = this.flight;
+    if (fl) {
+      const u = Math.min(1, (performance.now() / 1000 - fl.start) / fl.dur);
+      const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+      const f = fl.from;
+      c.rotation = f.rotation + (this.rotation - f.rotation) * e;
+      c.tilt = f.tilt + (this.tilt - f.tilt) * e;
+      c.zoom = (f.zoom + (this.zoom - f.zoom) * e) * (1 - fl.arc * Math.sin(Math.PI * u));
+      c.panX = f.panX + (this.pan.x - f.panX) * e;
+      c.panZ = f.panZ + (this.pan.y - f.panZ) * e;
+      if (u >= 1) this.flight = null;
+    } else {
+      c.rotation += (this.rotation - c.rotation) * k;
+      c.tilt += (this.tilt - c.tilt) * k;
+      c.zoom += (this.zoom - c.zoom) * k;
+      c.panX += (this.pan.x - c.panX) * k;
+      c.panZ += (this.pan.y - c.panZ) * k;
+    }
     const delta = Math.abs(c.rotation - this.rotation) + Math.abs(c.tilt - this.tilt)
       + Math.abs(c.zoom - this.zoom) + Math.abs(c.panX - this.pan.x) + Math.abs(c.panZ - this.pan.y);
-    if (delta < 1e-4) this.snap();
+    if (delta < 1e-4 && !this.flight) this.snap();
     if (delta < 0.02 && this.damping < 9) this.damping = Math.min(9, this.damping + dt * 6);
     const after = c.rotation + c.tilt + c.zoom + c.panX + c.panZ;
-    this.moving = delta >= 1e-4 || Math.abs(after - before) > 1e-6;
+    this.moving = !!this.flight || delta >= 1e-4 || Math.abs(after - before) > 1e-6;
 
     this.place(c.rotation, c.tilt, c.zoom, c.panX, c.panZ);
 

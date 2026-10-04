@@ -108,10 +108,13 @@ interface HeroAnimationProps {
   start?: boolean;
   /** Fired once the diorama's shaders are compiled and the card art is decoded. */
   onReady?: () => void;
+  /** Stop drawing while something covers the home screen (the tutorial). */
+  paused?: boolean;
 }
 
-export default function HeroAnimation({ start = true, onReady }: HeroAnimationProps) {
+export default function HeroAnimation({ start = true, onReady, paused = false }: HeroAnimationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const engineRef = useRef<BoardEngine | null>(null);
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const blueCardRef = useRef<HTMLDivElement>(null);
   const redCardRef = useRef<HTMLDivElement>(null);
@@ -168,6 +171,7 @@ export default function HeroAnimation({ start = true, onReady }: HeroAnimationPr
     };
 
     const engine = new BoardEngine(canvasHost, { hero: true });
+    engineRef.current = engine;
     let onLayoutChange: (() => void) | null = null;
     const ro = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => {
@@ -387,10 +391,13 @@ export default function HeroAnimation({ start = true, onReady }: HeroAnimationPr
       cancelAnimationFrame(raf);
       ro?.disconnect();
       engine.dispose();
+      engineRef.current = null;
       delete PLAYER_COLORS[BLUE_ID];
       delete PLAYER_COLORS[RED_ID];
     };
   }, []);
+
+  useEffect(() => { engineRef.current?.setPaused(paused); }, [paused]);
 
   return (
     <div ref={containerRef} className="cc-scr-hero" aria-hidden="true">
