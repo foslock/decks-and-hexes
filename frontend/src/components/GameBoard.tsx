@@ -99,6 +99,8 @@ interface GameBoardProps {
   extendBelow?: number;
   /** Keep the fitted board this many px clear of the canvas's bottom edge. */
   viewInsetBottom?: number;
+  /** Tile whose card row draws above every other row (the one resolving). */
+  raisedTileKey?: string | null;
 }
 
 // ── Labels ──────────────────────────────────────────────────────────────
@@ -204,7 +206,7 @@ export default function GameBoard(props: GameBoardProps) {
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths,
     connectedVpTiles, disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
     paused, undoableTiles, fxRef, controlsRef, showCameraControls, dragHoverPosition,
-    tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0,
+    tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0, raisedTileKey,
   } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BoardEngine | null>(null);
@@ -793,7 +795,7 @@ export default function GameBoard(props: GameBoardProps) {
             <div
               key={key}
               ref={el => { if (el) tileCardEls.current.set(key, el); else tileCardEls.current.delete(key); }}
-              className="cc-board-tilecard"
+              className={`cc-board-tilecard${key === raisedTileKey ? ' is-raised' : ''}`}
             >
               {renderTileCards(key, labelScale)}
             </div>

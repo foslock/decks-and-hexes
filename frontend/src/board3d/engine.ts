@@ -15,7 +15,8 @@ import {
   tileTexIndex, TF, type SharedUniforms, type TerrainUniforms, type TileTextures,
 } from './materials';
 import { ParticlePool } from './particles';
-import { buildDecor, buildStructure, emptySpots, structureHeight, structureSpec, type AmbientSpots } from './props';
+import { buildDecor, buildStructure, buildWallEdge, emptySpots, structureHeight, structureSpec, wallEdges, type AmbientSpots } from './props';
+import { Soup } from './soup';
 import { FloatingOverlay } from './floating';
 import { RoadLayer } from './roads';
 import { buildSlabGeometry, buildTerrainGeometry, buildUnderGlow, buildWater } from './terrain';
@@ -72,6 +73,21 @@ interface StructureEntry {
   base: Vector3;
 }
 
+/** One edge of a tile's defensive wall (see wallEdges). */
+interface WallEntry {
+  tileKey: string;
+  k: number;
+  signature: string;
+  level: number;
+  mesh: Mesh;
+  born: number;
+  /** Rising in, sinking away (removed when down), or standing. */
+  mode: 'rise' | 'sink' | 'idle';
+  jolt: number;
+  joltAt: number;
+  base: Vector3;
+}
+
 /**
  * The 3D game board. Owns the WebGL renderer, scene, camera and every layer
  * (terrain, decor, structures, ambient life, markers, effects). React talks
@@ -99,6 +115,7 @@ export class BoardEngine {
   private underGlow: Mesh | null = null;
   private decorMesh: Mesh | null = null;
   private structures = new Map<string, StructureEntry>();
+  private walls = new Map<string, WallEntry>();
   private structureGroup = new Group();
   private sun: DirectionalLight;
   private layout: BoardLayout | null = null;
@@ -374,6 +391,7 @@ export class BoardEngine {
       this.rebuildLayout(first);
     }
     this.syncStructures();
+    this.syncWalls();
     this.writeTileTextures();
     this.syncBarriers();
     this.syncPickProxies();
@@ -601,6 +619,7 @@ export class BoardEngine {
     for (const [, s] of this.structures) if (s.mesh) { this.structureGroup.remove(s.mesh); s.mesh.geometry.dispose(); }
     this.structures.clear();
     this.structureSpots.clear();
+    this.clearWalls();
     if (this.ambient) { this.world.remove(this.ambient.group); this.ambient.dispose(); this.ambient = null; }
     if (this.markers) { this.world.remove(this.markers.group); this.markers.dispose(); this.markers = null; }
     if (this.fxLayer) { this.world.remove(this.fxLayer.group); this.fxLayer.dispose(); this.fxLayer = null; }
@@ -647,6 +666,7 @@ export class BoardEngine {
     for (const [, s] of this.structures) if (s.mesh) { this.structureGroup.remove(s.mesh); s.mesh.geometry.dispose(); }
     this.structures.clear();
     this.structureSpots.clear();
+    this.clearWalls();
 
     if (!this.fxLayer) {
       const fx = new FxLayer(layout, this.glowPool, this.smokePool, {
@@ -752,9 +772,10 @@ export class BoardEngine {
         mesh.receiveShadow = true;
         this.structureGroup.add(mesh);
       }
-      // Rising animation for walls / new mountains; instant swaps otherwise.
+      // Rising animation for new mountains; instant swaps otherwise (walls
+      // animate per edge in syncWalls).
       const kind = spec.kind;
-      const grew = !!entry && (kind === 'walls' || kind === 'mountain' || (kind === 'town' && spec.signature.split('|')[4] !== entry.signature.split('|')[4]));
+      const grew = !!entry && kind === 'mountain';
       const rise = animate && grew;
       const se: StructureEntry = {
         signature: spec.signature, mesh, born: now, rise, jolt: 0, joltAt: 0,
@@ -793,10 +814,95 @@ export class BoardEngine {
 
   private joltStructure(key: string, strength: number): void {
     const s = this.structures.get(key);
-    if (!s) return;
-    s.jolt = Math.max(s.jolt, strength);
-    s.joltAt = this.time;
-    this.kick(0.6);
+    let hit = false;
+    if (s) {
+      s.jolt = Math.max(s.jolt, strength);
+      s.joltAt = this.time;
+      hit = true;
+    }
+    for (const w of this.walls.values()) {
+      if (w.tileKey !== key) continue;
+      w.jolt = Math.max(w.jolt, strength);
+      w.joltAt = this.time;
+      hit = true;
+    }
+    if (hit) this.kick(0.6);
+  }
+
+  private disposeWall(w: WallEntry): void {
+    this.structureGroup.remove(w.mesh);
+    w.mesh.geometry.dispose();
+  }
+
+  private clearWalls(): void {
+    for (const w of this.walls.values()) this.disposeWall(w);
+    this.walls.clear();
+  }
+
+  /** Dust where a wall edge rises or falls (local px, like other fx). */
+  private wallDust(tileKey: string, k: number): void {
+    const tl = this.layout?.byKey.get(tileKey);
+    if (!tl) return;
+    const a = (Math.PI / 3) * k + Math.PI / 6;
+    const d = 0.74;
+    this.fxLayer?.dust((tl.x + Math.cos(a) * d) * HEX_SIZE, (tl.z + Math.sin(a) * d) * HEX_SIZE, 6, 0.55);
+  }
+
+  /**
+   * Fortified tiles' walls, one mesh per edge. Same-holder neighbours share
+   * an enclosure, so when a tile changes hands its shared edges sink away
+   * and new outer edges rise — only the edges that change move.
+   */
+  private syncWalls(): void {
+    const layout = this.layout;
+    if (!layout) return;
+    const animate = this.speed > 0 && this.build >= 1;
+    const now = this.time;
+    const want = new Set<string>();
+    let changed = false;
+    for (const e of wallEdges(layout, this.tiles)) {
+      want.add(e.key);
+      const cur = this.walls.get(e.key);
+      if (cur && cur.mode !== 'sink' && cur.signature === e.signature) continue;
+      const tl = layout.byKey.get(e.tileKey);
+      if (!tl) continue;
+      const soup = new Soup(tl.seed);
+      buildWallEdge(soup, tl, layout, e);
+      if (soup.vertexCount === 0) continue;
+      const mesh = new Mesh(soup.toGeometry(), this.propMat.material);
+      mesh.customDepthMaterial = this.propMat.depth;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.structureGroup.add(mesh);
+      // A new edge, or a stronger / weaker wall, rises in; an edge that only
+      // changed where it meets its neighbours swaps in place.
+      const rise = animate && (!cur || cur.mode === 'sink' || cur.level !== e.level);
+      if (cur) this.disposeWall(cur);
+      const base = new Vector3(tl.x, layout.heightAt(tl.x, tl.z), tl.z);
+      if (rise) {
+        mesh.scale.set(1, 0.001, 1);
+        mesh.position.y = base.y * 0.999;
+        this.wallDust(e.tileKey, e.k);
+      }
+      this.walls.set(e.key, {
+        tileKey: e.tileKey, k: e.k, signature: e.signature, level: e.level, mesh,
+        born: now, mode: rise ? 'rise' : 'idle', jolt: 0, joltAt: 0, base,
+      });
+      changed = true;
+    }
+    for (const [key, w] of this.walls) {
+      if (want.has(key) || w.mode === 'sink') continue;
+      if (animate) {
+        w.mode = 'sink';
+        w.born = now;
+        this.wallDust(w.tileKey, w.k);
+      } else {
+        this.disposeWall(w);
+        this.walls.delete(key);
+      }
+      changed = true;
+    }
+    if (changed) this.kick(0.8);
   }
 
   /** In-flight ownership sweeps: tile → start time + origin angle. */
@@ -1210,6 +1316,33 @@ export class BoardEngine {
         se.mesh.position.x = Math.sin(age * 90) * amp;
         se.mesh.position.z = Math.cos(age * 77) * amp;
         if (age > 0.45) { se.jolt = 0; se.mesh.position.x = 0; se.mesh.position.z = 0; }
+      }
+    }
+
+    // Wall edges: rise in / sink away + jolts
+    for (const [key, w] of this.walls) {
+      if (w.mode === 'rise') {
+        const k = Math.min(1, (t - w.born) / Math.max(0.2, 0.75 * Math.max(0.5, this.speed)));
+        const e = k >= 1 ? 1 : 1 - Math.pow(1 - k, 3) * Math.cos(k * 6);
+        const sy = Math.max(0.001, Math.min(1.12, e));
+        w.mesh.scale.set(1, sy, 1);
+        w.mesh.position.y = w.base.y * (1 - sy);
+        if (k >= 1) { w.mode = 'idle'; w.mesh.scale.set(1, 1, 1); w.mesh.position.y = 0; }
+        this.kick(0.1);
+      } else if (w.mode === 'sink') {
+        const k = Math.min(1, (t - w.born) / Math.max(0.15, 0.5 * Math.max(0.5, this.speed)));
+        const sy = Math.max(0.001, 1 - k * k);
+        w.mesh.scale.set(1, sy, 1);
+        w.mesh.position.y = w.base.y * (1 - sy);
+        if (k >= 1) { this.disposeWall(w); this.walls.delete(key); continue; }
+        this.kick(0.1);
+      }
+      if (w.jolt > 0) {
+        const age = t - w.joltAt;
+        const amp = w.jolt * 0.03 * Math.max(0, 1 - age / 0.45);
+        w.mesh.position.x = Math.sin(age * 90) * amp;
+        w.mesh.position.z = Math.cos(age * 77) * amp;
+        if (age > 0.45) { w.jolt = 0; w.mesh.position.x = 0; w.mesh.position.z = 0; }
       }
     }
 

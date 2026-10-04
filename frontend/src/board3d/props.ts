@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import type { HexTile } from '../types/game';
 import { HEX_DIRS } from '../utils/hexGeometry';
-import { BoardLayout, hexCorner, hexSdf, type TileLayout } from './layout';
+import { BoardLayout, hexCorner, hexSdf, worldToTileKey, type TileLayout } from './layout';
 import { rng } from './noise';
 import { Soup, lin, mix, scaleRGB, type RGB } from './soup';
 
@@ -388,7 +388,7 @@ export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTil
 // ── Structures (dynamic, per tile) ───────────────────────────────────────
 
 export interface StructureSpec {
-  kind: 'mountain' | 'castle' | 'town' | 'walls' | 'none';
+  kind: 'mountain' | 'castle' | 'town' | 'none';
   /** Changes whenever the structure must be rebuilt. */
   signature: string;
 }
@@ -742,54 +742,196 @@ function buildTown(s: Soup, tile: TileLayout, layout: BoardLayout, vp: number, o
   }
 }
 
-/** Defensive works around a tile: palisade (1), stone wall (2), towered wall (3+). */
-function buildWalls(s: Soup, tile: TileLayout, layout: BoardLayout, level: number): void {
-  const r = rng(tile.seed ^ 0x77a1);
-  const y0 = layout.heightAt(tile.x, tile.z);
-  s.setAnchor(tile.x, y0, tile.z);
-  s.jitter = 0.06;
-  const R = 0.86;
-  const gate = Math.floor(r() * 6);
-  for (let k = 0; k < 6; k++) {
-    const a = hexCorner(tile.x, tile.z, k, R);
-    const b = hexCorner(tile.x, tile.z, k + 1, R);
-    const len = Math.hypot(b.x - a.x, b.z - a.z);
-    const ry = -Math.atan2(b.z - a.z, b.x - a.x);
-    const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
-    if (level <= 1) {
-      // Sharpened palisade stakes
-      const n = 13;
-      for (let i = 0; i <= n; i++) {
-        const t = i / n;
-        if (k === gate && t > 0.35 && t < 0.65) continue;
-        const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
-        const py = layout.heightAt(px, pz);
-        s.place(px, py - 0.01, pz, ry + (r() - 0.5) * 0.3, 1);
-        const hh = 0.08 + r() * 0.03;
-        s.box(0.02, hh, 0.02, mix(C.wood, C.woodDark, r()));
-        at(s, 0, hh, 0, () => s.pyramid(0.02, 0.025, C.woodDark));
-      }
-    } else {
-      const wh = level >= 3 ? 0.15 : 0.11;
-      const py = layout.heightAt(mx, mz);
-      s.place(mx, py - 0.02, mz, ry, 1);
-      if (k === gate) {
-        for (const sx of [-1, 1]) at(s, sx * len * 0.33, 0, 0, () => {
-          s.box(len * 0.34, wh, 0.05, C.stone, C.stoneDark);
-          crenellate(s, len * 0.34, wh, 0.05, C.stoneDark, 0.04);
-        });
-        for (const sx of [-1, 1]) at(s, sx * len * 0.15, 0, 0, () => s.box(0.04, wh + 0.04, 0.07, C.stoneDark));
-      } else {
-        s.box(len, wh, 0.05, C.stone, C.stoneDark);
-        crenellate(s, len, wh, 0.05, C.stoneDark, 0.04);
-      }
-      if (level >= 3) {
-        const cx = a.x, cz = a.z;
-        s.place(cx, layout.heightAt(cx, cz) - 0.02, cz, 0, 1);
-        s.cylinder(0.055, 0.05, 0.24, 7, C.stone, { top: C.stoneDark });
-        at(s, 0, 0.24, 0, () => s.cone(0.07, 0.1, 7, C.roofs[2]));
-      }
+// ── Defensive walls (per edge) ───────────────────────────────────────────
+//
+// Fortified tiles (lasting defense > 0; bases keep their own castle walls)
+// wall their hexagon, and the wall grows with the defense: a palisade (1),
+// stone wall (2), towered wall (3), fortified wall (4), citadel (5+).
+// Neighbouring fortified tiles of the same holder — unowned counts as one
+// holder, "neutral" — share an enclosure: a tile leaves an edge unwalled
+// when the tile across it is as strong or stronger (equal tiles merge; a
+// stronger tile keeps its own wall on that edge, so it still shows). Each
+// edge is its own piece so a change of hands animates only what it affects.
+
+/** Inset of the wall line from the hex edge (as a corner radius). */
+const WALL_R = 0.86;
+/** Where two equal walls meet across an open edge: this far along the open
+ *  edge from the shared corner (the mitre of the inset). */
+const WALL_JOIN = 1 - WALL_R;
+/** Strongest wall drawn (higher defense looks the same). */
+export const MAX_WALL_LEVEL = 5;
+
+/** Wall strength of a tile: 0 for none, else palisade (1) … citadel (5). */
+export function wallLevel(t: HexTile | undefined): number {
+  if (!t || t.is_blocked || t.is_base) return 0;
+  return Math.min(MAX_WALL_LEVEL, Math.max(0, t.base_defense + (t.permanent_defense_bonus ?? 0)));
+}
+
+/** The enclosure a fortified tile belongs to: its holder, or "neutral". */
+function wallHolder(t: HexTile | undefined): string | null {
+  return wallLevel(t) > 0 ? (t!.owner ?? 'neutral') : null;
+}
+
+/** Direction (radians) from a tile's center across edge k. */
+const edgeAngle = (k: number) => (Math.PI / 3) * k + Math.PI / 6;
+
+/** Key of the tile across edge k (between corners k and k+1). */
+function neighbourAcross(tile: TileLayout, k: number): string {
+  const a = edgeAngle(k);
+  return worldToTileKey(tile.x + Math.sqrt(3) * Math.cos(a), tile.z + Math.sqrt(3) * Math.sin(a));
+}
+
+/**
+ * How a wall edge ends at a corner:
+ *  - `corner`: it turns a corner of its own tile (the next edge is walled too);
+ *  - `merge`: the next edge is shared with an equal tile — the wall runs on
+ *    into that tile's, meeting it on the shared edge;
+ *  - `abut`: the next edge is shared with a stronger tile that keeps its own
+ *    wall — this wall runs into that tile's corner.
+ */
+export type WallEnd = 'corner' | 'merge' | 'abut';
+
+export interface WallEdgeSpec {
+  /** `${tileKey}#${k}` */
+  key: string;
+  tileKey: string;
+  k: number;
+  level: number;
+  start: WallEnd;
+  end: WallEnd;
+  gate: boolean;
+  /** Changes whenever the edge must be rebuilt. */
+  signature: string;
+}
+
+/** Every wall edge on the board for the current tile states. */
+export function wallEdges(layout: BoardLayout, tiles: Record<string, HexTile>): WallEdgeSpec[] {
+  const out: WallEdgeSpec[] = [];
+  for (const tile of layout.tiles) {
+    const t = tiles[tile.key];
+    const holder = wallHolder(t);
+    if (!holder) continue;
+    const level = wallLevel(t);
+    const across = Array.from({ length: 6 }, (_, k) => tiles[neighbourAcross(tile, k)]);
+    const same = across.map(n => wallHolder(n) === holder);
+    const open = across.map((n, k) => same[k] && wallLevel(n) >= level);
+    if (open.every(Boolean)) continue;
+    const endAt = (k: number): WallEnd => !open[k] ? 'corner' : wallLevel(across[k]) === level ? 'merge' : 'abut';
+    // One gate per tile, on its preferred edge or the next walled one.
+    let gate = Math.floor(rng(tile.seed ^ 0x77a1)() * 6);
+    while (open[gate]) gate = (gate + 1) % 6;
+    for (let k = 0; k < 6; k++) {
+      if (open[k]) continue;
+      const start = endAt((k + 5) % 6);
+      const end = endAt((k + 1) % 6);
+      out.push({
+        key: `${tile.key}#${k}`, tileKey: tile.key, k, level, start, end, gate: k === gate,
+        signature: `${level}|${start[0]}${end[0]}|${k === gate ? 1 : 0}`,
+      });
     }
+  }
+  return out;
+}
+
+/** End point of a wall edge at a corner (see WallEnd). `side` is the own
+ *  edge on the far side of that corner; `along` the corner it runs toward. */
+function wallEnd(tile: TileLayout, corner: number, mode: WallEnd, side: number, along: number): { x: number; z: number } {
+  if (mode === 'corner') return hexCorner(tile.x, tile.z, corner, WALL_R);
+  const c = hexCorner(tile.x, tile.z, corner);
+  if (mode === 'merge') {
+    const n = hexCorner(tile.x, tile.z, along);
+    return { x: c.x + (n.x - c.x) * WALL_JOIN, z: c.z + (n.z - c.z) * WALL_JOIN };
+  }
+  // The stronger neighbour's own inset corner at this corner.
+  const a = edgeAngle(side);
+  const nx = tile.x + Math.sqrt(3) * Math.cos(a), nz = tile.z + Math.sqrt(3) * Math.sin(a);
+  return { x: c.x + (nx - c.x) * (1 - WALL_R), z: c.z + (nz - c.z) * (1 - WALL_R) };
+}
+
+/** Look of each stone wall level (2+; level 1 is a wooden palisade). */
+interface StoneTier {
+  h: number;
+  thick: number;
+  body: RGB;
+  trim: RGB;
+  merlon: number;
+  /** A wider footing course under the wall. */
+  plinth?: boolean;
+  /** A stripe of this colour below the battlements. */
+  band?: RGB;
+  /** Towers on the enclosure's corners: cone roof, or battlements when null. */
+  tower?: { r: number; h: number; roof: RGB | null; tip?: RGB; pennant?: boolean };
+}
+const STONE_TIERS: StoneTier[] = [
+  /* 2 */ { h: 0.11, thick: 0.05, body: C.stone, trim: C.stoneDark, merlon: 0.04 },
+  /* 3 */ { h: 0.15, thick: 0.055, body: C.stone, trim: C.stoneDark, merlon: 0.04, tower: { r: 0.055, h: 0.24, roof: C.roofs[2] } },
+  /* 4 */ { h: 0.18, thick: 0.065, body: C.fortressStone, trim: C.fortressTrim, merlon: 0.045, plinth: true, tower: { r: 0.068, h: 0.3, roof: null } },
+  /* 5 */ { h: 0.21, thick: 0.075, body: C.vanguardStone, trim: C.vanguardTrim, merlon: 0.05, plinth: true, band: C.gold, tower: { r: 0.078, h: 0.36, roof: C.roofs[1], tip: C.gold, pennant: true } },
+];
+
+/** One straight run of stone wall, centered on the current placement. */
+function stoneRun(s: Soup, len: number, tier: StoneTier): void {
+  if (tier.plinth) s.box(len, 0.035, tier.thick * 1.55, tier.trim);
+  s.box(len, tier.h, tier.thick, tier.body, tier.trim);
+  if (tier.band) at(s, 0, tier.h * 0.8, 0, () => s.box(len, 0.012, tier.thick * 1.06, tier.band!));
+  crenellate(s, len, tier.h, tier.thick, tier.trim, tier.merlon);
+}
+
+/** Geometry for one wall edge of a tile. */
+export function buildWallEdge(s: Soup, tile: TileLayout, layout: BoardLayout, e: WallEdgeSpec): void {
+  const r = rng(tile.seed ^ 0x77a1 ^ ((e.k + 1) * 0x9e37));
+  s.build = tile.ring / Math.max(1, layout.maxRing);
+  s.setAnchor(tile.x, layout.heightAt(tile.x, tile.z), tile.z);
+  s.jitter = 0.06;
+  const a = wallEnd(tile, e.k, e.start, e.k + 5, e.k + 5);
+  const b = wallEnd(tile, e.k + 1, e.end, e.k + 1, e.k + 2);
+  const len = Math.hypot(b.x - a.x, b.z - a.z);
+  const ry = -Math.atan2(b.z - a.z, b.x - a.x);
+  const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+  if (e.level <= 1) {
+    // Sharpened palisade stakes
+    const n = Math.max(3, Math.round(13 * len / 0.86));
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      if (e.gate && t > 0.35 && t < 0.65) continue;
+      // The stake on a meeting point belongs to the wall ending there.
+      if (i === 0 && e.start === 'merge') continue;
+      const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+      s.place(px, layout.heightAt(px, pz) - 0.01, pz, ry + (r() - 0.5) * 0.3, 1);
+      const hh = 0.08 + r() * 0.03;
+      s.box(0.02, hh, 0.02, mix(C.wood, C.woodDark, r()));
+      at(s, 0, hh, 0, () => s.pyramid(0.02, 0.025, C.woodDark));
+    }
+    return;
+  }
+  const tier = STONE_TIERS[Math.min(e.level, MAX_WALL_LEVEL) - 2];
+  s.place(mx, layout.heightAt(mx, mz) - 0.02, mz, ry, 1);
+  if (e.gate) {
+    for (const sx of [-1, 1]) at(s, sx * len * 0.33, 0, 0, () => stoneRun(s, len * 0.34, tier));
+    for (const sx of [-1, 1]) at(s, sx * len * 0.15, 0, 0, () => s.box(0.045, tier.h + 0.045, tier.thick * 1.4, tier.trim));
+    if (tier.band) at(s, 0, tier.h + 0.03, 0, () => s.box(len * 0.34, 0.03, tier.thick * 1.2, tier.trim));
+  } else {
+    stoneRun(s, len, tier);
+  }
+  // A pier where this wall meets an equal neighbour's (one per meeting point).
+  if (e.end === 'merge') {
+    s.place(b.x, layout.heightAt(b.x, b.z) - 0.02, b.z, ry, 1);
+    s.box(tier.thick + 0.025, tier.h + 0.02, tier.thick + 0.025, tier.trim, tier.body);
+  }
+  // Towers on the enclosure's own corners (not where it runs on).
+  const tw = tier.tower;
+  if (tw && e.start === 'corner') {
+    s.place(a.x, layout.heightAt(a.x, a.z) - 0.02, a.z, 0, 1);
+    s.cylinder(tw.r, tw.r * 0.9, tw.h, 8, tier.body, { top: tier.trim });
+    at(s, 0, tw.h, 0, () => {
+      if (tw.roof) {
+        s.cone(tw.r * 1.3, tw.r * 1.9, 8, tw.roof);
+        if (tw.tip) at(s, 0, tw.r * 1.85, 0, () => s.cone(tw.r * 0.32, tw.r * 0.7, 6, tw.tip!));
+        if (tw.pennant) at(s, 0, tw.r * 2.4, 0, () => banner(s, C.gold, 0.1, 0.05));
+      } else {
+        roundTowerTop(s, tw.r, tier.trim);
+      }
+    });
   }
 }
 
@@ -801,11 +943,10 @@ export function structureSpec(t: HexTile, archetypeOf: (pid: string) => string, 
     const holder = t.owner ?? pid;
     return { kind: 'castle', signature: `castle|${archetypeOf(pid)}|${ownerColor(holder)}` };
   }
-  const persist = t.base_defense + (t.permanent_defense_bonus ?? 0);
   if (t.is_vp) {
-    return { kind: 'town', signature: `town|${t.vp_value}|${t.owner ? ownerColor(t.owner) : '-'}|${connected ? 1 : 0}|w${Math.min(persist, 3)}` };
+    return { kind: 'town', signature: `town|${t.vp_value}|${t.owner ? ownerColor(t.owner) : '-'}|${connected ? 1 : 0}` };
   }
-  if (persist > 0) return { kind: 'walls', signature: `walls|${Math.min(persist, 3)}` };
+  // Walls are built per edge (wallEdges), not as part of the structure.
   return { kind: 'none', signature: '' };
 }
 
@@ -816,7 +957,6 @@ export function buildStructure(
 ): Soup | null {
   const s = new Soup(tile.seed);
   s.build = tile.ring / Math.max(1, layout.maxRing);
-  const persist = t.base_defense + (t.permanent_defense_bonus ?? 0);
   if (t.is_blocked) {
     buildMountain(s, tile, layout, gameTiles, spots);
   } else if (t.is_base) {
@@ -824,9 +964,6 @@ export function buildStructure(
     buildCastle(s, tile, layout, archetypeOf(pid), ownerColor(t.owner ?? pid), spots);
   } else if (t.is_vp) {
     buildTown(s, tile, layout, t.vp_value || 1, t.owner ? ownerColor(t.owner) : null, connected, spots);
-    if (persist > 0) buildWalls(s, tile, layout, persist);
-  } else if (persist > 0) {
-    buildWalls(s, tile, layout, persist);
   } else {
     return null;
   }
@@ -838,8 +975,10 @@ export function structureHeight(t: HexTile): number {
   if (t.is_blocked) return 1.6;
   if (t.is_base) return 1.15;
   if (t.is_vp) return t.vp_value >= 2 ? 0.42 : 0.36;
-  const persist = t.base_defense + (t.permanent_defense_bonus ?? 0);
-  if (persist >= 3) return 0.3;
-  if (persist > 0) return 0.15;
+  const level = wallLevel(t);
+  if (level >= 5) return 0.5;
+  if (level >= 4) return 0.36;
+  if (level >= 3) return 0.3;
+  if (level > 0) return 0.18;
   return 0.12;
 }

@@ -75,9 +75,9 @@ describe('board cards', () => {
     expect(card.style.transition).toContain('width 0.25s ease');
   });
 
-  it('lists queued engine cards with a count', () => {
+  it('lists played engine cards with a count', () => {
     render(<WithSettings><EngineQueue entries={[entry('g', 'Gather'), entry('h', 'Tithe')]} onOpen={() => {}} /></WithSettings>);
-    expect(screen.getByText(/Queued/)).toHaveTextContent('Queued (2)');
+    expect(screen.getByText(/Played/)).toHaveTextContent('Played (2)');
     expect(screen.getByText('Gather')).toBeInTheDocument();
     expect(screen.getByText('Tithe')).toBeInTheDocument();
   });
