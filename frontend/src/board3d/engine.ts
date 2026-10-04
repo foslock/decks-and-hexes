@@ -931,9 +931,12 @@ export class BoardEngine {
         if (e.shiftKey || this.orbit.button === 1) {
           this.panBy(dx, dy);
         } else {
-          this.userRotation += dx * 0.006;
+          // Grab-and-turn: the board's near side follows the cursor
+          // (drag right → it turns right; drag down → it tips back toward
+          // top-down, drag up → it tips further over).
+          this.userRotation -= dx * 0.006;
           this.rig.rotation = this.baseRotation + this.userRotation;
-          this.setTilt(this.rig.tilt + dy * 0.004);
+          this.setTilt(this.rig.tilt - dy * 0.004);
         }
         this.kick(0.5);
         return;
@@ -1096,7 +1099,7 @@ export class BoardEngine {
     if (this.rig.zoom <= 1.001) this.rig.pan.set(0, 0);
     this.userRotation = g.rot + (angle - g.angle);
     this.rig.rotation = this.baseRotation + this.userRotation;
-    this.setTilt(g.tilt + (midY - g.midY) * 0.006);
+    this.setTilt(g.tilt - (midY - g.midY) * 0.006);
     this.kick(0.5);
   }
 
