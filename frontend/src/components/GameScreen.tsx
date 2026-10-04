@@ -208,6 +208,7 @@ function canClaimCaptureTile(
 // (and animation preview tooling) can import them without pulling the entire
 // GameScreen dependency tree. Re-exported here for existing callers.
 import { HEX_SIZE, axialToPixel, localToScreen, screenToLocal, type GridTransform } from '../utils/hexGeometry';
+import { chevronSource, findNearestOwnedTile } from '../utils/resolveChevrons';
 export { HEX_SIZE, axialToPixel, localToScreen };
 
 interface GameScreenProps {
@@ -248,30 +249,6 @@ function pixelToAxial(px: number, py: number): { q: number; r: number } {
   if (dq > dr && dq > ds) rq = -rr - rs;
   else if (dr > ds) rr = -rq - rs;
   return { q: rq, r: rr };
-}
-
-/** Hex distance in axial coordinates (module-level for use in effects before hooks). */
-function hexDist(q1: number, r1: number, q2: number, r2: number): number {
-  return Math.max(Math.abs(q1 - q2), Math.abs(r1 - r2), Math.abs((q1 + r1) - (q2 + r2)));
-}
-
-/** Find closest tile owned by a player to a target position (module-level). */
-function findNearestOwnedTile(
-  targetQ: number, targetR: number,
-  tiles: Record<string, import('../types/game').HexTile>,
-  playerId: string,
-): { q: number; r: number } | null {
-  let closest: { q: number; r: number } | null = null;
-  let minDist = Infinity;
-  for (const tile of Object.values(tiles)) {
-    if (tile.owner !== playerId) continue;
-    const dist = hexDist(tile.q, tile.r, targetQ, targetR);
-    if (dist < minDist) {
-      minDist = dist;
-      closest = { q: tile.q, r: tile.r };
-    }
-  }
-  return closest;
 }
 
 /** Check if a card requires the player to choose cards to trash or discard from hand. */
@@ -1700,15 +1677,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               // (defensive play) — no directional arrow needed.
               if (oldTiles[targetKey]?.owner === claimant.player_id) continue;
               const color = PLAYER_COLORS[claimant.player_id] ?? 0xffffff;
-              const closest = findNearestOwnedTile(step.q, step.r, oldTiles, claimant.player_id);
-              if (!closest) continue;
-              // If target isn't adjacent to territory, point arrow toward base instead
-              const dist = hexDist(step.q, step.r, closest.q, closest.r);
-              let source = closest;
-              if (dist > 1) {
-                const base = Object.values(oldTiles).find(t => t.is_base && t.owner === claimant.player_id);
-                if (base) source = { q: base.q, r: base.r };
-              }
+              // Nearest pre-resolve tile (base for long-range claims); a
+              // Breakthrough spill-over advances from its played-on tile.
+              const source = chevronSource(step, claimant, oldTiles);
+              if (!source) continue;
               cachedChevrons.push({
                 targetQ: step.q, targetR: step.r,
                 sourceQ: source.q, sourceR: source.r,
@@ -5117,6 +5089,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setDetailCards(entries.map(e => ({ card: e.card, subtitleParts: e.subtitleParts, playerId: e.playerId, playerName: e.playerName })));
   }, [showZoom]);
 
+  // Aiming a card at a tile: the cards on the board step back (fainter, no
+  // hover zoom) so the player can focus on picking the tile.
+  const aimingCard = selectedCardIndex !== null ? activePlayer?.hand[selectedCardIndex] ?? null : null;
+  const aimingAtTiles = phase === 'play' && (multiTileCardIndex !== null || (!!aimingCard && (
+    aimingCard.card_type === 'claim' || aimingCard.card_type === 'defense'
+    || (aimingCard.card_type === 'engine' && (needsOpponentTarget(aimingCard) || !!aimingCard.target_own_tile)))));
   const renderTileCards = (tileKey: string, zoom: number) => {
     const entries = boardCards.tiles.get(tileKey);
     if (!entries) return null;
@@ -5128,6 +5106,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         focus={revealFocusTile === tileKey}
         open={openCardsTile === tileKey && (detailCards != null || zoomedCard != null)}
         faded={draggingCardIndex !== null}
+        passThrough={aimingAtTiles}
         onOpen={(list, i) => { setOpenCardsTile(tileKey); openBoardCards(list, i); }}
         onUndo={undoable ? () => {
           const [q, r] = tileKey.split(',').map(Number);

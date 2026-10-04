@@ -39,6 +39,8 @@ const QUEUE_PER_ROW = 3;
 const ZOOM_SCALE = 0.8;
 /** Tile cards at rest are see-through so the board shows under them. */
 const REST_OPACITY = 0.4;
+/** …and fainter still while a card is dragged or aimed at a tile. */
+const AIMING_OPACITY = 0.15;
 /** Matches the card box's size transition, so a growing card scales in step
  *  with its box instead of snapping out of its top-left corner. */
 const SIZE_EASE = '0.25s ease';
@@ -69,11 +71,13 @@ function ScaledFace({ entry, scale }: { entry: BoardCardEntry; scale: number }) 
  * The hover zoom: the card grows out of its mini copy to a readable size,
  * above it (or below, near the top of the screen) or to its right.
  */
-function HoverZoom({ entry, from, placement, hint }: {
+function HoverZoom({ entry, from, placement, hint, hangsBelow }: {
   entry: BoardCardEntry;
   from: DOMRect;
   placement: 'above' | 'right';
   hint?: string;
+  /** Its row hangs below the tile (GameBoard marks it data-below). */
+  hangsBelow?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const animated = useAnimated();
@@ -87,7 +91,9 @@ function HoverZoom({ entry, from, placement, hint }: {
   } else {
     cx = from.left + from.width / 2;
     cy = from.top - 12 - h / 2;
-    if (cy - h / 2 < 8) cy = from.bottom + 12 + h / 2;
+    // A row hanging below its tile opens downward, so the zoom never sits
+    // on the tile itself.
+    if (cy - h / 2 < 8 || (hangsBelow && from.bottom + 12 + h <= window.innerHeight - 8)) cy = from.bottom + 12 + h / 2;
   }
   cx = Math.max(8 + w / 2, Math.min(window.innerWidth - 8 - w / 2, cx));
   cy = Math.max(8 + h / 2, Math.min(window.innerHeight - 8 - h / 2 - (hint ? 22 : 0), cy));
@@ -129,6 +135,8 @@ function HoverZoom({ entry, from, placement, hint }: {
 }
 
 const HOLD_MS = 550;
+/** How long the pointer rests on a board card before its zoom opens. */
+const HOVER_DELAY_MS = 220;
 
 /** One mini card: hover to zoom, click to open, hold to undo (when offered). */
 function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
@@ -143,6 +151,12 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endHover = () => {
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = null;
+    setHoverRect(null);
+  };
   const [holding, setHolding] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const undone = useRef(false);
@@ -151,7 +165,10 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
     holdTimer.current = null;
     setHolding(false);
   };
-  useEffect(() => () => { if (holdTimer.current) clearTimeout(holdTimer.current); }, []);
+  useEffect(() => () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+  }, []);
   // A card that moves (fan reflow, focus) refreshes its zoom anchor.
   useEffect(() => {
     if (hoverRect && ref.current) setHoverRect(ref.current.getBoundingClientRect());
@@ -163,8 +180,17 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
       ref={ref}
       data-board-card={entry.key}
       className={entry.pulse ? 'war-banner-pulse' : undefined}
-      onPointerEnter={() => setHoverRect(ref.current?.getBoundingClientRect() ?? null)}
-      onPointerLeave={() => { setHoverRect(null); stopHold(); }}
+      // The zoom waits for a deliberate hover, so sweeping past a card on the
+      // way to a tile doesn't throw it over the board.
+      onPointerEnter={(e) => {
+        if (e.pointerType === 'touch') return;
+        if (hoverTimer.current) clearTimeout(hoverTimer.current);
+        hoverTimer.current = setTimeout(() => {
+          hoverTimer.current = null;
+          setHoverRect(ref.current?.getBoundingClientRect() ?? null);
+        }, HOVER_DELAY_MS);
+      }}
+      onPointerLeave={() => { endHover(); stopHold(); }}
       onPointerDown={(e) => {
         e.stopPropagation();
         if (!onUndo || e.button !== 0) return;
@@ -174,7 +200,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
           holdTimer.current = null;
           undone.current = true;
           setHolding(false);
-          setHoverRect(null);
+          endHover();
           onUndo();
         }, HOLD_MS);
       }}
@@ -183,7 +209,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
       onClick={(e) => {
         e.stopPropagation();
         if (undone.current) { undone.current = false; return; }
-        setHoverRect(null);
+        endHover();
         onOpen();
       }}
       style={{
@@ -209,7 +235,13 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
         }} />
       )}
       {hoverRect && (
-        <HoverZoom entry={entry} from={hoverRect} placement={placement} hint={onUndo ? 'Hold to undo' : undefined} />
+        <HoverZoom
+          entry={entry}
+          from={hoverRect}
+          placement={placement}
+          hint={onUndo ? 'Hold to undo' : undefined}
+          hangsBelow={!!ref.current?.closest('[data-below="1"]')}
+        />
       )}
     </div>
   );
@@ -221,7 +253,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
  * row (bottom-center) over the tile each frame. At rest the row is
  * see-through; hovering it, opening it or resolving its tile makes it solid.
  */
-export function TileCardStack({ entries, scale, focus, open, faded, onOpen, onUndo }: {
+export function TileCardStack({ entries, scale, focus, open, faded, passThrough, onOpen, onUndo }: {
   entries: BoardCardEntry[];
   scale: number;
   /** This tile is resolving: its cards grow so everyone sees what was played. */
@@ -230,6 +262,9 @@ export function TileCardStack({ entries, scale, focus, open, faded, onOpen, onUn
   open?: boolean;
   /** Out of the way (a card is being dragged from the hand). */
   faded?: boolean;
+  /** A card is being aimed at a tile: fainter, and the pointer goes through
+   *  to the tiles beneath (no hover zoom while picking a tile). */
+  passThrough?: boolean;
   onOpen: (entries: BoardCardEntry[], index: number) => void;
   /** Hold a card to undo it (only the player's own undoable plays). */
   onUndo?: () => void;
@@ -254,8 +289,8 @@ export function TileCardStack({ entries, scale, focus, open, faded, onOpen, onUn
         position: 'relative',
         width: w + span,
         height: h,
-        opacity: faded ? 0.15 : focus || open || hot ? 1 : REST_OPACITY,
-        pointerEvents: faded ? 'none' : 'auto',
+        opacity: faded || passThrough ? AIMING_OPACITY : focus || open || hot ? 1 : REST_OPACITY,
+        pointerEvents: faded || passThrough ? 'none' : 'auto',
         transition: `opacity 0.2s ease-out, width ${SIZE_EASE}, height ${SIZE_EASE}`,
       }}
     >

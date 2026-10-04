@@ -71,6 +71,17 @@ describe('isCardEmpowered', () => {
     expect(isCardEmpowered(mob, { tileCount: 1 })).toBe(false);
   });
 
+  it('glows Chatter once playing it would be the 3rd card this round', () => {
+    const chatter = makeCard({
+      name: 'Chatter', card_type: 'engine', draw_cards: 1, action_return: 1,
+      effects: [{ type: 'conditional_draw', value: 1, upgraded_value: 2, condition: 'if_cards_played_this_round_gte', condition_threshold: 3 }],
+    });
+    expect(isCardEmpowered(chatter, { playedCardNames: [] })).toBe(false);
+    expect(isCardEmpowered(chatter, { playedCardNames: ['Explore'] })).toBe(false);
+    expect(isCardEmpowered(chatter, { playedCardNames: ['Explore', 'Gather'] })).toBe(true);
+    expect(isCardEmpowered(chatter, { playedCardNames: ['Explore', 'Gather', 'Rabble'] })).toBe(true);
+  });
+
   it('glows cards granted Stackable', () => {
     expect(isCardEmpowered(makeCard({ granted_stackable: true }), {})).toBe(true);
   });
