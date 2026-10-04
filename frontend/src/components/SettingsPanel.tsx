@@ -51,7 +51,7 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
             ))}
           </div>
         </div>
-        <div className="cc-ov-set-row" title="Low turns off antialiasing for a smoother frame rate on large or high-resolution screens.">
+        <div className="cc-ov-set-row" title="Low renders the board at standard resolution without antialiasing, for a smoother frame rate on large or high-resolution screens.">
           <span className="cc-ov-set-label">Visual Quality:</span>
           <div className="cc-ov-seg">
             {(['low', 'high'] as VisualQuality[]).map((q) => (

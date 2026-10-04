@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
 
 export type AnimationMode = 'normal' | 'fast' | 'off';
-/** Board rendering quality. Low turns off antialiasing for a faster frame rate. */
+/** Board rendering quality. Low turns off antialiasing and renders at a 1x
+ *  pixel ratio, for a faster frame rate. */
 export type VisualQuality = 'high' | 'low';
 
 interface Settings {

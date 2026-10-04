@@ -117,7 +117,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BoardEngine | null>(null);
   // Read once when the diorama is built (it isn't rebuilt on a change).
-  const antialiasRef = useRef(useVisualQuality() === 'high');
+  const lowQualityRef = useRef(useVisualQuality() === 'low');
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const blueCardRef = useRef<HTMLDivElement>(null);
   const redCardRef = useRef<HTMLDivElement>(null);
@@ -173,7 +173,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       placeCard(redCardRef.current, { x: restR, y: centerY, rotation: restAngleR, alpha: 1 });
     };
 
-    const engine = new BoardEngine(canvasHost, { hero: true, antialias: antialiasRef.current });
+    const engine = new BoardEngine(canvasHost, lowQualityRef.current ? { hero: true, antialias: false, maxPixelRatio: 1 } : { hero: true });
     engineRef.current = engine;
     let onLayoutChange: (() => void) | null = null;
     const ro = typeof ResizeObserver === 'function'
