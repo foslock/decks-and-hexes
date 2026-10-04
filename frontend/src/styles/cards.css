@@ -126,3 +126,52 @@
   0%, 100% { box-shadow: 0 0 4px rgba(255, 216, 74, 0.35), 0 0 8px rgba(255, 216, 74, 0.15); }
   50% { box-shadow: 0 0 8px rgba(255, 216, 74, 0.85), 0 0 16px rgba(255, 200, 0, 0.45); }
 }
+
+/* ── Board cards (played cards over tiles, engine queue) ──────── */
+
+/* GameBoard positions each tile's stack; the layer itself lets clicks through. */
+.cc-board-tilecards {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+.cc-board-tilecard {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform;
+  filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.55));
+}
+.cc-tile-stack.is-focus [data-board-card] {
+  filter: drop-shadow(0 0 8px rgba(255, 220, 130, 0.85)) drop-shadow(0 0 18px rgba(255, 180, 60, 0.45));
+}
+
+/* An opponent's card turning face up at the reveal. */
+@keyframes cc-board-card-reveal {
+  0% { transform: perspective(500px) rotateY(90deg) scale(0.8); opacity: 0; }
+  60% { transform: perspective(500px) rotateY(-8deg) scale(1.04); opacity: 1; }
+  100% { transform: perspective(500px) rotateY(0deg) scale(1); opacity: 1; }
+}
+
+/* Hold-to-undo: gold fills the card from the bottom. */
+.cc-board-card-hold {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(0deg, rgba(255, 210, 90, 0.55), rgba(255, 210, 90, 0.25));
+  box-shadow: inset 0 0 0 2px rgba(255, 220, 120, 0.9);
+  animation: cc-board-card-hold-fill 550ms linear forwards;
+}
+@keyframes cc-board-card-hold-fill {
+  from { clip-path: inset(100% 0 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+/* A War Banner whose buff the hovered/selected Claim will use. */
+@keyframes warBannerPulse {
+  0%, 100% { box-shadow: 0 0 4px 1px rgba(255, 215, 0, 0.3); }
+  50% { box-shadow: 0 0 12px 3px rgba(255, 215, 0, 0.9); }
+}
+.war-banner-pulse { animation: warBannerPulse 1.8s ease-in-out infinite; }
