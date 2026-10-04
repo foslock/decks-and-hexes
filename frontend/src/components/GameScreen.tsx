@@ -5229,6 +5229,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               plannedActions={phase === 'play' ? plannedActions : undefined}
               tileCardKeys={tileCardKeys}
               renderTileCards={renderTileCards}
+              raisedTileKey={revealFocusTile}
               previewCard={phase === 'play' ? (() => {
                 // Strike Team: preview gets +2/+3 power if the active player has
                 // already played another Claim this round (mirrors backend

@@ -278,8 +278,8 @@ export function TileCardStack({ entries, scale, focus, open, faded, onOpen, onUn
   );
 }
 
-/** Engine cards queued this round, under the player's ID card. */
-export function EngineQueue({ entries, onOpen, containerRef, title = 'Queued' }: {
+/** Engine cards played this round (they resolve as they are played), under the player's ID card. */
+export function EngineQueue({ entries, onOpen, containerRef, title = 'Played' }: {
   entries: BoardCardEntry[];
   onOpen: (entries: BoardCardEntry[], index: number) => void;
   containerRef?: React.Ref<HTMLDivElement>;
