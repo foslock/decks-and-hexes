@@ -35,6 +35,11 @@ const FOCUS_SCALE = 0.44;
 export const QUEUE_CARD_SCALE = 0.25;
 /** The hover zoom. */
 const ZOOM_SCALE = 0.8;
+/** Tile cards at rest are see-through so the board shows under them. */
+const REST_OPACITY = 0.4;
+/** Matches the card box's size transition, so a growing card scales in step
+ *  with its box instead of snapping out of its top-left corner. */
+const SIZE_EASE = '0.25s ease';
 
 /** Gap between cards sharing a tile (px). */
 const STACK_GAP = 8;
@@ -52,7 +57,7 @@ function playerColor(pid: string): string {
 /** A full card face scaled down to `scale`, top-left anchored in a box of its visual size. */
 function ScaledFace({ entry, scale }: { entry: BoardCardEntry; scale: number }) {
   return (
-    <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${scale})`, transformOrigin: '0 0', pointerEvents: 'none' }}>
+    <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${scale})`, transformOrigin: '0 0', transition: `transform ${SIZE_EASE}`, pointerEvents: 'none' }}>
       <CardFull card={entry.card} subtitleParts={entry.subtitleParts} artZoom={false} />
     </div>
   );
@@ -186,7 +191,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
         borderRadius: 14 * scale,
         opacity: entry.arriving ? 0 : 1,
         boxShadow: glow ? `0 0 0 2px ${glow}, 0 0 10px 3px ${glow}cc, 0 0 22px 6px ${glow}55` : undefined,
-        transition: 'opacity 0.18s ease, transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1), width 0.25s ease, height 0.25s ease, left 0.25s ease, box-shadow 0.25s ease',
+        transition: `opacity 0.18s ease, transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1), width ${SIZE_EASE}, height ${SIZE_EASE}, left ${SIZE_EASE}, box-shadow 0.25s ease`,
         touchAction: 'none',
         ...style,
       }}
@@ -211,19 +216,23 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
 /**
  * The cards played on one tile, side by side above it (they never overlap,
  * so it's clear at a glance how many landed there). GameBoard positions the
- * row (bottom-center) over the tile each frame.
+ * row (bottom-center) over the tile each frame. At rest the row is
+ * see-through; hovering it, opening it or resolving its tile makes it solid.
  */
-export function TileCardStack({ entries, scale, focus, faded, onOpen, onUndo }: {
+export function TileCardStack({ entries, scale, focus, open, faded, onOpen, onUndo }: {
   entries: BoardCardEntry[];
   scale: number;
   /** This tile is resolving: its cards grow so everyone sees what was played. */
   focus?: boolean;
+  /** Its cards are open in the zoom / detail view. */
+  open?: boolean;
   /** Out of the way (a card is being dragged from the hand). */
   faded?: boolean;
   onOpen: (entries: BoardCardEntry[], index: number) => void;
   /** Hold a card to undo it (only the player's own undoable plays). */
   onUndo?: () => void;
 }) {
+  const [hot, setHot] = useState(false);
   const s = focus ? Math.max(scale, FOCUS_SCALE) : scale;
   const n = entries.length;
   // Players sharing a tile: ring each card in its player's color.
@@ -234,13 +243,15 @@ export function TileCardStack({ entries, scale, focus, faded, onOpen, onUndo }: 
   return (
     <div
       className={focus ? 'cc-tile-stack is-focus' : 'cc-tile-stack'}
+      onPointerEnter={() => setHot(true)}
+      onPointerLeave={() => setHot(false)}
       style={{
         position: 'relative',
         width: w + span,
         height: h,
-        opacity: faded ? 0.15 : 1,
+        opacity: faded ? 0.15 : focus || open || hot ? 1 : REST_OPACITY,
         pointerEvents: faded ? 'none' : 'auto',
-        transition: 'opacity 0.15s ease-out, width 0.25s ease, height 0.25s ease',
+        transition: `opacity 0.2s ease-out, width ${SIZE_EASE}, height ${SIZE_EASE}`,
       }}
     >
       {entries.map((e, i) => (

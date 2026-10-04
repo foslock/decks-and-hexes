@@ -888,7 +888,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const animationOff = useAnimationOff();
   const animSpeed = useAnimationSpeed();
   const sound = useSound();
-  const { showZoom } = useCardZoom();
+  const { showZoom, zoomedCard } = useCardZoom();
   // Helper: find the first human player index
   const firstHumanIndex = gameState.player_order.findIndex(
     pid => !gameState.players[pid]?.is_cpu,
@@ -1146,6 +1146,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // that originated the buff consumed by the Claim planned on the hovered tile.
   const [playHoveredTileKey, setPlayHoveredTileKey] = useState<string | null>(null);
   const [reviewHoveredPlayer, setReviewHoveredPlayer] = useState<string | null>(null);
+  /** The tile whose board cards were last clicked open (solid while open). */
+  const [openCardsTile, setOpenCardsTile] = useState<string | null>(null);
   const [detailCards, setDetailCards] = useState<{ card: Card; subtitleParts?: SubtitlePart[]; playerId?: string; playerName?: string }[] | null>(null);
   const playerRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // Resolve animation state
@@ -4980,8 +4982,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         entries={entries}
         scale={boardCardScale(zoom)}
         focus={revealFocusTile === tileKey}
+        open={openCardsTile === tileKey && (detailCards != null || zoomedCard != null)}
         faded={draggingCardIndex !== null}
-        onOpen={openBoardCards}
+        onOpen={(list, i) => { setOpenCardsTile(tileKey); openBoardCards(list, i); }}
         onUndo={undoable ? () => {
           const [q, r] = tileKey.split(',').map(Number);
           handleTileLongPress(q, r);
