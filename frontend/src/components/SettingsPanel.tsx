@@ -13,10 +13,9 @@ interface SettingsPanelProps {
   playerId?: string;
   onLeaveGame?: () => void;
   onEndGame?: () => void;
-  onRotateGrid?: () => void;
 }
 
-export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, playerId, onLeaveGame, onEndGame, onRotateGrid }: SettingsPanelProps) {
+export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, playerId, onLeaveGame, onEndGame }: SettingsPanelProps) {
   const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setVisualQuality } = useSettings();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -105,21 +104,6 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
             />
           )}
         </div>
-
-        {/* Rotate grid */}
-        {onRotateGrid && (
-          <div className="cc-ov-set-row">
-            <span className="cc-ov-set-label">Grid:</span>
-            <button
-              className="cc-btn-secondary cc-ov-btn-sm"
-              onClick={onRotateGrid}
-              style={{ padding: '4px 10px' }}
-            >
-              Rotate 30°
-            </button>
-            <span className="cc-ov-kbd">R</span>
-          </div>
-        )}
 
         {/* Map seed (read-only) */}
         {mapSeed && (
