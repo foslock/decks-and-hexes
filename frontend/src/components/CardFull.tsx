@@ -582,17 +582,25 @@ export default function CardFull({
             </div>
           </div>
           {plaque.length > 0 && (
+            // Centred by a flex row, not translateX(-50%): Safari drops a
+            // transformed plaque while the card around it animates.
             <div style={{
               position: 'absolute',
-              left: '50%',
+              left: 0,
+              right: 0,
               bottom: -11,
-              transform: 'translateX(-50%)',
+              display: 'flex',
+              justifyContent: 'center',
+              zIndex: 2,
+              pointerEvents: 'none',
+            }}>
+            <div style={{
               maxWidth: '92%',
               padding: 1.5,
               borderRadius: 999,
               background: metalGradient(tier, 90),
               boxShadow: '0 2px 6px rgba(0,0,0,0.6)',
-              zIndex: 2,
+              pointerEvents: 'auto',
             }}>
               <div style={{
                 display: 'flex',
@@ -608,6 +616,7 @@ export default function CardFull({
               }}>
                 {renderSubtitle(plaque, { fontSize: 13, passiveVp: card.passive_vp, showDynamic })}
               </div>
+            </div>
             </div>
           )}
         </div>

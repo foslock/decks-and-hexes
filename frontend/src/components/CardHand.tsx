@@ -1015,12 +1015,25 @@ export default function CardHand({
         swell: spec.flip ? (t => 1 + 0.18 * Math.sin(Math.PI * t)) : undefined,
       }), timing)];
       if (spec.flip) {
-        runs.push(runAnimation(flipRefs.current.get(id)!, [
+        const flip = flipRefs.current.get(id)!;
+        const turn = { ...timing, easing: 'ease-in-out' };
+        runs.push(runAnimation(flip, [
           { offset: 0, transform: 'perspective(900px) rotateY(180deg)' },
           { offset: 0.22, transform: 'perspective(900px) rotateY(180deg)' },
           { offset: 0.72, transform: 'perspective(900px) rotateY(0deg)' },
           { offset: 1, transform: 'perspective(900px) rotateY(0deg)' },
-        ], { ...timing, easing: 'ease-in-out' }));
+        ], turn));
+        // The back hides once the card is edge-on (90° at 0.47), and stays
+        // hidden until it unmounts.
+        const back = flip.querySelector<HTMLElement>('[data-card-back]');
+        if (back) {
+          runs.push(runAnimation(back, [
+            { offset: 0, opacity: 1 },
+            { offset: 0.47, opacity: 1 },
+            { offset: 0.47, opacity: 0 },
+            { offset: 1, opacity: 0 },
+          ], { ...turn, fill: 'both' }));
+        }
       }
       Promise.all(runs).then(() => {
         setEntering(p => {
@@ -1328,11 +1341,14 @@ export default function CardHand({
                   ].join(' ')}
                   style={{ position: 'relative', width: '100%', height: '100%' }}
                 >
+                  {/* Flat (no preserve-3d / backface culling): Safari drops parts of
+                      the face — the stat plaque — while such a card animates. A
+                      dealt card's back covers the face until it turns edge-on. */}
                   <div
                     ref={el => { if (el) flipRefs.current.set(card.id, el); else flipRefs.current.delete(card.id); }}
-                    style={{ position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d' }}
+                    style={{ position: 'relative', width: '100%', height: '100%' }}
                   >
-                    <div style={{ position: 'relative', width: '100%', height: '100%', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
+                    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
                       <CardFull
                         card={faceCard}
                         subtitleContext={subtitleContext}
@@ -1376,7 +1392,7 @@ export default function CardHand({
                       )}
                     </div>
                     {enter?.flip && (
-                      <div style={{ position: 'absolute', inset: 0, transform: 'rotateY(180deg)', backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' }}>
+                      <div data-card-back style={{ position: 'absolute', inset: 0, transform: 'rotateY(180deg)' }}>
                         <CardBack />
                       </div>
                     )}

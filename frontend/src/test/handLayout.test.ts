@@ -33,6 +33,13 @@ describe('layoutHand', () => {
     expect(hov.poses[3].x).toBeGreaterThan(rest.poses[3].x);
   });
 
+  it('leaves the other cards in place when the hand has room', () => {
+    const rest = layoutHand({ count: 4, width: 1200, height: 100, sizing });
+    const hov = layoutHand({ count: 4, width: 1200, height: 100, sizing, hovered: 1 });
+    expect(hov.poses[1].scale).toBe(1);
+    for (const i of [0, 2, 3]) expect(hov.poses[i].x).toBe(rest.poses[i].x);
+  });
+
   it('maps pointer x to the card whose visible strip it is over', () => {
     const { strips, poses } = layoutHand({ count: 4, width: 500, height: 100, sizing });
     expect(stripAt(strips, poses[0].x - 10)).toBe(0);

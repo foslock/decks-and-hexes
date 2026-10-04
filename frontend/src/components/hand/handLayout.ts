@@ -63,7 +63,8 @@ export interface HandLayout {
  * (like cards held in a hand) when they don't, each later card on top of
  * the one before. A slight fan rotation and arc follow the position in the
  * hand. The hovered card straightens, grows to full size and rises fully on
- * screen, nudging its neighbors aside; a selected card rises a little.
+ * screen (nudging its neighbors aside only in a crowded hand); a selected
+ * card rises a little.
  */
 export function layoutHand(input: HandLayoutInput): HandLayout {
   const { count: n, width, height, sizing, hovered = null, selected = null, lifted = null, liftedX = null, raised } = input;
@@ -86,9 +87,12 @@ export function layoutHand(input: HandLayoutInput): HandLayout {
   const restRise = restH * (REST_VISIBLE - 0.5);
   const bandTop = height - restH * REST_VISIBLE - 4;
 
-  // Neighbors make room for the hovered card.
+  // The hovered card is drawn on top, so its neighbors stay put while the
+  // cards sit side by side; they only edge aside as a crowded hand overlaps.
   const focus = hovered ?? null;
-  const push = focus !== null ? Math.max(0, (hoverW / 2 + restW / 2 - spacing) * 0.6) : 0;
+  const push = focus !== null
+    ? Math.max(0, Math.min((hoverW / 2 + restW / 2 - spacing) * 0.6, (restW - spacing) * 0.6))
+    : 0;
 
   const poses: SlotPose[] = [];
   const strips: { left: number; right: number }[] = [];

@@ -17,8 +17,17 @@ export function row(segs: Seg[], size: number, color = '#fff', alpha?: number): 
   return { segs, size, color, alpha };
 }
 
-/** Permanent defense (white fortify) plus this round's bonus (blue) or immunity. */
-export function defenseRow(persist: number, temp: number, immune: boolean, size: number, alpha?: number): LabelRow {
+/** Label color for a tile's owner: their player color, lifted a little
+ *  toward white so it reads over the board. White for neutral tiles. */
+export function ownerLabelColor(color: number | undefined): string {
+  if (color == null) return '#fff';
+  const lift = (v: number) => Math.round(v + (255 - v) * 0.25);
+  const n = (lift((color >> 16) & 0xff) << 16) | (lift((color >> 8) & 0xff) << 8) | lift(color & 0xff);
+  return `#${n.toString(16).padStart(6, '0')}`;
+}
+
+/** Permanent defense (fortify, in `color`) plus this round's bonus (blue) or immunity. */
+export function defenseRow(persist: number, temp: number, immune: boolean, size: number, alpha?: number, color = '#fff'): LabelRow {
   const segs: Seg[] = [];
   if (persist > 0) {
     segs.push({ icon: 'fortify' }, { text: String(persist) });
@@ -29,7 +38,7 @@ export function defenseRow(persist: number, temp: number, immune: boolean, size:
   } else {
     segs.push({ icon: 'defense', color: TEMP_DEF }, { text: `+${temp}`, color: TEMP_DEF });
   }
-  return row(segs, size, '#fff', alpha);
+  return row(segs, size, color, alpha);
 }
 
 export function BoardLabelRow({ r, scale }: { r: LabelRow; scale: number }) {
