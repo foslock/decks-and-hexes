@@ -371,9 +371,14 @@ export default function CardFull({
   const keywords = useMemo(() => extractKeywords(card), [card]);
   const [hintsVisible, setHintsVisible] = useState(false);
   /** Where the keyword hints go: beside the card, or stacked above it when
-   *  neither side has room (phones). */
-  const [hintsSide, setHintsSide] = useState<'right' | 'left' | 'above'>('right');
+   *  neither side has room (phones) — below it instead when there's no room
+   *  above either (a card previewed near the top of the screen). */
+  const [hintsSide, setHintsSide] = useState<'right' | 'left' | 'above' | 'below'>('right');
+  /** Side hints run down from the card's top, or up from its bottom when
+   *  they'd otherwise spill off the bottom of the screen. */
+  const [hintsFromBottom, setHintsFromBottom] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const hintsRef = useRef<HTMLDivElement>(null);
 
   const shouldShowHints = showKeywordHints && tooltipsEnabled;
 
@@ -389,12 +394,22 @@ export default function CardFull({
     const measure = () => {
       const el = cardRef.current;
       if (!el) return;
-      if (window.innerWidth < 640) { setHintsSide('above'); return; }
       const rect = el.getBoundingClientRect();
       const k = rect.width / CARD_FULL_WIDTH; // the card may be scaled
       const need = (180 + 8) * k;
       const spaceRight = window.innerWidth - rect.right;
-      setHintsSide(spaceRight >= need ? 'right' : rect.left >= need ? 'left' : 'above');
+      const hintsH = (hintsRef.current?.getBoundingClientRect().height ?? 0) + 8 * k;
+      const margin = 8;
+      let side: 'right' | 'left' | 'above' | 'below' = window.innerWidth < 640
+        ? 'above'
+        : spaceRight >= need ? 'right' : rect.left >= need ? 'left' : 'above';
+      // No room above (e.g. a preview near the top of the screen): below it,
+      // or wherever there's more room.
+      if (side === 'above' && rect.top - hintsH < margin && window.innerHeight - rect.bottom > rect.top) side = 'below';
+      setHintsSide(side);
+      setHintsFromBottom(
+        (side === 'right' || side === 'left') && rect.top + hintsH > window.innerHeight - margin && rect.bottom - hintsH >= margin,
+      );
     };
     const show = setTimeout(() => { measure(); setHintsVisible(true); }, 1000);
     const settle = setTimeout(measure, 1400);
@@ -663,13 +678,18 @@ export default function CardFull({
 
       {/* Keyword hint panel — fades in next to card */}
       {shouldShowHints && keywords.length > 0 && (
-        <div style={{
+        <div ref={hintsRef} style={{
           position: 'absolute',
           ...(hintsSide === 'above'
             ? { bottom: '100%', left: 0, width: CARD_FULL_WIDTH, paddingBottom: 8, flexDirection: 'column-reverse' as const }
-            : hintsOnLeft
-              ? { top: 0, right: CARD_FULL_WIDTH + 8, width: 180, flexDirection: 'column' as const }
-              : { top: 0, left: CARD_FULL_WIDTH + 8, width: 180, flexDirection: 'column' as const }),
+            : hintsSide === 'below'
+              ? { top: '100%', left: 0, width: CARD_FULL_WIDTH, paddingTop: 8, flexDirection: 'column' as const }
+              : {
+                  ...(hintsFromBottom ? { bottom: 0 } : { top: 0 }),
+                  ...(hintsOnLeft ? { right: CARD_FULL_WIDTH + 8 } : { left: CARD_FULL_WIDTH + 8 }),
+                  width: 180,
+                  flexDirection: (hintsFromBottom ? 'column-reverse' : 'column') as 'column' | 'column-reverse',
+                }),
           boxSizing: 'border-box',
           display: 'flex',
           gap: 4,

@@ -5456,10 +5456,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             <div style={{
               position: 'fixed',
               left: purchaseHover.rect.right + 12,
-              top: Math.min(
+              top: Math.max(8, Math.min(
                 purchaseHover.rect.top + purchaseHover.rect.height / 2 - 150,
                 window.innerHeight - 320,
-              ),
+              )),
               width: 220,
               zIndex: 20000,
               pointerEvents: 'none',
