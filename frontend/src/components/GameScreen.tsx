@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
 import GameBoard, { type BoardControls, type BoardFx, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './GameBoard';
 import PlayerHud from './PlayerHud';
+import ResourceCounter, { type ResourceCounterHandle, type ResourceSource } from './ResourceCounter';
 import CardHand, { CardViewPopup, type PlayTarget, type DragTargetInfo, type UndoReturn, type IncomingDiscard } from './CardHand';
 import CardBrowser from './CardBrowser';
 import ShopOverlay, { PurchaseFlyAnimation } from './ShopOverlay';
@@ -1100,6 +1101,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const t = setTimeout(() => setError(null), 4000);
     return () => clearTimeout(t);
   }, [error]);
+  // The bank counter beside the action counter (coins fly into it).
+  const resourceCounterRef = useRef<ResourceCounterHandle>(null);
+  /** My cards that pay out resources at resolution (their tiles are where
+   *  those coins fly from when the resolve finishes). */
+  const resolveResourceSourcesRef = useRef<{ tileKey: string | null; weight: number }[] | null>(null);
   // "actions left" label beside the action counter: shown on hover, or for a
   // few seconds after a tap on touch screens.
   const [actionsLabelOpen, setActionsLabelOpen] = useState(false);
@@ -1217,6 +1223,46 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [error, sound]);
 
   const activePlayerId = gameState.player_order[activePlayerIndex];
+  const activePlayerIdRef = useRef(activePlayerId);
+  activePlayerIdRef.current = activePlayerId;
+  /** My base tile (where resources with no card of their own fly in from). */
+  const myBaseKey = useMemo(
+    () => Object.entries(gameState.grid.tiles).find(([, t]) => t.is_base && t.base_owner === activePlayerId)?.[0] ?? null,
+    [gameState.grid.tiles, activePlayerId],
+  );
+  const myBaseKeyRef = useRef(myBaseKey);
+  myBaseKeyRef.current = myBaseKey;
+  /** Where resources gained outside a card play come from: the tiles of my
+   *  cards that paid out at resolution, otherwise my base. */
+  const resourceSourcesForGain = useCallback((): ResourceSource[] => {
+    const tile = (key: string) => {
+      const transform = gridTransformRef.current;
+      const gRect = gridContainerRef.current?.getBoundingClientRect();
+      if (!transform || !gRect) return null;
+      const [q, r] = key.split(',').map(Number);
+      const local = axialToPixel(q, r);
+      // A little above the ground, so coins rise off the castle.
+      return localToScreen(local.x, local.y, transform, gRect.width, gRect.height, gRect, 0.3);
+    };
+    // Last resort (no board yet): my ID card's bank.
+    const idCard = () => {
+      const el = document.querySelector(`[data-hud-resources="${activePlayerIdRef.current}"]`)
+        ?? playerPanelRef.current;
+      const r = el?.getBoundingClientRect();
+      return r && r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+    };
+    const base = () => (myBaseKeyRef.current ? tile(myBaseKeyRef.current) : null) ?? idCard();
+    const pending = resolveResourceSourcesRef.current;
+    resolveResourceSourcesRef.current = null;
+    const out: ResourceSource[] = [];
+    for (const p of pending ?? []) {
+      const point = (p.tileKey ? tile(p.tileKey) : null) ?? base();
+      if (point) out.push({ point, weight: p.weight });
+    }
+    if (out.length) return out;
+    const p = base();
+    return p ? [{ point: p }] : [];
+  }, []);
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
 
@@ -1571,11 +1617,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (phaseBanner) return;
     // Commit: we're handling this phase transition now
     prevPhaseRef.current = phase;
+    if (phase !== 'reveal') resolveResourceSourcesRef.current = null;
     prevTilesRef.current = gameState.grid.tiles;
     prevPlayersRef.current = gameState.players;
 
     // play → reveal: set up resolve animation
     if (prev === 'play' && phase === 'reveal') {
+      // My cards that pay out resources as they resolve: when the resolve
+      // finishes, those coins fly in from their tiles.
+      resolveResourceSourcesRef.current = (gameState.players[activePlayerId]?.planned_actions ?? [])
+        .filter(a => a.card.timing === 'on_resolution'
+          && ((a.effective_resource_gain ?? a.card.resource_gain) > 0
+            || !!a.card.effects?.some(e => e.type.includes('resource') && e.type !== 'resource_drain' && e.type !== 'play_resource_cost')))
+        .map(a => ({
+          tileKey: a.target_q != null && a.target_r != null ? `${a.target_q},${a.target_r}` : null,
+          weight: Math.max(1, a.effective_resource_gain ?? a.card.resource_gain ?? 1),
+        }));
       // Immediately freeze the grid AND player stats at pre-resolve state so
       // players can't see updated VP/resources until animations have played out.
       const preResolveState: GameState = {
@@ -2054,6 +2111,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       }), Math.round(520 * animSpeed) + 40);
     }
     const anchor = q != null && r != null ? boardControlsRef.current?.tileAnchor(`${q},${r}`) : null;
+    /** Where the played card lands (coins it earns fly from here). */
+    let landing: { x: number; y: number } | null = null;
     if (q != null && r != null && anchor) {
       // Fly onto the tile's card stack, into the slot it will take in the fan.
       const key = `${q},${r}`;
@@ -2061,6 +2120,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         (a.target_q === q && a.target_r === r) || a.extra_targets?.some(([eq, er]) => `${eq},${er}` === key)).length;
       const n = onTile + 1;
       const sc = boardCardScale(anchor.zoom);
+      landing = { x: anchor.x + fanOffset(n - 1, n, sc), y: anchor.below ? anchor.y + (CARD_H * sc) / 2 : anchor.y - (CARD_H * sc) / 2 };
       setLastPlayedTarget({
         cardId: card.id,
         screenX: anchor.x + fanOffset(n - 1, n, sc),
@@ -2078,6 +2138,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const screen = localToScreen(local.x, local.y, transform, containerW, containerH, gRect);
         const screenX = screen.x;
         const screenY = screen.y;
+        landing = { x: screenX, y: screenY };
         setLastPlayedTarget({
           cardId: card.id, screenX, screenY,
           ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
@@ -2093,6 +2154,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Queue panel: 6px padding, a 15px title, 3 cards per row with 6px gaps.
       const originX = queueRect ? queueRect.left : panelRect ? panelRect.left + 6 : null;
       const originY = queueRect ? queueRect.top + 15 : panelRect ? panelRect.bottom + 6 + 6 + 15 : null;
+      if (originX != null && originY != null) {
+        landing = { x: originX + (queued % 3) * (slotW + 6) + slotW / 2, y: originY + Math.floor(queued / 3) * (slotH + 6) + slotH / 2 };
+      }
       setLastPlayedTarget({
         cardId: card.id,
         screenX: originX != null ? originX + (queued % 3) * (slotW + 6) + slotW / 2 : null,
@@ -2101,6 +2165,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
       });
     }
+
+    // Resources the card earns fly from where it lands into the bank, as it
+    // lands (the new state may come by socket before the response does).
+    resourceCounterRef.current?.expect({
+      from: () => landing,
+      launchAt: performance.now() + (animated ? Math.round(520 * animSpeed) + 60 : 0),
+    });
 
     try {
       setError(null);
@@ -4723,6 +4794,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       tileScreenY = screen.y;
     }
 
+    // An undone card's resources go straight back (just the +/−X).
+    resourceCounterRef.current?.expect({ coins: false });
     try {
       const resp = await api.undoCard(gameState.id, activePlayer.id, actionIndex);
       if (undoCard) {
@@ -5544,7 +5617,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     mapSeed={gameState.map_seed}
                     gameId={gameState.id}
                     playerId={mpPlayerId || undefined}
-                    onRotateGrid={resolving ? undefined : handleRotateGrid}
                     onLeaveGame={isMultiplayer && onLeaveGame ? async () => {
                       if (mpPlayerId && mpToken) {
                         try { await import('../api/client').then(api => api.leaveGame(gameState.id, mpPlayerId, mpToken)); } catch (e) { console.warn('leaveGame failed:', e); }
@@ -5782,10 +5854,23 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'flex-end', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
             {/* Actions left — bottom-aligned with the action buttons on the right */}
             <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end' }}>
-              {phase === 'play' && activePlayer && !resolving && !phaseBanner && !showIntro && !playSubmitted && introSequence === 'done' && (
+              {/* The action counter folds away outside your play turn; the
+                  bank beside it stays, sliding over to take its place. */}
+              {activePlayer && introSequence === 'done' && !showIntro && (() => {
+                const showActions = phase === 'play' && !resolving && !phaseBanner && !playSubmitted;
+                return (
+                <div aria-hidden={!showActions} style={{
+                  display: 'flex',
+                  maxWidth: showActions ? 260 : 0,
+                  marginRight: showActions ? 8 : 0,
+                  opacity: showActions ? 1 : 0,
+                  overflow: showActions ? 'visible' : 'hidden',
+                  pointerEvents: showActions ? undefined : 'none',
+                  transition: 'max-width 0.3s ease, margin-right 0.3s ease, opacity 0.25s ease',
+                }}>
                 <div
                   role="button"
-                  tabIndex={0}
+                  tabIndex={showActions ? 0 : -1}
                   aria-label={`${submitActionsLeft} action${submitActionsLeft !== 1 ? 's' : ''} left`}
                   aria-expanded={actionsLabelOpen}
                   onPointerDown={(e) => { actionsPointerRef.current = e.pointerType; }}
@@ -5879,6 +5964,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     action{submitActionsLeft !== 1 ? 's' : ''} left
                   </span>
                 </div>
+                </div>
+                );
+              })()}
+              {activePlayer && (
+                <ResourceCounter
+                  ref={resourceCounterRef}
+                  value={displayState.players[activePlayerId]?.resources ?? activePlayer.resources ?? 0}
+                  playerId={activePlayerId}
+                  speed={animSpeed}
+                  visible={introSequence === 'done' && !showIntro && !showGameOver}
+                  sourcesForGain={resourceSourcesForGain}
+                />
               )}
             </div>
             {/* Buttons + waiting indicators — right aligned, stacked vertically */}

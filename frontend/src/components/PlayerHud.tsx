@@ -5,6 +5,7 @@ import type { VpBreakdown } from '../utils/vpBreakdown';
 import Icon from '../icons/Icon';
 import { CostLabel, IconValue } from '../icons/Num';
 import CardName from './CardName';
+import { useShownResources } from './ResourceCounter';
 
 /** Renders text that shrinks (via transform scaleX) to fit a fixed max width. */
 function ShrinkText({ text, maxWidth, style }: { text: string; maxWidth: number; style?: React.CSSProperties }) {
@@ -252,6 +253,8 @@ function getStatus(player: Player, phase: string, isCurrentBuyer?: boolean): { l
 
 export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, isCurrentBuyer, phase, totalCards, tileCount, purchases, onPurchaseHover, onPurchaseLeave, vpTarget, vpBreakdown }: PlayerHudProps) {
   const status = getStatus(player, phase, isCurrentBuyer);
+  // Your own bank counts up with the coins flying into the bottom counter.
+  const resources = useShownResources(player.id, player.resources);
   const hasReachedVpTarget = vpTarget != null && player.vp >= vpTarget;
   const [showVpTooltip, setShowVpTooltip] = useState(false);
   const hudRef = useRef<HTMLDivElement>(null);
@@ -426,7 +429,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
             } : undefined} />
           </StatTip>
         )}
-        <StatTip label="Resources"><IconValue icon="resource" value={player.resources} size={12} decorative /></StatTip>
+        <StatTip label="Resources"><span data-hud-resources={player.id}><IconValue icon="resource" value={resources} size={12} decorative /></span></StatTip>
         <StatTip label="Tiles Occupied"><IconValue icon="tile" value={tileCount} size={12} decorative /></StatTip>
         <StatTip label="Total Deck Size"><IconValue icon="drawPile" value={totalCards} size={12} decorative /></StatTip>
       </div>
