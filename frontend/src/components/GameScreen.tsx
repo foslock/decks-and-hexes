@@ -209,6 +209,7 @@ function canClaimCaptureTile(
 // GameScreen dependency tree. Re-exported here for existing callers.
 import { HEX_SIZE, axialToPixel, localToScreen, screenToLocal, type GridTransform } from '../utils/hexGeometry';
 import { chevronSource, findNearestOwnedTile } from '../utils/resolveChevrons';
+import { roundEndDiscardsHand } from '../utils/endOfRound';
 export { HEX_SIZE, axialToPixel, localToScreen };
 
 interface GameScreenProps {
@@ -858,12 +859,24 @@ const GAME_BACKDROP = [
   'linear-gradient(180deg, #121230 0%, #0c0c20 100%)',
 ].join(', ');
 
-export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby, wsSend, wsMessage }: GameScreenProps) {
-  // Sync player colors from game state into the shared PLAYER_COLORS map
-  syncPlayerColors(gameState.players);
+export default function GameScreen({ gameState: latestState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby, wsSend, wsMessage }: GameScreenProps) {
   const animated = useAnimated();
   const animationMode = useAnimationMode();
   const animationOff = useAnimationOff();
+  // End of round: the hand animates into the discard pile while the last
+  // round's state stays on screen, then the next round is shown — however
+  // it arrived (WebSocket or End Turn response).
+  const [heldState, setHeldState] = useState<GameState | null>(null);
+  const [seenState, setSeenState] = useState(latestState);
+  if (latestState !== seenState) {
+    setSeenState(latestState);
+    const localPid = isMultiplayer && mpPlayerId ? mpPlayerId : seenState.player_order.find(pid => !seenState.players[pid]?.is_cpu);
+    if (!heldState && !animationOff && roundEndDiscardsHand(seenState, latestState, localPid)) setHeldState(seenState);
+  }
+  const gameState = heldState ?? latestState;
+  const discardingAll = heldState !== null;
+  // Sync player colors from game state into the shared PLAYER_COLORS map
+  syncPlayerColors(gameState.players);
   const animSpeed = useAnimationSpeed();
   /** The reveal + resolution sequence runs a touch slower on Normal. */
   const resolveSpeed = useResolveSpeed();
@@ -901,7 +914,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [cursorClicks, setCursorClicks] = useState<Record<string, number>>({}); // player_id -> timestamp
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [cardPackDefs, setCardPackDefs] = useState<{ id: string; name: string; shared_card_ids: string[] | null; archetype_card_ids: Record<string, string[]> | null }[]>([]);
-  const [discardingAll, setDiscardingAll] = useState(false);
   const [lastPlayedTarget, setLastPlayedTarget] = useState<PlayTarget | null>(null);
   /** Temporarily stores drag release position/velocity so executePlayCard can include it in lastPlayedTarget */
   const dragReleaseRef = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
@@ -1157,7 +1169,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [gridRect, setGridRect] = useState<DOMRect | null>(null);
   const [gridTransformSnapshot, setGridTransformSnapshot] = useState<GridTransform | null>(null);
   const [gridRectSnapshot, setGridRectSnapshot] = useState<DOMRect | null>(null);
-  const pendingStateRef = useRef<GameState | null>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridTransformRef = useRef<GridTransform | null>(null);
   const boardFxRef = useRef<BoardFx | null>(null);
@@ -1419,6 +1430,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       .filter(c => c.name === 'Debt').length;
     // Names of cards already played this round (for conditional_action_return)
     const playedCardNames = activePlayer.planned_actions?.map(a => a.card.name) ?? [];
+    // Resilience: fewest tiles of any player still in the game (ties count).
+    const tilesOf = (pid: string) => gameState.grid ? Object.values(gameState.grid.tiles).filter(t => t.owner === pid).length : 0;
+    const myTiles = tilesOf(activePlayerId);
+    const hasFewestTiles = gameState.player_order
+      .filter(pid => pid !== activePlayerId && !gameState.players[pid]?.has_left)
+      .every(pid => tilesOf(pid) >= myTiles);
     // Strike Team: whether any Claim has already been played this round
     const hasPlayedClaimThisRound = (activePlayer.planned_actions ?? [])
       .some(a => a.card.card_type === 'claim');
@@ -1442,8 +1459,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       debtCount,
       playedCardNames,
       hasPlayedClaimThisRound,
+      actionsLeft: activePlayer.actions_available - activePlayer.actions_used,
+      hasFewestTiles,
     };
-  }, [activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand, activePlayer.trash, activePlayer.deck_size, activePlayer.deck_cards, activePlayer.discard, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId, activePlayer.planned_actions]);
+  }, [activePlayer.actions_available, activePlayer.actions_used, gameState.players, gameState.player_order, activePlayer.claims_won_last_round, activePlayer.tiles_lost_last_round, activePlayer.tile_count, activePlayer.hand, activePlayer.trash, activePlayer.deck_size, activePlayer.deck_cards, activePlayer.discard, activePlayer.discard_count, activePlayer.resources, gameState.grid?.tiles, activePlayerId, activePlayer.planned_actions]);
 
   // Context for played/revealed cards: power is already frozen on card.power, skip re-resolution
   const frozenSubtitleContext: CardSubtitleContext = useMemo(() => ({
@@ -3124,26 +3143,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     try {
       setError(null);
       const result = await api.endTurn(gameState.id, activePlayerId);
-      const allDone = result.state.current_phase !== 'buy';
-
-      if (allDone) {
-        // All players ended turn — game advanced to next round
-        if (animationMode !== 'off' && activePlayer && activePlayer.hand.length > 0) {
-          pendingStateRef.current = result.state;
-          setDiscardingAll(true);
-        } else {
-          onStateUpdate(result.state);
-          setSelectedCardIndex(null);
-        }
-      } else {
-        // Not all players done — stay on local player (waiting for others)
-        onStateUpdate(result.state);
-        setSelectedCardIndex(null);
-      }
+      // If this ended the round, the hand-discard hold above takes it from here.
+      onStateUpdate(result.state);
+      setSelectedCardIndex(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, onStateUpdate, animationMode, activePlayer]);
+  }, [gameState.id, activePlayerId, onStateUpdate]);
 
   // Concurrent buy phase: trigger CPU buys once when buy phase starts.
   // Uses a ref for the timer so dependency-array re-runs don't cancel it.
@@ -3489,13 +3495,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, trashSelectedIndices, handleTrashToggle, handleConfirmTrash, selectedCardIndex, multiTileCardIndex, multiTileTargets, multiTilePrimaryTarget, handleConfirmMultiTile, resolving, reviewing, reviewButtonVisible, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
   const handleDiscardAllComplete = useCallback(() => {
-    setDiscardingAll(false);
-    if (pendingStateRef.current) {
-      onStateUpdate(pendingStateRef.current);
-      pendingStateRef.current = null;
-    }
+    setHeldState(null);
     setSelectedCardIndex(null);
-  }, [onStateUpdate]);
+  }, []);
+  // Never strand the next round behind the hold (e.g. no hand on screen).
+  useEffect(() => {
+    if (!heldState) return;
+    const t = setTimeout(() => setHeldState(null), 4000);
+    return () => clearTimeout(t);
+  }, [heldState]);
 
   // Intro overlay dismissed — start shuffle → draw → play banner sequence
   const handleIntroReady = useCallback(() => {
@@ -3728,14 +3736,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [resolving, phaseBanner, phase, onStateUpdate, animationOff, enterReviewMode, gameState, activePlayerId]);
 
+  // A Debt for you joins your discard pile when its flying card lands there,
+  // not when the round's state (which already counts it) arrives.
+  const [debtLandedRound, setDebtLandedRound] = useState<number | null>(null);
+  const debtInbound = useMemo(() => (
+    phase === 'upkeep' && !animationOff && gameState.current_round >= DEBT_START_ROUND
+    && debtLandedRound !== gameState.current_round
+    && findDebtRecipientFromLog(gameState)?.id === activePlayerId
+  ), [phase, animationOff, gameState, debtLandedRound, activePlayerId]);
+
   // Debt fly animation complete — release banner hold, collapse panel after short delay
   const handleDebtFlyComplete = useCallback(() => {
+    setDebtLandedRound(gameState.current_round);
     setDebtFlyTarget(null);
     setBannerHoldUntilRelease(false);
     debtFlyPendingRef.current = null;
     // Collapse player panel after a brief delay so the user sees the target highlight
     setTimeout(() => setForcePlayerPanelExpanded(false), 400);
-  }, []);
+  }, [gameState.current_round]);
 
   // Effect: after panel expands, measure target player row and start flying
   useEffect(() => {
@@ -6192,7 +6210,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 Done Reviewing{reviewCountdown !== null && reviewCountdown > 0 ? ` (${reviewCountdown}s)` : ''}<Icon name="check" size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
               </button>
             )}
-            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !gameState.players_done_buying.includes(activePlayerId) && !activePlayer.has_ended_turn && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !discardingAll && !gameState.players_done_buying.includes(activePlayerId) && !activePlayer.has_ended_turn && (
               <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
                 <style>{`
                   @keyframes pulseGlowOrange {
@@ -6220,7 +6238,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </HoldToSubmitButton>
               </div>
             )}
-            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && activePlayer.has_ended_turn && gameState.players_done_buying.includes(activePlayerId) && (
+            {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && (discardingAll || (activePlayer.has_ended_turn && gameState.players_done_buying.includes(activePlayerId))) && (
               <div style={{ opacity: buyButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
                 <button
                   disabled
@@ -6293,7 +6311,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               onDragMove={(x, y) => setDragHoverPos({ clientX: x, clientY: y })}
               disabled={phase !== 'play' || playSubmitted || interactionBlocked}
               deckSize={introSequence !== 'done' && !introHandReady ? activePlayer.deck_size + activePlayer.hand.length : activePlayer.deck_size}
-              discardCount={discardCountOverride !== null ? discardCountOverride : activePlayer.discard_count}
+              discardCount={Math.max(0, (discardCountOverride ?? activePlayer.discard_count) - (debtInbound ? 1 : 0))}
               discardCards={activePlayer.discard}
               deckCards={activePlayer.deck_cards}
               trashCards={activePlayer.trash}

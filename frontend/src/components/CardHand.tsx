@@ -20,7 +20,7 @@ import {
   CARD_H, CARD_W, PILE_SCALE, PILE_TILT,
   easeIn, easeInOut, easeOut, enterKeyframes, flightKeyframes, poseTransform, runAnimation, type Pose,
 } from './hand/cardMotion';
-import { handSizing, handStripHeight, layoutHand, nearestSlot, shiftLayout, stripAt } from './hand/handLayout';
+import { handSizing, handStripHeight, layoutHand, nearestSlot, reconcileHandOrder, shiftLayout, stripAt } from './hand/handLayout';
 
 export { CardViewPopup };
 
@@ -402,8 +402,20 @@ export default function CardHand({
 
   // ── Order: the player's arrangement of the hand, by card id ──
   const [orderIds, setOrderIds] = useState<string[]>(() => cards.map(c => c.id));
-  // Indices into `cards` in display order. Ids of cards that left the hand
-  // keep their place, so an undone card slides back into its old slot.
+  // Re-arranged during render (not in an effect) so a drawn card's flight
+  // already aims at its slot on the right.
+  const handIds = cards.map(c => c.id);
+  const inPlayIds = inPlayCards?.map(c => c.id) ?? [];
+  const [orderBasis, setOrderBasis] = useState({ hand: handIds, inPlay: inPlayIds, discarding: !!discardAll });
+  if (orderBasis.hand.join('\n') !== handIds.join('\n') || orderBasis.inPlay.join('\n') !== inPlayIds.join('\n')
+    || orderBasis.discarding !== !!discardAll) {
+    // Once the hand has gone to the discard pile, nothing in it is held.
+    const held = new Set(orderBasis.discarding ? [] : [...orderBasis.hand, ...orderBasis.inPlay]);
+    setOrderBasis({ hand: handIds, inPlay: inPlayIds, discarding: !!discardAll });
+    setOrderIds(prev => reconcileHandOrder(prev, held, handIds, new Set(inPlayIds)));
+  }
+  // Indices into `cards` in display order. Ids of cards in play keep their
+  // place, so an undone card slides back into its old slot.
   const order = useMemo(() => {
     const idx = new Map(cards.map((c, i) => [c.id, i]));
     const out: number[] = [];
@@ -415,14 +427,6 @@ export default function CardHand({
     cards.forEach((c, i) => { if (!seen.has(c.id)) { out.push(i); seen.add(c.id); } });
     return out;
   }, [orderIds, cards]);
-  useEffect(() => {
-    setOrderIds(prev => {
-      if (cards.length === 0) return prev.length ? [] : prev;
-      const known = new Set(prev);
-      const added = cards.filter(c => !known.has(c.id)).map(c => c.id);
-      return added.length ? [...prev, ...added] : prev;
-    });
-  }, [cards]);
   const onOrderChangeRef = useRef(onOrderChange);
   onOrderChangeRef.current = onOrderChange;
   const orderKey = order.join(',');

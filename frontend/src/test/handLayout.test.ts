@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { handSizing, layoutHand, nearestSlot, stripAt } from '../components/hand/handLayout';
+import { handSizing, layoutHand, nearestSlot, reconcileHandOrder, stripAt } from '../components/hand/handLayout';
 import { splitUpgradeMark } from '../components/CardName';
 import { isCardEmpowered } from '../components/cardEmpowered';
 import { makeCard } from './fixtures';
@@ -82,7 +82,70 @@ describe('isCardEmpowered', () => {
     expect(isCardEmpowered(chatter, { playedCardNames: ['Explore', 'Gather', 'Rabble'] })).toBe(true);
   });
 
+  it('glows every bonus that depends on the turn so far, only when it would apply', () => {
+    const eff = (type: string, condition: string, value: number, extra: object = {}) => ({ type, condition, value, ...extra });
+    // Mobilize: +1 action per other card played (max 3).
+    const mobilize = makeCard({ name: 'Mobilize', card_type: 'engine', effects: [eff('actions_per_cards_played', 'always', 1, { metadata: { max: 3 } })] });
+    expect(isCardEmpowered(mobilize, { playedCardNames: [] })).toBe(false);
+    expect(isCardEmpowered(mobilize, { playedCardNames: ['Explore'] })).toBe(true);
+    // Spyglass: +1 action if your hand after its draw is 3 or fewer.
+    const spyglass = makeCard({ name: 'Spyglass', card_type: 'engine', draw_cards: 1, effects: [eff('conditional_action', 'hand_size_lte', 1, { condition_threshold: 3 })] });
+    expect(isCardEmpowered(spyglass, { handSize: 5 })).toBe(false);
+    expect(isCardEmpowered(spyglass, { handSize: 3 })).toBe(true);
+    // Scavenge: +1 action if playing it spends your last action.
+    const scavenge = makeCard({ name: 'Scavenge', card_type: 'engine', action_cost: 1, resource_gain: 2, effects: [eff('grant_actions', 'zero_actions', 1)] });
+    expect(isCardEmpowered(scavenge, { actionsLeft: 3 })).toBe(false);
+    expect(isCardEmpowered(scavenge, { actionsLeft: 1 })).toBe(true);
+    // Commander: next-round draw once a Claim has been played.
+    const commander = makeCard({ name: 'Commander', card_type: 'engine', action_return: 1, effects: [eff('conditional_draw_next_round', 'if_played_claim_this_turn', 1)] });
+    expect(isCardEmpowered(commander, { hasPlayedClaimThisRound: false })).toBe(false);
+    expect(isCardEmpowered(commander, { hasPlayedClaimThisRound: true })).toBe(true);
+    // Toll Road: draws per connected VP tile.
+    const tollRoad = makeCard({ name: 'Toll Road', card_type: 'engine', effects: [eff('draw_per_connected_vp', 'always', 2)] });
+    expect(isCardEmpowered(tollRoad, { vpHexCount: 0 })).toBe(false);
+    expect(isCardEmpowered(tollRoad, { vpHexCount: 1 })).toBe(true);
+    // Resilience: +3 resources while you hold the fewest tiles.
+    const resilience = makeCard({ name: 'Resilience', card_type: 'engine', action_return: 1, effects: [eff('gain_resources', 'fewest_tiles', 3)] });
+    expect(isCardEmpowered(resilience, { hasFewestTiles: false })).toBe(false);
+    expect(isCardEmpowered(resilience, { hasFewestTiles: true })).toBe(true);
+    // Rabble+: +1 power per other Rabble played.
+    const rabblePlus = makeCard({ name: 'Rabble+', card_type: 'claim', power: 1, is_upgraded: true, effects: [eff('power_per_same_name', 'always', 1, { metadata: { upgraded_only: true } })] });
+    expect(isCardEmpowered(rabblePlus, { playedCardNames: ['Explore'] })).toBe(false);
+    expect(isCardEmpowered(rabblePlus, { playedCardNames: ['Rabble'] })).toBe(true);
+    // Dividends: only above its minimum of 1.
+    const dividends = makeCard({ name: 'Dividends', card_type: 'engine', effects: [eff('resource_scaling', 'always', 2)] });
+    expect(isCardEmpowered(dividends, { resourcesHeld: 2 })).toBe(false);
+    expect(isCardEmpowered(dividends, { resourcesHeld: 6 })).toBe(true);
+    // Coordinated Push / Dog Pile: stacking bonuses once there's a Claim out to stack on.
+    const push = makeCard({ name: 'Coordinated Push', card_type: 'claim', power: 3, stackable: true, effects: [eff('grant_actions_if_stacked', 'always', 1)] });
+    expect(isCardEmpowered(push, { hasPlayedClaimThisRound: false })).toBe(false);
+    expect(isCardEmpowered(push, { hasPlayedClaimThisRound: true })).toBe(true);
+    const dogPile = makeCard({ name: 'Dog Pile', card_type: 'claim', power: 1, stackable: true, effects: [eff('stacking_power_bonus', 'always', 1)] });
+    expect(isCardEmpowered(dogPile, { hasPlayedClaimThisRound: false })).toBe(false);
+    expect(isCardEmpowered(dogPile, { hasPlayedClaimThisRound: true })).toBe(true);
+  });
+
   it('glows cards granted Stackable', () => {
     expect(isCardEmpowered(makeCard({ granted_stackable: true }), {})).toBe(true);
+  });
+});
+
+describe('reconcileHandOrder', () => {
+  const set = (...ids: string[]) => new Set(ids);
+
+  it('puts drawn cards on the right, even ones that sat in the hand before', () => {
+    // "a" was in an earlier hand (its id is still remembered) and comes back
+    // in the middle of the server's hand order.
+    expect(reconcileHandOrder(['a', 'b', 'c'], set('b', 'c'), ['b', 'a', 'c', 'd'], set())).toEqual(['b', 'c', 'a', 'd']);
+  });
+
+  it('keeps the player\'s arrangement and drops cards that left', () => {
+    expect(reconcileHandOrder(['c', 'a', 'b'], set('a', 'b', 'c'), ['a', 'b'], set())).toEqual(['a', 'b']);
+  });
+
+  it('keeps the slot of a card in play so an undo slides it back', () => {
+    const played = reconcileHandOrder(['a', 'b', 'c'], set('a', 'b', 'c'), ['a', 'c'], set('b'));
+    expect(played).toEqual(['a', 'b', 'c']);
+    expect(reconcileHandOrder(played, set('a', 'c', 'b'), ['a', 'c', 'b'], set())).toEqual(['a', 'b', 'c']);
   });
 });
