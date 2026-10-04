@@ -33,6 +33,8 @@ export function boardCardScale(zoom: number): number {
 const FOCUS_SCALE = 0.44;
 /** Engine queue cards (under the player's ID card). */
 export const QUEUE_CARD_SCALE = 0.25;
+/** The Played box holds this many cards per row, then wraps. */
+const QUEUE_PER_ROW = 3;
 /** The hover zoom. */
 const ZOOM_SCALE = 0.8;
 /** Tile cards at rest are see-through so the board shows under them. */
@@ -290,7 +292,12 @@ export function EngineQueue({ entries, onOpen, containerRef, title = 'Played' }:
       <div style={{ fontSize: 10, color: 'var(--cc-gold)', opacity: 0.8, textTransform: 'uppercase', letterSpacing: 1.5, fontFamily: 'var(--cc-font-display)', fontWeight: 700, marginBottom: 5 }}>
         {title} ({entries.length})
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {/* Only as wide as the cards it holds (up to three a row). */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${Math.max(1, Math.min(entries.length, QUEUE_PER_ROW))}, ${CARD_W * QUEUE_CARD_SCALE}px)`,
+        gap: 6,
+      }}>
         {entries.map((e, i) => (
           <MiniCard key={e.key} entry={e} scale={QUEUE_CARD_SCALE} placement="right" onOpen={() => onOpen(entries, i)} style={{ position: 'relative' }} />
         ))}
