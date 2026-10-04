@@ -203,13 +203,14 @@ interface TooltipState {
 // ── Component ───────────────────────────────────────────────────────────
 
 /** The 3D board. Antialiasing is fixed when a WebGL context is created, so
- *  changing the Visual Quality setting rebuilds the board's renderer. */
+ *  changing the Visual Quality setting rebuilds the board's renderer. Low
+ *  turns antialiasing off and renders at a 1x pixel ratio. */
 export default function GameBoard(props: GameBoardProps) {
   const quality = useVisualQuality();
-  return <GameBoardView key={quality} {...props} antialias={quality === 'high'} />;
+  return <GameBoardView key={quality} {...props} lowQuality={quality === 'low'} />;
 }
 
-function GameBoardView(props: GameBoardProps & { antialias: boolean }) {
+function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   const {
     tiles, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, activePlayerId,
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths,
@@ -258,7 +259,7 @@ function GameBoardView(props: GameBoardProps & { antialias: boolean }) {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const engine = new BoardEngine(host, { antialias: props.antialias });
+    const engine = new BoardEngine(host, props.lowQuality ? { antialias: false, maxPixelRatio: 1 } : {});
     if (!engine.ok) {
       setNoWebgl(true);
       return;

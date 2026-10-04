@@ -478,7 +478,7 @@ export default function LobbyScreen({
                 ))}
               </div>
             </div>
-            <div className="cc-scr-gear-row" title="Low turns off antialiasing for a smoother frame rate on large or high-resolution screens.">
+            <div className="cc-scr-gear-row" title="Low renders the board at standard resolution without antialiasing, for a smoother frame rate on large or high-resolution screens.">
               <span>Visual Quality</span>
               <div className="cc-scr-seg cc-scr-seg-sm">
                 {(['low', 'high'] as VisualQuality[]).map((q) => (

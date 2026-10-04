@@ -194,7 +194,13 @@ export class BoardEngine {
   private hero: boolean;
   private sway = 0;
 
-  constructor(host: HTMLElement, opts: { quality?: BoardQuality; interactive?: boolean; hero?: boolean; antialias?: boolean } = {}) {
+  constructor(host: HTMLElement, opts: {
+    quality?: BoardQuality; interactive?: boolean; hero?: boolean;
+    /** Off for the Low visual-quality setting. */
+    antialias?: boolean;
+    /** Cap on the canvas pixel ratio (Low visual quality renders at 1x). */
+    maxPixelRatio?: number;
+  } = {}) {
     this.hostEl = host;
     this.hero = !!opts.hero;
     this.quality = opts.quality ?? (this.hero ? 'low' : detectQuality());
@@ -219,10 +225,10 @@ export class BoardEngine {
 
     this.ok = webglAvailable();
     if (!this.ok) return;
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, this.hero ? 2 : this.quality === 'low' ? 1.5 : 2);
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, this.hero ? 2 : this.quality === 'low' ? 1.5 : 2, opts.maxPixelRatio ?? Infinity);
     try {
       // Antialiasing (4x MSAA) is a large share of the frame at 2x pixel
-      // ratios; the Low visual-quality setting turns it off.
+      // ratios; the Low visual-quality setting turns it off (and renders at 1x).
       this.renderer = new WebGLRenderer({ antialias: opts.antialias !== false, alpha: true, powerPreference: 'high-performance' });
     } catch {
       this.ok = false;
