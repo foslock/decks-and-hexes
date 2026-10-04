@@ -1,4 +1,4 @@
-import { useRef, useCallback, useState, useEffect, useLayoutEffect, useMemo, memo, type PointerEvent as ReactPointerEvent } from 'react';
+import { useRef, useCallback, useState, useEffect, useLayoutEffect, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import { useAnimated, useAnimationOff, useAnimationSpeed } from './SettingsContext';
@@ -15,6 +15,7 @@ import { CardViewPopup } from './CardViewPopup';
 import CardPile, { discardTopSpin, DRAW_PILE_SPIN } from './hand/CardPile';
 import TargetArrow, { type ArrowState } from './hand/TargetArrow';
 import TrashBurn from './hand/TrashBurn';
+import FlightCard, { turnOver, type Flight as BaseFlight } from './hand/FlightCard';
 import {
   CARD_H, CARD_W, PILE_SCALE, PILE_TILT,
   easeIn, easeInOut, easeOut, enterKeyframes, flightKeyframes, poseTransform, runAnimation, type Pose,
@@ -34,6 +35,10 @@ export interface PlayTarget {
   /** Cursor velocity at release (px/ms) */
   dragVelocityX?: number;
   dragVelocityY?: number;
+  /** The card's size where it lands (its copy on the board / queue). When
+   *  set, the flight ends upright at screenX/screenY at this scale so the
+   *  board copy takes over seamlessly; otherwise it settles onto the tile. */
+  landScale?: number;
 }
 
 /** Trash/discard selection mode state passed from GameScreen */
@@ -274,72 +279,7 @@ function UpgradeHoldBadge({
 // ── Flights ─────────────────────────────────────────────────────
 
 type FlightKind = 'discard' | 'discardAll' | 'play' | 'incoming' | 'transfer' | 'swapBack' | 'riffle';
-
-interface Flight {
-  key: string;
-  kind: FlightKind;
-  /** null → a card back (shuffle). */
-  card: Card | null;
-  frames: Keyframe[];
-  delay: number;
-  duration: number;
-  /** Turn the card over in flight: keyframes for a rotateY flipper (0deg =
-   *  face up, 180deg = face down). */
-  flipFrames?: Keyframe[];
-  /** Where to flash when a played card lands on the board. */
-  flashAt?: { x: number; y: number };
-}
-
-const FACE_STYLE: React.CSSProperties = { position: 'absolute', inset: 0, backfaceVisibility: 'hidden', WebkitBackfaceVisibility: 'hidden' };
-
-/** Flipper keyframes turning a card over between `from` and `to` (0–1 of the flight). */
-function turnOver(faceUpAtStart: boolean, from = 0.25, to = 0.7): Keyframe[] {
-  const a = faceUpAtStart ? 0 : 180;
-  const b = faceUpAtStart ? 180 : 0;
-  return [
-    { offset: 0, transform: `perspective(900px) rotateY(${a}deg)` },
-    { offset: from, transform: `perspective(900px) rotateY(${a}deg)` },
-    { offset: to, transform: `perspective(900px) rotateY(${b}deg)` },
-    { offset: 1, transform: `perspective(900px) rotateY(${b}deg)` },
-  ];
-}
-
-/** A card in the air between two places on screen (portal, fixed). */
-const FlightCard = memo(function FlightCard({ flight, onDone }: { flight: Flight; onDone: (f: Flight) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const flipRef = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    let alive = true;
-    const timing: KeyframeAnimationOptions = { duration: flight.duration, delay: flight.delay, easing: 'linear', fill: 'both' };
-    const runs = [runAnimation(ref.current, flight.frames, timing)];
-    if (flight.flipFrames) runs.push(runAnimation(flipRef.current, flight.flipFrames, { ...timing, easing: 'ease-in-out' }));
-    Promise.all(runs).then(() => { if (alive) onDone(flight); });
-    return () => { alive = false; };
-    // A flight's keyframes are fixed at launch.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return (
-    <div ref={ref} style={{
-      position: 'fixed',
-      left: 0,
-      top: 0,
-      width: CARD_W,
-      height: CARD_H,
-      pointerEvents: 'none',
-      zIndex: 9990,
-      transform: String(flight.frames[0]?.transform ?? ''),
-      opacity: Number(flight.frames[0]?.opacity ?? 1),
-      willChange: 'transform, opacity',
-    }}>
-      {flight.flipFrames && flight.card ? (
-        <div ref={flipRef} style={{ position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d', transform: String(flight.flipFrames[0].transform) }}>
-          <div style={FACE_STYLE}><CardFull card={flight.card} artZoom={false} /></div>
-          <div style={{ ...FACE_STYLE, transform: 'rotateY(180deg)' }}><CardBack /></div>
-        </div>
-      ) : flight.card ? <CardFull card={flight.card} artZoom={false} /> : <CardBack />}
-    </div>
-  );
-});
+type Flight = BaseFlight<FlightKind>;
 
 interface EnterSpec {
   start: Pose;
@@ -1015,9 +955,12 @@ export default function CardHand({
       if (lastPlayedTarget && lastPlayedTarget.cardId === card.id) {
         played = true;
         const hasTarget = lastPlayedTarget.screenX !== null && lastPlayedTarget.screenY !== null;
-        const to: Pose = hasTarget
-          ? { x: lastPlayedTarget.screenX!, y: lastPlayedTarget.screenY!, rot: 0, scale: 0.12, tilt: 42 }
-          : { x: from.x, y: from.y - 160, rot: 0, scale: from.scale * 0.5 };
+        const handoff = hasTarget && lastPlayedTarget.landScale != null;
+        const to: Pose = handoff
+          ? { x: lastPlayedTarget.screenX!, y: lastPlayedTarget.screenY!, rot: 0, scale: lastPlayedTarget.landScale! }
+          : hasTarget
+            ? { x: lastPlayedTarget.screenX!, y: lastPlayedTarget.screenY!, rot: 0, scale: 0.12, tilt: 42 }
+            : { x: from.x, y: from.y - 160, rot: 0, scale: from.scale * 0.5 };
         launch({
           kind: 'play',
           card,
@@ -1025,7 +968,7 @@ export default function CardHand({
             arc: hasTarget ? 60 : 20,
             ease: easeInOut,
             swell: t => 1 + 0.1 * Math.sin(Math.PI * Math.min(1, t * 1.6)),
-            opacity: t => (t < 0.72 ? 1 : 1 - (t - 0.72) / 0.28),
+            opacity: handoff ? undefined : (t => (t < 0.72 ? 1 : 1 - (t - 0.72) / 0.28)),
           }),
           delay: 0,
           duration: Math.round(520 * speed),

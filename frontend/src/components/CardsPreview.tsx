@@ -4,6 +4,7 @@ import { BASE } from '../api/client';
 import CardFull from './CardFull';
 import { getUpgradedPreview } from '../hooks/upgradePreview';
 import CardHand, { type DragTargetInfo, type IncomingDiscard, type PlayTarget, type UndoReturn } from './CardHand';
+import { TileCardStack } from './BoardCards';
 
 /**
  * Dev page (?preview=cards): every card face in the catalog, base and
@@ -64,7 +65,8 @@ function shuffled<T>(arr: T[]): T[] {
 /**
  * Dev page (?preview=hand): the hand, piles and every card animation on a
  * stand-in board — draw, play to a tile (drag one onto the gold hex), undo,
- * discard, trash, shuffle, end of turn and purchases.
+ * discard, trash, shuffle, end of turn and purchases — plus a tile two
+ * players share.
  */
 export function HandPreview() {
   const [catalog, setCatalog] = useState<Card[]>([]);
@@ -173,6 +175,21 @@ export function HandPreview() {
           <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>Tiles <input type="range" min={0} max={20} value={tiles} onChange={e => setTiles(Number(e.target.value))} />{tiles}</label>
           <span style={{ fontSize: 12, opacity: 0.6 }}>In play: {inPlay.map(c => c.name).join(', ') || '—'}</span>
         </div>
+        {/* A tile two players both played on: each card glows in its player's color */}
+        {catalog.length > 2 && (
+          <div style={{ position: 'absolute', left: '72%', top: '42%', transform: 'translate(-50%, -100%)', textAlign: 'center' }}>
+            <TileCardStack
+              scale={0.3}
+              onOpen={() => {}}
+              entries={[
+                { key: 'demo-a', card: catalog[0], playerId: 'player_0', playerName: 'You' },
+                { key: 'demo-b', card: catalog[1], playerId: 'player_1', playerName: 'Rival', revealed: true },
+                { key: 'demo-c', card: catalog[2], playerId: 'player_1', playerName: 'Rival', revealed: true },
+              ]}
+            />
+            <div style={{ marginTop: 8, fontSize: 11, opacity: 0.6 }}>Shared tile</div>
+          </div>
+        )}
         {/* Stand-in target tile */}
         <div ref={tileRef} style={{
           position: 'absolute', left: '50%', top: '42%', width: 110, height: 96, transform: 'translate(-50%, -50%)',

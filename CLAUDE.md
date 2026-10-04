@@ -58,6 +58,13 @@ at high priority, the rest of the catalog during idle time).
 - `CardHand` owns the hand fan, the 3D draw/discard piles and every card
   animation; helpers live in `components/hand/` (`handLayout`, `cardMotion`,
   `CardPile`, `TargetArrow`, `TrashBurn`).
+- Played cards live on the board: `BoardCards.tsx` (`TileCardStack` over
+  tiles, `EngineQueue` under the ID card, hover zoom, `CardDetailOverlay`).
+  GameBoard positions stacks each frame (`tileCardKeys` / `renderTileCards`;
+  `controls.tileAnchor` gives a played card its landing spot). At the reveal
+  GameScreen turns every player's plays into `revealCards`; `ResolveOverlay`'s
+  `onStepStart`/`onStepEnd` focus each resolving tile and send its cards home
+  (your discard pile, an opponent's ID card, or a burn if trashed).
 - Dev pages: `?preview=cards` (every card face, base/upgraded) and
   `?preview=hand` (a sandbox for draw, play, undo, discard, trash, shuffles,
   purchases and end of turn).

@@ -15,7 +15,7 @@ import ResolveOverlay from './ResolveOverlay';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
-import { CARD_TYPE_COLORS, getCardDisplayColor, miniCardBackground, MINI_CARD_SHADOW } from '../constants/cardColors';
+import { CARD_TYPE_COLORS } from '../constants/cardColors';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } from './SettingsContext';
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
@@ -23,6 +23,11 @@ import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { renderSubtitle } from './SubtitlePartRenderer';
 import CardName, { plainCardName } from './CardName';
+import { TileCardStack, EngineQueue, CardDetailOverlay, boardCardScale, fanOffset, QUEUE_CARD_SCALE, type BoardCardEntry } from './BoardCards';
+import FlightCard, { type Flight } from './hand/FlightCard';
+import TrashBurn from './hand/TrashBurn';
+import { discardTopSpin } from './hand/CardPile';
+import { CARD_H, CARD_W, PILE_SCALE, PILE_TILT, easeInOut, elementCenter, flightKeyframes, poseTransform, type Pose } from './hand/cardMotion';
 import Icon from '../icons/Icon';
 import { CostLabel, IconValue, Num } from '../icons/Num';
 import { useSound } from '../audio/useSound';
@@ -217,6 +222,17 @@ interface GameScreenProps {
   wsSend?: (data: object) => void;  // WebSocket send for cursor broadcasting
   wsMessage?: { type: string; [key: string]: unknown } | null;  // WS messages for cursor/purchase events
 }
+
+/** A played card on the board during the reveal (every player's), until it
+ *  flies home: to its owner's discard pile or ID card, or burns if trashed. */
+interface RevealCard extends BoardCardEntry {
+  tileKey: string | null;
+  /** A multi-target card shows on each tile; only its primary copy flies home. */
+  primary: boolean;
+  trash: boolean;
+}
+
+type BoardFlightKind = 'toDiscard' | 'toPlayer' | 'fade';
 
 function pixelToAxial(px: number, py: number): { q: number; r: number } {
   const q = ((2 / 3) * px) / HEX_SIZE;
@@ -1002,22 +1018,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const settingsRef = useRef<HTMLDivElement>(null);
   // Player panel expand-on-hover
   const [playerPanelExpanded, setPlayerPanelExpanded] = useState(false);
-  // In-play card list hover preview
-  const [inPlayHoverIndex, setInPlayHoverIndex] = useState<number | null>(null);
+  // Engine cards played this round wait in a queue under the player's ID card
   const inPlayContainerRef = useRef<HTMLDivElement>(null);
-  const inPlayCardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  // Staggered exit animations for in-play cards when submitting
-  type InPlayExitAnim = {
-    card: Card; rect: DOMRect; active: boolean; type: 'trash' | 'discard';
-    targetX: number; targetY: number; rotation: number; delay: number;
-    subtitleParts: SubtitlePart[];
-  };
-  const [inPlayExitAnims, setInPlayExitAnims] = useState<InPlayExitAnim[]>([]);
-  // Snapshot of exit animation data, prepared on submit, consumed when play→reveal fires
-  const pendingExitAnimsRef = useRef<{ anims: InPlayExitAnim[]; prePlayDiscardCount: number } | null>(null);
-  // Deferred reveal setup — stored when play→reveal fires during exit animations (WS race)
-  const deferredRevealSetupRef = useRef<(() => void) | null>(null);
-  // Override discard count during exit animations so it increments per discard anim
+  const playerPanelRef = useRef<HTMLDivElement>(null);
+  // Played cards stay hidden on the board until their flight from the hand lands
+  const [arrivingIds, setArrivingIds] = useState<Set<string>>(() => new Set());
+  // Reveal: every player's played cards over their tiles, flying home as each tile resolves
+  const [revealCards, setRevealCards] = useState<RevealCard[] | null>(null);
+  const revealCardsRef = useRef<RevealCard[] | null>(null);
+  revealCardsRef.current = revealCards;
+  const [revealFocusTile, setRevealFocusTile] = useState<string | null>(null);
+  const [boardFlights, setBoardFlights] = useState<Flight<BoardFlightKind>[]>([]);
+  const [boardBurns, setBoardBurns] = useState<{ key: string; card: Card; pose: Pose }[]>([]);
+  const boardFlightSeq = useRef(0);
+  /** Set up the reveal's board cards (assigned below; called from the phase effect). */
+  const beginRevealRef = useRef<(state: GameState) => void>(() => {});
+  // Hold the discard count while revealed cards fly to the discard pile; +1 per landing
   const [discardCountOverride, setDiscardCountOverride] = useState<number | null>(null);
   // Purchase pill hover preview
   const [purchaseHover, setPurchaseHover] = useState<{ card: import('../types/game').Card; rect: DOMRect } | null>(null);
@@ -1089,7 +1105,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   // that originated the buff consumed by the Claim planned on the hovered tile.
   const [playHoveredTileKey, setPlayHoveredTileKey] = useState<string | null>(null);
   const [reviewHoveredPlayer, setReviewHoveredPlayer] = useState<string | null>(null);
-  const [reviewFullCards, setReviewFullCards] = useState<{ playerId: string; playerName: string; card: Card }[] | null>(null);
+  const [detailCards, setDetailCards] = useState<{ card: Card; subtitleParts?: SubtitlePart[]; playerId?: string; playerName?: string }[] | null>(null);
   const playerRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // Resolve animation state
   const [resolving, setResolving] = useState(false);
@@ -1251,8 +1267,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
     return true;
   }, [activePlayer, ownedUniqueCardNames, gameState.shared_market, gameState.buy_phase_purchases, activePlayerId]);
-  // True when the player has submitted (server-side) or exit animations are pending/playing
-  const playSubmitted = !!(activePlayer?.has_submitted_play || inPlayExitAnims.length > 0);
+  // True once the player has submitted their plays for the round
+  const playSubmitted = !!activePlayer?.has_submitted_play;
 
   // Grid rotation — starts oriented so active player's base is at the top
   const computeBaseRotation = useCallback((playerId: string): number => {
@@ -1529,6 +1545,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const doRevealSetup = () => {
         const steps = gameState.resolution_steps;
         const hasSteps = steps && steps.length > 0;
+        // Everyone's played cards turn face up over their tiles.
+        beginRevealRef.current(gameState);
 
         if (hasSteps && !animationOff) {
           setSelectedCardIndex(null);
@@ -1607,6 +1625,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         } else {
           // No claim steps or animations off — show reveal banner briefly, then transition to buy
           // Clear the pre-resolve freeze so the grid shows post-resolve state
+          if (!animationOff) setTimeout(() => flyRevealCardsRef.current(() => true, 80), 1300 * animSpeed);
           setResolveDisplayState(null);
           setInteractionBlocked(true);
           setBannerSubtitle('Battle & Expand');
@@ -1614,19 +1633,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         }
       };
 
-      // If exit animations are pending (waiting-for-others case), play them before reveal
-      const pending = pendingExitAnimsRef.current;
-      if (pending && pending.anims.length > 0) {
-        pendingExitAnimsRef.current = null;
-        startExitAnims(pending.anims, pending.prePlayDiscardCount, doRevealSetup);
-      } else if (inPlayExitAnims.length > 0) {
-        // Exit animations already in progress (last-player + WS broadcast race)
-        // Defer reveal setup until they complete
-        deferredRevealSetupRef.current = doRevealSetup;
-      } else {
-        // No exit anims — run reveal setup immediately
-        doRevealSetup();
-      }
+      doRevealSetup();
       return;
     }
 
@@ -1678,9 +1685,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setBuyButtonVisible(false);
   }, [phase, phaseBanner, resolving]);
 
-  // Chevron reveal animation: fade in all claim chevrons before resolve overlay
+  // Chevron reveal animation: once the reveal banner clears, fade in all claim
+  // chevrons (with every played card face up over its tile) before the
+  // resolve overlay starts.
+  const revealHoldMs = revealCards && revealCards.length > 0 ? 1100 : 300;
   useEffect(() => {
-    if (!chevronRevealPhase) return;
+    if (!chevronRevealPhase || phaseBanner) return;
     const duration = Math.round(1500 * animSpeed);
 
     if (duration === 0) {
@@ -1699,13 +1709,16 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
       if (progress >= 1) {
         clearInterval(intervalId);
-        // Brief pause at full visibility, then proceed to resolve animation
-        setTimeout(() => setChevronRevealPhase(false), 300);
+        // Pause at full visibility (longer when cards were revealed, so
+        // players can see what landed where), then resolve.
+        setTimeout(() => setChevronRevealPhase(false), Math.round(revealHoldMs * (animSpeed || 1)));
       }
     }, 50);
 
     return () => clearInterval(intervalId);
-  }, [chevronRevealPhase, animationMode]);
+  // revealHoldMs is read once when the fade starts.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chevronRevealPhase, animationMode, phaseBanner]);
 
   // Chevron fade-out during resolution step animation
   useEffect(() => {
@@ -1979,7 +1992,32 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     // Compute screen position for card animation
     const drag = dragReleaseRef.current;
     dragReleaseRef.current = null;
-    if (q != null && r != null) {
+    // The played card's board copy appears once its flight lands on it.
+    if (animated) {
+      setArrivingIds(prev => new Set(prev).add(card.id));
+      setTimeout(() => setArrivingIds(prev => {
+        if (!prev.has(card.id)) return prev;
+        const next = new Set(prev);
+        next.delete(card.id);
+        return next;
+      }), Math.round(520 * animSpeed) + 40);
+    }
+    const anchor = q != null && r != null ? boardControlsRef.current?.tileAnchor(`${q},${r}`) : null;
+    if (q != null && r != null && anchor) {
+      // Fly onto the tile's card stack, into the slot it will take in the fan.
+      const key = `${q},${r}`;
+      const onTile = activePlayer.planned_actions.filter(a =>
+        (a.target_q === q && a.target_r === r) || a.extra_targets?.some(([eq, er]) => `${eq},${er}` === key)).length;
+      const n = onTile + 1;
+      const sc = boardCardScale(anchor.zoom);
+      setLastPlayedTarget({
+        cardId: card.id,
+        screenX: anchor.x + fanOffset(n - 1, n, sc),
+        screenY: anchor.below ? anchor.y + (CARD_H * sc) / 2 : anchor.y - (CARD_H * sc) / 2,
+        landScale: sc,
+        ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
+      });
+    } else if (q != null && r != null) {
       const transform = gridTransformRef.current;
       const gRect = gridContainerRef.current?.getBoundingClientRect();
       if (transform && gRect) {
@@ -1995,16 +2033,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         });
       }
     } else {
-      // Non-targeting card (engine) — animate toward the In Play list
-      let inPlayX: number | null = null;
-      let inPlayY: number | null = null;
-      const inPlayRect = inPlayContainerRef.current?.getBoundingClientRect();
-      if (inPlayRect) {
-        inPlayX = inPlayRect.left + inPlayRect.width / 2;
-        inPlayY = inPlayRect.top + inPlayRect.height / 2;
-      }
+      // Non-targeting card (engine) — fly into the next slot of the queue under the ID card
+      const queued = activePlayer.planned_actions.filter(a => a.target_q == null).length;
+      const slotW = CARD_W * QUEUE_CARD_SCALE;
+      const slotH = CARD_H * QUEUE_CARD_SCALE;
+      const queueRect = inPlayContainerRef.current?.getBoundingClientRect();
+      const panelRect = playerPanelRef.current?.getBoundingClientRect();
+      // Queue panel: 6px padding, a 15px title, 3 cards per row with 6px gaps.
+      const originX = queueRect ? queueRect.left : panelRect ? panelRect.left + 6 : null;
+      const originY = queueRect ? queueRect.top + 15 : panelRect ? panelRect.bottom + 6 + 6 + 15 : null;
       setLastPlayedTarget({
-        cardId: card.id, screenX: inPlayX, screenY: inPlayY,
+        cardId: card.id,
+        screenX: originX != null ? originX + (queued % 3) * (slotW + 6) + slotW / 2 : null,
+        screenY: originY != null ? originY + Math.floor(queued / 3) * (slotH + 6) + slotH / 2 : null,
+        landScale: originX != null ? QUEUE_CARD_SCALE : undefined,
         ...(drag ? { dragX: drag.x, dragY: drag.y, dragVelocityX: drag.vx, dragVelocityY: drag.vy } : {}),
       });
     }
@@ -2471,7 +2513,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         showZoom(entries[0].card);
       } else if (entries.length > 1) {
         setReviewHoveredTile(null);
-        setReviewFullCards(entries);
+        setDetailCards(entries);
       }
       return;
     }
@@ -2908,91 +2950,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     })();
   }, [submitSearchCommit]);
 
-  // Start the in-play exit animations and call onComplete when done
-  const startExitAnims = useCallback((exitAnims: InPlayExitAnim[], prePlayDiscardCount: number, onComplete: () => void) => {
-    const STAGGER = Math.round(400 * animSpeed);
-    const TRASH_DUR = Math.round(500 * animSpeed);
-    const DISCARD_DUR = Math.round(1000 * animSpeed);
-    const lastDelay = (exitAnims.length - 1) * STAGGER;
-    const lastIsTrash = exitAnims[exitAnims.length - 1].type === 'trash';
-    const totalAnimTime = lastDelay + (lastIsTrash ? TRASH_DUR : DISCARD_DUR) + 100;
-
-    // Freeze discard count at pre-play value; it'll increment per discard anim
-    setDiscardCountOverride(prePlayDiscardCount);
-    setInPlayExitAnims(exitAnims);
-
-    // Stagger: activate each card after its delay, play sound, increment discard count
-    exitAnims.forEach((anim, i) => {
-      setTimeout(() => {
-        if (anim.type === 'trash') sound.cardTrash();
-        else {
-          sound.cardDiscard();
-          setDiscardCountOverride(prev => prev !== null ? prev + 1 : prev);
-        }
-        setInPlayExitAnims(prev => prev.map((a, j) => j === i ? { ...a, active: true } : a));
-      }, anim.delay);
-    });
-
-    // Clean up after all animations complete
-    setTimeout(() => {
-      setInPlayExitAnims([]);
-      setDiscardCountOverride(null);
-      onComplete();
-      // If a reveal setup was deferred (WS race), run it now
-      const deferredReveal = deferredRevealSetupRef.current;
-      if (deferredReveal) {
-        deferredRevealSetupRef.current = null;
-        deferredReveal();
-      }
-    }, totalAnimTime);
-  }, [animSpeed, sound]);
-
   const handleSubmitPlay = useCallback(async () => {
     try {
       setError(null);
 
-      // Snapshot positions of in-play cards for exit animations (consumed on play→reveal transition)
-      if (activePlayer && animated && activePlayer.planned_actions.length > 0) {
-        const discardEl = document.querySelector('[data-discard-pile]');
-        const discardRect = discardEl?.getBoundingClientRect();
-        const discardCx = discardRect ? discardRect.left + discardRect.width / 2 : window.innerWidth - 40;
-        const discardCy = discardRect ? discardRect.top + discardRect.height / 2 : window.innerHeight - 40;
-        const exitAnims: InPlayExitAnim[] = [];
-
-        const actions = activePlayer.planned_actions;
-        actions.forEach((action, i) => {
-          const el = inPlayCardRefs.current.get(i);
-          if (!el) return;
-          const rect = el.getBoundingClientRect();
-          const isTrash = action.card.trash_on_use;
-          const delay = i * Math.round(400 * animSpeed);
-          const rotation = (Math.random() - 0.5) * 16; // ±8deg
-          const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
-          const priorNames = actions.slice(0, i).map(a => a.card.name);
-          const ctx: CardSubtitleContext = { ...frozenSubtitleContext, powerFrozen: true, playedCardNames: priorNames, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
-          const subtitleParts = buildCardSubtitle(c, ctx);
-          exitAnims.push({
-            card: c, rect, active: false, type: isTrash ? 'trash' : 'discard',
-            targetX: discardCx, targetY: discardCy, rotation, delay, subtitleParts,
-          });
-        });
-
-        if (exitAnims.length > 0) {
-          pendingExitAnimsRef.current = { anims: exitAnims, prePlayDiscardCount: activePlayer.discard_count };
-        }
-      }
-
-      // Submit to server immediately
+      // Submit to server immediately; played cards stay on the board until the reveal
       const result = await api.submitPlay(gameState.id, activePlayerId);
-
-      if (result.state.current_phase === 'reveal' && pendingExitAnimsRef.current) {
-        // Last player to submit — start exit animations now; the useLayoutEffect
-        // will detect play→reveal (when state is applied) and defer reveal setup
-        // until these animations complete.
-        const { anims, prePlayDiscardCount } = pendingExitAnimsRef.current;
-        pendingExitAnimsRef.current = null;
-        startExitAnims(anims, prePlayDiscardCount, () => {});
-      }
 
       // Apply state immediately — useLayoutEffect handles play→reveal transition
       onStateUpdate(result.state);
@@ -3001,7 +2964,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState, activePlayerId, activePlayerIndex, activePlayer, onStateUpdate, animated, animSpeed, sound, startExitAnims]);
+  }, [gameState, activePlayerId, onStateUpdate]);
 
   const handleBuyArchetype = useCallback(async (cardId: string) => {
     try {
@@ -3492,7 +3455,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     setInteractionBlocked(false);
     setReviewHoveredTile(null);
     setReviewHoveredPlayer(null);
-    setReviewFullCards(null);
+    setDetailCards(null);
   }, []);
 
   // Advance through resolve to buy phase, then show the buy banner.
@@ -3771,6 +3734,10 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   // Resolve animation completed — advance resolve and move to buy phase
   const handleResolveComplete = useCallback(() => {
+    // Cards with no resolution step of their own (e.g. Sabotage on an
+    // opponent's tile) go home now.
+    flyRevealCardsRef.current(() => true, 80);
+    setRevealFocusTile(null);
     setResolving(false);
     setResolutionSteps([]);
     setResolveDisplayState(null);
@@ -4728,6 +4695,260 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [phase, activePlayer, undoableTiles, gameState.id, onStateUpdate]);
 
+  // ── Played cards on the board ──
+  /** Where my revealed cards land: the top of my discard pile. */
+  const discardPilePose = useCallback((cardId: string): Pose | null => {
+    const c = elementCenter('[data-discard-pile]');
+    return c ? { x: c.x, y: c.y, rot: 0, scale: PILE_SCALE, tilt: PILE_TILT, spin: discardTopSpin(cardId) } : null;
+  }, []);
+
+  const launchBoardFlight = useCallback((f: Omit<Flight<BoardFlightKind>, 'key'>) => {
+    setBoardFlights(prev => [...prev, { ...f, key: `bf${++boardFlightSeq.current}` }]);
+  }, []);
+
+  /**
+   * Send revealed cards home: mine land on my discard pile, opponents' fly
+   * into their ID card, trashed cards burn. Each card takes off from where it
+   * sits on the board (or in the engine queue).
+   */
+  const flyRevealCards = useCallback((pick: (rc: RevealCard) => boolean, stagger = 90) => {
+    const current = revealCardsRef.current;
+    if (!current) return;
+    const leaving = current.filter(pick);
+    if (leaving.length === 0) return;
+    const remaining = current.filter(rc => !pick(rc));
+    revealCardsRef.current = remaining;
+    setRevealCards(remaining);
+    const speed = animSpeed || 1;
+    leaving.forEach((rc, i) => {
+      const el = document.querySelector(`[data-board-card="${CSS.escape(rc.key)}"]`);
+      const r = el?.getBoundingClientRect();
+      const from: Pose | null = r && r.width > 0
+        ? { x: r.left + r.width / 2, y: r.top + r.height / 2, rot: 0, scale: r.width / CARD_W }
+        : null;
+      const delay = Math.round(i * stagger * speed);
+      const duration = Math.round(600 * speed);
+      if (!rc.primary) {
+        // A multi-target card's extra copy just fades; the primary flies home.
+        if (from) launchBoardFlight({ kind: 'fade', card: rc.card, frames: [
+          { transform: poseTransform(from), opacity: 1 },
+          { transform: poseTransform({ ...from, scale: from.scale * 0.7 }), opacity: 0 },
+        ], delay, duration: Math.round(260 * speed) });
+        return;
+      }
+      if (rc.trash) {
+        if (from) setTimeout(() => setBoardBurns(b => [...b, { key: `burn-${rc.key}`, card: rc.card, pose: from }]), delay);
+        if (rc.playerId === activePlayerId || from) sound.cardTrash();
+        return;
+      }
+      if (rc.playerId === activePlayerId) {
+        const to = discardPilePose(rc.card.id);
+        if (!from || !to) { setDiscardCountOverride(v => (v == null ? v : v + 1)); return; }
+        launchBoardFlight({ kind: 'toDiscard', card: rc.card, frames: flightKeyframes(from, to, { arc: 80, ease: easeInOut }), delay, duration });
+        return;
+      }
+      const row = playerRowRefs.current.get(rc.playerId)?.getBoundingClientRect();
+      if (!row) return;
+      const to: Pose = { x: row.left + row.width / 2, y: row.top + row.height / 2, rot: 0, scale: 0.06, opacity: 0 };
+      if (from) {
+        launchBoardFlight({ kind: 'toPlayer', card: rc.card, frames: flightKeyframes(from, to, {
+          arc: 50, ease: easeInOut, opacity: t => (t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3),
+        }), delay, duration });
+      } else {
+        // An opponent's engine card has no spot on the board: it pops up
+        // beside their ID card, holds a beat, then slips into it.
+        const pop: Pose = { x: row.right + 14 + CARD_W * 0.17, y: row.top + row.height / 2, rot: 0, scale: 0.34 };
+        launchBoardFlight({ kind: 'toPlayer', card: rc.card, frames: [
+          { offset: 0, transform: poseTransform({ ...pop, scale: 0.1 }), opacity: 0 },
+          { offset: 0.2, transform: poseTransform(pop), opacity: 1 },
+          { offset: 0.55, transform: poseTransform(pop), opacity: 1 },
+          ...flightKeyframes(pop, to, { ease: easeInOut, samples: 5, opacity: t => (t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4) })
+            .slice(1).map(f => ({ ...f, offset: 0.55 + (f.offset as number) * 0.45 })),
+        ], delay, duration: Math.round(1300 * speed) });
+      }
+    });
+  }, [animSpeed, activePlayerId, discardPilePose, launchBoardFlight, sound]);
+  const flyRevealCardsRef = useRef(flyRevealCards);
+  flyRevealCardsRef.current = flyRevealCards;
+
+  const handleBoardFlightDone = useCallback((f: Flight<BoardFlightKind>) => {
+    setBoardFlights(prev => prev.filter(x => x.key !== f.key));
+    if (f.kind === 'toDiscard') {
+      setDiscardCountOverride(v => (v == null ? v : v + 1));
+      sound.cardDiscard();
+    }
+  }, [sound]);
+
+  // Reveal: every player's plays turn face up over their tiles.
+  beginRevealRef.current = (state: GameState) => {
+    const revealed = state.revealed_actions;
+    if (!revealed || animationOff) return;
+    const cards: RevealCard[] = [];
+    for (const pid of state.player_order) {
+      const actions = revealed[pid] ?? [];
+      const name = state.players[pid]?.name ?? pid;
+      actions.forEach((a, i) => {
+        const c = a.effective_power != null ? { ...a.card, power: a.effective_power } : a.card;
+        const ctx: CardSubtitleContext = {
+          ...(pid === activePlayerId ? frozenSubtitleContext : {}),
+          powerFrozen: true,
+          playedCardNames: actions.slice(0, i).map(b => b.card.name),
+          effectiveResourceGain: a.effective_resource_gain,
+          effectiveDrawCards: a.effective_draw_cards,
+        };
+        const base = {
+          card: c,
+          subtitleParts: buildCardSubtitle(c, ctx),
+          playerId: pid,
+          playerName: name,
+          revealed: pid !== activePlayerId,
+          trash: !!a.card.trash_on_use,
+        };
+        if (a.target_q != null && a.target_r != null) {
+          const tileKey = `${a.target_q},${a.target_r}`;
+          cards.push({ ...base, key: `${a.card.id}@${tileKey}`, tileKey, primary: true });
+          for (const [eq, er] of a.extra_targets ?? []) {
+            const k = `${eq},${er}`;
+            cards.push({ ...base, key: `${a.card.id}@${k}`, tileKey: k, primary: false });
+          }
+        } else {
+          cards.push({ ...base, key: `${a.card.id}@queue`, tileKey: null, primary: true });
+        }
+      });
+    }
+    revealCardsRef.current = cards;
+    setRevealCards(cards);
+    setRevealFocusTile(null);
+    const mine = cards.filter(c => c.playerId === activePlayerId && c.primary && !c.trash).length;
+    setDiscardCountOverride(Math.max(0, (state.players[activePlayerId]?.discard_count ?? 0) - mine));
+  };
+
+  // The last resolution step for each tile — its cards go home after it.
+  const lastStepByTile = useMemo(() => {
+    const m = new Map<string, number>();
+    resolutionSteps.forEach((st, i) => m.set(st.tile_key, i));
+    return m;
+  }, [resolutionSteps]);
+  const handleResolveStepStart = useCallback((idx: number) => {
+    const step = resolutionSteps[idx];
+    if (!step) return;
+    // Engine cards have no tile to resolve on: send them home first.
+    if (idx === 0) flyRevealCards(rc => rc.tileKey === null, 120);
+    setRevealFocusTile(step.tile_key);
+  }, [resolutionSteps, flyRevealCards]);
+  const handleResolveStepEnd = useCallback((idx: number) => {
+    const step = resolutionSteps[idx];
+    if (!step || lastStepByTile.get(step.tile_key) !== idx) return;
+    setRevealFocusTile(null);
+    flyRevealCards(rc => rc.tileKey === step.tile_key, 90);
+  }, [resolutionSteps, lastStepByTile, flyRevealCards]);
+
+  // Once every revealed card is home, hand the discard count back to the state.
+  useEffect(() => {
+    if (revealCards && revealCards.length === 0 && boardFlights.length === 0 && boardBurns.length === 0) {
+      setRevealCards(null);
+      setDiscardCountOverride(null);
+    }
+  }, [revealCards, boardFlights.length, boardBurns.length]);
+  // A new round never inherits the last reveal (e.g. animations interrupted).
+  useEffect(() => {
+    if (phase === 'upkeep' || phase === 'play') {
+      if (revealCardsRef.current) {
+        revealCardsRef.current = null;
+        setRevealCards(null);
+        setDiscardCountOverride(null);
+      }
+      setRevealFocusTile(null);
+    }
+  }, [phase]);
+
+  // War Banner pulse: (1) hovering a tile whose planned Claim consumed a
+  // buff pulses the banner that granted it; (2) holding a Claim in hand
+  // pulses every banner whose buff is still waiting.
+  const warBannerPulseIds = useMemo(() => {
+    const ids = new Set<string>();
+    const actions = activePlayer?.planned_actions ?? [];
+    if (playHoveredTileKey) {
+      for (const a of actions) {
+        if (a.target_q == null || a.target_r == null || `${a.target_q},${a.target_r}` !== playHoveredTileKey) continue;
+        const src = a.consumed_claim_buff?.source_card_ids
+          ?? (a.consumed_claim_buff?.source_card_id ? [a.consumed_claim_buff.source_card_id] : []);
+        for (const id of src) ids.add(id);
+      }
+    }
+    const handClaimActive = hoveredCard?.card_type === 'claim' || selectedCard?.card_type === 'claim';
+    if (handClaimActive) {
+      for (const b of activePlayer?.claim_buffs ?? []) if (b.source_card_id) ids.add(b.source_card_id);
+    }
+    return ids;
+  }, [activePlayer?.planned_actions, activePlayer?.claim_buffs, playHoveredTileKey, hoveredCard, selectedCard]);
+
+  /** What sits on the board: cards over tiles, and engine cards in the queue. */
+  const boardCards = useMemo(() => {
+    const tiles = new Map<string, BoardCardEntry[]>();
+    const engines: BoardCardEntry[] = [];
+    const addTile = (key: string, e: BoardCardEntry) => {
+      const list = tiles.get(key);
+      if (list) list.push(e); else tiles.set(key, [e]);
+    };
+    if (revealCards) {
+      // Opponents' cards turn face up the moment the reveal banner clears.
+      const hideOthers = phaseBanner === 'reveal';
+      for (const rc of revealCards) {
+        if (hideOthers && rc.playerId !== activePlayerId) continue;
+        if (rc.tileKey) addTile(rc.tileKey, rc);
+        else if (rc.playerId === activePlayerId) engines.push(rc);
+      }
+      return { tiles, engines };
+    }
+    // Planned cards show during play only — at the reveal they become revealCards
+    // (planned_actions linger on the server until the next round).
+    if (phase !== 'play' || showIntro || introSequence !== 'done') return { tiles, engines };
+    const actions = activePlayer?.planned_actions ?? [];
+    actions.forEach((a, i) => {
+      const c = a.effective_power != null ? { ...a.card, power: a.effective_power } : a.card;
+      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: actions.slice(0, i).map(b => b.card.name), effectiveResourceGain: a.effective_resource_gain, effectiveDrawCards: a.effective_draw_cards };
+      const base = { card: c, subtitleParts: buildCardSubtitle(c, ctx), playerId: activePlayerId, arriving: arrivingIds.has(a.card.id) };
+      if (a.target_q != null && a.target_r != null) {
+        const key = `${a.target_q},${a.target_r}`;
+        addTile(key, { ...base, key: `${a.card.id}@${key}` });
+        for (const [eq, er] of a.extra_targets ?? []) addTile(`${eq},${er}`, { ...base, key: `${a.card.id}@${eq},${er}` });
+      } else {
+        engines.push({ ...base, key: `${a.card.id}@queue`, pulse: warBannerPulseIds.has(a.card.id) });
+      }
+    });
+    return { tiles, engines };
+  }, [revealCards, phase, phaseBanner, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds]);
+  const tileCardKeys = useMemo(() => [...boardCards.tiles.keys()], [boardCards]);
+
+  /** Click a board card: one card opens the zoom; several show side by side. */
+  const openBoardCards = useCallback((entries: BoardCardEntry[], index: number) => {
+    if (entries.length === 1) {
+      showZoom(entries[index].card);
+      return;
+    }
+    setDetailCards(entries.map(e => ({ card: e.card, subtitleParts: e.subtitleParts, playerId: e.playerId, playerName: e.playerName })));
+  }, [showZoom]);
+
+  const renderTileCards = (tileKey: string, zoom: number) => {
+    const entries = boardCards.tiles.get(tileKey);
+    if (!entries) return null;
+    const undoable = !revealCards && undoableTiles?.has(tileKey);
+    return (
+      <TileCardStack
+        entries={entries}
+        scale={boardCardScale(zoom)}
+        focus={revealFocusTile === tileKey}
+        faded={draggingCardIndex !== null}
+        onOpen={openBoardCards}
+        onUndo={undoable ? () => {
+          const [q, r] = tileKey.split(',').map(Number);
+          handleTileLongPress(q, r);
+        } : undefined}
+      />
+    );
+  };
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', color: '#fff',
@@ -4887,6 +5108,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               dragHoverPosition={draggingCardIndex !== null ? dragHoverPos : null}
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
               plannedActions={phase === 'play' ? plannedActions : undefined}
+              tileCardKeys={tileCardKeys}
+              renderTileCards={renderTileCards}
               previewCard={phase === 'play' ? (() => {
                 // Strike Team: preview gets +2/+3 power if the active player has
                 // already played another Claim this round (mirrors backend
@@ -4991,6 +5214,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
             {/* Expandable player panel */}
             <div
+              ref={playerPanelRef}
               onMouseEnter={() => setPlayerPanelExpanded(true)}
               onMouseLeave={() => setPlayerPanelExpanded(false)}
               style={{
@@ -5002,7 +5226,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 pointerEvents: hudVisible ? 'auto' : 'none',
               }}
             >
-              {(playerPanelExpanded || forcePlayerPanelExpanded || reviewing || phase === 'buy' || anyPlayerReachedVp || showGameOver) ? (
+              {(playerPanelExpanded || forcePlayerPanelExpanded || reviewing || resolving || !!revealCards || phase === 'buy' || anyPlayerReachedVp || showGameOver) ? (
                 /* Expanded: all players */
                 <div style={{ padding: 6 }}>
                   {gameState.player_order.map((pid, i) => {
@@ -5030,7 +5254,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                             if (actions.length === 1) {
                               showZoom(actions[0].card);
                             } else {
-                              setReviewFullCards(actions.map(a => ({ playerId: pid, playerName: name, card: a.card })));
+                              setDetailCards(actions.map(a => ({ playerId: pid, playerName: name, card: a.card })));
                             }
                           }
                         }}
@@ -5088,255 +5312,21 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               )}
             </div>
 
-            {/* In Play card list — shown during play phase when active player has played cards */}
-            {phase === 'play' && activePlayer && activePlayer.planned_actions.length > 0 && !resolving && !showIntro && introSequence === 'done' && (() => {
-              const COL_W = 134;
-              const PAD = 6;
-              const actions = activePlayer.planned_actions;
-              const GAP = 4;
-              // Fade out while the player is dragging any card so they can drop
-              // on tiles hidden beneath the list.
-              const isDraggingCard = draggingCardIndex !== null;
-              // War Banner pulse: triggers in two scenarios.
-              //  1) Player hovers a tile that has a planned Claim which
-              //     consumed a buff → pulse the specific War Banner that
-              //     originated that buff (via consumed_claim_buff.source_card_id).
-              //  2) Player is about to play a Claim (a Claim card is
-              //     selected or hovered in-hand) → pulse every War Banner in
-              //     the list whose buff is still unconsumed, so the player
-              //     sees which Claim-targeted plays will still be boosted.
-              const warBannerPulseIdx = new Set<number>();
-              if (playHoveredTileKey) {
-                for (const a of actions) {
-                  if (a.target_q == null || a.target_r == null) continue;
-                  if (`${a.target_q},${a.target_r}` !== playHoveredTileKey) continue;
-                  const ids = a.consumed_claim_buff?.source_card_ids
-                    ?? (a.consumed_claim_buff?.source_card_id ? [a.consumed_claim_buff.source_card_id] : []);
-                  for (const src of ids) {
-                    const srcIdx = actions.findIndex(b => b.card.id === src);
-                    if (srcIdx >= 0) warBannerPulseIdx.add(srcIdx);
-                  }
-                }
-              }
-              const handClaimActive = (hoveredCard?.card_type === 'claim') || (selectedCard?.card_type === 'claim');
-              if (handClaimActive && activePlayer.claim_buffs && activePlayer.claim_buffs.length > 0) {
-                const unclaimedSources = new Set(
-                  activePlayer.claim_buffs
-                    .map(b => b.source_card_id)
-                    .filter((id): id is string => !!id)
-                );
-                actions.forEach((a, idx) => {
-                  if (unclaimedSources.has(a.card.id)) warBannerPulseIdx.add(idx);
-                });
-              }
-              return (
-                <div
-                  ref={inPlayContainerRef}
-                  className="in-play-list"
-                  style={{
-                    ...HUD_PANEL_STYLE,
-                    marginTop: 6,
-                    padding: PAD,
-                    width: COL_W + PAD * 2 + 2, // card width + padding + border
-                    maxHeight: 'calc(100dvh - 420px)',
-                    overflowY: 'auto',
-                    boxSizing: 'border-box',
-                    opacity: isDraggingCard ? 0 : 1,
-                    pointerEvents: isDraggingCard ? 'none' : 'auto',
-                    transition: 'opacity 0.15s ease-out',
-                  }}
-                >
-                  <style>{`
-                    .in-play-list::-webkit-scrollbar { width: 4px; }
-                    .in-play-list::-webkit-scrollbar-track { background: transparent; }
-                    .in-play-list::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
-                    .in-play-list { scrollbar-width: thin; scrollbar-color: #555 transparent; }
-                    @keyframes warBannerPulse {
-                      0%, 100% { box-shadow: 0 0 4px 1px rgba(255, 215, 0, 0.3); }
-                      50% { box-shadow: 0 0 10px 2px rgba(255, 215, 0, 0.85); }
-                    }
-                    .war-banner-pulse { animation: warBannerPulse 1.8s ease-in-out infinite; }
-                  `}</style>
-                  <div style={{ fontSize: 10, color: 'var(--cc-gold)', opacity: 0.8, textTransform: 'uppercase', letterSpacing: 1.5, fontFamily: 'var(--cc-font-display)', fontWeight: 700, marginBottom: 5 }}>
-                    In Play ({actions.length})
-                  </div>
-                  <div style={{
-                    columnWidth: COL_W,
-                    columnGap: GAP,
-                  }}>
-                    {actions.map((action, i) => {
-                      const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
-                      const typeColor = getCardDisplayColor(c);
-                      const priorNames = actions.slice(0, i).map(a => a.card.name);
-                      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
-                      const statParts = buildCardSubtitle(c, ctx);
-                      const pulseBanner = warBannerPulseIdx.has(i);
-                      return (
-                        <div
-                          key={i}
-                          ref={(el) => { if (el) inPlayCardRefs.current.set(i, el); else inPlayCardRefs.current.delete(i); }}
-                          onPointerEnter={() => setInPlayHoverIndex(i)}
-                          onPointerLeave={() => setInPlayHoverIndex(null)}
-                          className={pulseBanner ? 'war-banner-pulse' : undefined}
-                          style={{
-                            width: COL_W,
-                            padding: '3px 6px',
-                            background: miniCardBackground(typeColor, inPlayHoverIndex === i ? '#33335a' : undefined),
-                            border: `1px solid ${typeColor}`,
-                            borderRadius: 6,
-                            boxShadow: MINI_CARD_SHADOW,
-                            color: '#fff',
-                            marginBottom: GAP,
-                            breakInside: 'avoid' as const,
-                            cursor: 'default',
-                            transition: 'background 0.1s, opacity 0.15s',
-                            opacity: inPlayExitAnims[i]?.active ? 0 : 1,
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                            <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              <CardName name={c.name} upgraded={c.is_upgraded} />
-                            </div>
-                          </div>
-                          <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-                              if (el) {
-                                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                                el.style.setProperty('--sub-scale', String(scale));
-                              }
-                            }}>
-                              {renderSubtitle(statParts, { fontSize: 11, passiveVp: c.passive_vp })}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* In Play hover preview — CardFull popup to the right */}
-            {inPlayHoverIndex !== null && activePlayer && activePlayer.planned_actions[inPlayHoverIndex] && inPlayContainerRef.current && (() => {
-              const action = activePlayer.planned_actions[inPlayHoverIndex];
-              const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
-              const containerRect = inPlayContainerRef.current!.getBoundingClientRect();
-              return createPortal(
-                <div style={{
-                  position: 'fixed',
-                  left: containerRect.right + 12,
-                  top: Math.min(containerRect.top, window.innerHeight - 320),
-                  width: 220,
-                  zIndex: 20000,
-                  pointerEvents: 'none',
-                }}>
-                  <CardFull card={c} showKeywordHints />
-                </div>,
-                document.body
-              );
-            })()}
-
-            {/* Staggered exit animation portals for in-play cards */}
-            {inPlayExitAnims.length > 0 && createPortal(
-              <>
-                {inPlayExitAnims.map((anim, idx) => {
-                  const typeColor = getCardDisplayColor(anim.card);
-                  const cardInner = (
-                    <div style={{
-                      width: anim.rect.width, padding: '3px 6px', background: '#2a2a3e',
-                      border: `1px solid ${typeColor}`, borderRadius: 5,
-                      color: '#fff', boxSizing: 'border-box',
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          <CardName name={anim.card.name} upgraded={anim.card.is_upgraded} />
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                        {renderSubtitle(anim.subtitleParts, { fontSize: 11, passiveVp: anim.card.passive_vp })}
-                      </div>
-                    </div>
-                  );
-
-                  if (anim.type === 'trash') {
-                    // Tear animation: two halves split, rotate outward, rise, fade
-                    const durMs = Math.round(500 * animSpeed);
-                    const fadeDurMs = Math.round(300 * animSpeed);
-                    const halfW = anim.rect.width / 2;
-                    const dy = anim.active ? -120 : 0;
-                    return [
-                      <div key={`tear-L-${idx}`} style={{
-                        position: 'fixed', left: anim.rect.left, top: anim.rect.top,
-                        width: halfW, height: anim.rect.height, overflow: 'hidden',
-                        transform: anim.active
-                          ? `translate(${-10}px, ${dy}px) rotate(-8deg)`
-                          : 'translate(0, 0) rotate(0deg)',
-                        transformOrigin: 'right center',
-                        opacity: anim.active ? 0 : 1,
-                        transition: anim.active
-                          ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in ${Math.round(durMs * 0.4)}ms`
-                          : 'none',
-                        pointerEvents: 'none', zIndex: 9990,
-                      }}>
-                        <div style={{ width: anim.rect.width }}>{cardInner}</div>
-                      </div>,
-                      <div key={`tear-R-${idx}`} style={{
-                        position: 'fixed', left: anim.rect.left + halfW, top: anim.rect.top,
-                        width: halfW, height: anim.rect.height, overflow: 'hidden',
-                        transform: anim.active
-                          ? `translate(${10}px, ${dy}px) rotate(8deg)`
-                          : 'translate(0, 0) rotate(0deg)',
-                        transformOrigin: 'left center',
-                        opacity: anim.active ? 0 : 1,
-                        transition: anim.active
-                          ? `transform ${durMs}ms ease-in, opacity ${fadeDurMs}ms ease-in ${Math.round(durMs * 0.4)}ms`
-                          : 'none',
-                        pointerEvents: 'none', zIndex: 9990,
-                      }}>
-                        <div style={{ width: anim.rect.width, marginLeft: -halfW }}>{cardInner}</div>
-                      </div>,
-                    ];
-                  }
-
-                  // Discard arc animation: arc toward discard pile, smooth scale with eased grow/shrink, late fade
-                  const durMs = Math.round(1000 * animSpeed);
-                  const dx = anim.targetX - (anim.rect.left + anim.rect.width / 2);
-                  const dy = anim.targetY - (anim.rect.top + anim.rect.height / 2);
-                  const rot = anim.rotation;
-                  const animName = `inPlayArc_${idx}`;
-                  // Scale uses a sine-like curve: 1 → 1.5 peak at ~30% → back to 0.5 at end
-                  const arcPeak = -50;
-                  const keyframes = `@keyframes ${animName} {
-                    0% { transform: translate(0, 0) scale(1) rotate(0deg); opacity: 1; }
-                    15% { transform: translate(${dx * 0.08}px, ${dy * 0.08 + arcPeak * 0.6}px) scale(1.35) rotate(${rot * 0.1}deg); opacity: 1; }
-                    30% { transform: translate(${dx * 0.2}px, ${dy * 0.2 + arcPeak}px) scale(1.5) rotate(${rot * 0.25}deg); opacity: 1; }
-                    50% { transform: translate(${dx * 0.4}px, ${dy * 0.4 + arcPeak * 0.7}px) scale(1.35) rotate(${rot * 0.45}deg); opacity: 1; }
-                    70% { transform: translate(${dx * 0.6}px, ${dy * 0.6 + arcPeak * 0.2}px) scale(1.0) rotate(${rot * 0.7}deg); opacity: 1; }
-                    85% { transform: translate(${dx * 0.8}px, ${dy * 0.8}px) scale(0.7) rotate(${rot * 0.88}deg); opacity: 1; }
-                    90% { transform: translate(${dx * 0.88}px, ${dy * 0.88}px) scale(0.6) rotate(${rot * 0.93}deg); opacity: 1; }
-                    100% { transform: translate(${dx}px, ${dy}px) scale(0.5) rotate(${rot}deg); opacity: 0; }
-                  }`;
-                  return (
-                    <div key={`arc-${idx}`}>
-                      <style>{keyframes}</style>
-                      <div style={{
-                        position: 'fixed',
-                        left: anim.rect.left,
-                        top: anim.rect.top,
-                        width: anim.rect.width,
-                        height: anim.rect.height,
-                        animation: anim.active ? `${animName} ${durMs}ms linear forwards` : 'none',
-                        pointerEvents: 'none',
-                        zIndex: 9990,
-                        transformOrigin: 'center center',
-                      }}>
-                        {cardInner}
-                      </div>
-                    </div>
-                  );
-                })}
-              </>,
-              document.body
+            {/* Engine cards played this round — queued under the ID card */}
+            {boardCards.engines.length > 0 && (
+              <div style={{
+                ...HUD_PANEL_STYLE,
+                marginTop: 6,
+                padding: 6,
+                width: 200,
+                boxSizing: 'border-box',
+                // Out of the way while a card is dragged from the hand.
+                opacity: draggingCardIndex !== null ? 0.15 : 1,
+                pointerEvents: draggingCardIndex !== null ? 'none' : 'auto',
+                transition: 'opacity 0.15s ease-out',
+              }}>
+                <EngineQueue entries={boardCards.engines} onOpen={openBoardCards} containerRef={inPlayContainerRef} />
+              </div>
             )}
           </div>
 
@@ -6021,11 +6011,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
         {/* Bottom panel: hand */}
         <div style={{ padding: '0 8px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
-          {/* Drag hint tooltip — right above the card hand */}
+          {/* Drag hint tooltip — just above the resting hand cards */}
           {showDragHint && (
             <div style={{
               position: 'absolute',
-              top: -24,
+              top: -72,
               left: '50%',
               transform: 'translateX(-50%)',
               zIndex: 35,
@@ -6161,6 +6151,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           fxRef={boardFxRef}
           onStepApply={applyResolveStep}
           onComplete={handleResolveComplete}
+          onStepStart={handleResolveStepStart}
+          onStepEnd={handleResolveStepEnd}
         />
       )}
 
@@ -6300,48 +6292,20 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         );
       })()}
 
-      {/* Review mode: full-screen card overlay (tile click or player click) */}
-      {reviewing && reviewFullCards && reviewFullCards.length > 0 && (
-        <div
-          onClick={() => setReviewFullCards(null)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 10000,
-            background: 'rgba(0, 0, 0, 0.85)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-          }}
-        >
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            justifyContent: 'center',
-            gap: 20,
-            maxWidth: 4 * (220 + 20) + 20,
-            padding: 24,
-          }}>
-            {reviewFullCards.map((entry, i) => {
-              const numColor = PLAYER_COLORS[entry.playerId];
-              const color = numColor != null ? `#${numColor.toString(16).padStart(6, '0')}` : '#888';
-              return (
-                <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-                  <CardFull card={entry.card} />
-                  <div style={{ fontSize: 12, fontWeight: 'bold', color }}>
-                    {entry.playerName}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ marginTop: 16, fontSize: 12, color: '#666' }}>
-            Click anywhere to close
-          </div>
-        </div>
+      {/* Several cards at full size (a tile's cards, the queue, a player's plays) */}
+      {detailCards && detailCards.length > 0 && (
+        <CardDetailOverlay entries={detailCards} onClose={() => setDetailCards(null)} />
       )}
+
+      {/* Played cards flying home after the reveal, and trashed ones burning */}
+      {boardFlights.length > 0 && createPortal(
+        <>{boardFlights.map(f => <FlightCard key={f.key} flight={f} onDone={handleBoardFlightDone} />)}</>,
+        document.body,
+      )}
+      {boardBurns.map(b => (
+        <TrashBurn key={b.key} card={b.card} pose={b.pose} speed={animSpeed || 1} maxScale={0.5}
+          onDone={() => setBoardBurns(prev => prev.filter(x => x.key !== b.key))} />
+      ))}
 
       {/* Player effect popups (e.g. Sabotage forced discard) — shown over target base tiles.
           Lifecycle is self-managed by the component: intro fade-in → settle into stack

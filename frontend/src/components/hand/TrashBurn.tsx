@@ -13,13 +13,15 @@ const BURN_K = 11;
  * them along a noise field with a glowing ember front and a charred rim,
  * while sparks and smoke drift up.
  */
-export default function TrashBurn({ card, pose, speed, onDone }: {
+export default function TrashBurn({ card, pose, speed, onDone, maxScale = 0.9 }: {
   card: Card;
   /** Screen pose of the card when it was trashed. */
   pose: Pose;
   /** Animation duration multiplier (1 normal, 0.5 fast). */
   speed: number;
   onDone: () => void;
+  /** Largest size the card rises to before it rips. */
+  maxScale?: number;
 }) {
   const uid = useId().replace(/[^a-zA-Z0-9]/g, '');
   const filterId = `cc-burn-${uid}`;
@@ -52,14 +54,14 @@ export default function TrashBurn({ card, pose, speed, onDone }: {
 
   // Before it rips, the card rises clear of the hand to a readable size.
   const lift = useMemo<Pose>(() => {
-    const scale = Math.max(pose.scale, Math.min(0.9, (window.innerHeight * 0.42) / CARD_H));
+    const scale = Math.max(pose.scale, Math.min(maxScale, (window.innerHeight * 0.42) / CARD_H));
     return {
       x: pose.x,
       y: Math.min(pose.y, window.innerHeight - (CARD_H * scale) / 2 - 36),
       rot: 0,
       scale,
     };
-  }, [pose]);
+  }, [pose, maxScale]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const sparks = useMemo(() => Array.from({ length: 22 }, (_, i) => ({

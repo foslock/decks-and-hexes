@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Vector3 } from 'three';
 import type { Card, HexTile } from '../types/game';
@@ -8,6 +8,8 @@ import type { IconName } from '../icons/glyphs';
 import { ACTION_SIZE, BoardLabelRow, TILE_SIZE, defenseRow, row, type LabelRow } from './BoardLabel';
 import { HEX_DIRS, type GridTransform } from '../utils/hexGeometry';
 import { BoardEngine } from '../board3d/engine';
+import { CARD_FULL_HEIGHT } from './CardFull';
+import { boardCardScale } from './BoardCards';
 import { TOKEN_LABEL_LIFT, type TokenKind, type TokenSpec } from '../board3d/markers';
 import {
   PLAYER_COLORS, computeStackingPowerBonus,
@@ -28,6 +30,10 @@ export interface BoardControls {
   toggleTilt(): void;
   resetView(): void;
   zoom(factor: number): void;
+  /** Where a tile's card stack sits on screen — its bottom-center, or its
+   *  top-center when it hangs below the tile (`below`, near the board's top
+   *  edge) — and the board's label zoom. Lets a played card land right on it. */
+  tileAnchor(key: string): { x: number; y: number; zoom: number; below: boolean } | null;
 }
 
 interface GameBoardProps {
@@ -46,6 +52,10 @@ interface GameBoardProps {
   borderTiles?: Set<string>;
   activePlayerId?: string;
   plannedActions?: Map<string, PlannedActionIcon>;
+  /** Tiles that have played cards floating above them. */
+  tileCardKeys?: string[];
+  /** Renders a tile's card stack; `zoom` follows the board's zoom (≈1 at fit). */
+  renderTileCards?: (tileKey: string, zoom: number) => React.ReactNode;
   /** Card currently selected or being dragged — used for hover preview on valid tiles */
   previewCard?: Card | null;
   /** All tiles the preview card can legally be played on */
@@ -181,6 +191,7 @@ export default function GameBoard(props: GameBoardProps) {
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths,
     connectedVpTiles, disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
     paused, undoableTiles, fxRef, controlsRef, showCameraControls, dragHoverPosition,
+    tileCardKeys, renderTileCards,
   } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BoardEngine | null>(null);
@@ -238,6 +249,16 @@ export default function GameBoard(props: GameBoardProps) {
         toggleTilt: () => engine.toggleTilt(),
         resetView: () => engine.resetView(),
         zoom: (f) => engine.zoomBy(f),
+        tileAnchor: (key) => {
+          const host = hostRef.current;
+          const pt = { x: 0, y: 0 };
+          if (!host) return null;
+          const h = tileCardEls.current.get(key)?.offsetHeight || CARD_FULL_HEIGHT * boardCardScale(labelScaleRef.current);
+          const placed = placeStackRef.current(engine, key, h, pt);
+          if (placed === null) return null;
+          const r = host.getBoundingClientRect();
+          return { x: pt.x + r.left, y: pt.y + r.top, zoom: labelScaleRef.current, below: placed };
+        },
       };
     }
     setReady(true);
@@ -303,8 +324,8 @@ export default function GameBoard(props: GameBoardProps) {
     const planned = p.plannedActions?.get(key);
     const mtCard = p.previewCard;
     const isMulti = mtCard && p.multiTileTargets?.some(([sq, sr]) => `${sq},${sr}` === key);
-    if (planned) {
-      return { x, y, cx, cy, allCards: planned.allCards, undoable: p.undoableTiles?.has(key) };
+    if (planned && p.undoableTiles?.has(key)) {
+      return { x, y, cx, cy, text: 'Hold to undo' };
     }
     if (isMulti && mtCard) {
       const permDef = mtCard.effects?.find(e => e.type === 'permanent_defense');
@@ -658,8 +679,61 @@ export default function GameBoard(props: GameBoardProps) {
         const a = engine.buildAlpha(l.key);
         el.style.opacity = a >= 1 ? '' : a.toFixed(3);
       }
+      positionTileCards(engine);
     });
   }, [noWebgl]);
+
+  // ── Played cards floating over tiles ──
+  const tileCardEls = useRef(new Map<string, HTMLDivElement>());
+  const tileCardKeysRef = useRef(tileCardKeys ?? []);
+  tileCardKeysRef.current = tileCardKeys ?? [];
+  const labelByKey = useMemo(() => new Map(labels.map(l => [l.key, l])), [labels]);
+  const labelByKeyRef = useRef(labelByKey);
+  labelByKeyRef.current = labelByKey;
+  /** Where a tile's card stack sits: above the tile's label when it has one
+   *  (planned power / defense readout), else just above the tile. */
+  const tileCardAnchorRef = useRef((engine: BoardEngine, key: string, out: { x: number; y: number }): boolean => {
+    const tile = live.current.tiles[key];
+    if (!tile) return false;
+    const l = labelByKeyRef.current.get(key);
+    const lift = l ? l.lift : tile.is_vp ? (tile.vp_value >= 2 ? 0.5 : 0.42) : tile.is_base ? 0.3 : 0.12;
+    const w = engine.tileWorld(key, lift + engine.tiltFactor * 0.42);
+    if (!w) return false;
+    engine.projectWorld(w, out);
+    if (l) out.y -= l.rows.length * 21 * labelScaleRef.current + 4;
+    return true;
+  });
+  /** Place a stack `height` px tall: above the tile, or hanging below it
+   *  when there's no room above. Returns whether it's below (null: no tile). */
+  const placeStackRef = useRef((engine: BoardEngine, key: string, height: number, out: { x: number; y: number }): boolean | null => {
+    if (!tileCardAnchorRef.current(engine, key, out)) return null;
+    if (out.y - height >= 6) return false;
+    const g = engine.tileWorld(key, 0.04);
+    if (!g) return false;
+    engine.projectWorld(g, out);
+    out.y += 12 * labelScaleRef.current;
+    return true;
+  });
+  const positionTileCards = (engine: BoardEngine) => {
+    const pt = { x: 0, y: 0 };
+    const keys = tileCardKeysRef.current;
+    // Read sizes first, then write transforms (no layout thrash).
+    const heights = keys.map(k => tileCardEls.current.get(k)?.offsetHeight ?? 0);
+    keys.forEach((key, i) => {
+      const el = tileCardEls.current.get(key);
+      if (!el) return;
+      const below = placeStackRef.current(engine, key, heights[i], pt);
+      if (below === null) return;
+      el.style.transform = `translate3d(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px, 0) translate(-50%, ${below ? '0' : '-100%'})`;
+      const a = engine.buildAlpha(key);
+      el.style.opacity = a >= 1 ? '' : a.toFixed(3);
+    });
+  };
+  // Place stacks as soon as they mount, without waiting for the next frame.
+  useLayoutEffect(() => {
+    const engine = engineRef.current;
+    if (engine && tileCardKeys?.length) positionTileCards(engine);
+  });
 
   const hasLabels = labels.length > 0;
   const engine = ready ? engineRef.current : null;
@@ -681,6 +755,19 @@ export default function GameBoard(props: GameBoardProps) {
               className={`cc-board-label${l.prominent ? ' is-prominent' : ''}`}
             >
               {l.rows.map((r, i) => <BoardLabelRow key={i} r={r} scale={labelScale} />)}
+            </div>
+          ))}
+        </div>
+      )}
+      {tileCardKeys && tileCardKeys.length > 0 && renderTileCards && (
+        <div className="cc-board-tilecards">
+          {tileCardKeys.map(key => (
+            <div
+              key={key}
+              ref={el => { if (el) tileCardEls.current.set(key, el); else tileCardEls.current.delete(key); }}
+              className="cc-board-tilecard"
+            >
+              {renderTileCards(key, labelScale)}
             </div>
           ))}
         </div>

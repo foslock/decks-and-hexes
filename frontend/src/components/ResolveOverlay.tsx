@@ -145,6 +145,10 @@ interface ResolveOverlayProps {
   onStepApply?: (stepIndex: number) => void;
   /** Called after all steps have been animated. */
   onComplete: () => void;
+  /** A step starts animating (its tile is the one being resolved). */
+  onStepStart?: (stepIndex: number) => void;
+  /** A step finished animating. */
+  onStepEnd?: (stepIndex: number) => void;
   /** The 3D board's effects API — wedges, fortification rings, sparks, shockwaves. */
   fxRef?: React.RefObject<BoardFx | null>;
 }
@@ -169,7 +173,7 @@ type StepStage = 'numbers_move' | 'winner_grow' | 'done' | 'br_fortify' | 'br_ra
  * one-by-one: power numbers fly in from source tiles, bounce at the center,
  * then the winner's number grows while losers fade.
  */
-export default function ResolveOverlay({ steps, gridTransform: gridTransformProp, gridRect, gridContainerRef, gridTransformRef, onStepApply, onComplete, fxRef }: ResolveOverlayProps) {
+export default function ResolveOverlay({ steps, gridTransform: gridTransformProp, gridRect, gridContainerRef, gridTransformRef, onStepApply, onComplete, onStepStart, onStepEnd, fxRef }: ResolveOverlayProps) {
   // Snapshot rect + transform measured in useLayoutEffect (fires after DOM
   // commit, before paint) so we always get post-layout values rather than
   // stale values captured during React's render phase.
@@ -205,6 +209,10 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   onCompleteRef.current = onComplete;
   const onStepApplyRef = useRef(onStepApply);
   onStepApplyRef.current = onStepApply;
+  const onStepStartRef = useRef(onStepStart);
+  onStepStartRef.current = onStepStart;
+  const onStepEndRef = useRef(onStepEnd);
+  onStepEndRef.current = onStepEnd;
 
   const step = steps[currentIdx] as ResolutionStep | undefined;
 
@@ -882,10 +890,23 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, numbersActive, step, moveMs, growMs, isOff, currentIdx, fireStepApply, hasPositionData, isWedgeBattle, isBaseRaid, baseRaidCaptured, fortifyMs, ramMs, finalMs]);
 
+  // Tell the parent which tile is resolving.
+  const startedStepsRef = useRef(new Set<number>());
+  const endedStepsRef = useRef(new Set<number>());
+  useEffect(() => {
+    if (!step || startedStepsRef.current.has(currentIdx)) return;
+    startedStepsRef.current.add(currentIdx);
+    onStepStartRef.current?.(currentIdx);
+  }, [currentIdx, step]);
+
   // Advance to next step or complete
   useEffect(() => {
     if (stage !== 'done') return;
     if (completedRef.current) return;
+    if (!endedStepsRef.current.has(currentIdx)) {
+      endedStepsRef.current.add(currentIdx);
+      onStepEndRef.current?.(currentIdx);
+    }
 
     const nextIdx = currentIdx + 1;
     if (nextIdx >= steps.length) {
