@@ -4,14 +4,11 @@ import type { Card } from '../types/game';
 import { BASE } from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { getUpgradedPreview } from '../hooks/upgradePreview';
-import { buildCardSubtitle } from './cardSubtitle';
-import { renderSubtitle } from './SubtitlePartRenderer';
-import { CostLabel } from '../icons/Num';
 import { useShiftKey } from '../hooks/useShiftKey';
-import { CARD_TYPE_COLORS, CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
+import { CARD_TYPE_COLORS, getCardDisplayColor } from '../constants/cardColors';
 import { useCardZoom } from './CardZoomContext';
 import Icon from '../icons/Icon';
-import CardName from './CardName';
+import CompactCardFace from './CompactCardFace';
 
 const ARCHETYPE_ORDER = ['shared', 'vanguard', 'swarm', 'fortress'];
 
@@ -92,31 +89,7 @@ function BrowserCardCompact({ card, shiftHeld, onShiftClick, cardList }: { card:
       className={`cc-scr-cb-card${flashAdded ? ' is-flash' : ''}`}
       style={{ ['--cb-color' as string]: color }}
     >
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-              if (el) {
-                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                el.style.setProperty('--title-scale', String(scale));
-              }
-            }}>
-              <CardName name={displayCard.name} upgraded={displayCard.is_upgraded} />
-            </span>
-          </div>
-          <span style={{ fontSize: 15, flexShrink: 0, color: 'var(--cc-gold)', fontWeight: 700, whiteSpace: 'nowrap' }}><CostLabel cost={displayCard.buy_cost} size={15} /></span>
-        </div>
-        <div style={{ fontSize: 15, color: 'var(--cc-text-dim)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-          <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-            if (el) {
-              const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-              el.style.setProperty('--sub-scale', String(scale));
-            }
-          }}>
-          {renderSubtitle(buildCardSubtitle(displayCard), { fontSize: 15, passiveVp: displayCard.passive_vp })}
-          </span>
-        </div>
-      </div>
+      <CompactCardFace card={displayCard} width={154} />
       {hoverRect && createPortal(
         <div style={{
           position: 'fixed',

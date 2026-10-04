@@ -15,21 +15,21 @@ import ResolveOverlay from './ResolveOverlay';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
-import { CARD_TYPE_COLORS } from '../constants/cardColors';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } from './SettingsContext';
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
-import { renderSubtitle } from './SubtitlePartRenderer';
-import CardName, { plainCardName } from './CardName';
+import { plainCardName } from './CardName';
+import CompactCardFace from './CompactCardFace';
 import { TileCardStack, EngineQueue, CardDetailOverlay, boardCardScale, fanOffset, QUEUE_CARD_SCALE, type BoardCardEntry } from './BoardCards';
 import FlightCard, { type Flight } from './hand/FlightCard';
 import TrashBurn from './hand/TrashBurn';
 import { discardTopSpin } from './hand/CardPile';
 import { CARD_H, CARD_W, PILE_SCALE, PILE_TILT, easeInOut, elementCenter, flightKeyframes, poseTransform, type Pose } from './hand/cardMotion';
+import { handSizing, handStripHeight, REST_VISIBLE } from './hand/handLayout';
 import Icon from '../icons/Icon';
-import { CostLabel, IconValue, Num } from '../icons/Num';
+import { IconValue, Num } from '../icons/Num';
 import { useSound } from '../audio/useSound';
 import { useCardZoom } from './CardZoomContext';
 import { computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
@@ -1066,6 +1066,47 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const testDebtRecipientRef = useRef<{ id: string; name: string } | null>(null);
   const testDebtBannerRef = useRef(false); // true when banner is from test "Give Debt" button
   const submitPlayRef = useRef<HoldToSubmitHandle>(null);
+  // Errors float just above the top of the resting hand (which rises out of
+  // its bottom strip) — and on phones, where the toast spans the screen, above
+  // the actions / Submit row too — and fade after a few seconds.
+  const handSizes = handSizing(window.innerWidth, window.innerHeight);
+  const errorToastBottom = Math.round(Math.max(handStripHeight(handSizes), CARD_H * handSizes.rest * REST_VISIBLE))
+    + 14 + (window.innerWidth < 640 ? 58 : 0);
+
+  // The board draws on under the hand panel (the water runs to the screen
+  // edge) but frames the island above the resting hand cards.
+  const [handPanelH, setHandPanelH] = useState(0);
+  const handPanelRo = useRef<ResizeObserver | null>(null);
+  const handPanelRef = useCallback((el: HTMLDivElement | null) => {
+    handPanelRo.current?.disconnect();
+    handPanelRo.current = null;
+    if (!el) return;
+    const measure = () => setHandPanelH(Math.round(el.getBoundingClientRect().height));
+    measure();
+    handPanelRo.current = new ResizeObserver(measure);
+    handPanelRo.current.observe(el);
+  }, []);
+  const boardViewInset = handPanelH > 0 ? Math.round(Math.max(handPanelH, CARD_H * handSizes.rest * REST_VISIBLE)) : 0;
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(null), 4000);
+    return () => clearTimeout(t);
+  }, [error]);
+  // "actions left" label beside the action counter: shown on hover, or for a
+  // few seconds after a tap on touch screens.
+  const [actionsLabelOpen, setActionsLabelOpen] = useState(false);
+  const actionsPointerRef = useRef<string>('mouse');
+  const actionsLabelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionsLabelOpenRef = useRef(actionsLabelOpen);
+  actionsLabelOpenRef.current = actionsLabelOpen;
+  const toggleActionsLabel = useCallback(() => {
+    if (actionsLabelTimerRef.current) clearTimeout(actionsLabelTimerRef.current);
+    actionsLabelTimerRef.current = null;
+    const next = !actionsLabelOpenRef.current;
+    setActionsLabelOpen(next);
+    if (next) actionsLabelTimerRef.current = setTimeout(() => setActionsLabelOpen(false), 3000);
+  }, []);
+  useEffect(() => () => { if (actionsLabelTimerRef.current) clearTimeout(actionsLabelTimerRef.current); }, []);
   const endTurnRef = useRef<HoldToSubmitHandle>(null);
   // Responsive: stack top-right buttons vertically when screen is narrow
   const [narrowTop, setNarrowTop] = useState(() => window.innerWidth < 700);
@@ -4960,7 +5001,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div
           ref={gridContainerRef}
-          style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}
+          style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'visible' }}
           onPointerDown={(e) => {
             // Presses on the board itself are handled by GameBoard (a click on
             // empty board deselects via onEmptyClick; a drag orbits the camera).
@@ -5104,6 +5145,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               fxRef={boardFxRef}
               controlsRef={boardControlsRef}
               showCameraControls={!showIntro}
+              extendBelow={handPanelH}
+              viewInsetBottom={boardViewInset}
               gridRotation={gridRotation}
               dragHoverPosition={draggingCardIndex !== null ? dragHoverPos : null}
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
@@ -5624,29 +5667,142 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             />
           ))}
 
-          {/* Toasts — floating above the hand panel */}
-          <div style={{ position: 'absolute', bottom: 8, left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, zIndex: 20, pointerEvents: 'none' }}>
-            {error && (
-              <div style={{
+          {/* Error toast — just above the resting hand cards, over everything
+              in the hand layer so a raised or inspected card can't hide it */}
+          {error && createPortal(
+            <div style={{
+              position: 'fixed',
+              left: '50%',
+              bottom: errorToastBottom,
+              transform: 'translateX(-50%)',
+              zIndex: 25000,
+              pointerEvents: 'none',
+              maxWidth: 'calc(100vw - 32px)',
+            }}>
+              <div key={error} style={{
                 fontSize: 13,
-                padding: '6px 16px',
-                background: '#ff4a4a22',
-                border: '1px solid #ff4a4a55',
-                borderRadius: 6,
-                color: '#ff4a4a',
-                whiteSpace: 'nowrap',
+                lineHeight: 1.35,
+                padding: '7px 16px',
+                background: 'rgba(42, 10, 16, 0.95)',
+                border: '1px solid #ff4a4a88',
+                borderRadius: 8,
+                color: '#ff8a8a',
+                textAlign: 'center',
+                boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
+                animation: 'cc-fade-in 0.15s ease-out both',
               }}>
                 {error}
               </div>
-            )}
-          </div>
+            </div>,
+            document.body,
+          )}
 
           {/* Bottom bar: buttons (right) —
               Wrapper is pointer-events: none so the full-width bar (including
               the left spacer) passes clicks through to the hex grid canvas
               underneath. Only the button column opts back into pointer events. */}
           <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'flex-end', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
-            <div style={{ flex: 1 }} />
+            {/* Actions left — bottom-aligned with the action buttons on the right */}
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end' }}>
+              {phase === 'play' && activePlayer && !resolving && !phaseBanner && !showIntro && !playSubmitted && introSequence === 'done' && (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`${submitActionsLeft} action${submitActionsLeft !== 1 ? 's' : ''} left`}
+                  aria-expanded={actionsLabelOpen}
+                  onPointerDown={(e) => { actionsPointerRef.current = e.pointerType; }}
+                  onPointerEnter={(e) => { if (e.pointerType === 'mouse') setActionsLabelOpen(true); }}
+                  onPointerLeave={(e) => { if (e.pointerType === 'mouse') setActionsLabelOpen(false); }}
+                  onClick={() => { if (actionsPointerRef.current !== 'mouse') toggleActionsLabel(); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleActionsLabel(); } }}
+                  style={{
+                    position: 'relative',
+                    pointerEvents: 'auto',
+                    cursor: 'default',
+                    boxSizing: 'border-box',
+                    height: 42,
+                    display: 'flex', alignItems: 'center',
+                    padding: '0 13px',
+                    background: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%), rgba(14, 14, 34, 0.85)',
+                    border: `1px solid ${submitActionsLeft > 0 ? 'rgba(232, 196, 106, 0.35)' : 'rgba(255,255,255,0.08)'}`,
+                    borderRadius: 10,
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 12px rgba(0,0,0,0.4)',
+                    opacity: submitButtonVisible ? 1 : 0,
+                    transition: 'opacity 0.4s ease-in',
+                    outline: 'none',
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute', bottom: '100%', left: 0,
+                    paddingBottom: 8,
+                    opacity: actionsLabelOpen ? 1 : 0,
+                    transition: 'opacity 0.15s ease',
+                    pointerEvents: 'none',
+                  }}>
+                    <div style={{
+                      padding: '4px 10px',
+                      background: '#111122',
+                      border: '1px solid #555',
+                      borderRadius: 6,
+                      color: '#ccc',
+                      fontSize: 12,
+                      whiteSpace: 'nowrap',
+                    }}>
+                      Playing a card costs 1 action.
+                    </div>
+                  </div>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center',
+                    fontSize: 22, lineHeight: 1, fontWeight: 900, fontFamily: 'var(--cc-font-display)',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: submitActionsLeft > 0 ? '#ffe7a8' : '#555',
+                    textShadow: submitActionsLeft > 0 ? '0 0 10px rgba(232, 196, 106, 0.45), 0 1px 2px rgba(0,0,0,0.6)' : 'none',
+                    position: 'relative',
+                  }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <Icon name="action" size={22} title="Actions" />
+                      <Num value={submitActionsLeft} style={{ fontFamily: 'inherit', fontWeight: 900, top: 0 }} />
+                    </span>
+                    {floatingActions.map(fa => (
+                      <span
+                        key={fa.id}
+                        style={{
+                          position: 'absolute',
+                          left: fa.offsetX,
+                          top: fa.offsetY,
+                          fontSize: 18,
+                          fontWeight: 'bold',
+                          color: fa.type === 'gain' ? '#4ade80' : '#ff6b6b',
+                          pointerEvents: 'none',
+                          whiteSpace: 'nowrap',
+                          animation: 'actionFloat 850ms ease-out forwards',
+                        }}
+                      >
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          {fa.type === 'gain' ? `+${fa.amount}` : `−${fa.amount}`}
+                          <Icon name="action" size={17} decorative />
+                        </span>
+                      </span>
+                    ))}
+                  </span>
+                  {/* "actions left" folds away until hovered or tapped */}
+                  <span aria-hidden style={{
+                    display: 'inline-block',
+                    overflow: 'hidden',
+                    whiteSpace: 'nowrap',
+                    maxWidth: actionsLabelOpen ? 110 : 0,
+                    marginLeft: actionsLabelOpen ? 8 : 0,
+                    opacity: actionsLabelOpen ? 1 : 0,
+                    transition: 'max-width 0.2s ease, margin-left 0.2s ease, opacity 0.15s ease',
+                    fontSize: 13,
+                    lineHeight: 1,
+                    color: submitActionsLeft > 0 ? '#aaa' : '#555',
+                  }}>
+                    action{submitActionsLeft !== 1 ? 's' : ''} left
+                  </span>
+                </div>
+              )}
+            </div>
             {/* Buttons + waiting indicators — right aligned, stacked vertically */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, pointerEvents: 'auto' }}>
             {/* Multiplayer: waiting for other players indicator */}
@@ -5927,90 +6083,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           </div>
         </div>
 
-        {/* Action counter — above hand panel (only when submit button is visible) */}
-        {phase === 'play' && activePlayer && !resolving && !phaseBanner && !showIntro && !playSubmitted && introSequence === 'done' && (
-          <div style={{ position: 'relative', zIndex: 30, opacity: submitButtonVisible ? 1 : 0, transition: 'opacity 0.4s ease-in' }}>
-            <div
-              className="action-counter-wrap"
-              style={{
-                position: 'absolute', bottom: 4, left: 12,
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '10px 14px',
-                background: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%), rgba(14, 14, 34, 0.85)',
-                border: `1px solid ${submitActionsLeft > 0 ? 'rgba(232, 196, 106, 0.35)' : 'rgba(255,255,255,0.08)'}`,
-                borderRadius: 10,
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 12px rgba(0,0,0,0.4)',
-              }}
-            >
-              <style>{`
-                .action-counter-wrap .action-counter-tip {
-                  opacity: 0;
-                  transition: opacity 0.15s ease;
-                  pointer-events: none;
-                }
-                .action-counter-wrap:hover .action-counter-tip {
-                  opacity: 1;
-                }
-              `}</style>
-              <div className="action-counter-tip" style={{
-                position: 'absolute', bottom: '100%', left: 0,
-                paddingBottom: 8,
-              }}>
-                <div style={{
-                  padding: '4px 10px',
-                  background: '#111122',
-                  border: '1px solid #555',
-                  borderRadius: 6,
-                  color: '#ccc',
-                  fontSize: 12,
-                  whiteSpace: 'nowrap',
-                }}>
-                  Playing a card costs 1 action.
-                </div>
-              </div>
-              <span style={{
-                display: 'inline-flex', alignItems: 'center',
-                fontSize: 22, lineHeight: 1, fontWeight: 900, fontFamily: 'var(--cc-font-display)',
-                fontVariantNumeric: 'tabular-nums',
-                color: submitActionsLeft > 0 ? '#ffe7a8' : '#555',
-                textShadow: submitActionsLeft > 0 ? '0 0 10px rgba(232, 196, 106, 0.45), 0 1px 2px rgba(0,0,0,0.6)' : 'none',
-                position: 'relative',
-              }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                  <Icon name="action" size={22} title="Actions" />
-                  <Num value={submitActionsLeft} style={{ fontFamily: 'inherit', fontWeight: 900, top: 0 }} />
-                </span>
-                {floatingActions.map(fa => (
-                  <span
-                    key={fa.id}
-                    style={{
-                      position: 'absolute',
-                      left: fa.offsetX,
-                      top: fa.offsetY,
-                      fontSize: 18,
-                      fontWeight: 'bold',
-                      color: fa.type === 'gain' ? '#4ade80' : '#ff6b6b',
-                      pointerEvents: 'none',
-                      whiteSpace: 'nowrap',
-                      animation: 'actionFloat 850ms ease-out forwards',
-                    }}
-                  >
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                      {fa.type === 'gain' ? `+${fa.amount}` : `−${fa.amount}`}
-                      <Icon name="action" size={17} decorative />
-                    </span>
-                  </span>
-                ))}
-              </span>
-              <span style={{ fontSize: 13, lineHeight: 1, color: submitActionsLeft > 0 ? '#aaa' : '#555' }}>
-                action{submitActionsLeft !== 1 ? 's' : ''} left
-              </span>
-            </div>
-          </div>
-        )}
-
         {/* Bottom panel: hand */}
-        <div style={{ padding: '0 8px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
+        <div ref={handPanelRef} style={{ padding: '0 8px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
           {/* Drag hint tooltip — just above the resting hand cards */}
           {showDragHint && (
             <div style={{
@@ -6162,7 +6236,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         const POPUP_W = 180;
         const left = Math.min(reviewTilePopupPos.x + 16, window.innerWidth - POPUP_W - 12);
         const top = Math.min(reviewTilePopupPos.y - 20, window.innerHeight - cards.length * 70 - 20);
-        const REVIEW_TYPE_COLORS = CARD_TYPE_COLORS;
         return (
           <div style={{
             position: 'fixed',
@@ -6181,7 +6254,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 const n = PLAYER_COLORS[entry.playerId];
                 return n != null ? `#${n.toString(16).padStart(6, '0')}` : '#888';
               })();
-              const typeColor = REVIEW_TYPE_COLORS[entry.card.card_type] || '#555';
               const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
               const playerActions = revealedActionsRef.current?.[entry.playerId] ?? [];
               const actionIdx = playerActions.findIndex(a => a.card.id === entry.card.id);
@@ -6193,31 +6265,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   <div style={{ fontSize: 10, color: playerColor, fontWeight: 'bold', marginBottom: 2 }}>
                     {entry.playerName}
                   </div>
-                  <div style={{
-                    width: 154,
-                    padding: 6,
-                    background: '#2a2a3e',
-                    border: `1px solid ${typeColor}`,
-                    borderRadius: 6,
-                    color: '#fff',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-                      <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-                        <CardName name={c.name} upgraded={c.is_upgraded} />
-                      </div>
-                      <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={c.buy_cost} size={15} /></span>
-                    </div>
-                    <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                      <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-                        if (el) {
-                          const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                          el.style.setProperty('--sub-scale', String(scale));
-                        }
-                      }}>
-                      {renderSubtitle(statParts, { fontSize: 15, passiveVp: c.passive_vp })}
-                      </span>
-                    </div>
-                  </div>
+                  <CompactCardFace card={c} width={154} subtitleParts={statParts} />
                 </div>
               );
             })}
@@ -6233,7 +6281,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (!rowEl) return null;
         const rect = rowEl.getBoundingClientRect();
         const POPUP_W = 180;
-        const REVIEW_TYPE_COLORS = CARD_TYPE_COLORS;
         const reviewPlayedCardNames = actions.map(a => a.card.name);
         return (
           <div style={{
@@ -6254,38 +6301,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               Cards Played ({actions.length})
             </div>
             {actions.map((action, i) => {
-              const typeColor = REVIEW_TYPE_COLORS[action.card.card_type] || '#555';
               const c = action.effective_power != null ? { ...action.card, power: action.effective_power } : action.card;
               const priorNames = actions.slice(0, i).map(a => a.card.name);
               const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: action.effective_resource_gain, effectiveDrawCards: action.effective_draw_cards };
               const statParts = buildCardSubtitle(c, ctx);
               return (
-                <div key={i} style={{
-                  width: 154,
-                  padding: 6,
-                  background: '#2a2a3e',
-                  border: `1px solid ${typeColor}`,
-                  borderRadius: 6,
-                  color: '#fff',
-                  marginBottom: i < actions.length - 1 ? 4 : 0,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-                    <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-                      <CardName name={c.name} upgraded={c.is_upgraded} />
-                    </div>
-                    <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={c.buy_cost} size={15} /></span>
-                  </div>
-                  <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-                    <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-                      if (el) {
-                        const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                        el.style.setProperty('--sub-scale', String(scale));
-                      }
-                    }}>
-                    {renderSubtitle(statParts, { fontSize: 15, passiveVp: c.passive_vp })}
-                    </span>
-                  </div>
-                </div>
+                <CompactCardFace key={i} card={c} width={154} subtitleParts={statParts}
+                  style={{ marginBottom: i < actions.length - 1 ? 4 : 0 }} />
               );
             })}
           </div>

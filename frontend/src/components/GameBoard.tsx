@@ -94,6 +94,11 @@ interface GameBoardProps {
   showCameraControls?: boolean;
   /** Effective drag-cursor position in client coords while a card is dragged. */
   dragHoverPosition?: { clientX: number; clientY: number } | null;
+  /** Draw the scene this many px past the bottom of the board's box (under
+   *  the hand), so the water runs to the screen edge. */
+  extendBelow?: number;
+  /** Keep the fitted board this many px clear of the canvas's bottom edge. */
+  viewInsetBottom?: number;
 }
 
 // ── Labels ──────────────────────────────────────────────────────────────
@@ -123,7 +128,7 @@ function PlannedCardsPreview({ cards, x, y, undoable }: { cards: { card: Card; e
   const colGap = 6;
   const rowGap = 4;
   const cardW = COMPACT_CARD_WIDTH + 14;
-  const cardH = 42;
+  const cardH = 47;
   const numCols = Math.ceil(cards.length / maxPerCol);
   const totalW = numCols * cardW + (numCols - 1) * colGap;
   let undoTargetIdx = -1;
@@ -191,7 +196,7 @@ export default function GameBoard(props: GameBoardProps) {
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths,
     connectedVpTiles, disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
     paused, undoableTiles, fxRef, controlsRef, showCameraControls, dragHoverPosition,
-    tileCardKeys, renderTileCards,
+    tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0,
   } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BoardEngine | null>(null);
@@ -271,6 +276,10 @@ export default function GameBoard(props: GameBoardProps) {
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (ready) engineRef.current?.setInsetBottom(viewInsetBottom);
+  }, [ready, viewInsetBottom]);
 
   // ── State → engine ──
   useEffect(() => {
@@ -495,7 +504,8 @@ export default function GameBoard(props: GameBoardProps) {
     const rect = host.getBoundingClientRect();
     const x = dragHoverPosition.clientX - rect.left;
     const y = dragHoverPosition.clientY - rect.top;
-    if (x < 0 || y < 0 || x > rect.width || y > rect.height) {
+    // The band drawn under the hand isn't a drop zone.
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height - extendBelow) {
       hoverOut();
       return;
     }
@@ -740,7 +750,11 @@ export default function GameBoard(props: GameBoardProps) {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <div ref={hostRef} className="cc-board3d" style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }} />
+      <div
+        ref={hostRef}
+        className="cc-board3d"
+        style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: `calc(100% + ${extendBelow}px)`, overflow: 'hidden' }}
+      />
       {noWebgl && (
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--cc-text-dim)', fontSize: 14 }}>
           The 3D board needs WebGL 2, which this browser doesn't support.
