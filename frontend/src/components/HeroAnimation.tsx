@@ -175,6 +175,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
 
     const engine = new BoardEngine(canvasHost, lowQualityRef.current ? { hero: true, antialias: false, maxPixelRatio: 1 } : { hero: true });
     engineRef.current = engine;
+    if (import.meta.env.DEV) (window as unknown as { __hero?: BoardEngine }).__hero = engine;
     let onLayoutChange: (() => void) | null = null;
     const ro = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => {
