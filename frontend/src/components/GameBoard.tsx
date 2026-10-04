@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom';
 import { Vector3 } from 'three';
 import type { Card, HexTile } from '../types/game';
-import { useAnimationSpeed, useTooltips } from './SettingsContext';
+import { useAnimationSpeed, useTooltips, useVisualQuality } from './SettingsContext';
 import CompactCard, { COMPACT_CARD_WIDTH } from './CompactCard';
 import type { IconName } from '../icons/glyphs';
 import { ACTION_SIZE, BoardLabelRow, TILE_SIZE, defenseRow, row, type LabelRow } from './BoardLabel';
@@ -202,7 +202,14 @@ interface TooltipState {
 
 // ── Component ───────────────────────────────────────────────────────────
 
+/** The 3D board. Antialiasing is fixed when a WebGL context is created, so
+ *  changing the Visual Quality setting rebuilds the board's renderer. */
 export default function GameBoard(props: GameBoardProps) {
+  const quality = useVisualQuality();
+  return <GameBoardView key={quality} {...props} antialias={quality === 'high'} />;
+}
+
+function GameBoardView(props: GameBoardProps & { antialias: boolean }) {
   const {
     tiles, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, activePlayerId,
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths,
@@ -251,7 +258,7 @@ export default function GameBoard(props: GameBoardProps) {
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const engine = new BoardEngine(host);
+    const engine = new BoardEngine(host, { antialias: props.antialias });
     if (!engine.ok) {
       setNoWebgl(true);
       return;

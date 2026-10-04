@@ -20,7 +20,7 @@ import { buildDecor, buildStructure, buildWallEdge, emptySpots, structureHeight,
 import { Soup } from './soup';
 import { FloatingOverlay } from './floating';
 import { RoadLayer } from './roads';
-import { buildSlabGeometry, buildTerrainGeometry, buildUnderGlow, buildWater } from './terrain';
+import { buildSlabGeometry, buildTerrainGeometry, buildWater } from './terrain';
 
 export type BoardQuality = 'high' | 'low';
 
@@ -127,7 +127,6 @@ export class BoardEngine {
   private slabMesh: Mesh | null = null;
   private waterDispose: (() => void) | null = null;
   private waterMesh: Mesh | null = null;
-  private underGlow: Mesh | null = null;
   private decorMesh: Mesh | null = null;
   private structures = new Map<string, StructureEntry>();
   private walls = new Map<string, WallEntry>();
@@ -150,6 +149,11 @@ export class BoardEngine {
   private pixelScale = { value: 400 };
   private ambient: AmbientLayer | null = null;
   private clouds: CloudLayer | null = null;
+  /** Shadow map: redraw next frame (board / tokens / layout changed). */
+  private shadowDirty = true;
+  /** Something casting a shadow is animating quickly this frame. */
+  private shadowsLive = false;
+  private lastShadow = 0;
   private readonly sunDir = new Vector3();
   private markers: MarkerLayer | null = null;
   private roads: RoadLayer | null = null;
@@ -190,7 +194,7 @@ export class BoardEngine {
   private hero: boolean;
   private sway = 0;
 
-  constructor(host: HTMLElement, opts: { quality?: BoardQuality; interactive?: boolean; hero?: boolean } = {}) {
+  constructor(host: HTMLElement, opts: { quality?: BoardQuality; interactive?: boolean; hero?: boolean; antialias?: boolean } = {}) {
     this.hostEl = host;
     this.hero = !!opts.hero;
     this.quality = opts.quality ?? (this.hero ? 'low' : detectQuality());
@@ -215,21 +219,25 @@ export class BoardEngine {
 
     this.ok = webglAvailable();
     if (!this.ok) return;
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, this.hero ? 2 : this.quality === 'low' ? 1.5 : 2);
     try {
-      this.renderer = new WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+      // Antialiasing (4x MSAA) is a large share of the frame at 2x pixel
+      // ratios; the Low visual-quality setting turns it off.
+      this.renderer = new WebGLRenderer({ antialias: opts.antialias !== false, alpha: true, powerPreference: 'high-performance' });
     } catch {
       this.ok = false;
       return;
     }
     const r = this.renderer;
-    const dpr = window.devicePixelRatio || 1;
-    r.setPixelRatio(Math.min(dpr, this.hero ? 2 : this.quality === 'low' ? 1.5 : 2));
+    r.setPixelRatio(pixelRatio);
     r.setClearColor(0x000000, 0);
     r.outputColorSpace = SRGBColorSpace;
     r.toneMapping = ACESFilmicToneMapping;
     r.toneMappingExposure = 1.12;
     r.shadowMap.enabled = true;
     r.shadowMap.type = PCFSoftShadowMap;
+    // Redrawn on demand (see scheduleShadows), not every frame.
+    r.shadowMap.autoUpdate = false;
     this.canvas = r.domElement;
     const canvas = r.domElement;
     canvas.style.position = 'absolute';
@@ -434,6 +442,7 @@ export class BoardEngine {
     }
     this.syncStructures();
     this.syncWalls();
+    this.shadowDirty = true;
     this.writeTileTextures();
     this.syncBarriers();
     this.syncPickProxies();
@@ -478,6 +487,7 @@ export class BoardEngine {
 
   setTokens(specs: TokenSpec[]): void {
     this.markers?.setTokens(specs);
+    this.shadowDirty = true;
     this.kick(1.2);
   }
 
@@ -607,6 +617,7 @@ export class BoardEngine {
   renderNow(): void {
     if (!this.renderer || this.disposed) return;
     this.rig.update(0);
+    this.renderer.shadowMap.needsUpdate = true;
     this.renderer.render(this.scene, this.rig.camera);
   }
 
@@ -657,7 +668,6 @@ export class BoardEngine {
     disposeMesh(this.slabMesh); this.slabMesh = null;
     disposeMesh(this.decorMesh); this.decorMesh = null;
     if (this.waterMesh) { this.world.remove(this.waterMesh); this.waterDispose?.(); this.waterMesh = null; }
-    if (this.underGlow) { this.world.remove(this.underGlow); this.underGlow.geometry.dispose(); (this.underGlow.material as MeshBasicMaterial).dispose(); this.underGlow = null; }
     for (const [, s] of this.structures) if (s.mesh) { this.structureGroup.remove(s.mesh); s.mesh.geometry.dispose(); }
     this.structures.clear();
     this.structureSpots.clear();
@@ -679,10 +689,13 @@ export class BoardEngine {
     disposeMesh(this.slabMesh);
     disposeMesh(this.decorMesh);
     if (this.waterMesh) { this.world.remove(this.waterMesh); this.waterDispose?.(); }
-    if (this.underGlow) { this.world.remove(this.underGlow); this.underGlow.geometry.dispose(); }
 
     this.terrainMesh = new Mesh(buildTerrainGeometry(layout), this.terrainMat);
     this.terrainMesh.receiveShadow = true;
+    // Its shader is the most expensive per pixel: draw it after the other
+    // opaque meshes so the depth test skips ground hidden under trees,
+    // buildings and walls.
+    this.terrainMesh.renderOrder = 1;
     this.world.add(this.terrainMesh);
 
     this.slabMesh = new Mesh(buildSlabGeometry(layout, this.tiles), this.slabMat);
@@ -693,8 +706,6 @@ export class BoardEngine {
     this.waterMesh = water.mesh;
     this.waterDispose = water.dispose;
     this.world.add(water.mesh);
-    this.underGlow = buildUnderGlow(layout, this.shared);
-    this.world.add(this.underGlow);
 
     this.decorSpots = emptySpots();
     const decor = buildDecor(layout, this.tiles, this.decorSpots);
@@ -1316,13 +1327,30 @@ export class BoardEngine {
     const step = this.lastRender ? Math.min(0.1, now - this.lastRender) : dt;
     this.lastRender = now;
     this.step(step);
+    this.scheduleShadows(now);
     this.renderer.render(this.scene, this.rig.camera);
     for (const cb of this.frameCbs) cb();
   };
 
+  /**
+   * The shadow map (a 2048² pass over every caster) only needs redrawing when
+   * a caster moves — the camera doesn't matter. Redraw every frame while
+   * structures, walls or effects animate (or the board is building), and
+   * otherwise ~20 times a second for the slow ambient movers (sheep, birds,
+   * windmills, swaying trees, bobbing tokens).
+   */
+  private scheduleShadows(now: number): void {
+    if (this.shadowDirty || this.shadowsLive || now - this.lastShadow >= 0.05) {
+      this.renderer!.shadowMap.needsUpdate = true;
+      this.shadowDirty = false;
+      this.lastShadow = now;
+    }
+  }
+
   private step(dt: number): void {
     this.time += dt;
     const t = this.time;
+    this.shadowsLive = this.build < 1;
     const s = this.shared;
     s.uTime.value = t;
     s.uCloud.value.set(t * 0.012, t * 0.007);
@@ -1358,8 +1386,10 @@ export class BoardEngine {
         se.mesh.position.y = se.base.y * (1 - sy);
         if (k >= 1) { se.rise = false; se.mesh.scale.set(1, 1, 1); se.mesh.position.y = 0; }
         this.kick(0.1);
+        this.shadowsLive = true;
       }
       if (se.jolt > 0) {
+        this.shadowsLive = true;
         const age = t - se.joltAt;
         const amp = se.jolt * 0.03 * Math.max(0, 1 - age / 0.45);
         se.mesh.position.x = Math.sin(age * 90) * amp;
@@ -1378,7 +1408,9 @@ export class BoardEngine {
         w.mesh.position.y = w.base.y * (1 - sy);
         if (k >= 1) { w.mode = 'idle'; w.mesh.scale.set(1, 1, 1); w.mesh.position.y = 0; }
         this.kick(0.1);
+        this.shadowsLive = true;
       } else if (w.mode === 'sink') {
+        this.shadowsLive = true;
         const k = Math.min(1, (t - w.born) / Math.max(0.15, 0.5 * Math.max(0.5, this.speed)));
         const sy = Math.max(0.001, 1 - k * k);
         w.mesh.scale.set(1, sy, 1);
@@ -1387,6 +1419,7 @@ export class BoardEngine {
         this.kick(0.1);
       }
       if (w.jolt > 0) {
+        this.shadowsLive = true;
         const age = t - w.joltAt;
         const amp = w.jolt * 0.03 * Math.max(0, 1 - age / 0.45);
         w.mesh.position.x = Math.sin(age * 90) * amp;
@@ -1408,7 +1441,7 @@ export class BoardEngine {
     const fxBusy = this.fxLayer?.update(dt, t) ?? false;
     this.markers?.update(dt, t);
     if (this.roads?.update(dt, t)) this.kick(0.15);
-    if (fxBusy) this.kick(0.15);
+    if (fxBusy) { this.kick(0.15); this.shadowsLive = true; }
     this.smokePool.flush();
     this.glowPool.flush();
 

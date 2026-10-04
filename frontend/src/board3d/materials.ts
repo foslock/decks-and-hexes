@@ -140,17 +140,23 @@ export function createPropMaterial(shared: SharedUniforms, mask?: RoadMask): { m
   });
   material.onBeforeCompile = (shader) => {
     patchPropVertex(shader, shared, mask);
+    // Cloud shadows are far broader than any prop: shade per vertex.
     shader.uniforms.uCloud = shared.uCloud;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        uniform vec2 uCloud;
+        varying float vCloud;
+        ${NOISE_GLSL}`)
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        vCloud = bh_cloud(vPropWorld.xz, uCloud);`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform float uTime;
-        uniform vec2 uCloud;
         varying vec3 vGlow;
         varying float vGlowSeed;
-        varying vec3 vPropWorld;
-        ${NOISE_GLSL}`)
+        varying float vCloud;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        diffuseColor.rgb *= 1.0 - 0.2 * bh_cloud(vPropWorld.xz, uCloud);`)
+        diffuseColor.rgb *= 1.0 - 0.2 * vCloud;`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           float s = vGlowSeed;
@@ -245,9 +251,9 @@ uniform vec4 uCursor;
 uniform float uTransDur;
 uniform float uGrid;
 uniform vec3 uHoverColor;
-uniform vec2 uCloud;
 varying vec3 vBoardPos;
 varying float vBuilt;
+varying float vCloud;
 ${NOISE_GLSL}
 
 const float BH_SQ3 = 1.7320508;
@@ -321,8 +327,8 @@ vec3 boardEmissive = vec3(0.0);
   float tintAmt = mix(prv.a, own.a, m);
   vec3 tintCol = (prv.a * (1.0 - m) * prv.rgb + own.a * m * own.rgb) / max(tintAmt, 0.001);
 
-  // Cloud shadows drifting over the land.
-  diffuseColor.rgb *= 1.0 - 0.2 * bh_cloud(p, uCloud);
+  // Cloud shadows drifting over the land (shaded per vertex).
+  diffuseColor.rgb *= 1.0 - 0.2 * vCloud;
 
   if (exists && tintAmt > 0.001) {
     float lum = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -445,15 +451,19 @@ export function createTerrainMaterial(shared: SharedUniforms, tex: TileTextures)
       .replace('#include <common>', `#include <common>
         attribute float aBuild;
         uniform float uBuild;
+        uniform vec2 uCloud;
         varying vec3 vBoardPos;
         varying float vBuilt;
-        ${BUILD_GLSL}`)
+        varying float vCloud;
+        ${BUILD_GLSL}
+        ${NOISE_GLSL}`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         {
           float bt = bh_build(aBuild);
           vBuilt = bt;
           transformed.y -= (1.0 - bh_easeOutBack(bt)) * 0.9;
           vBoardPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+          vCloud = bh_cloud(vBoardPos.xz, uCloud);
         }`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\n${TERRAIN_FRAGMENT_HEAD}`)

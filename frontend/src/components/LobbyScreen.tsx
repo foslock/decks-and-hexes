@@ -1,7 +1,7 @@
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import type { GameState, LobbyState } from '../types/game';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useSettings, type AnimationMode } from './SettingsContext';
+import { useSettings, type AnimationMode, type VisualQuality } from './SettingsContext';
 import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
@@ -133,7 +133,7 @@ interface LobbyScreenProps {
 export default function LobbyScreen({
   lobbyCode, playerId, token, isHost, initialLobby, onGameStart, onLeave, onTokenRefresh,
 }: LobbyScreenProps) {
-  const { settings, setAnimationMode, setTooltips } = useSettings();
+  const { settings, setAnimationMode, setTooltips, setVisualQuality } = useSettings();
   const [lobby, setLobby] = useState<LobbyState>(initialLobby);
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -474,6 +474,20 @@ export default function LobbyScreen({
                     className={`cc-scr-seg-btn${settings.animationMode === mode ? ' is-active' : ''}`}
                   >
                     {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="cc-scr-gear-row" title="Low turns off antialiasing for a smoother frame rate on large or high-resolution screens.">
+              <span>Visual Quality</span>
+              <div className="cc-scr-seg cc-scr-seg-sm">
+                {(['low', 'high'] as VisualQuality[]).map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => setVisualQuality(q)}
+                    className={`cc-scr-seg-btn${settings.visualQuality === q ? ' is-active' : ''}`}
+                  >
+                    {q === 'low' ? 'Low' : 'High'}
                   </button>
                 ))}
               </div>
