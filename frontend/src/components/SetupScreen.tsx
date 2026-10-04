@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { BASE } from '../api/client';
 import CardBrowser from './CardBrowser';
 import Icon from '../icons/Icon';
 import HowToPlay from './HowToPlay';
 import HeroAnimation from './HeroAnimation';
 import packageJson from '../../package.json';
+import { appHasBooted, signalAppReady, waitForFonts } from '../utils/appReady';
 
 interface SetupScreenProps {
   onCreateLobby: () => void;
@@ -47,6 +48,34 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   const [joinError, setJoinError] = useState<string | null>(null);
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
 
+  // Boot gate: the whole home intro (title, diorama, buttons) waits until the
+  // fonts, card art and 3D board are ready, then starts in one go as the
+  // loading bar fades out. Coming back home later skips the wait.
+  const [ready, setReady] = useState(() => appHasBooted());
+  const [fontsReady, setFontsReady] = useState(() => appHasBooted());
+  const [heroReady, setHeroReady] = useState(() => appHasBooted());
+  const handleHeroReady = useCallback(() => setHeroReady(true), []);
+  useEffect(() => {
+    if (fontsReady) return;
+    let live = true;
+    void waitForFonts().then(() => { if (live) setFontsReady(true); });
+    return () => { live = false; };
+  }, [fontsReady]);
+  useEffect(() => {
+    if (ready) return;
+    if (fontsReady && heroReady) {
+      // Flip on the next frame so the bar's fade and the intro share a paint.
+      const raf = requestAnimationFrame(() => {
+        setReady(true);
+        signalAppReady();
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+    // Never hold the home screen hostage to a slow asset.
+    const t = setTimeout(() => { setReady(true); signalAppReady(); }, 8000);
+    return () => clearTimeout(t);
+  }, [ready, fontsReady, heroReady]);
+
   useEffect(() => {
     fetch(`${BASE}/version`)
       .then(r => r.json())
@@ -73,7 +102,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   };
 
   return (
-    <div className="cc-scr-backdrop cc-scr-home">
+    <div className={`cc-scr-backdrop cc-scr-home${ready ? '' : ' is-booting'}`} aria-busy={!ready}>
       <HomeEmbers />
 
       {/* Title */}
@@ -87,7 +116,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
 
       {/* Hero animation — fills space between title and buttons */}
       <div className="cc-scr-home-hero">
-        <HeroAnimation />
+        <HeroAnimation start={ready} onReady={handleHeroReady} />
       </div>
 
       {/* Bottom buttons — pinned to bottom */}

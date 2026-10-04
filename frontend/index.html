@@ -23,9 +23,71 @@
         -ms-user-select: none;
         user-select: none;
       }
+      /* Matches the app backdrop so the loading bar never sits on white. */
+      html, body { margin: 0; background: #0b0b1c; }
     </style>
   </head>
   <body>
+    <!-- Loading bar: painted before any script arrives, removed by
+         window.cardClashReady() once the home screen's fonts, art and 3D
+         board are ready (the intro animation starts on that same paint). -->
+    <div id="cc-loader" class="cc-loader" role="progressbar" aria-label="Loading">
+      <span class="cc-loader-label">Loading</span>
+      <span class="cc-loader-track"><span class="cc-loader-bar"></span></span>
+      <button type="button" class="cc-loader-retry" hidden>Try again</button>
+    </div>
+    <style>
+      .cc-loader { position: fixed; z-index: 2147483000; left: 50%; top: 50%; transform: translate(-50%, -50%); box-sizing: border-box;
+        display: grid; justify-items: center; gap: 10px; padding: 14px 18px 16px; border-radius: 14px; pointer-events: none;
+        border: 1px solid rgba(232, 196, 106, .28); background: rgba(16, 12, 28, .5); color: rgba(255, 244, 222, .88);
+        -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+        font: 500 10.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif; letter-spacing: .16em; text-transform: uppercase;
+        transition: opacity 240ms ease; }
+      .cc-loader.is-done { opacity: 0; }
+      .cc-loader-track { position: relative; overflow: hidden; width: 148px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, .16); }
+      .cc-loader-bar { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, #ffe39a, #e8c46a); transform-origin: left;
+        transform: scaleX(.04); animation: cc-loader-creep 14s cubic-bezier(.1, .75, .25, 1) forwards; }
+      .cc-loader.is-done .cc-loader-bar { animation: none; transform: scaleX(1); transition: transform 200ms ease-out; }
+      .cc-loader-track::after { content: ""; position: absolute; inset: 0; width: 40%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .55), transparent); animation: cc-loader-sheen 1.5s ease-in-out infinite; }
+      .cc-loader-retry { pointer-events: auto; font: inherit; letter-spacing: .08em; color: #fff; cursor: pointer;
+        padding: 7px 12px; border-radius: 999px; border: 1px solid rgba(232, 196, 106, .55); background: rgba(232, 196, 106, .12); }
+      .cc-loader-retry:hover { background: rgba(232, 196, 106, .24); }
+      .cc-loader-retry:focus-visible { outline: 2px solid #e8c46a; outline-offset: 3px; }
+      .cc-loader.is-failed { pointer-events: auto; text-transform: none; letter-spacing: .02em; font-size: 13px; }
+      .cc-loader.is-failed .cc-loader-track { display: none; }
+      @keyframes cc-loader-creep { to { transform: scaleX(.92); } }
+      @keyframes cc-loader-sheen { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+      @media (prefers-reduced-motion: reduce) { .cc-loader-track::after { display: none; } }
+    </style>
+    <script>
+      (() => {
+        const el = document.getElementById('cc-loader'), retry = el.querySelector('.cc-loader-retry');
+        let settled = false;
+        // Called by the app once the screen is ready to animate in. The bar
+        // fills, fades, and is removed.
+        window.cardClashReady = () => {
+          if (settled) return;
+          settled = true;
+          el.classList.add('is-done');
+          setTimeout(() => el.remove(), 260);
+        };
+        // A script that fails to load, or throws while starting, would otherwise
+        // leave the bar creeping forever.
+        addEventListener('error', (e) => {
+          if (settled || !(e instanceof ErrorEvent || e.target instanceof HTMLScriptElement)) return; // a missing font or image isn't fatal
+          if (e instanceof ErrorEvent && /ResizeObserver/.test(e.message || '')) return; // benign browser warning
+          settled = true;
+          el.classList.add('is-failed');
+          el.setAttribute('role', 'alert');
+          el.querySelector('.cc-loader-label').textContent = 'Card Clash didn\u2019t load.';
+          retry.hidden = false;
+          retry.onclick = () => location.reload();
+        }, true);
+        // Safety net in case the app never reports in.
+        addEventListener('load', () => setTimeout(window.cardClashReady, 15000));
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
