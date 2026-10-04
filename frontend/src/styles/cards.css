@@ -148,6 +148,12 @@
    lift the row under the pointer, and the resolving row above them all. */
 .cc-board-tilecard:hover { z-index: 1; }
 .cc-board-tilecard.is-raised { z-index: 2; }
+/* The resolving card's glow fades in as it grows: tile cards carry the same
+   two shadows unlit, so the filter can ease between them (MiniCard's
+   transition includes filter). */
+.cc-tile-stack [data-board-card] {
+  filter: drop-shadow(0 0 0 rgba(255, 220, 130, 0)) drop-shadow(0 0 0 rgba(255, 180, 60, 0));
+}
 .cc-tile-stack.is-focus [data-board-card] {
   filter: drop-shadow(0 0 8px rgba(255, 220, 130, 0.85)) drop-shadow(0 0 18px rgba(255, 180, 60, 0.45));
 }
