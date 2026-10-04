@@ -155,6 +155,8 @@ export default function LobbyScreen({
 
   // Local name state for responsive typing — debounces API calls
   const selfPlayer = lobby.players[playerId];
+  /** Seats the host has opened (bots included), 2–6. */
+  const seatLimit = Math.max(2, Math.min(6, lobby.config.max_players ?? 6));
   const [localName, setLocalName] = useState(selfPlayer?.name ?? '');
   const localNameRef = useRef(localName);
   localNameRef.current = localName;
@@ -530,7 +532,7 @@ export default function LobbyScreen({
         <section className="cc-panel cc-scr-section" style={{ animationDelay: '60ms' }}>
           <div className="cc-scr-section-head">
             <h3 className="cc-scr-section-title">Players ({players.length})</h3>
-            <span className="cc-scr-section-meta">{players.length} / 6 seats</span>
+            <span className="cc-scr-section-meta">{players.length} / {seatLimit} seats</span>
           </div>
           {players.map((p, playerIdx) => {
             const isSelf = p.id === playerId;
@@ -743,7 +745,7 @@ export default function LobbyScreen({
               </Fragment>
             );
           })}
-          {isHost && players.length < 6 && (
+          {isHost && players.length < seatLimit && (
             <button
               onClick={() => handleAddCpu('vanguard')}
               className="cc-scr-add-seat"
@@ -868,6 +870,32 @@ export default function LobbyScreen({
                   {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
                 </strong>
               )}
+            </div>
+
+            {/* Player Limit — seats open, bots included */}
+            <div className="cc-scr-row">
+              <div>
+                <Tooltip content="How many seats this lobby has, bots included. Once they're filled no one else can join. Can't go below the players already here.">
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>Player Limit</span>
+                </Tooltip>
+              </div>
+              <div className={`cc-scr-seg${isHost ? '' : ' is-readonly'}`} style={{ display: 'flex', flex: 1 }}>
+                {[2, 3, 4, 5, 6].map((n) => {
+                  const tooFew = n < players.length;
+                  return (
+                    <button
+                      key={n}
+                      onClick={() => isHost && !tooFew && handleConfigChange('max_players', n)}
+                      disabled={isHost && tooFew}
+                      title={tooFew ? `${players.length} players are already here` : undefined}
+                      className={`cc-scr-seg-btn${seatLimit === n ? ' is-active' : ''}`}
+                      style={{ flex: '1 1 0', minWidth: 0, padding: '0 4px', opacity: isHost && tooFew ? 0.35 : undefined }}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Open to Public */}
