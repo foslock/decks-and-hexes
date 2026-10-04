@@ -636,19 +636,33 @@ export default function LobbyScreen({
                 </div>
                 <div className="cc-scr-seat-controls">
                   {p.is_cpu && isHost && (
-                    <div className="cc-scr-seg cc-scr-seg-sm" style={{ flexShrink: 0 }}>
-                      {DIFFICULTIES.map((d) => (
-                        <Tooltip key={d.id} content={d.desc} wrapperStyle={{ display: 'flex' }}>
-                          <button
-                            onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
-                            className={`cc-scr-seg-btn${p.cpu_difficulty === d.id ? ' is-active' : ''}`}
-                          >
-                            <span className="cc-scr-diff-full">{d.name}</span>
-                            <span className="cc-scr-diff-short">{d.short}</span>
-                          </button>
-                        </Tooltip>
-                      ))}
-                    </div>
+                    <>
+                      {/* Wide screens: a segmented control. Phones: a small
+                          dropdown, so a CPU seat fits on one line. */}
+                      <div className="cc-scr-seg cc-scr-seg-sm cc-scr-diff-seg" style={{ flexShrink: 0 }}>
+                        {DIFFICULTIES.map((d) => (
+                          <Tooltip key={d.id} content={d.desc} wrapperStyle={{ display: 'flex' }}>
+                            <button
+                              onClick={() => handleUpdatePlayer(p.id, { difficulty: d.id })}
+                              className={`cc-scr-seg-btn${p.cpu_difficulty === d.id ? ' is-active' : ''}`}
+                            >
+                              {d.name}
+                            </button>
+                          </Tooltip>
+                        ))}
+                      </div>
+                      <select
+                        className="cc-scr-select cc-scr-diff-select"
+                        value={p.cpu_difficulty ?? 'medium'}
+                        onChange={(e) => handleUpdatePlayer(p.id, { difficulty: e.target.value })}
+                        aria-label={`${p.name} difficulty`}
+                        title={DIFFICULTIES.find(d => d.id === p.cpu_difficulty)?.desc}
+                      >
+                        {DIFFICULTIES.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </>
                   )}
                   {canEditArchetype ? (
                     <div className="cc-scr-arch-pick">

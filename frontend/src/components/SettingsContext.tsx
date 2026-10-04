@@ -106,6 +106,15 @@ export function useAnimationSpeed() {
   return settings.animationMode === 'fast' ? 0.5 : settings.animationMode === 'off' ? 0 : 1;
 }
 
+/** Duration multiplier for the resolution sequence (the reveal, each tile
+ *  resolving, played cards going home). On Normal it runs a touch slower than
+ *  the rest of the UI so each step can be followed; Fast and Off are as usual. */
+export const RESOLVE_NORMAL_PACE = 1.2;
+export function useResolveSpeed() {
+  const speed = useAnimationSpeed();
+  return speed === 1 ? RESOLVE_NORMAL_PACE : speed;
+}
+
 export function useAnimationOff() {
   const { settings } = useSettings();
   return settings.animationMode === 'off';

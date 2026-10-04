@@ -2,7 +2,7 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react
 import type { ResolutionStep } from '../types/game';
 import type { GridTransform } from '../utils/hexGeometry';
 import { PLAYER_COLORS, type BoardFx, type FxFortifyRing, type FxWedge } from '../board3d/boardTypes';
-import { useAnimationMode, useAnimationSpeed } from './SettingsContext';
+import { useAnimationMode, useResolveSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
 import Icon from '../icons/Icon';
 import { Num } from '../icons/Num';
@@ -181,7 +181,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   const measuredTransformRef = useRef<GridTransform | null>(null);
   const animMode = useAnimationMode();
   const isOff = animMode === 'off';
-  const animSpeed = useAnimationSpeed();
+  const animSpeed = useResolveSpeed();
   const sound = useSound();
 
   const [currentIdx, setCurrentIdx] = useState(0);
