@@ -196,9 +196,11 @@ function TiltingZoomedCard({ card }: { card: Card }) {
 
 interface CardZoomContextType {
   showZoom: (card: Card, cardList?: Card[]) => void;
+  /** The card open in the zoom overlay, if any. */
+  zoomedCard: Card | null;
 }
 
-const CardZoomContext = createContext<CardZoomContextType>({ showZoom: () => {} });
+const CardZoomContext = createContext<CardZoomContextType>({ showZoom: () => {}, zoomedCard: null });
 
 export function useCardZoom() {
   return useContext(CardZoomContext);
@@ -264,7 +266,7 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
   const hasNext = navList != null && currentIndex >= 0 && currentIndex < navList.length - 1;
 
   return (
-    <CardZoomContext.Provider value={{ showZoom }}>
+    <CardZoomContext.Provider value={{ showZoom, zoomedCard }}>
       {children}
       {zoomedCard && createPortal(
         <div

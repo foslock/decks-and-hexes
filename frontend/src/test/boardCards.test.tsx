@@ -49,6 +49,32 @@ describe('board cards', () => {
     c2.querySelectorAll<HTMLElement>('[data-board-card]').forEach(el => expect(el.style.boxShadow).toBe(''));
   });
 
+  it('keeps tile cards see-through until hovered, opened or resolving', () => {
+    const entries = [entry('a', 'Explore')];
+    const stackOf = (c: HTMLElement) => c.querySelector<HTMLElement>('.cc-tile-stack')!;
+    const { container, rerender } = render(<WithSettings><TileCardStack entries={entries} scale={0.25} onOpen={() => {}} /></WithSettings>);
+    const stack = stackOf(container);
+    expect(Number(stack.style.opacity)).toBeLessThan(1);
+    fireEvent.pointerEnter(stack);
+    expect(stack.style.opacity).toBe('1');
+    fireEvent.pointerLeave(stack);
+    expect(Number(stack.style.opacity)).toBeLessThan(1);
+
+    rerender(<WithSettings><TileCardStack entries={entries} scale={0.25} open onOpen={() => {}} /></WithSettings>);
+    expect(stackOf(container).style.opacity).toBe('1');
+    rerender(<WithSettings><TileCardStack entries={entries} scale={0.25} focus onOpen={() => {}} /></WithSettings>);
+    expect(stackOf(container).style.opacity).toBe('1');
+  });
+
+  it('grows a resolving card in step with its box', () => {
+    const { container } = render(<WithSettings><TileCardStack entries={[entry('a', 'Explore')]} scale={0.25} focus onOpen={() => {}} /></WithSettings>);
+    const card = container.querySelector<HTMLElement>('[data-board-card]')!;
+    const face = card.querySelector<HTMLElement>('[style*="scale("]')!;
+    // The face's scale eases with the same timing as the card box's size.
+    expect(face.style.transition).toContain('transform 0.25s ease');
+    expect(card.style.transition).toContain('width 0.25s ease');
+  });
+
   it('lists queued engine cards with a count', () => {
     render(<WithSettings><EngineQueue entries={[entry('g', 'Gather'), entry('h', 'Tithe')]} onOpen={() => {}} /></WithSettings>);
     expect(screen.getByText(/Queued/)).toHaveTextContent('Queued (2)');
