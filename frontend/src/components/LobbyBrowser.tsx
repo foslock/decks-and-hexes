@@ -50,8 +50,10 @@ function HostName({ name, color }: { name: string; color: string }) {
  * public games in progress (round + who's leading). Refreshes every 5 s, and
  * on demand at most once a second.
  */
-export default function LobbyBrowser({ onJoin, onClose }: {
+export default function LobbyBrowser({ onJoin, onCreate, onClose }: {
   onJoin: (code: string) => Promise<void>;
+  /** Start a new lobby (same as the home page's Create). */
+  onCreate?: () => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<'open' | 'progress'>('open');
@@ -150,7 +152,7 @@ export default function LobbyBrowser({ onJoin, onClose }: {
               {ago != null && <><span className="cc-ov-lb-long">Updated </span>{agoLabel(ago)}</>}
             </span>
             <button className="cc-ov-chip" onClick={refresh} disabled={coolingDown} aria-label="Refresh" title="Refresh">
-              <Icon name="reroll" size={11} decorative style={{ verticalAlign: '-0.1em' }} />
+              <Icon name="refresh" size={12} decorative style={{ verticalAlign: '-0.15em' }} />
               <span className="cc-ov-lb-long" style={{ marginLeft: 4 }}>Refresh</span>
             </button>
           </div>
@@ -162,6 +164,11 @@ export default function LobbyBrowser({ onJoin, onClose }: {
           {list && list.length === 0 && (
             <div className="cc-ov-lb-empty">
               {tab === 'open' ? 'No open games right now — create one and invite friends!' : 'No games in progress right now.'}
+              {tab === 'open' && onCreate && (
+                <div style={{ marginTop: 14 }}>
+                  <button className="cc-btn-primary cc-ov-lb-create" onClick={onCreate}>Create Game</button>
+                </div>
+              )}
             </div>
           )}
 

@@ -241,7 +241,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
         <CardBrowser onClose={() => setShowCardBrowser(false)} />
       )}
       {showBrowser && (
-        <LobbyBrowser onJoin={onJoinLobby} onClose={() => setShowBrowser(false)} />
+        <LobbyBrowser onJoin={onJoinLobby} onCreate={onCreateLobby} onClose={() => setShowBrowser(false)} />
       )}
     </div>
   );

@@ -1306,6 +1306,15 @@
   font-variant-numeric: tabular-nums;
 }
 .cc-ov-lb-row-error { font-size: 12px; color: #ff8b97; }
+.cc-ov-lb-create {
+  padding: 10px 22px;
+  font-family: var(--cc-font-display);
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-style: normal;
+}
 .cc-ov-lb-join { flex-shrink: 0; min-width: 84px; padding: 8px 14px; font-size: 14px; }
 .cc-ov-lb-round {
   flex-shrink: 0;

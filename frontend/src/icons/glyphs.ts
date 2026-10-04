@@ -343,6 +343,15 @@ export const GLYPHS = {
       { d: 'M14.6 10.4 H5.6 V7.8 L1.4 11.4 L5.6 15 V12.4 H14.6 Z' },
     ],
   },
+  refresh: {
+    // The standard refresh arrow: a thick ring running clockwise from the
+    // upper right round to the top, ending in an arrowhead across the gap.
+    label: 'Refresh', group: 'ui',
+    layers: [
+      { d: 'M13.37 5.3 A6.2 6.2 0 1 1 6.92 2.29 L7.24 4.07 A4.4 4.4 0 1 0 11.81 6.2 Z' },
+      { d: 'M6.7 1.01 L10.03 2.66 L7.46 5.35 Z' },
+    ],
+  },
   round: {
     label: 'Round', group: 'ui',
     layers: [
