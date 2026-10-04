@@ -160,3 +160,29 @@ class TestTokensPerLobby:
         assert res.status_code == 403
         res = client.post(f"/api/lobby/{second['code']}/close", json={"token": first["token"]})
         assert res.status_code == 403
+
+
+class TestPlayerLimit:
+    """The host's player limit counts every seat, bots included."""
+
+    def test_limit_closes_the_lobby_to_joins_and_bots(self, client: TestClient) -> None:
+        lob = _create(client)
+        code, token = lob["code"], lob["token"]
+        assert client.patch(f"/api/lobby/{code}/config", json={"max_players": 3, "token": token}).status_code == 200
+        client.post(f"/api/lobby/{code}/cpu", json={"archetype": "swarm", "token": token})
+        assert client.post(f"/api/lobby/{code}/join", json={"name": "Joiner", "archetype": "swarm"}).status_code == 200
+        # Three seats taken: no more joins or bots.
+        full = client.post(f"/api/lobby/{code}/join", json={"name": "Late", "archetype": "swarm"})
+        assert full.status_code == 400 and "full" in full.json()["detail"].lower()
+        assert client.post(f"/api/lobby/{code}/cpu", json={"archetype": "swarm", "token": token}).status_code == 400
+        entry = _browse(client)["open"][0]
+        assert (entry["players"], entry["max_players"], entry["full"]) == (3, 3, True)
+
+    def test_limit_cannot_drop_below_the_players_already_there(self, client: TestClient) -> None:
+        lob = _create(client)
+        code, token = lob["code"], lob["token"]
+        for _ in range(2):
+            client.post(f"/api/lobby/{code}/cpu", json={"archetype": "swarm", "token": token})
+        res = client.patch(f"/api/lobby/{code}/config", json={"max_players": 2, "token": token})
+        assert res.status_code == 400
+        assert client.patch(f"/api/lobby/{code}/config", json={"max_players": 3, "token": token}).status_code == 200

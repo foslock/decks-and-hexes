@@ -22,9 +22,18 @@ function Meta({ icon, children }: { icon: IconName; children: React.ReactNode })
   );
 }
 
-function playersLabel(players: number, cpus: number): string {
-  const p = `${players} player${players !== 1 ? 's' : ''}`;
+/** "3 players (1 bot)", or "3 of 4 players (1 bot)" for a lobby with a limit. */
+function playersLabel(players: number, cpus: number, seats?: number): string {
+  const count = seats != null ? `${players} of ${seats}` : `${players}`;
+  const p = `${count} player${(seats ?? players) !== 1 ? 's' : ''}`;
   return cpus > 0 ? `${p} (${cpus} bot${cpus !== 1 ? 's' : ''})` : p;
+}
+
+/** Short, steady-width age of the list ("just now", "4s ago", "2m ago"). */
+function agoLabel(seconds: number): string {
+  if (seconds < 2) return 'just now';
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
 }
 
 function HostName({ name, color }: { name: string; color: string }) {
@@ -126,18 +135,23 @@ export default function LobbyBrowser({ onJoin, onClose }: {
         </div>
 
         <div className="cc-ov-lb-bar">
+          {/* One line at every width: phones drop the long words, and the
+              "updated" note keeps a fixed width so nothing shifts as it ticks. */}
           <div className="cc-ov-lb-tabs" role="tablist">
             <button role="tab" aria-selected={tab === 'open'} className={`cc-ov-chip${tab === 'open' ? ' is-active' : ''}`} onClick={() => setTab('open')}>
-              Open Games{open ? ` (${open.length})` : ''}
+              Open<span className="cc-ov-lb-long"> Games</span>{open ? ` (${open.length})` : ''}
             </button>
             <button role="tab" aria-selected={tab === 'progress'} className={`cc-ov-chip${tab === 'progress' ? ' is-active' : ''}`} onClick={() => setTab('progress')}>
               In Progress{inProgress ? ` (${inProgress.length})` : ''}
             </button>
           </div>
           <div className="cc-ov-lb-refresh">
-            {ago != null && <span className="cc-ov-lb-ago">{ago < 2 ? 'Updated just now' : `Updated ${ago}s ago`}</span>}
-            <button className="cc-ov-chip" onClick={refresh} disabled={coolingDown} aria-label="Refresh">
-              <Icon name="reroll" size={11} decorative style={{ marginRight: 4, verticalAlign: '-0.1em' }} />Refresh
+            <span className="cc-ov-lb-ago">
+              {ago != null && <><span className="cc-ov-lb-long">Updated </span>{agoLabel(ago)}</>}
+            </span>
+            <button className="cc-ov-chip" onClick={refresh} disabled={coolingDown} aria-label="Refresh" title="Refresh">
+              <Icon name="reroll" size={11} decorative style={{ verticalAlign: '-0.1em' }} />
+              <span className="cc-ov-lb-long" style={{ marginLeft: 4 }}>Refresh</span>
             </button>
           </div>
         </div>
@@ -158,7 +172,7 @@ export default function LobbyBrowser({ onJoin, onClose }: {
                 <div className="cc-ov-lb-metas">
                   <Meta icon="tile">{MAP_NAMES[l.grid_size] ?? l.grid_size} map</Meta>
                   <Meta icon="drawPile">{l.card_pack_name}</Meta>
-                  <Meta icon="allOpponents">{playersLabel(l.players, l.cpus)}</Meta>
+                  <Meta icon="allOpponents">{playersLabel(l.players, l.cpus, l.max_players)}</Meta>
                 </div>
                 {joinError?.code === l.code && <div className="cc-ov-lb-row-error">{joinError.message}</div>}
               </div>

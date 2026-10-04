@@ -113,7 +113,7 @@ class LobbyPlayer:
 class LobbyConfig:
     grid_size: str = "medium"
     speed: str = "normal"
-    max_players: int = 6
+    max_players: int = 6  # Seats (humans + bots) the host opens, 2-6
     test_mode: bool = False
     vp_target: Optional[int] = None  # None = use computed default
     granted_actions: Optional[int] = None  # None = use archetype default (currently 5)
@@ -283,6 +283,11 @@ def _require_game_token(game_id: str, player_id: str, token: str) -> None:
         raise HTTPException(403, "Invalid token")
 
 
+def _seat_limit(lobby: Lobby) -> int:
+    """Seats open in a lobby: the host's player limit (bots included), max 6."""
+    return max(2, min(6, lobby.config.max_players))
+
+
 def _require_lobby(code: str) -> Lobby:
     lobby = _lobbies.get(code.upper())
     if not lobby or lobby.status == "expired":
@@ -423,8 +428,8 @@ async def browse_lobbies() -> dict[str, Any]:
                 "players": len(lobby.players),
                 "humans": humans,
                 "cpus": cpus,
-                "max_players": 6,
-                "full": len(lobby.players) >= 6 or humans >= lobby.config.max_players,
+                "max_players": _seat_limit(lobby),
+                "full": len(lobby.players) >= _seat_limit(lobby),
                 "starting": lobby.status == "countdown",
                 "last_activity": lobby.last_activity,
             })
@@ -470,12 +475,8 @@ async def join_lobby(code: str, req: JoinLobbyRequest) -> dict[str, Any]:
     except ValueError:
         raise HTTPException(400, f"Invalid archetype: {req.archetype}")
 
-    # Count current human players
-    human_count = sum(1 for p in lobby.players.values() if not p.is_cpu)
-    total_count = len(lobby.players)
-    if total_count >= 6:
-        raise HTTPException(400, "Lobby is full (max 6 players)")
-    if human_count >= lobby.config.max_players:
+    # The host's player limit counts every seat, bots included (max 6).
+    if len(lobby.players) >= _seat_limit(lobby):
         raise HTTPException(400, "Lobby is full")
 
     # Assign next player_id
@@ -588,6 +589,8 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
     if req.max_players is not None:
         if not 2 <= req.max_players <= 6:
             raise HTTPException(400, "max_players must be 2-6")
+        if req.max_players < len(lobby.players):
+            raise HTTPException(400, f"There are already {len(lobby.players)} players in the lobby")
         lobby.config.max_players = req.max_players
 
     if req.test_mode is not None:
@@ -701,8 +704,8 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
     except ValueError:
         raise HTTPException(400, f"Invalid archetype: {req.archetype}")
 
-    if len(lobby.players) >= 6:
-        raise HTTPException(400, "Lobby is full (max 6 players)")
+    if len(lobby.players) >= _seat_limit(lobby):
+        raise HTTPException(400, "Lobby is at its player limit")
 
     from app.game_engine.cpu_player import NOISE_FOR_DIFFICULTY
     difficulty = req.difficulty if req.difficulty in NOISE_FOR_DIFFICULTY else "medium"

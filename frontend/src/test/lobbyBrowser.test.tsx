@@ -27,8 +27,8 @@ describe('LobbyBrowser', () => {
     render(<LobbyBrowser onJoin={onJoin} onClose={() => {}} />);
     expect(await screen.findByText('Hosty')).toBeInTheDocument();
     expect(screen.getByText('Medium map')).toBeInTheDocument();
-    expect(screen.getByText('3 players (1 bot)')).toBeInTheDocument();
-    expect(screen.getByText('Open Games (1)')).toBeInTheDocument();
+    expect(screen.getByText('3 of 6 players (1 bot)')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Open\s*Games \(1\)/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Join' }));
     expect(onJoin).toHaveBeenCalledWith('ABCD');
   });
@@ -36,7 +36,7 @@ describe('LobbyBrowser', () => {
   it('shows games in progress with the round and the leader', async () => {
     vi.stubGlobal('fetch', mockFetch({ open: [], in_progress: [game] }));
     render(<LobbyBrowser onJoin={async () => {}} onClose={() => {}} />);
-    fireEvent.click(await screen.findByText('In Progress (1)'));
+    fireEvent.click(await screen.findByRole('tab', { name: 'In Progress (1)' }));
     expect(screen.getByText('Gamer')).toBeInTheDocument();
     expect(screen.getByText('Ethan')).toBeInTheDocument();
     expect(screen.getByText('6 / 12 VP')).toBeInTheDocument();
