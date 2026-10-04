@@ -79,7 +79,6 @@ export function HandPreview() {
   const [trashedIds, setTrashedIds] = useState<Set<string>>(new Set());
   const [discardAll, setDiscardAll] = useState(false);
   const [incoming, setIncoming] = useState<IncomingDiscard[]>([]);
-  const [shopOpen, setShopOpen] = useState(false);
   const [undo, setUndo] = useState<UndoReturn | null>(null);
   const [disabled, setDisabled] = useState(false);
   const [tiles, setTiles] = useState(4);
@@ -170,7 +169,13 @@ export function HandPreview() {
             setDiscard(d => [...d, c]);
             setIncoming(list => [...list, { key: c.id, card: c }]);
           }}>Buy</button>
-          <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={shopOpen} onChange={e => setShopOpen(e.target.checked)} />Shop open</label>
+          <button style={btn} onClick={(e) => {
+            // As if bought from a shop tile: lifts off from the button.
+            const c = instance(catalog[Math.floor(Math.random() * catalog.length)]);
+            const r = e.currentTarget.getBoundingClientRect();
+            setDiscard(d => [...d, c]);
+            setIncoming(list => [...list, { key: c.id, card: c, from: { left: r.left, top: r.top, width: Math.max(r.width, 134), height: r.height } }]);
+          }}>Buy (from shop)</button>
           <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}><input type="checkbox" checked={disabled} onChange={e => setDisabled(e.target.checked)} />Disabled</label>
           <label style={{ fontSize: 12, display: 'flex', gap: 4, alignItems: 'center' }}>Tiles <input type="range" min={0} max={20} value={tiles} onChange={e => setTiles(Number(e.target.value))} />{tiles}</label>
           <span style={{ fontSize: 12, opacity: 0.6 }}>In play: {inPlay.map(c => c.name).join(', ') || '—'}</span>
@@ -238,7 +243,6 @@ export function HandPreview() {
           dragTarget={dragTarget}
           undoReturn={undo}
           incomingDiscards={incoming}
-          holdIncoming={shopOpen}
           onIncomingLanded={(key) => setIncoming(list => list.filter(i => i.key !== key))}
           isPlayPhase
           upgradeCreditsAvailable={1}

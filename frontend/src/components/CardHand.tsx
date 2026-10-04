@@ -77,6 +77,9 @@ export interface DragTargetInfo {
 export interface IncomingDiscard {
   key: string;
   card: Card;
+  /** Where it was bought (the shop tile's screen rect): it lifts off from
+   *  there. Without one it pops up above the hand first. */
+  from?: { left: number; top: number; width: number; height: number };
 }
 
 interface CardHandProps {
@@ -161,10 +164,9 @@ interface CardHandProps {
   dragTarget?: DragTargetInfo | null;
   /** A card returning from the board (undo) — flies back from its tile. */
   undoReturn?: UndoReturn | null;
-  /** Cards to fly into the discard pile (purchases). */
+  /** Cards to fly into the discard pile (purchases) — straight away, over
+   *  the shop if it's open. */
   incomingDiscards?: IncomingDiscard[];
-  /** Hold incoming cards (e.g. while the shop covers the screen). */
-  holdIncoming?: boolean;
   /** An incoming card finished landing on the discard pile. */
   onIncomingLanded?: (key: string) => void;
 }
@@ -363,7 +365,6 @@ export default function CardHand({
   dragTarget,
   undoReturn,
   incomingDiscards,
-  holdIncoming,
   onIncomingLanded,
 }: CardHandProps) {
   const animated = useAnimated();
@@ -1070,12 +1071,12 @@ export default function CardHand({
   }, [discardAll]); // eslint-disable-line react-hooks/exhaustive-deps
   const discardAllFinishRef = useRef<{ remaining: number; finish: () => void } | null>(null);
 
-  // ── Purchases: fly into the discard pile once nothing covers it ──
+  // ── Purchases: fly into the discard pile as soon as they're bought ──
   const launchedIncomingRef = useRef<Set<string>>(new Set());
   const onIncomingLandedRef = useRef(onIncomingLanded);
   onIncomingLandedRef.current = onIncomingLanded;
   useEffect(() => {
-    if (!incomingDiscards || incomingDiscards.length === 0 || holdIncoming) return;
+    if (!incomingDiscards || incomingDiscards.length === 0) return;
     const fresh = incomingDiscards.filter(i => !launchedIncomingRef.current.has(i.key));
     if (fresh.length === 0) return;
     if (animationOff) {
@@ -1090,26 +1091,54 @@ export default function CardHand({
     }
     fresh.forEach((item, i) => {
       launchedIncomingRef.current.add(item.key);
-      // Each purchase pops up above the hand, holds a beat, then drops onto the pile.
-      const show: Pose = { x: hand.left + hand.width / 2 + (i - (fresh.length - 1) / 2) * 120, y: hand.top - 150, rot: (i - (fresh.length - 1) / 2) * 3, scale: 0.62 };
       const land = { ...to, spin: discardTopSpin(item.card.id) };
-      const pop = [
-        { offset: 0, transform: `translate(${show.x - CARD_W / 2}px, ${show.y - CARD_H / 2 + 40}px) rotate(${show.rot}deg) perspective(520px) rotateX(0deg) rotateZ(0deg) scale(${show.scale * 0.5})`, opacity: 0 },
-        { offset: 0.18, transform: `translate(${show.x - CARD_W / 2}px, ${show.y - CARD_H / 2}px) rotate(${show.rot}deg) perspective(520px) rotateX(0deg) rotateZ(0deg) scale(${show.scale})`, opacity: 1 },
-        { offset: 0.42, transform: `translate(${show.x - CARD_W / 2}px, ${show.y - CARD_H / 2}px) rotate(${show.rot}deg) perspective(520px) rotateX(0deg) rotateZ(0deg) scale(${show.scale})`, opacity: 1 },
-      ];
-      const fly = flightKeyframes(show, land, { arc: 60, ease: easeInOut, samples: 8 })
-        .map(k => ({ ...k, offset: 0.42 + (k.offset as number) * 0.58 }));
+      const at = (p: Pose, dy = 0) =>
+        `translate(${p.x - CARD_W / 2}px, ${p.y - CARD_H / 2 + dy}px) rotate(${p.rot}deg) perspective(520px) rotateX(0deg) rotateZ(0deg) scale(${p.scale})`;
+      let pop: Keyframe[];
+      let hold: number;
+      let duration: number;
+      if (item.from) {
+        // Bought from the shop: the card lifts off its tile, grows into a
+        // readable face for a beat, then arcs down onto the pile.
+        const f = item.from;
+        const x = f.left + f.width / 2;
+        const y = f.top + f.height / 2;
+        const start: Pose = { x, y, rot: 0, scale: f.width / CARD_W };
+        const show: Pose = { x, y: y - 24, rot: -2, scale: Math.max(0.5, Math.min(0.62, f.width / CARD_W)) };
+        hold = 0.28;
+        duration = 1000;
+        pop = [
+          { offset: 0, transform: at({ ...start, scale: start.scale * 0.6 }), opacity: 0 },
+          { offset: 0.12, transform: at(show), opacity: 1 },
+          { offset: hold, transform: at(show), opacity: 1 },
+        ];
+        flightKeyframes(show, land, { arc: 70, ease: easeInOut, samples: 8 })
+          .slice(1)
+          .forEach(k => pop.push({ ...k, offset: hold + (k.offset as number) * (1 - hold) }));
+      } else {
+        // Each purchase pops up above the hand, holds a beat, then drops onto the pile.
+        const show: Pose = { x: hand.left + hand.width / 2 + (i - (fresh.length - 1) / 2) * 120, y: hand.top - 150, rot: (i - (fresh.length - 1) / 2) * 3, scale: 0.62 };
+        hold = 0.42;
+        duration = 1250;
+        pop = [
+          { offset: 0, transform: at({ ...show, scale: show.scale * 0.5 }, 40), opacity: 0 },
+          { offset: 0.18, transform: at(show), opacity: 1 },
+          { offset: hold, transform: at(show), opacity: 1 },
+        ];
+        flightKeyframes(show, land, { arc: 60, ease: easeInOut, samples: 8 })
+          .slice(1)
+          .forEach(k => pop.push({ ...k, offset: hold + (k.offset as number) * (1 - hold) }));
+      }
       launch({
         kind: 'incoming',
         card: item.card,
-        frames: [...pop, ...fly.slice(1)],
+        frames: pop,
         delay: i * Math.round(220 * speed),
-        duration: Math.round(1250 * speed),
+        duration: Math.round(duration * speed),
       });
       incomingKeyByFlight.current.set(`f${flightSeq.current}`, item.key);
     });
-  }, [incomingDiscards, holdIncoming, animationOff]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [incomingDiscards, animationOff]); // eslint-disable-line react-hooks/exhaustive-deps
   const incomingKeyByFlight = useRef(new Map<string, string>());
 
   const onFlightDone = useCallback((f: Flight) => {
@@ -1405,6 +1434,7 @@ export default function CardHand({
       {showDeckPopup && createPortal(
         <CardViewPopup
           title="Draw Pile"
+          icon="drawPile"
           cards={[{ label: 'Draw Pile', items: deckCards }]}
           onClose={() => setShowDeckPopup(false)}
           note="Not shown in draw order"
@@ -1416,6 +1446,7 @@ export default function CardHand({
       {showDiscardPopup && createPortal(
         <CardViewPopup
           title="Discard Pile"
+          icon="discard"
           cards={[{ label: 'Discard Pile', items: [...discardCards].reverse() }]}
           onClose={() => setShowDiscardPopup(false)}
           preserveOrder

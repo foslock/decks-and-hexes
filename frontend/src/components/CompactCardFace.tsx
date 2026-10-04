@@ -61,6 +61,7 @@ export default function CompactCardFace({
 
   return (
     <div
+      data-compact-card
       className={className}
       style={{
         position: 'relative',
