@@ -5,7 +5,7 @@ import type { Card, HexTile } from '../types/game';
 import { useAnimationSpeed, useTooltips, useVisualQuality } from './SettingsContext';
 import CompactCard, { COMPACT_CARD_WIDTH } from './CompactCard';
 import type { IconName } from '../icons/glyphs';
-import { ACTION_SIZE, BoardLabelRow, TILE_SIZE, defenseRow, row, type LabelRow } from './BoardLabel';
+import { ACTION_SIZE, BoardLabelRow, TILE_SIZE, defenseRow, ownerLabelColor, row, type LabelRow } from './BoardLabel';
 import { HEX_DIRS, type GridTransform } from '../utils/hexGeometry';
 import { BoardEngine, type CameraShot } from '../board3d/engine';
 import { CARD_FULL_HEIGHT } from './CardFull';
@@ -576,7 +576,9 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
         main = plannedRow(pa, tile);
       } else if (tile.defense_power > 0 || tile.immune) {
         const persist = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
-        main = defenseRow(persist, tile.defense_power - persist, !!tile.immune, TILE_SIZE);
+        // Tinted to the owner so whose defense it is reads at a glance.
+        const color = ownerLabelColor(tile.owner ? PLAYER_COLORS[tile.owner] : undefined);
+        main = defenseRow(persist, tile.defense_power - persist, !!tile.immune, TILE_SIZE, undefined, color);
       }
       if (pa && activePlayerId) {
         const c = classify(pa.card, tile, activePlayerId, pa.type);
