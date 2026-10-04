@@ -5438,7 +5438,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 ...HUD_PANEL_STYLE,
                 marginTop: 6,
                 padding: 6,
-                width: 200,
+                // Sized to the cards played (EngineQueue lays out up to 3 a row).
+                width: 'max-content',
                 boxSizing: 'border-box',
                 // Out of the way while a card is dragged from the hand.
                 opacity: draggingCardIndex !== null ? 0.15 : 1,
