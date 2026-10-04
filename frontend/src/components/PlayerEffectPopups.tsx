@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { HexTile, PlayerEffect } from '../types/game';
+import type { Card, HexTile, PlayerEffect } from '../types/game';
 import { PLAYER_COLORS, type GridTransform } from './GameBoard';
 import { axialToPixel, localToScreen } from '../utils/hexGeometry';
 import Icon from '../icons/Icon';
+import type { IconName } from '../icons/glyphs';
 import CardName from './CardName';
+import CardFull from './CardFull';
+import { CARD_H, CARD_W } from './hand/cardMotion';
+import { useCardCatalog } from '../cardCatalog';
+import { CARD_TITLE_FONT } from '../constants/cardColors';
+import { cardTrimTier, metalGradient, type TrimTier } from '../constants/cardTrim';
+import { cardImageUrl } from '../utils/cardImagePreload';
+import { useSqueeze } from '../utils/useSqueeze';
 
 /**
  * Effect callouts shown above target-player base tiles during review mode.
@@ -37,8 +45,9 @@ const DISMISS_DURATION = 400;  // ms for the fade-out when the parent clears eff
 // side stacks.
 const POPUP_RADIAL_OFFSET_X = 90;
 const POPUP_RADIAL_OFFSET_Y = 50;
-const POPUP_HALF_WIDTH = 110;   // half of the popup wrapper width (~220px) — used to clamp the anchor inside the viewport
-const POPUP_CARD_HEIGHT = 78;   // rough rendered height of a single popup card (3 lines of text + padding)
+const CALLOUT_W = 232;          // width of one callout card
+const POPUP_HALF_WIDTH = CALLOUT_W / 2; // used to clamp the anchor inside the viewport
+const POPUP_CARD_HEIGHT = 70;   // rendered height of a single callout (art medallion / 3 lines + trim)
 const VIEWPORT_MARGIN = 8;      // min gap between the stack and any viewport edge
 
 type Phase = 'intro' | 'stacked';
@@ -69,6 +78,126 @@ function effectColor(effectType: string): string {
 function colorStr(playerId: string): string {
   const c = PLAYER_COLORS[playerId];
   return c !== undefined ? `#${c.toString(16).padStart(6, '0')}` : '#fff';
+}
+
+const EFFECT_ICONS: Record<string, IconName> = {
+  gain_resources: 'resource',
+  resource_drain: 'resource',
+  grant_actions_next_turn: 'action',
+  draw_next_turn: 'card',
+  next_turn_bonus: 'nextRound',
+  forced_discard: 'discard',
+  on_defend_forced_discard: 'discard',
+  free_reroll: 'reroll',
+  grant_land_grants: 'vp',
+  cease_fire: 'defense',
+  global_claim_ban: 'ban',
+  cost_reduction: 'buy',
+  buy_restriction: 'buy',
+  base_raid_rubble: 'rubble',
+  inject_rubble: 'rubble',
+  base_raid_spoils: 'vp',
+  base_raid_defended: 'fortify',
+  global_random_trash: 'trash',
+  create_cards_to_discard: 'cardAdd',
+};
+
+/**
+ * One status callout, dressed like the cards: a metal trim tiered by the
+ * source card's cost, the card's art in a medallion, its name in the card
+ * title face, the effect in its tone (gain / restriction / harm) with a
+ * glyph, and the source player on a ribbon in their color.
+ */
+function EffectCallout({ effect, sourceName, sourceColor }: {
+  effect: PlayerEffect;
+  sourceName: string;
+  sourceColor: string;
+}) {
+  const catalog = useCardCatalog();
+  const card = catalog.getCardByName(effect.card_name);
+  const tier: TrimTier = card ? cardTrimTier(card) : 'iron';
+  const tone = effectColor(effect.effect_type);
+  const icon = EFFECT_ICONS[effect.effect_type] ?? 'card';
+  const art = card?.definition_id ? cardImageUrl(card.definition_id) : null;
+  const nameRef = useSqueeze([effect.card_name]);
+  const effectRef = useSqueeze([effect.effect]);
+  const sourceRef = useSqueeze([sourceName]);
+  const line = { whiteSpace: 'nowrap', overflow: 'hidden' } as const;
+  const squeezable = { display: 'inline-block', transformOrigin: 'left center' } as const;
+
+  return (
+    <div
+      data-effect-callout
+      style={{
+        width: CALLOUT_W,
+        boxSizing: 'border-box',
+        padding: 2,
+        borderRadius: 11,
+        background: metalGradient(tier, 145),
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.5), 0 0 0 1px rgba(0,0,0,0.6), 0 0 18px ${sourceColor}40, 0 8px 18px rgba(0,0,0,0.55)`,
+      }}
+    >
+      <div style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 9,
+        padding: '7px 10px 9px 7px',
+        borderRadius: 9,
+        overflow: 'hidden',
+        background:
+          `linear-gradient(100deg, ${tone}30 0%, ${tone}0d 45%, rgba(0,0,0,0) 75%),` +
+          'repeating-linear-gradient(-45deg, rgba(255,255,255,0.025) 0 2px, rgba(0,0,0,0) 2px 8px),' +
+          '#17172f',
+        boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.65), inset 0 0 0 2px rgba(255,255,255,0.05)',
+      }}>
+        {/* The source card's art in a small metal-rimmed medallion */}
+        <div style={{
+          width: 46, height: 46, flexShrink: 0, boxSizing: 'border-box', padding: 2, borderRadius: 8,
+          background: metalGradient(tier, 160), boxShadow: '0 2px 6px rgba(0,0,0,0.6)',
+        }}>
+          <div style={{
+            width: '100%', height: '100%', borderRadius: 6, display: 'grid', placeItems: 'center',
+            background: art ? `url(${art}) center / cover, #22223e` : 'radial-gradient(circle at 50% 35%, #34345a, #1a1a34)',
+            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.5), inset 0 0 8px rgba(0,0,0,0.55)',
+            color: tone,
+          }}>
+            {!art && <Icon name={icon} size={20} decorative />}
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left' }}>
+          <div style={{
+            ...line, fontFamily: CARD_TITLE_FONT, fontWeight: 700, fontSize: 14.5, lineHeight: 1.15,
+            color: '#fff6e2', letterSpacing: 0.2, textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+          }}>
+            <span ref={nameRef} style={squeezable}><CardName name={effect.card_name} /></span>
+          </div>
+          <div style={{ ...line, fontSize: 12.5, fontWeight: 700, lineHeight: 1.2, color: tone, textShadow: `0 0 8px ${tone}55, 0 1px 1px rgba(0,0,0,0.8)` }}>
+            <span ref={effectRef} style={squeezable}>
+              <Icon name={icon} size={12} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} />
+              {effect.effect}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+            <span aria-hidden style={{ width: 7, height: 7, flexShrink: 0, borderRadius: '50%', background: sourceColor, boxShadow: `0 0 6px ${sourceColor}` }} />
+            <div style={{
+              ...line, flex: 1, minWidth: 0, fontFamily: 'var(--cc-font-display)', fontSize: 9.5, fontWeight: 700,
+              lineHeight: 1.3, letterSpacing: 1.2, textTransform: 'uppercase', color: sourceColor,
+            }}>
+              <span ref={sourceRef} style={squeezable}>{sourceName}</span>
+            </div>
+          </div>
+        </div>
+        {/* Source player's ribbon, as on the board cards */}
+        <div aria-hidden style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 3, background: sourceColor, boxShadow: `0 0 8px ${sourceColor}` }} />
+        {/* Laminate sheen, as on the full card */}
+        <div aria-hidden style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: 'linear-gradient(118deg, rgba(255,255,255,0) 30%, rgba(255,255,255,0.06) 45%, rgba(255,255,255,0) 60%)',
+        }} />
+      </div>
+    </div>
+  );
 }
 
 interface Props {
@@ -397,7 +526,7 @@ export default function PlayerEffectPopups({
               position: 'fixed',
               left: groupPos.anchorX,
               top: wrapperTop,
-              width: 220,
+              width: CALLOUT_W,
               height: wrapperHeight,
               transform: 'translateX(-50%)',
               // Wrapper itself never receives pointer events — hover is driven
@@ -451,7 +580,6 @@ export default function PlayerEffectPopups({
 
               const sourceName = playerNames[effect.source_player_id] ?? effect.source_player_id;
               const sourceColor = colorStr(effect.source_player_id);
-              const effColor = effectColor(effect.effect_type);
 
               // Only the final top card (the last to arrive, largest
               // idxInGroup) is interactive — it sits on top once all
@@ -483,26 +611,7 @@ export default function PlayerEffectPopups({
                     pointerEvents: isTopCard && phase === 'stacked' && !anotherHovered && !dismissing ? 'auto' : 'none',
                   }}
                 >
-                  <div style={{
-                    background: 'rgba(15, 15, 35, 0.95)',
-                    border: `2px solid ${sourceColor}`,
-                    borderRadius: 10,
-                    padding: '8px 14px',
-                    textAlign: 'center',
-                    boxShadow: `0 0 20px ${sourceColor}44, 0 4px 16px rgba(0,0,0,0.6)`,
-                    whiteSpace: 'nowrap',
-                    minWidth: 140,
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 2 }}>
-                      <CardName name={effect.card_name} />
-                    </div>
-                    <div style={{ fontSize: 12, color: effColor, fontWeight: 700, marginBottom: 3 }}>
-                      {effect.effect}
-                    </div>
-                    <div style={{ fontSize: 10, color: sourceColor, fontWeight: 600, letterSpacing: 0.2, textTransform: 'uppercase' }}>
-                      {sourceName}
-                    </div>
-                  </div>
+                  <EffectCallout effect={effect} sourceName={sourceName} sourceColor={sourceColor} />
                 </div>
               );
             })}
@@ -528,6 +637,7 @@ function useFlyingCards(
   activePlayerId: string | undefined,
   animSpeed: number,
 ): React.ReactNode[] {
+  const catalog = useCardCatalog();
   // Resolve HUD/discard destination elements once per burst.
   const startedRef = useRef(false);
   useEffect(() => { startedRef.current = false; }, [effects]);
@@ -537,6 +647,7 @@ function useFlyingCards(
 
     const FLY_DURATION = Math.round(800 * animSpeed);
     const FLY_CARD_STAGGER = 120;
+    const FLY_CARD_SCALE = 0.24;
     const STAGGER_DELAY = INTRO_STAGGER;
 
     const out: React.ReactNode[] = [];
@@ -588,6 +699,7 @@ function useFlyingCards(
       const isRubble = effect.added_card_name === 'Rubble';
       const cardColor = isRubble ? '#ff6666' : '#ffd700';
       const cardIcon = isRubble ? 'rubble' : 'vp';
+      const addedCard: Card | undefined = effect.added_card ?? catalog.getCardByName(effect.added_card_name);
       const effectDelay = idx * STAGGER_DELAY * animSpeed;
 
       for (let c = 0; c < effect.added_card_count; c++) {
@@ -617,19 +729,34 @@ function useFlyingCards(
               opacity: 0,
               animation: `${keyName} ${FLY_DURATION}ms ease-in ${cardDelay}ms forwards`,
             }}>
-              <div style={{
-                background: 'rgba(15, 15, 35, 0.95)',
-                border: `2px solid ${cardColor}`,
-                borderRadius: 6,
-                padding: '3px 8px',
-                fontSize: 12,
-                fontWeight: 'bold',
-                color: cardColor,
-                whiteSpace: 'nowrap',
-                boxShadow: `0 0 12px ${cardColor}66`,
-              }}>
-                <Icon name={cardIcon} size={12} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} /><CardName name={effect.added_card_name} />
-              </div>
+              {addedCard ? (
+                // A mini copy of the card itself, like the cards on the board.
+                <div style={{ width: CARD_W * FLY_CARD_SCALE, height: CARD_H * FLY_CARD_SCALE, filter: `drop-shadow(0 0 8px ${cardColor}99) drop-shadow(0 4px 6px rgba(0,0,0,0.6))` }}>
+                  <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${FLY_CARD_SCALE})`, transformOrigin: '0 0' }}>
+                    <CardFull card={addedCard} artZoom={false} />
+                  </div>
+                </div>
+              ) : (
+                <div style={{
+                  padding: 2,
+                  borderRadius: 8,
+                  background: metalGradient(isRubble ? 'iron' : 'gold', 145),
+                  boxShadow: `0 0 12px ${cardColor}66, 0 4px 8px rgba(0,0,0,0.55)`,
+                }}>
+                  <div style={{
+                    padding: '3px 9px',
+                    borderRadius: 6,
+                    background: '#17172f',
+                    fontFamily: CARD_TITLE_FONT,
+                    fontSize: 13,
+                    fontWeight: 'bold',
+                    color: '#fff6e2',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    <Icon name={cardIcon} size={12} decorative style={{ verticalAlign: '-0.15em', marginRight: 4, color: cardColor }} /><CardName name={effect.added_card_name} />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -637,5 +764,6 @@ function useFlyingCards(
     }
 
     return out;
-  }, [effects, gridTransform, gridRect, tiles, activePlayerId, animSpeed]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effects, gridTransform, gridRect, tiles, activePlayerId, animSpeed, catalog.namePattern]);
 }

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { Card } from '../types/game';
 import { CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
 import { cardTrimTier, metalGradient, TRIM_INK } from '../constants/cardTrim';
@@ -6,6 +6,7 @@ import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from '
 import { renderSubtitle } from './SubtitlePartRenderer';
 import CardName from './CardName';
 import { CostLabel } from '../icons/Num';
+import { useSqueeze } from '../utils/useSqueeze';
 
 /** Text sizes for the two compact densities. */
 const SIZES = {
@@ -35,22 +36,6 @@ export interface CompactCardFaceProps {
   style?: CSSProperties;
   /** Overlays (selection marks, flashes) drawn over the face. */
   children?: ReactNode;
-}
-
-/** Squeeze a single line horizontally when it would overflow its box. */
-function useSqueeze(deps: unknown[]) {
-  const ref = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el?.parentElement) return;
-    el.style.transform = '';
-    const avail = el.parentElement.clientWidth;
-    if (!avail) return;
-    const k = Math.min(1, avail / el.scrollWidth);
-    if (k < 1) el.style.transform = `scaleX(${k})`;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
-  return ref;
 }
 
 /**
