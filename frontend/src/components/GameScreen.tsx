@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
-import HexGrid, { type GridTransform, type PixiContainer, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './HexGrid';
+import GameBoard, { type BoardControls, type BoardFx, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './GameBoard';
 import PlayerHud from './PlayerHud';
 import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
 import CardBrowser from './CardBrowser';
@@ -16,7 +16,7 @@ import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
 import { CARD_TYPE_COLORS, getCardDisplayColor, miniCardBackground, MINI_CARD_SHADOW } from '../constants/cardColors';
-import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed, useBackgroundImages } from './SettingsContext';
+import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } from './SettingsContext';
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
@@ -201,7 +201,7 @@ function canClaimCaptureTile(
 // Hex geometry helpers moved to `../utils/hexGeometry` so sibling components
 // (and animation preview tooling) can import them without pulling the entire
 // GameScreen dependency tree. Re-exported here for existing callers.
-import { HEX_SIZE, axialToPixel, localToScreen } from '../utils/hexGeometry';
+import { HEX_SIZE, axialToPixel, localToScreen, screenToLocal, type GridTransform } from '../utils/hexGeometry';
 export { HEX_SIZE, axialToPixel, localToScreen };
 
 interface GameScreenProps {
@@ -231,20 +231,6 @@ function pixelToAxial(px: number, py: number): { q: number; r: number } {
   if (dq > dr && dq > ds) rq = -rr - rs;
   else if (dr > ds) rr = -rq - rs;
   return { q: rq, r: rr };
-}
-
-/** Convert screen coordinates to hex-local coordinates, accounting for grid rotation. */
-function screenToLocal(canvasX: number, canvasY: number, transform: GridTransform, containerW: number, containerH: number): { x: number; y: number } {
-  const cx = containerW / 2;
-  const cy = containerH / 2;
-  const dx = canvasX - cx;
-  const dy = canvasY - cy;
-  const cos = Math.cos(-transform.rotation);
-  const sin = Math.sin(-transform.rotation);
-  return {
-    x: (dx * cos - dy * sin) / transform.scale + transform.pivotX,
-    y: (dx * sin + dy * cos) / transform.scale + transform.pivotY,
-  };
 }
 
 /** Hex distance in axial coordinates (module-level for use in effects before hooks). */
@@ -885,14 +871,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const animationMode = useAnimationMode();
   const animationOff = useAnimationOff();
   const animSpeed = useAnimationSpeed();
-  const bgEnabled = useBackgroundImages();
-  // Pick one of 4 game background images based on map seed
-  const gameBgIndex = useMemo(() => {
-    const seed = gameState.map_seed || '';
-    let hash = 0;
-    for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash + seed.charCodeAt(i)) | 0;
-    return (Math.abs(hash) % 4) + 1;
-  }, [gameState.map_seed]);
   const sound = useSound();
   const { showZoom } = useCardZoom();
   // Helper: find the first human player index
@@ -1130,8 +1108,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const pendingStateRef = useRef<GameState | null>(null);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridTransformRef = useRef<GridTransform | null>(null);
-  const resolveLayerRef = useRef<PixiContainer | null>(null);
-  const tileClickedRef = useRef(false);
+  const boardFxRef = useRef<BoardFx | null>(null);
+  const boardControlsRef = useRef<BoardControls | null>(null);
   // Chevron reveal state (resolve phase pre-animation)
   const [chevronRevealPhase, setChevronRevealPhase] = useState(false);
   const [chevronAlpha, setChevronAlpha] = useState(0);
@@ -2455,7 +2433,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   }, [findBaseKey]);
 
   const handleTileClick = useCallback(async (q: number, r: number, shiftKey?: boolean) => {
-    tileClickedRef.current = true;
 
     // Test mode: shift+click cycles tile ownership (none → p0 → p1 → ... → none)
     if (shiftKey && gameState.test_mode) {
@@ -3063,7 +3040,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Upgrade button unmounts once the card is upgraded (no more preview),
       // so its onMouseLeave never fires. Clear the preview state manually —
       // otherwise `showUpgradePreview` stays true and keeps the HexGrid
-      // `paused` prop true forever, freezing the PIXI ticker.
+      // `paused` prop true forever, freezing the board's render loop.
       setShowUpgradePreview(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -3304,6 +3281,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         } else {
           handleRotateGrid();
         }
+        return;
+      }
+
+      // T: toggle the tilted 3D view; V: reset the camera
+      if ((key === 't' || key === 'v') && !e.ctrlKey && !e.metaKey && !showShopOverlay && !showCardBrowser && !showDeckViewer && !showFullLog && !showUpgradePreview) {
+        if (key === 't') boardControlsRef.current?.toggleTilt();
+        else boardControlsRef.current?.resetView();
         return;
       }
 
@@ -4710,10 +4694,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', color: '#fff',
       backgroundColor: '#0e0e22',
-      backgroundImage: bgEnabled
-        ? `radial-gradient(ellipse at 50% 45%, rgba(8,8,24,0) 35%, rgba(8,8,24,0.55) 80%, rgba(4,4,14,0.85) 100%), url(/backgrounds/bg-game-${gameBgIndex}.webp)`
-        : GAME_BACKDROP,
-      backgroundSize: bgEnabled ? 'cover, cover' : undefined,
+      backgroundImage: GAME_BACKDROP,
       backgroundPosition: 'center',
     }}>
       {/* Full-width grid area */}
@@ -4722,18 +4703,18 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           ref={gridContainerRef}
           style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'hidden' }}
           onPointerDown={(e) => {
-            // Small delay to let pixi's pointerdown handler fire first and set tileClickedRef
-            requestAnimationFrame(() => {
-              if (tileClickedRef.current) { tileClickedRef.current = false; return; }
-              setSelectedCardIndex(null);
-            });
+            // Presses on the board itself are handled by GameBoard (a click on
+            // empty board deselects via onEmptyClick; a drag orbits the camera).
+            // Anything else in the grid area (HUD chrome) deselects as before.
+            if ((e.target as HTMLElement).tagName === 'CANVAS') return;
+            setSelectedCardIndex(null);
           }}
         >
           {displayState.grid && (
-            <HexGrid
+            <GameBoard
               tiles={displayState.grid.tiles}
               onTileClick={handleTileClick}
-              onTilePointerDown={() => { tileClickedRef.current = true; }}
+              onEmptyClick={() => setSelectedCardIndex(null)}
               highlightTiles={(() => {
                 if (phase !== 'play') return undefined;
                 if (multiTileCardIndex !== null) {
@@ -4861,7 +4842,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               borderTiles={phase === 'play' ? adjacentTiles : undefined}
               playerInfo={playerInfo}
               transformRef={gridTransformRef}
-              resolveLayerRef={resolveLayerRef}
+              fxRef={boardFxRef}
+              controlsRef={boardControlsRef}
+              showCameraControls={!showIntro}
               gridRotation={gridRotation}
               dragHoverPosition={draggingCardIndex !== null ? dragHoverPos : null}
               activePlayerId={phase === 'play' ? activePlayerId : undefined}
@@ -4915,7 +4898,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 return total;
               })() : 0}
               claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
-              vpPaths={vpPaths.length > 0 && !resolving ? vpPaths : undefined}
+              vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
               disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || prePlaySearchMode || activePlayer?.pending_search || searchAnimating || searchFlights || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
@@ -5969,7 +5952,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               style={{
                 position: 'absolute', bottom: 4, left: 12,
                 display: 'flex', alignItems: 'center', gap: 8,
-                padding: '6px 14px',
+                padding: '10px 14px',
                 background: 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0) 60%), rgba(14, 14, 34, 0.85)',
                 border: `1px solid ${submitActionsLeft > 0 ? 'rgba(232, 196, 106, 0.35)' : 'rgba(255,255,255,0.08)'}`,
                 borderRadius: 10,
@@ -6003,7 +5986,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 </div>
               </div>
               <span style={{
-                fontSize: 22, fontWeight: 900, fontFamily: 'var(--cc-font-display)',
+                display: 'inline-flex', alignItems: 'center',
+                fontSize: 22, lineHeight: 1, fontWeight: 900, fontFamily: 'var(--cc-font-display)',
                 fontVariantNumeric: 'tabular-nums',
                 color: submitActionsLeft > 0 ? '#ffe7a8' : '#555',
                 textShadow: submitActionsLeft > 0 ? '0 0 10px rgba(232, 196, 106, 0.45), 0 1px 2px rgba(0,0,0,0.6)' : 'none',
@@ -6035,7 +6019,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   </span>
                 ))}
               </span>
-              <span style={{ fontSize: 13, color: submitActionsLeft > 0 ? '#aaa' : '#555' }}>
+              <span style={{ fontSize: 13, lineHeight: 1, color: submitActionsLeft > 0 ? '#aaa' : '#555' }}>
                 action{submitActionsLeft !== 1 ? 's' : ''} left
               </span>
             </div>
@@ -6179,7 +6163,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           gridTransformRef={gridTransformRef}
           gridRect={gridRectSnapshot ?? gridRect}
           gridContainerRef={gridContainerRef}
-          resolveLayerRef={resolveLayerRef}
+          fxRef={boardFxRef}
           onStepApply={applyResolveStep}
           onComplete={handleResolveComplete}
         />

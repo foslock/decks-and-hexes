@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { Application, Graphics } from 'pixi.js';
 import { BASE } from '../api/client';
 import type { Card } from '../types/game';
 import { buildCardSubtitle, parseSubtitle, type SubtitlePart } from '../components/cardSubtitle';
@@ -9,7 +8,8 @@ import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground, MINI_CARD_SHA
 import Icon from './Icon';
 import { CostLabel, IconValue } from './Num';
 import { GLYPHS, ICON_NAMES, type GlyphGroup, type IconName } from './glyphs';
-import { createLabelRow, drawGlyph, iconTextureCacheSize, type LabelSegment } from './pixiIcons';
+import { drawGlyph } from './canvasGlyph';
+import { BoardLabelRow, TEMP_DEF, defenseRow, row, type LabelRow } from '../components/BoardLabel';
 
 /**
  * Dev icon gallery (?preview=icons):
@@ -19,7 +19,7 @@ import { createLabelRow, drawGlyph, iconTextureCacheSize, type LabelSegment } fr
  *  3. Number + glyph units at 11/12/13 px.
  *  4. Every purchasable card's hand chip (134×52, 13 px subtitle, same
  *     auto-fit as CardHand), base and upgraded.
- *  5. A live PixiJS board sample built from the cached icon textures.
+ *  5. The floating HTML labels the 3D board draws over tiles.
  */
 
 const SIZES = [11, 12, 14, 16, 24];
@@ -76,7 +76,7 @@ export default function IconPreview() {
         <h1 className="cc-title" style={{ fontSize: 30, margin: '0 0 4px' }}>Icon Gallery</h1>
         <p style={note}>
           {ICON_NAMES.length} hand-authored single-color glyphs on a 16-unit grid (<code>src/icons/glyphs.ts</code>), rendered as
-          inline SVG in the DOM (<code>&lt;Icon&gt;</code>) and as cached textures on the PixiJS board.
+          inline SVG in the DOM (<code>&lt;Icon&gt;</code>) everywhere, including the floating labels on the 3D board.
         </p>
         <nav style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 13, marginBottom: 8 }}>
           {[['glyphs', 'Glyphs'], ['loupe', 'Pixel loupe'], ['numbers', 'Numbers'], ['cards', 'All cards'], ['board', 'Board']].map(([id, label]) => (
@@ -344,69 +344,45 @@ function FitSpan({ children, onScale }: { children: ReactNode; onScale?: (s: num
   return <span ref={ref} style={{ display: 'inline-block', maxWidth: '100%', transformOrigin: 'left center' }}>{children}</span>;
 }
 
-// ── 5. PixiJS board sample ───────────────────────────────────────────────
-
-const HEX_R = 32;
-const OUTLINE = { color: 0x000000, width: 1.5 };
-const BLUE = 0x66ccff;
+// ── 5. Board label sample ────────────────────────────────────────────────
 
 function BoardSample() {
-  const host = useRef<HTMLDivElement>(null);
-  const [cacheSize, setCacheSize] = useState(0);
-  const tiles: { label: string; fill: number | null; segs: LabelSegment[]; size: number; color?: number }[] = [
-    { label: 'VP (connected)', fill: 0x3a7abf, segs: [{ icon: 'vp' }], size: 18, color: 0xffd700 },
-    { label: 'VP ×3', fill: 0x3a7abf, segs: [{ icon: 'vp' }, { icon: 'vp' }, { icon: 'vp' }], size: 14, color: 0xfff066 },
-    { label: 'VP (not connected)', fill: null, segs: [{ icon: 'vpOutline' }], size: 18, color: 0x888888 },
-    { label: 'Permanent + round', fill: 0xa83040, segs: [{ icon: 'fortify' }, { text: '2' }, { text: '+3', color: BLUE }], size: 14 },
-    { label: 'Defense (round)', fill: 0x2e8a3a, segs: [{ icon: 'defense', color: BLUE }, { text: '+3', color: BLUE }], size: 14 },
-    { label: 'Immune', fill: 0x2e8a3a, segs: [{ icon: 'immune', color: BLUE }, { text: 'Immune', color: BLUE, size: 11 }], size: 14 },
-    { label: 'Planned claim', fill: null, segs: [{ icon: 'power' }, { text: '4' }], size: 18 },
-    { label: 'Target opponent', fill: 0x8868a8, segs: [{ icon: 'opponent' }], size: 16, color: 0xff6666 },
-    { label: 'Rubble', fill: 0x8868a8, segs: [{ icon: 'rubble' }], size: 18, color: 0xff6666 },
-    { label: 'Abandon', fill: 0xa83040, segs: [{ icon: 'abandon' }], size: 20, color: 0xff9944 },
-    { label: 'Blocked', fill: 0x2a2a3a, segs: [{ icon: 'mountain' }], size: 34, color: 0x888888 },
+  const samples: { label: string; fill: string; rows: LabelRow[] }[] = [
+    { label: 'VP (connected)', fill: '#3a7abf', rows: [row([{ icon: 'vp' }], 18, '#ffd700')] },
+    { label: 'VP ×3', fill: '#3a7abf', rows: [row([{ icon: 'vp' }, { icon: 'vp' }, { icon: 'vp' }], 15, '#fff066')] },
+    { label: 'VP (not connected)', fill: '#4a5a3a', rows: [row([{ icon: 'vpOutline' }], 18, '#9a9a9a')] },
+    { label: 'Permanent + round', fill: '#a83040', rows: [defenseRow(2, 3, false, 14)] },
+    { label: 'Defense (round)', fill: '#2e8a3a', rows: [defenseRow(0, 3, false, 14)] },
+    { label: 'Immune', fill: '#2e8a3a', rows: [defenseRow(0, 0, true, 14)] },
+    { label: 'Planned claim', fill: '#4a5a3a', rows: [row([{ icon: 'power' }, { text: '4' }], 18)] },
+    { label: 'Target opponent', fill: '#8868a8', rows: [row([{ icon: 'opponent' }], 16, '#ff6666')] },
+    { label: 'Rubble', fill: '#8868a8', rows: [row([{ icon: 'rubble' }], 18, '#ff6666')] },
+    { label: 'Abandon', fill: '#a83040', rows: [row([{ icon: 'abandon' }], 20, '#ff9944')] },
+    { label: 'Preview', fill: '#4a5a3a', rows: [row([{ icon: 'power' }, { text: '+3' }], 18, '#fff', 0.75)] },
   ];
   const stepX = 92;
-
-  useEffect(() => {
-    const el = host.current;
-    if (!el) return;
-    let destroyed = false;
-    const app = new Application();
-    const res = Math.ceil(window.devicePixelRatio || 2);
-    app.init({ width: tiles.length * stepX + 10, height: 96, backgroundAlpha: 0, antialias: true, resolution: res, autoDensity: true }).then(() => {
-      if (destroyed) { app.destroy(true, { children: true }); return; }
-      el.appendChild(app.canvas);
-      tiles.forEach((t, i) => {
-        const cx = 46 + i * stepX;
-        const cy = 48;
-        const pts: number[] = [];
-        for (let k = 0; k < 6; k++) pts.push(cx + HEX_R * Math.cos((Math.PI / 3) * k), cy + HEX_R * Math.sin((Math.PI / 3) * k));
-        app.stage.addChild(new Graphics().poly(pts).fill({ color: t.fill ?? 0x1e1e38, alpha: t.fill ? 0.55 : 1 }).stroke({ color: 0x4a4a70, width: 1.5 }));
-        const label = createLabelRow(t.segs, { size: t.size, color: t.color ?? 0xffffff, outline: OUTLINE, gap: 1 });
-        label.position.set(cx, cy);
-        app.stage.addChild(label);
-      });
-      setCacheSize(iconTextureCacheSize());
-    });
-    return () => {
-      destroyed = true;
-      try { app.destroy(true, { children: true }); } catch { /* not yet initialised */ }
-    };
-  }, []);
-
   return (
     <>
-      <h2 id="board" style={sectionTitle}>Board tile labels (PixiJS)</h2>
+      <h2 id="board" style={sectionTitle}>Board tile labels</h2>
       <p style={note}>
-        <code>createLabelRow()</code>: icon sprites from a shared texture cache plus Philosopher Text for numbers. Textures cached so
-        far: <b style={{ color: 'var(--cc-gold)' }}>{cacheSize}</b> (each built once, reused by every tile and rebuild).
+        Floating HTML labels the 3D board positions over each tile every frame (<code>BoardLabelRow</code>). Blue
+        ({TEMP_DEF}) marks this-round defense.
       </p>
       <div style={{ overflowX: 'auto', background: '#101024', border: '1px solid var(--cc-panel-border)', borderRadius: 10, padding: '8px 0' }}>
         <div style={{ display: 'flex' }}>
-          {tiles.map(t => <div key={t.label} style={{ width: stepX, flexShrink: 0, fontSize: 10, color: 'var(--cc-text-faint)', textAlign: 'center' }}>{t.label}</div>)}
+          {samples.map(t => <div key={t.label} style={{ width: stepX, flexShrink: 0, fontSize: 10, color: 'var(--cc-text-faint)', textAlign: 'center' }}>{t.label}</div>)}
         </div>
-        <div ref={host} />
+        <div style={{ display: 'flex' }}>
+          {samples.map(t => (
+            <div key={t.label} style={{ width: stepX, height: 84, flexShrink: 0, display: 'grid', placeItems: 'center' }}>
+              <div style={{ width: 64, height: 56, clipPath: 'polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%)', background: t.fill, opacity: 0.85, display: 'grid', placeItems: 'center' }}>
+                <div className="cc-board-label" style={{ position: 'static' }}>
+                  {t.rows.map((r, i) => <BoardLabelRow key={i} r={r} scale={1} />)}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </>
   );

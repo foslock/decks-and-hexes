@@ -26,7 +26,6 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "public")
 # (directory under public/, WebP quality, max width or None)
 TARGETS = [
     ("cards", 80, None),
-    ("backgrounds", 78, 1920),
     ("assets/howtoplay", 82, 320),
 ]
 

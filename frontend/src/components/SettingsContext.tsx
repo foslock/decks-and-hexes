@@ -7,7 +7,6 @@ interface Settings {
   tooltips: boolean;
   soundEnabled: boolean;
   soundVolume: number;
-  backgroundImages: boolean;
 }
 
 interface SettingsContextValue {
@@ -16,7 +15,6 @@ interface SettingsContextValue {
   setTooltips: (on: boolean) => void;
   setSoundEnabled: (on: boolean) => void;
   setSoundVolume: (v: number) => void;
-  setBackgroundImages: (on: boolean) => void;
 }
 
 const STORAGE_KEY = 'cardclash_settings';
@@ -31,11 +29,10 @@ function loadSettings(): Settings {
         tooltips: parsed.tooltips !== false,  // default true
         soundEnabled: parsed.soundEnabled !== false,  // default true
         soundVolume: typeof parsed.soundVolume === 'number' ? parsed.soundVolume : 0.5,
-        backgroundImages: parsed.backgroundImages === true,  // default false
       };
     }
   } catch { /* ignore */ }
-  return { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5, backgroundImages: false };
+  return { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5 };
 }
 
 function saveSettings(settings: Settings) {
@@ -45,12 +42,11 @@ function saveSettings(settings: Settings) {
 }
 
 const SettingsContext = createContext<SettingsContextValue>({
-  settings: { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5, backgroundImages: false },
+  settings: { animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5 },
   setAnimationMode: () => {},
   setTooltips: () => {},
   setSoundEnabled: () => {},
   setSoundVolume: () => {},
-  setBackgroundImages: () => {},
 });
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -88,16 +84,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setBackgroundImages = useCallback((on: boolean) => {
-    setSettings((prev) => {
-      const next = { ...prev, backgroundImages: on };
-      saveSettings(next);
-      return next;
-    });
-  }, []);
-
   return (
-    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setBackgroundImages }}>
+    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume }}>
       {children}
     </SettingsContext.Provider>
   );
@@ -131,9 +119,4 @@ export function useAnimationMode() {
 export function useTooltips() {
   const { settings } = useSettings();
   return settings.tooltips;
-}
-
-export function useBackgroundImages() {
-  const { settings } = useSettings();
-  return settings.backgroundImages;
 }

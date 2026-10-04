@@ -1,4 +1,4 @@
-// Mock CanvasRenderingContext2D for PixiJS (not available in jsdom)
+// Mock CanvasRenderingContext2D (not available in jsdom)
 if (typeof globalThis.CanvasRenderingContext2D === 'undefined') {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (globalThis as any).CanvasRenderingContext2D = class CanvasRenderingContext2D {};
@@ -12,8 +12,8 @@ globalThis.ResizeObserver = class ResizeObserver {
   disconnect() {}
 };
 
-// Suppress PixiJS canvas errors in jsdom (getContext returns null).
-// Mock getContext so PixiJS doesn't throw during component mount.
+// jsdom's getContext returns null; give canvas consumers a harmless 2D stub.
+// (WebGL stays unavailable, so the 3D board falls back gracefully.)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (HTMLCanvasElement.prototype as any).getContext = function (_type: string) {
   return {

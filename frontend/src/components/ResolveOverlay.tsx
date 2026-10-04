@@ -1,17 +1,17 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import type { ResolutionStep } from '../types/game';
-import { type GridTransform, PLAYER_COLORS } from './HexGrid';
-import type { Container } from 'pixi.js';
-import { Graphics } from 'pixi.js';
+import type { GridTransform } from '../utils/hexGeometry';
+import { PLAYER_COLORS, type BoardFx, type FxFortifyRing, type FxWedge } from '../board3d/boardTypes';
 import { useAnimationMode, useAnimationSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
 import Icon from '../icons/Icon';
 import { Num } from '../icons/Num';
 
 // ---------------------------------------------------------------------------
-// Pixi wedge animation helpers — wedge geometry lives in the hex grid's own
-// Pixi coordinate space (axialToPixel, HEX_SIZE=32, unscaled), so there is
-// no screen-coordinate conversion and no measurement-timing bugs.
+// Wedge animation helpers — wedge geometry lives in hex-local pixel space
+// (axialToPixel, HEX_SIZE=32). The 3D board drapes each wedge over the
+// terrain, so there is no screen-coordinate conversion and no
+// measurement-timing bugs.
 // ---------------------------------------------------------------------------
 
 /** Cubic-bezier easing solver matching CSS cubic-bezier(x1,y1,x2,y2). */
@@ -32,7 +32,7 @@ function lerp2d(a: { x: number; y: number }, b: { x: number; y: number }, t: num
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 }
 
-interface PixiWedge {
+interface BoardWedge {
   playerId: string;
   isWinner: boolean;
   cornerA: { x: number; y: number };
@@ -41,11 +41,11 @@ interface PixiWedge {
   hexCenter: { x: number; y: number };
   /** The 4 remaining hex corners (CCW from edgeK+2..edgeK+5) — used to expand winner to full hex. */
   otherCorners: { x: number; y: number }[];
-  g: Graphics;
+  w: FxWedge;
 }
 
-/** Build wedge geometry and Graphics objects for each attacker in the given step. */
-function buildPixiWedges(step: ResolutionStep, container: Container): PixiWedge[] {
+/** Build wedge geometry and board wedges for each attacker in the given step. */
+function buildBoardWedges(step: ResolutionStep, fx: BoardFx): BoardWedge[] {
   const hexCenter = axialToPixel(step.q, step.r);
   const inscribedR = HEX_SIZE * Math.sqrt(3) / 2;
 
@@ -62,7 +62,7 @@ function buildPixiWedges(step: ResolutionStep, container: Container): PixiWedge[
   });
 
   const usedEdges = new Set<number>();
-  const wedges: PixiWedge[] = [];
+  const wedges: BoardWedge[] = [];
 
   for (const [playerId, info] of grouped) {
     const local = axialToPixel(info.sourceQ - step.q, info.sourceR - step.r);
@@ -81,10 +81,6 @@ function buildPixiWedges(step: ResolutionStep, container: Container): PixiWedge[
     }
     usedEdges.add(edgeK);
 
-    const g = new Graphics();
-    g.zIndex = 0;
-    container.addChild(g);
-
     wedges.push({
       playerId,
       isWinner: playerId === step.winner_id,
@@ -96,22 +92,17 @@ function buildPixiWedges(step: ResolutionStep, container: Container): PixiWedge[
       },
       hexCenter,
       otherCorners: [2, 3, 4, 5].map(off => corner(edgeK + off)),
-      g,
+      w: fx.createWedge(playerId, step.q, step.r),
     });
   }
 
   return wedges;
 }
 
-function fillWedge(w: PixiWedge, pts: { x: number; y: number }[]) {
-  const color = PLAYER_COLORS[w.playerId] ?? 0xffffff;
-  w.g.clear();
-  w.g.fill({ color, alpha: 0.9 });
-  w.g.poly(pts);
-  w.g.fill();
+function fillWedge(w: BoardWedge, pts: { x: number; y: number }[]) {
+  w.w.setPoints(pts);
 }
 
-// Must match HexGrid.tsx
 const HEX_SIZE = 32;
 
 function axialToPixel(q: number, r: number): { x: number; y: number } {
@@ -154,9 +145,8 @@ interface ResolveOverlayProps {
   onStepApply?: (stepIndex: number) => void;
   /** Called after all steps have been animated. */
   onComplete: () => void;
-  /** Pixi Container inside the hex grid — when provided, wedge animations are rendered in Pixi
-   *  (no screen-coordinate conversion needed, eliminating the measurement-timing offset bug). */
-  resolveLayerRef?: React.RefObject<Container | null>;
+  /** The 3D board's effects API — wedges, fortification rings, sparks, shockwaves. */
+  fxRef?: React.RefObject<BoardFx | null>;
 }
 
 interface ActiveNumber {
@@ -179,7 +169,7 @@ type StepStage = 'numbers_move' | 'winner_grow' | 'done' | 'br_fortify' | 'br_ra
  * one-by-one: power numbers fly in from source tiles, bounce at the center,
  * then the winner's number grows while losers fade.
  */
-export default function ResolveOverlay({ steps, gridTransform: gridTransformProp, gridRect, gridContainerRef, gridTransformRef, onStepApply, onComplete, resolveLayerRef }: ResolveOverlayProps) {
+export default function ResolveOverlay({ steps, gridTransform: gridTransformProp, gridRect, gridContainerRef, gridTransformRef, onStepApply, onComplete, fxRef }: ResolveOverlayProps) {
   // Snapshot rect + transform measured in useLayoutEffect (fires after DOM
   // commit, before paint) so we always get post-layout values rather than
   // stale values captured during React's render phase.
@@ -196,12 +186,11 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   const completedRef = useRef(false);
   const appliedStepsRef = useRef(new Set<number>());
 
-  // Pixi wedge state — Graphics objects live inside the resolve container provided by HexGrid
-  const pixiWedgesRef = useRef<PixiWedge[] | null>(null);
+  // Board wedges for the current step (draped polygons in the 3D scene).
+  const wedgesRef = useRef<BoardWedge[] | null>(null);
 
-  // Base-raid Pixi state — fortification ring + crenellations + shatter shards. Cleaned up
-  // when the step changes or the component unmounts.
-  const pixiBaseRaidRef = useRef<{ ring: Graphics; crenels: Graphics; shards: Graphics } | null>(null);
+  // Base-raid fortification ring. Cleaned up when the step changes or the component unmounts.
+  const baseRaidRef = useRef<{ ring: FxFortifyRing } | null>(null);
 
   // Ram-impact state — drives screen shake when the attacker wedge connects.
   const [ramImpactCount, setRamImpactCount] = useState(0);
@@ -227,11 +216,9 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // post-layout snapshot so they are always mutually consistent.
   useLayoutEffect(() => {
     const container = gridContainerRef?.current;
-    // Use the canvas element's rect when available — it exactly matches Pixi's
-    // app.screen dimensions (the drawing surface), whereas the outer wrapper div
-    // may be taller/wider due to flex layout. fitGrid positions the hexContainer
-    // at (app.screen.width/2, app.screen.height/2), so we must use those same
-    // dimensions as the coordinate origin for correct number placement.
+    // Use the canvas element's rect when available — the board's projection is
+    // relative to its drawing surface, whereas the outer wrapper div may be
+    // taller/wider due to flex layout.
     const canvas = container?.querySelector('canvas') ?? null;
     measuredRectRef.current = (canvas ?? container)?.getBoundingClientRect() ?? gridRect ?? null;
     measuredTransformRef.current = gridTransformRef?.current ?? gridTransformProp ?? null;
@@ -249,6 +236,10 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     const transform = measuredTransformRef.current;
     if (!rect || !transform) return { x: 0, y: 0 };
     const local = axialToPixel(q, r);
+    if (transform.project) {
+      const p = transform.project(local.x, local.y, 0.15);
+      return { x: p.x + rect.left, y: p.y + rect.top };
+    }
     // Rotation-aware: apply pivot-based transform
     const relX = (local.x - transform.pivotX) * transform.scale;
     const relY = (local.y - transform.pivotY) * transform.scale;
@@ -261,6 +252,16 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // Deps are stable refs — toScreen reads them via .current at call time.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Screen-space offset of a hex-local displacement from a tile center (follows the 3D camera). */
+  const projectOffset = (q: number, r: number, lx: number, ly: number): { dx: number; dy: number } | null => {
+    const transform = measuredTransformRef.current;
+    if (!transform?.project) return null;
+    const c = axialToPixel(q, r);
+    const a = transform.project(c.x, c.y, 0.15);
+    const b = transform.project(c.x + lx, c.y + ly, 0.15);
+    return { dx: b.x - a.x, dy: b.y - a.y };
+  };
 
   // hasPositionData: true when both transform and rect are available.
   // Falls back to snapshot props on the first render (before useLayoutEffect has fired),
@@ -419,10 +420,8 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
         cornerB: localCorner(edgeK + 1),
         edgeMid,
         remaining: [2, 3, 4, 5].map(off => localCorner(edgeK + off)),
-        edgeOffsetScreen: {
-          dx: ox * cosR - oy * sinR,
-          dy: ox * sinR + oy * cosR,
-        },
+        edgeOffsetScreen: projectOffset(step.q, step.r, ox / scale, oy / scale)
+          ?? { dx: ox * cosR - oy * sinR, dy: ox * sinR + oy * cosR },
         isWinner: playerId === step.winner_id,
       });
     }
@@ -455,6 +454,8 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     const a = (bestK + 0.5) * Math.PI / 3;
     const ox = inscribedR * Math.cos(a);
     const oy = inscribedR * Math.sin(a);
+    const projected = projectOffset(step.q, step.r, ox / scale, oy / scale);
+    if (projected) return projected;
     const rot = gridTransform.rotation;
     const cosR = Math.cos(rot);
     const sinR = Math.sin(rot);
@@ -493,31 +494,33 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     onStepApplyRef.current?.(idx);
   }, []);
 
-  // === PIXI WEDGE ANIMATION EFFECTS ===
-  // Wedge shapes are drawn directly into the HexGrid's Pixi Container, so geometry
-  // is in axial-pixel space with no screen-coordinate conversion needed.
+  // === BOARD WEDGE ANIMATION EFFECTS ===
+  // Wedges are draped over the 3D terrain by the board's effects layer, so
+  // geometry stays in axial-pixel space with no screen conversion.
 
-  // Effect 1: create Pixi Graphics for the current step's wedges
+  const stepCenter = step ? axialToPixel(step.q, step.r) : null;
+  const winnerColor = step?.winner_id ? (PLAYER_COLORS[step.winner_id] ?? 0xffffff) : 0xffffff;
+
+  // Effect 1: create the current step's wedges
   useEffect(() => {
-    // Tear down any wedges from the previous step
-    const prev = pixiWedgesRef.current;
+    const prev = wedgesRef.current;
     if (prev) {
-      for (const w of prev) { if (!w.g.destroyed) w.g.destroy(); }
-      pixiWedgesRef.current = null;
+      for (const w of prev) w.w.destroy();
+      wedgesRef.current = null;
     }
 
-    const container = resolveLayerRef?.current;
-    if (!container || !step || !isWedgeBattle || isOff) return;
+    const fx = fxRef?.current;
+    if (!fx || !step || !isWedgeBattle || isOff) return;
 
-    const wedges = buildPixiWedges(step, container);
-    pixiWedgesRef.current = wedges;
+    const wedges = buildBoardWedges(step, fx);
+    wedgesRef.current = wedges;
 
     // Initial state: collapsed triangle at the approach edge
     for (const w of wedges) fillWedge(w, [w.cornerA, w.cornerB, w.edgeMidPt]);
 
     return () => {
-      for (const w of wedges) { if (!w.g.destroyed) w.g.destroy(); }
-      pixiWedgesRef.current = null;
+      for (const w of wedges) w.w.destroy();
+      wedgesRef.current = null;
     };
   // isWedgeBattle is derived from step — step change covers both
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -528,7 +531,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // number flies in); the apex advance happens later during br_ram as lunges.
   useEffect(() => {
     if (!numbersActive || stage !== 'numbers_move' || !isWedgeBattle) return;
-    const wedges = pixiWedgesRef.current;
+    const wedges = wedgesRef.current;
     if (!wedges) return;
     if (isBaseRaid) return; // apex stays collapsed; br_ram drives it instead
 
@@ -537,20 +540,32 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     const tick = (now: number) => {
       const raw = Math.min(1, (now - start) / Math.max(moveMs, 1));
       const t = solveCubicBezier(raw, 0.2, 0.8, 0.3, 1.0);
-      for (const w of wedges) {
-        if (!w.g.destroyed) fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.edgeMidPt, w.hexCenter, t)]);
-      }
+      for (const w of wedges) fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.edgeMidPt, w.hexCenter, t)]);
       if (raw < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [numbersActive, stage, isWedgeBattle, moveMs, isBaseRaid]);
 
-  // Effect 3: winner_grow phase — winner expands to full hex, losers shrink to edge
+  // Effect 3: winner_grow phase — winner expands to full hex, losers shrink to edge.
+  // The clash itself gets a burst of sparks; a held defense rings out in the
+  // defender's color.
   useEffect(() => {
     if (stage !== 'winner_grow' || !isWedgeBattle) return;
-    const wedges = pixiWedgesRef.current;
+    const wedges = wedgesRef.current;
     if (!wedges) return;
+    const fx = fxRef?.current;
+    if (fx && stepCenter && step) {
+      if (wedges.length > 1) {
+        fx.sparks(stepCenter.x, stepCenter.y, winnerColor, 36, 1.2);
+        fx.shake(0.5, 260);
+      }
+      if (!attackerWins && step.defender_id) {
+        fx.shockwave(stepCenter.x, stepCenter.y, PLAYER_COLORS[step.defender_id] ?? 0xffffff, 1.05, 520);
+        fx.sparks(stepCenter.x, stepCenter.y, 0xd8e4ff, 18, 0.8);
+        fx.jolt(step.q, step.r, 0.6);
+      }
+    }
 
     const start = performance.now();
     let raf = 0;
@@ -558,12 +573,11 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
       const raw = Math.min(1, (now - start) / Math.max(growMs, 1));
       const t = solveCubicBezier(raw, 0.4, 0, 0.2, 1);
       for (const w of wedges) {
-        if (w.g.destroyed) continue;
         if (w.isWinner) {
-          w.g.zIndex = 1; // draw above losers
+          w.w.setOrder(1); // draw above losers
           fillWedge(w, [w.cornerA, w.cornerB, ...w.otherCorners.map(c => lerp2d(w.hexCenter, c, t))]);
         } else {
-          w.g.zIndex = 0;
+          w.w.setOrder(0);
           fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.hexCenter, w.edgeMidPt, t)]);
         }
       }
@@ -571,31 +585,52 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, isWedgeBattle, growMs]);
 
   // Effect 4: done phase — fade wedges out
   useEffect(() => {
     if (stage !== 'done' || !isWedgeBattle) return;
-    const wedges = pixiWedgesRef.current;
+    const wedges = wedgesRef.current;
     if (!wedges) return;
 
     const start = performance.now();
     let raf = 0;
     const tick = (now: number) => {
       const raw = Math.min(1, (now - start) / Math.max(pauseMs, 50));
-      for (const w of wedges) {
-        if (!w.g.destroyed) w.g.alpha = 1 - raw;
-      }
+      for (const w of wedges) w.w.setAlpha(1 - raw);
       if (raw < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [stage, isWedgeBattle, pauseMs]);
 
-  // Screen-shake on ram impacts — apply a short shake animation to BOTH the grid canvas
+  // Non-battle outcomes get their own board flourishes.
+  useEffect(() => {
+    if (!numbersActive || stage !== 'numbers_move' || isOff || !step || !stepCenter) return;
+    const fx = fxRef?.current;
+    if (!fx) return;
+    if (isConsecrate) {
+      fx.pillar(stepCenter.x, stepCenter.y, 0xffd24a, moveMs + growMs);
+    } else if (isDefenseApplied) {
+      fx.pillar(stepCenter.x, stepCenter.y, 0x66ccff, moveMs + growMs);
+      fx.shockwave(stepCenter.x, stepCenter.y, 0x66ccff, 0.95, moveMs + growMs);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numbersActive, stage, isOff, step]);
+
+  useEffect(() => {
+    if (stage !== 'winner_grow' || !isAutoClaim || isOff || !stepCenter) return;
+    const fx = fxRef?.current;
+    fx?.shockwave(stepCenter.x, stepCenter.y, winnerColor, 1.1, 600);
+    fx?.sparks(stepCenter.x, stepCenter.y, winnerColor, 20, 0.8);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage, isAutoClaim, isOff]);
+
+  // Screen-shake on ram impacts — apply a short shake animation to BOTH the board canvas
   // and the HTML number overlay each time ramImpactCount increments. Both shake in lock-step
   // so the power numbers move with the wedges they label. The overlay is a position:fixed
-  // sibling of the grid, so we have to animate it separately; driving them from a single
+  // sibling of the board, so we have to animate it separately; driving them from a single
   // useEffect with the same duration keeps them perfectly synced.
   useEffect(() => {
     if (ramImpactCount === 0) return;
@@ -618,113 +653,36 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ramImpactCount]);
 
-  // ─── Base-raid Pixi effects ──────────────────────────────────────────────
-  // Effect BR-1: create fortification ring + crenellations + shards Graphics
+  // ─── Base-raid board effects ─────────────────────────────────────────────
+  // Effect BR-1: raise a stone fortification ring around the defender's base.
   useEffect(() => {
-    const prev = pixiBaseRaidRef.current;
+    const prev = baseRaidRef.current;
     if (prev) {
-      for (const g of [prev.ring, prev.crenels, prev.shards]) { if (!g.destroyed) g.destroy(); }
-      pixiBaseRaidRef.current = null;
+      prev.ring.destroy();
+      baseRaidRef.current = null;
     }
-    const container = resolveLayerRef?.current;
-    if (!container || !step || !isBaseRaid || isOff) return;
-
-    const ring = new Graphics();    ring.zIndex = 2;  container.addChild(ring);
-    const crenels = new Graphics(); crenels.zIndex = 2; container.addChild(crenels);
-    const shards = new Graphics();  shards.zIndex = 3;  container.addChild(shards);
-    // Initial alpha: 0; effects below ramp it up during br_fortify.
-    ring.alpha = 0;
-    crenels.alpha = 0;
-    shards.alpha = 0;
-
-    pixiBaseRaidRef.current = { ring, crenels, shards };
-
+    const fx = fxRef?.current;
+    if (!fx || !step || !isBaseRaid || isOff) return;
+    const ring = fx.createFortifyRing(step.q, step.r);
+    baseRaidRef.current = { ring };
     return () => {
-      for (const g of [ring, crenels, shards]) { if (!g.destroyed) g.destroy(); }
-      pixiBaseRaidRef.current = null;
+      ring.destroy();
+      baseRaidRef.current = null;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, isBaseRaid, isOff]);
 
-  // Effect BR-2: fortify phase — hex-shaped ring + crenellations along each edge materialize
-  // around the defender's base. The ring traces the hex outline at a small outward offset;
-  // crenellations are square "teeth" sitting on the outside of each of the 6 edges.
+  // Effect BR-2: fortify phase — the ring rises out of the ground with a subtle settle.
   useEffect(() => {
     if (stage !== 'br_fortify' || !isBaseRaid) return;
-    const br = pixiBaseRaidRef.current;
+    const br = baseRaidRef.current;
     if (!br || !step) return;
-    const hexCenter = axialToPixel(step.q, step.r);
-    // Silver fortification — reads as "stone walls + metal trim" regardless of defender color,
-    // keeps the ring visually distinct from both wedges and player territory.
-    const ringColor = 0xd4d8de;
-    // Push corners outward a hair so the ring sits just outside the tile's own outline.
-    const ringCornerR = HEX_SIZE * 1.06;
-    // Crenel size, scaled off the tile's edge length.
-    const edgeLen = HEX_SIZE; // flat-top hex: side length == HEX_SIZE
-    const crenelW = edgeLen * 0.22;
-    const crenelH = edgeLen * 0.18;
-    // Evenly spaced offsets along each edge (in edge-local param space -0.5..+0.5).
-    const crenelOffsets = [-0.3, 0, 0.3];
-
-    // Flat-top hex corner at angle k*60° (matches the rest of the file's geometry).
-    const hexCorner = (k: number, radius: number) => ({
-      x: hexCenter.x + Math.cos(k * Math.PI / 3) * radius,
-      y: hexCenter.y + Math.sin(k * Math.PI / 3) * radius,
-    });
-
     const start = performance.now();
     let raf = 0;
     const tick = (now: number) => {
       const raw = Math.min(1, (now - start) / Math.max(fortifyMs, 1));
       const t = raw < 0.7 ? raw / 0.7 : 1;
-      // Subtle breathing pulse — scales the whole ring outward/inward.
-      const pulse = 1 + Math.sin(raw * Math.PI * 3) * 0.03 * (1 - raw);
-      const cornerR = ringCornerR * pulse;
-
-      // Compute the 6 hex corners at this scale.
-      const corners = [0, 1, 2, 3, 4, 5].map(k => hexCorner(k, cornerR));
-
-      if (!br.ring.destroyed) {
-        br.ring.clear();
-        br.ring.setStrokeStyle({ width: 4 * t, color: ringColor, alpha: 0.95, join: 'miter' });
-        // Trace the hex outline as a closed polygon.
-        br.ring.poly(corners);
-        br.ring.stroke();
-        br.ring.alpha = t;
-      }
-      if (!br.crenels.destroyed) {
-        br.crenels.clear();
-        br.crenels.fill({ color: ringColor, alpha: 0.9 });
-        // Place crenels along each of the 6 edges.
-        for (let k = 0; k < 6; k++) {
-          const a = corners[k];
-          const b = corners[(k + 1) % 6];
-          // Edge direction (unit) and outward normal (unit).
-          const ex = b.x - a.x, ey = b.y - a.y;
-          const eLen = Math.hypot(ex, ey) || 1;
-          const ux = ex / eLen, uy = ey / eLen;
-          // Outward normal points away from hex center. For a flat-top hex wound CCW, rotating
-          // the edge vector +90° (−y,+x) gives the outward normal.
-          const nx = -uy, ny = ux;
-          for (const param of crenelOffsets) {
-            // Center of this crenel on the edge, pushed slightly outward so the tooth sits on
-            // the outside of the wall.
-            const cxE = a.x + ex * (0.5 + param) + nx * 1;
-            const cyE = a.y + ey * (0.5 + param) + ny * 1;
-            // Tooth footprint: half-width along the edge, full height along the normal.
-            const hw = crenelW / 2;
-            const pts = [
-              { x: cxE - ux * hw,          y: cyE - uy * hw          },
-              { x: cxE + ux * hw,          y: cyE + uy * hw          },
-              { x: cxE + ux * hw + nx * crenelH, y: cyE + uy * hw + ny * crenelH },
-              { x: cxE - ux * hw + nx * crenelH, y: cyE - uy * hw + ny * crenelH },
-            ];
-            br.crenels.poly(pts);
-          }
-        }
-        br.crenels.fill();
-        br.crenels.alpha = t;
-      }
+      br.ring.setProgress(t);
       if (raw < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
@@ -733,22 +691,16 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   }, [stage, isBaseRaid, step, fortifyMs]);
 
   // Effect BR-3: ram phase — attacker wedge apex lunges toward center ramCount times.
-  // Each lunge emits a ram sound + increments ramImpactCount to trigger CSS screen shake.
+  // Each lunge emits a ram sound, jolts the castle, throws sparks + dust and
+  // increments ramImpactCount to trigger the screen shake.
   useEffect(() => {
     if (stage !== 'br_ram' || !isBaseRaid) return;
-    const wedges = pixiWedgesRef.current;
-    const br = pixiBaseRaidRef.current;
+    const wedges = wedgesRef.current;
+    const br = baseRaidRef.current;
     if (!wedges || !br || !step) return;
+    const fx = fxRef?.current;
 
     setRamImpactCount(0);
-    const hexCenter = axialToPixel(step.q, step.r);
-    const ringColor = 0xd4d8de; // silver fortification
-    const ringCornerR = HEX_SIZE * 1.06;
-    const hexCorners = (radius: number) => [0, 1, 2, 3, 4, 5].map(k => ({
-      x: hexCenter.x + Math.cos(k * Math.PI / 3) * radius,
-      y: hexCenter.y + Math.sin(k * Math.PI / 3) * radius,
-    }));
-
     const start = performance.now();
     let raf = 0;
     let soundedIndex = -1;
@@ -759,40 +711,30 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
       const raw = Math.min(1, (now - start) / Math.max(ramMs, 1));
       const idx = Math.min(ramCount - 1, Math.floor(raw / lungeFrac));
       const local = (raw - idx * lungeFrac) / lungeFrac; // 0..1 within this lunge
-      // Apex position: 0 = at edgeMid, 1 = just past hexCenter, 0.5 = peak impact
       let apexT: number;
       if (local < 0.5) {
-        // forward slam — ease-in (accelerate into the gate)
         const u = local / 0.5;
-        apexT = u * u * 1.15; // overshoot
+        apexT = u * u * 0.85; // forward slam — stops at the wall line
       } else {
-        // pull-back — ease-out
         const u = (local - 0.5) / 0.5;
-        apexT = 1.15 - 1.15 * (u * (2 - u));
+        apexT = 0.85 - 0.85 * (u * (2 - u));
       }
       for (const w of wedges) {
-        if (w.g.destroyed) continue;
         const apex = lerp2d(w.edgeMidPt, w.hexCenter, apexT);
         fillWedge(w, [w.cornerA, w.cornerB, apex]);
       }
-      // Fire a ram-impact event when we cross the peak (local ~0.5) for each lunge index
       if (local >= 0.5 && idx > soundedIndex) {
         soundedIndex = idx;
         sound.resolveBaseRaidRam();
         setRamImpactCount((c) => c + 1);
-        // Ring flashes/wobbles on each hit — hex-shaped to match the tile outline.
-        if (!br.ring.destroyed) {
-          br.ring.clear();
-          br.ring.setStrokeStyle({ width: 6, color: 0xffffff, alpha: 1, join: 'miter' });
-          br.ring.poly(hexCorners(ringCornerR * 1.05));
-          br.ring.stroke();
-          setTimeout(() => {
-            if (br.ring.destroyed) return;
-            br.ring.clear();
-            br.ring.setStrokeStyle({ width: 4, color: ringColor, alpha: 0.95, join: 'miter' });
-            br.ring.poly(hexCorners(ringCornerR));
-            br.ring.stroke();
-          }, 100);
+        br.ring.flash(0.8 + idx * 0.2);
+        if (fx) {
+          fx.jolt(step.q, step.r, 0.8 + idx * 0.3);
+          for (const w of wedges) {
+            const hit = lerp2d(w.edgeMidPt, w.hexCenter, 0.85);
+            fx.sparks(hit.x, hit.y, PLAYER_COLORS[w.playerId] ?? 0xffffff, 16 + idx * 6, 0.9);
+            fx.dust(hit.x, hit.y, 8, 0.8);
+          }
         }
       }
       if (raw < 1) raf = requestAnimationFrame(tick);
@@ -802,113 +744,54 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, isBaseRaid, ramMs]);
 
-  // Effect BR-4: final phase — captured: winner wedge grows + ring shatters.
-  //              defended: attacker wedge recoils to edge + ring flashes and holds.
+  // Effect BR-4: final phase — captured: the ring shatters into tumbling stone and the
+  // winner wedge floods the base. Defended: the attacker recoils and the ring flares.
   useEffect(() => {
     if (stage !== 'br_final' || !isBaseRaid) return;
-    const wedges = pixiWedgesRef.current;
-    const br = pixiBaseRaidRef.current;
+    const wedges = wedgesRef.current;
+    const br = baseRaidRef.current;
     if (!wedges || !br || !step) return;
-
-    const hexCenter = axialToPixel(step.q, step.r);
-    const ringCornerR = HEX_SIZE * 1.06;
-    const hexCorners = (radius: number) => [0, 1, 2, 3, 4, 5].map(k => ({
-      x: hexCenter.x + Math.cos(k * Math.PI / 3) * radius,
-      y: hexCenter.y + Math.sin(k * Math.PI / 3) * radius,
-    }));
-    const ringColor = 0xd4d8de; // silver fortification
+    const fx = fxRef?.current;
     const captured = baseRaidCaptured;
-
-    // Pre-compute shard trajectories for the shatter — 12 shards flying outward.
-    const shardCount = 12;
-    const shards: { angle: number; dist: number; spin: number; size: number }[] = [];
-    for (let k = 0; k < shardCount; k++) {
-      const angle = (k / shardCount) * Math.PI * 2 + Math.random() * 0.2;
-      shards.push({
-        angle,
-        dist: HEX_SIZE * (1.6 + Math.random() * 0.8),
-        spin: (Math.random() - 0.5) * Math.PI,
-        size: HEX_SIZE * (0.14 + Math.random() * 0.1),
-      });
+    const center = axialToPixel(step.q, step.r);
+    if (captured) {
+      br.ring.shatter();
+      fx?.shake(1.2, 520);
+      fx?.jolt(step.q, step.r, 1.6);
+      fx?.pillar(center.x, center.y, winnerColor, finalMs);
+    } else {
+      br.ring.flash(1.4);
+      fx?.shockwave(center.x, center.y, 0xd4d8de, 1.4, finalMs * 0.7);
+      fx?.jolt(step.q, step.r, 0.5);
     }
 
     const start = performance.now();
     let raf = 0;
     const tick = (now: number) => {
       const raw = Math.min(1, (now - start) / Math.max(finalMs, 1));
-
       if (captured) {
-        // Ring + crenels fade out as wedge takes over.
-        const fade = 1 - raw;
-        if (!br.ring.destroyed) br.ring.alpha = fade;
-        if (!br.crenels.destroyed) br.crenels.alpha = fade;
-        // Shards: fly outward + fade over the first ~60% of the phase.
-        if (!br.shards.destroyed) {
-          br.shards.clear();
-          if (raw < 0.8) {
-            const shardT = Math.min(1, raw / 0.8);
-            const shardFade = 1 - shardT;
-            br.shards.alpha = shardFade;
-            br.shards.fill({ color: ringColor, alpha: 0.95 });
-            for (const sh of shards) {
-              const d = sh.dist * shardT;
-              const x = hexCenter.x + Math.cos(sh.angle) * d;
-              const y = hexCenter.y + Math.sin(sh.angle) * d;
-              const a = sh.angle + sh.spin * shardT;
-              const cosA = Math.cos(a), sinA = Math.sin(a);
-              const s = sh.size;
-              const pts = [
-                { x: x + cosA * s, y: y + sinA * s },
-                { x: x - sinA * s * 0.6, y: y + cosA * s * 0.6 },
-                { x: x - cosA * s, y: y - sinA * s },
-              ];
-              br.shards.poly(pts);
-            }
-            br.shards.fill();
-          } else {
-            br.shards.alpha = 0;
-          }
-        }
-        // Wedge grows to full hex (attacker winner).
         const t = solveCubicBezier(raw, 0.4, 0, 0.2, 1);
         for (const w of wedges) {
-          if (w.g.destroyed) continue;
           if (w.isWinner) {
-            w.g.zIndex = 1;
+            w.w.setOrder(1);
             fillWedge(w, [w.cornerA, w.cornerB, ...w.otherCorners.map(c => lerp2d(w.hexCenter, c, t))]);
           } else {
-            w.g.zIndex = 0;
+            w.w.setOrder(0);
             fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.hexCenter, w.edgeMidPt, t)]);
           }
         }
       } else {
-        // Defended: wedge recoils from center back past edge (overshoots outward), fading.
+        // Defended: wedge recoils from the wall back past the edge, fading.
         const t = solveCubicBezier(raw, 0.2, 0.9, 0.3, 1);
         for (const w of wedges) {
-          if (w.g.destroyed) continue;
-          // Apex retreats from hexCenter (start of br_final, where the peak ram hit left it,
-          // partially) all the way past edgeMidPt back toward the corner-side.
-          // Simplify: apex = lerp(hexCenter, edgeMidPt * 1.15-ish, t)
           const recoilTarget = {
             x: w.edgeMidPt.x + (w.edgeMidPt.x - w.hexCenter.x) * 0.15,
             y: w.edgeMidPt.y + (w.edgeMidPt.y - w.hexCenter.y) * 0.15,
           };
-          fillWedge(w, [w.cornerA, w.cornerB, lerp2d(w.hexCenter, recoilTarget, t)]);
-          w.g.alpha = 1 - raw * 0.7; // fade the wedge partially so defender tile reads clearly
+          fillWedge(w, [w.cornerA, w.cornerB, lerp2d(lerp2d(w.edgeMidPt, w.hexCenter, 0.85), recoilTarget, t)]);
+          w.w.setAlpha(1 - raw * 0.7);
         }
-        // Ring pulses triumphantly — brief bright flash, then settles. Hex-shaped outline.
-        if (!br.ring.destroyed) {
-          const flash = raw < 0.4 ? Math.sin((raw / 0.4) * Math.PI) : 0;
-          const color = flash > 0.5 ? 0xffffff : ringColor;
-          br.ring.clear();
-          br.ring.setStrokeStyle({ width: 4 + flash * 4, color, alpha: 0.95, join: 'miter' });
-          br.ring.poly(hexCorners(ringCornerR * (1 + flash * 0.08)));
-          br.ring.stroke();
-          br.ring.alpha = 1 - raw * 0.5;
-        }
-        if (!br.crenels.destroyed) {
-          br.crenels.alpha = 1 - raw * 0.5;
-        }
+        br.ring.setAlpha(1 - raw * 0.5);
       }
       if (raw < 1) raf = requestAnimationFrame(tick);
     };
@@ -961,7 +844,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
       return () => clearTimeout(t);
     }
     if (stage === 'br_ram') {
-      // Ram sounds are emitted by the Pixi-driven ram effect on each impact beat.
+      // Ram sounds are emitted by the board-driven ram effect on each impact beat.
       const t = setTimeout(() => setStage('br_final'), ramMs);
       return () => clearTimeout(t);
     }
@@ -1253,7 +1136,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
         );
       })()}
 
-      {/* Wedge claim animations are rendered in Pixi (see Pixi effects above) — no HTML here */}
+      {/* Wedge claim animations are rendered on the 3D board (see board effects above) — no HTML here */}
 
       {/* Power numbers (skip for Consecrate, Defense Applied, Auto-claim — custom animations handle them) */}
       {!isConsecrate && !isDefenseApplied && !isAutoClaim && numbers.map((num, i) => {
@@ -1316,7 +1199,7 @@ export default function ResolveOverlay({ steps, gridTransform: gridTransformProp
             scale = 1;
           } else if (stage === 'br_fortify' || stage === 'br_ram') {
             // Defender sits at hex center and pulses (via keyframe below). Attacker number
-            // stays anchored at the wedge edge — the Pixi wedge does all the lunge motion.
+            // stays anchored at the wedge edge — the board wedge does all the lunge motion.
             if (num.isDefender) {
               x = num.endX;
               y = num.endY;

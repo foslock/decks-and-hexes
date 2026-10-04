@@ -29,6 +29,14 @@ function cardImageCachePlugin(): Plugin {
 
 export default defineConfig({
   plugins: [react(), cardImageCachePlugin()],
+  build: {
+    rollupOptions: {
+      output: {
+        // three.js changes rarely — keep it in its own long-cached chunk.
+        manualChunks: { three: ['three'] },
+      },
+    },
+  },
   server: {
     proxy: {
       '/api/lobby/ws': {
