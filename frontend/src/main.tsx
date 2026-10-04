@@ -6,6 +6,7 @@ import './styles/screens.css'
 import './styles/overlays.css'
 import './styles/game.css'
 import './styles/cards.css'
+import './styles/tutorial.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

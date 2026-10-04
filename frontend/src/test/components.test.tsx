@@ -254,6 +254,13 @@ describe('SetupScreen', () => {
     expect(screen.getByText('Card Browser')).toBeInTheDocument();
   });
 
+  it('How to Play opens the guided tutorial', async () => {
+    render(<WithSettings><SetupScreen onCreateLobby={() => {}} onJoinLobby={async () => {}} /></WithSettings>);
+    await userEvent.click(screen.getByText('How to Play'));
+    expect(screen.getByRole('dialog', { name: 'How to play' })).toBeInTheDocument();
+    expect(screen.getByText('Welcome to Card Clash')).toBeInTheDocument();
+  });
+
   it('calls onCreateLobby', async () => {
     const onCreateLobby = vi.fn();
     render(<SetupScreen onCreateLobby={onCreateLobby} onJoinLobby={async () => {}} />);
@@ -261,11 +268,13 @@ describe('SetupScreen', () => {
     expect(onCreateLobby).toHaveBeenCalled();
   });
 
-  it('Join offers a code or the game browser; Enter Code shows the code input', async () => {
+  it('Join opens the game browser, where Enter Code shows a code field', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ open: [], in_progress: [] }) }) as Response));
     render(<SetupScreen onCreateLobby={() => {}} onJoinLobby={async () => {}} />);
     await userEvent.click(screen.getByText('Join'));
-    expect(screen.getByText('Browse Games')).toBeInTheDocument();
-    await userEvent.click(screen.getByText('Enter Code'));
+    expect(screen.getByRole('dialog', { name: 'Browse games' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Enter Code' }));
     expect(screen.getByPlaceholderText('CODE')).toBeInTheDocument();
+    vi.unstubAllGlobals();
   });
 });

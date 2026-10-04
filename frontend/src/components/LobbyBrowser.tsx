@@ -45,10 +45,18 @@ function HostName({ name, color }: { name: string; color: string }) {
   );
 }
 
+/** A failed join, in words for the player. */
+function joinErrorMessage(e: unknown, byCode: boolean): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/full/i.test(msg)) return byCode ? 'That game is full.' : 'That lobby just filled up.';
+  if (/not found|expired|invalid|404/i.test(msg)) return byCode ? 'No game with that code — check it and try again.' : 'That lobby has closed.';
+  return msg;
+}
+
 /**
  * Browse Games: public lobbies waiting for players (join with one click) and
  * public games in progress (round + who's leading). Refreshes every 5 s, and
- * on demand at most once a second.
+ * on demand at most once a second. Private games join by code from the bar.
  */
 export default function LobbyBrowser({ onJoin, onCreate, onClose }: {
   onJoin: (code: string) => Promise<void>;
@@ -65,6 +73,13 @@ export default function LobbyBrowser({ onJoin, onCreate, onClose }: {
   const [coolingDown, setCoolingDown] = useState(false);
   const [joining, setJoining] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<{ code: string; message: string } | null>(null);
+  /** Join by code: the bar turns into a code field. */
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [code, setCode] = useState('');
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [codeBusy, setCodeBusy] = useState(false);
+  const codeOpenRef = useRef(codeOpen);
+  codeOpenRef.current = codeOpen;
   const lastFetchRef = useRef(0);
   const seqRef = useRef(0);
 
@@ -99,11 +114,37 @@ export default function LobbyBrowser({ onJoin, onCreate, onClose }: {
     void load();
   };
 
+  const closeCode = useCallback(() => {
+    setCodeOpen(false);
+    setCode('');
+    setCodeError(null);
+  }, []);
+
+  // Escape backs out of the code field first, then closes the browser.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (codeOpenRef.current) closeCode();
+      else onClose();
+    };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  }, [onClose, closeCode]);
+
+  const joinByCode = async () => {
+    const c = code.trim().toUpperCase();
+    if (!c || codeBusy) return;
+    setCodeBusy(true);
+    setCodeError(null);
+    try {
+      await onJoin(c);
+    } catch (e: unknown) {
+      setCodeError(joinErrorMessage(e, true));
+    } finally {
+      setCodeBusy(false);
+    }
+  };
 
   const join = async (code: string) => {
     setJoining(code);
@@ -111,8 +152,7 @@ export default function LobbyBrowser({ onJoin, onCreate, onClose }: {
     try {
       await onJoin(code);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setJoinError({ code, message: /full/i.test(msg) ? 'That lobby just filled up.' : /not found|expired/i.test(msg) ? 'That lobby has closed.' : msg });
+      setJoinError({ code, message: joinErrorMessage(e, false) });
       void load();
     } finally {
       setJoining(null);
@@ -131,32 +171,63 @@ export default function LobbyBrowser({ onJoin, onCreate, onClose }: {
           <Icon name="allOpponents" size={22} decorative style={{ color: 'var(--cc-gold)', flexShrink: 0 }} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="cc-ov-title">Browse Games</div>
-            <div className="cc-ov-subtitle">Public lobbies and games — updates every few seconds.</div>
+            <div className="cc-ov-subtitle">Join an open game, or enter a code for a private one.</div>
           </div>
           <button className="cc-ov-close" onClick={onClose} aria-label="Close"><Icon name="close" size={14} decorative /></button>
         </div>
 
         <div className="cc-ov-lb-bar">
-          {/* One line at every width: phones drop the long words, and the
-              "updated" note keeps a fixed width so nothing shifts as it ticks. */}
-          <div className="cc-ov-lb-tabs" role="tablist">
-            <button role="tab" aria-selected={tab === 'open'} className={`cc-ov-chip${tab === 'open' ? ' is-active' : ''}`} onClick={() => setTab('open')}>
-              Open<span className="cc-ov-lb-long"> Games</span>{open ? ` (${open.length})` : ''}
-            </button>
-            <button role="tab" aria-selected={tab === 'progress'} className={`cc-ov-chip${tab === 'progress' ? ' is-active' : ''}`} onClick={() => setTab('progress')}>
-              In Progress{inProgress ? ` (${inProgress.length})` : ''}
-            </button>
-          </div>
-          <div className="cc-ov-lb-refresh">
-            <span className="cc-ov-lb-ago">
-              {ago != null && <><span className="cc-ov-lb-long">Updated </span>{agoLabel(ago)}</>}
-            </span>
-            <button className="cc-ov-chip" onClick={refresh} disabled={coolingDown} aria-label="Refresh" title="Refresh">
-              <Icon name="refresh" size={12} decorative style={{ verticalAlign: '-0.15em' }} />
-              <span className="cc-ov-lb-long" style={{ marginLeft: 4 }}>Refresh</span>
-            </button>
-          </div>
+          {codeOpen ? (
+            // Join a specific (or private) game by its code.
+            <form className="cc-ov-lb-code" onSubmit={(e) => { e.preventDefault(); void joinByCode(); }}>
+              <Icon name="key" size={14} decorative style={{ color: 'var(--cc-gold)', flexShrink: 0 }} />
+              <input
+                className="cc-ov-lb-code-input"
+                value={code}
+                onChange={(e) => { setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)); setCodeError(null); }}
+                placeholder="CODE"
+                aria-label="Game code"
+                autoFocus
+                autoCapitalize="characters"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <button type="submit" className="cc-btn-primary cc-ov-lb-code-go" disabled={!code || codeBusy}>
+                {codeBusy ? 'Joining…' : 'Join'}
+              </button>
+              <button type="button" className="cc-ov-lb-code-cancel" onClick={closeCode} aria-label="Cancel code entry">
+                <Icon name="close" size={12} decorative />
+              </button>
+            </form>
+          ) : (
+            <>
+              {/* One line at every width: phones drop the long words, and the
+                  "updated" note keeps a fixed width so nothing shifts as it ticks. */}
+              <div className="cc-ov-lb-tabs" role="tablist">
+                <button role="tab" aria-selected={tab === 'open'} className={`cc-ov-chip${tab === 'open' ? ' is-active' : ''}`} onClick={() => setTab('open')}>
+                  Open<span className="cc-ov-lb-long"> Games</span>{open ? ` (${open.length})` : ''}
+                </button>
+                <button role="tab" aria-selected={tab === 'progress'} className={`cc-ov-chip${tab === 'progress' ? ' is-active' : ''}`} onClick={() => setTab('progress')}>
+                  In Progress{inProgress ? ` (${inProgress.length})` : ''}
+                </button>
+              </div>
+              <div className="cc-ov-lb-refresh">
+                <button className="cc-ov-chip cc-ov-lb-codechip" onClick={() => setCodeOpen(true)} aria-label="Enter Code" title="Join a game by its code">
+                  <Icon name="key" size={13} decorative style={{ verticalAlign: '-0.18em' }} />
+                  <span className="cc-ov-lb-long" style={{ marginLeft: 5 }}>Enter Code</span>
+                </button>
+                <span className="cc-ov-lb-ago">
+                  {ago != null && <><span className="cc-ov-lb-long">Updated </span>{agoLabel(ago)}</>}
+                </span>
+                <button className="cc-ov-chip" onClick={refresh} disabled={coolingDown} aria-label="Refresh" title="Refresh">
+                  <Icon name="refresh" size={12} decorative style={{ verticalAlign: '-0.15em' }} />
+                  <span className="cc-ov-lb-long" style={{ marginLeft: 4 }}>Refresh</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
+        {codeOpen && codeError && <div className="cc-ov-lb-code-error" role="alert">{codeError}</div>}
 
         <div className="cc-ov-lb-body">
           {error && !list && <div className="cc-ov-lb-empty" style={{ color: '#ff8b97' }}>Couldn't load games: {error}</div>}

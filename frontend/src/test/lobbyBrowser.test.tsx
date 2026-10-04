@@ -67,6 +67,37 @@ describe('LobbyBrowser', () => {
     expect(onCreate).toHaveBeenCalled();
   });
 
+  it('joins a private game by code from the bar', async () => {
+    vi.stubGlobal('fetch', mockFetch({ open: [], in_progress: [] }));
+    const onJoin = vi.fn(async () => {});
+    render(<LobbyBrowser onJoin={onJoin} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Code' }));
+    const input = screen.getByRole('textbox', { name: 'Game code' });
+    expect(screen.getByRole('button', { name: 'Join' })).toBeDisabled();
+    fireEvent.change(input, { target: { value: 'wx-yz9' } });
+    expect(input).toHaveValue('WXYZ');
+    fireEvent.submit(input.closest('form')!);
+    await act(async () => {});
+    expect(onJoin).toHaveBeenCalledWith('WXYZ');
+  });
+
+  it('explains a bad code, and Escape backs out of the code field before closing', async () => {
+    vi.stubGlobal('fetch', mockFetch({ open: [], in_progress: [] }));
+    const onJoin = vi.fn(async () => { throw new Error('Lobby not found'); });
+    const onClose = vi.fn();
+    render(<LobbyBrowser onJoin={onJoin} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Enter Code' }));
+    const input = screen.getByRole('textbox', { name: 'Game code' });
+    fireEvent.change(input, { target: { value: 'NOPE' } });
+    fireEvent.submit(input.closest('form')!);
+    expect(await screen.findByRole('alert')).toHaveTextContent('No game with that code');
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: 'Game code' })).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('disables Join for full or starting lobbies', async () => {
     vi.stubGlobal('fetch', mockFetch({ open: [{ ...lobby, full: true }], in_progress: [] }));
     render(<LobbyBrowser onJoin={async () => {}} onClose={() => {}} />);

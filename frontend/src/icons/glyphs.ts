@@ -343,6 +343,15 @@ export const GLYPHS = {
       { d: 'M14.6 10.4 H5.6 V7.8 L1.4 11.4 L5.6 15 V12.4 H14.6 Z' },
     ],
   },
+  key: {
+    // A key (joining a game by its code): a ring bow with a knocked-out hole,
+    // and a shaft with two teeth.
+    label: 'Join code', group: 'ui',
+    layers: [
+      { d: 'M1.2 8 A3.8 3.8 0 1 1 8.8 8 A3.8 3.8 0 1 1 1.2 8 Z M3.4 8 A1.6 1.6 0 1 0 6.6 8 A1.6 1.6 0 1 0 3.4 8 Z', evenOdd: true },
+      { d: 'M8.2 7 L15.4 7 L15.4 12.2 L13.6 12.2 L13.6 9 L11.6 9 L11.6 11.4 L9.8 11.4 L9.8 9 L8.2 9 Z' },
+    ],
+  },
   refresh: {
     // The standard refresh arrow: a thick ring running clockwise from the
     // upper right round to the top, ending in an arrowhead across the gap.

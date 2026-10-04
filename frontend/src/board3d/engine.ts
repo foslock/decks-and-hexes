@@ -5,6 +5,7 @@ import {
 import type { HexTile } from '../types/game';
 import { HEX_DIRS, HEX_SIZE, type GridTransform } from '../utils/hexGeometry';
 import { AmbientLayer } from './ambient';
+import { CloudLayer } from './clouds';
 import { CameraRig, DEFAULT_TILT, MAX_TILT, MAX_ZOOM } from './camera';
 import { PLAYER_COLORS, type ClaimChevron, type PlayerInfo, type VpPath } from './boardTypes';
 import { FxLayer } from './fx';
@@ -53,6 +54,20 @@ export interface BoardInputListener {
   onGesture?(): void;
   /** A click / tap (no drag) that landed on empty board space. */
   onEmptyClick?(e: PointerEvent): void;
+}
+
+/** A framed camera position for `flyTo` (rotation is an orbit on top of the
+ *  board's base rotation; zoom 1 fits the whole island). */
+export interface CameraShot {
+  keys?: string[];
+  zoom?: number;
+  tilt?: number;
+  rotation?: number;
+  seconds?: number;
+  arc?: number;
+  /** Frame the tiles this far (world units) below the view's center —
+   *  room for the cards that float above them. */
+  lower?: number;
 }
 
 export interface OverlayState {
@@ -134,6 +149,8 @@ export class BoardEngine {
   private glowPool: ParticlePool;
   private pixelScale = { value: 400 };
   private ambient: AmbientLayer | null = null;
+  private clouds: CloudLayer | null = null;
+  private readonly sunDir = new Vector3();
   private markers: MarkerLayer | null = null;
   private roads: RoadLayer | null = null;
   private floating: FloatingOverlay | null = null;
@@ -367,6 +384,31 @@ export class BoardEngine {
     if (next <= 1.001) rig.pan.set(0, 0);
     this.clampPan();
     this.kick(1.5);
+  }
+
+  /** A scripted camera move (the tutorial): glide over `seconds` to frame a
+   *  tile, the middle of several tiles, or the whole island (no keys), at a
+   *  zoom, tilt and orbit. `arc` pulls back mid-flight for a swoop. */
+  flyTo(shot: CameraShot): void {
+    const rig = this.rig;
+    this.userRotation = shot.rotation ?? 0;
+    rig.rotation = this.baseRotation + this.userRotation;
+    rig.tilt = Math.max(0, Math.min(MAX_TILT, shot.tilt ?? DEFAULT_TILT));
+    this.swayTilt = rig.tilt;
+    rig.zoom = Math.max(0.5, Math.min(MAX_ZOOM, shot.zoom ?? 1));
+    const pts = (shot.keys ?? []).map(k => this.tileWorld(k)).filter((v): v is Vector3 => !!v);
+    if (pts.length) {
+      // Aim past the tiles toward the top of the screen so they sit lower.
+      const r = rig.rotation, lower = shot.lower ?? 0;
+      const x = pts.reduce((a, v) => a + v.x, 0) / pts.length - Math.sin(r) * lower;
+      const z = pts.reduce((a, v) => a + v.z, 0) / pts.length - Math.cos(r) * lower;
+      rig.centerOn(x, z);
+    } else {
+      rig.pan.set(0, 0);
+    }
+    const seconds = shot.seconds ?? 1.6;
+    rig.beginFlight(seconds, shot.arc ?? 0);
+    this.kick(seconds + 0.5);
   }
 
   resetView(): void {
@@ -621,6 +663,7 @@ export class BoardEngine {
     this.structureSpots.clear();
     this.clearWalls();
     if (this.ambient) { this.world.remove(this.ambient.group); this.ambient.dispose(); this.ambient = null; }
+    if (this.clouds) { this.world.remove(this.clouds.group); this.clouds.dispose(); this.clouds = null; }
     if (this.markers) { this.world.remove(this.markers.group); this.markers.dispose(); this.markers = null; }
     if (this.fxLayer) { this.world.remove(this.fxLayer.group); this.fxLayer.dispose(); this.fxLayer = null; }
     if (this.pickMesh) { this.pickMesh.geometry.dispose(); this.pickMesh = null; }
@@ -711,6 +754,12 @@ export class BoardEngine {
       this.world.add(this.ambient.group);
     } else {
       this.ambient.setLayout(layout);
+    }
+    if (!this.clouds) {
+      this.clouds = new CloudLayer(layout, this.shared.uTime, this.quality === 'low' ? 0.6 : 1);
+      this.world.add(this.clouds.group);
+    } else {
+      this.clouds.setLayout(layout);
     }
 
     // Sun + shadow frustum sized to the island.
@@ -1352,6 +1401,10 @@ export class BoardEngine {
     this.floating?.update(dt, t, this.tiltFactor, h.key ? 1 : h.amount);
     this.markers?.setLift(this.tiltFactor);
     this.ambient?.update(dt, t, this.build);
+    if (this.clouds) {
+      this.sunDir.copy(this.sun.position).sub(this.sun.target.position).normalize();
+      this.clouds.update(dt, t, this.build, this.rig.camera, this.sunDir, this.rig.currentZoom);
+    }
     const fxBusy = this.fxLayer?.update(dt, t) ?? false;
     this.markers?.update(dt, t);
     if (this.roads?.update(dt, t)) this.kick(0.15);

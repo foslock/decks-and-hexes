@@ -1230,6 +1230,56 @@
 .cc-ov-lb-refresh .cc-ov-chip { white-space: nowrap; }
 .cc-ov-lb-refresh .cc-ov-chip:disabled { opacity: 0.45; cursor: default; }
 /* Fixed width (right-aligned, tabular digits) so the bar never reflows as it ticks. */
+/* Join by code: the bar becomes a code field. */
+.cc-ov-lb-code {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 10px;
+  height: 36px;
+  border-radius: var(--cc-radius);
+  border: 1px solid rgba(232, 196, 106, 0.5);
+  background: rgba(10, 10, 26, 0.55);
+  box-shadow: 0 0 0 3px rgba(232, 196, 106, 0.07);
+  animation: cc-fade-in 0.18s ease-out both;
+}
+.cc-ov-lb-code-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: none;
+  background: transparent;
+  font-family: var(--cc-font-display);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--cc-gold-bright);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.cc-ov-lb-code-input::placeholder { color: var(--cc-text-faint); letter-spacing: 0.32em; }
+.cc-ov-lb-code-input:focus,
+.cc-ov-lb-code-input:focus-visible { outline: none; }
+.cc-ov-lb-code-go { flex-shrink: 0; height: 28px; padding: 0 14px; font-size: 12px; border-radius: 7px; }
+.cc-ov-lb-code-cancel {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--cc-text-faint);
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+.cc-ov-lb-code-cancel:hover { color: var(--cc-text); }
+.cc-ov-lb-code-error { padding: 6px 18px 0; font-size: 12.5px; color: #ff8b97; }
+.cc-ov-lb-codechip svg { color: var(--cc-gold); }
+
 .cc-ov-lb-ago {
   display: inline-block;
   min-width: 15ch;
@@ -1344,6 +1394,8 @@
   .cc-ov-lb-row { padding: 9px 10px; gap: 10px; }
   .cc-ov-lb-tabs .cc-ov-chip { padding: 5px 10px; font-size: 12px; }
   .cc-ov-lb-join { min-width: 70px; padding: 7px 10px; }
+  .cc-ov-lb-refresh { gap: 6px; }
+  .cc-ov-lb-code-error { padding: 6px 14px 0; }
 }
 @media (max-width: 360px) {
   /* Room for double-digit counts on the smallest phones. */
