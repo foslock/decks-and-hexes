@@ -1130,8 +1130,25 @@
   .cc-scr-row { padding: 8px 10px; }
   .cc-scr-row-label { width: 78px; font-size: 11px; }
   .cc-scr-code-char { width: 44px; height: 56px; font-size: 32px; }
-  .cc-scr-seat { padding: 8px 8px 8px 12px; }
-  .cc-scr-arch-btn { width: 32px; height: 32px; }
+  /* A seat stays on one line on phones: the name truncates and the
+     controls tighten (a CPU seat carries difficulty + archetype + remove). */
+  .cc-scr-seat { flex-wrap: nowrap; gap: 6px; padding: 7px 6px 7px 10px; }
+  /* Touch can't drag-reorder seats, so the grip only costs room. */
+  .cc-scr-seat-handle { display: none; }
+  .cc-scr-seat-num { width: 14px; }
+  .cc-scr-seat-main { flex: 1 1 0; gap: 6px; }
+  .cc-scr-seat-controls { flex-wrap: nowrap; flex-shrink: 0; gap: 4px; }
+  .cc-scr-seat .cc-scr-seg-sm .cc-scr-seg-btn { padding: 0 5px; }
+  .cc-scr-arch-pick { gap: 2px; }
+  .cc-scr-arch-btn { width: 28px; height: 28px; }
+  .cc-scr-remove { width: 24px; height: 24px; }
+}
+@media (max-width: 360px) {
+  /* Smallest phones: the list order already shows the seat order. */
+  .cc-scr-lobby-inner { padding-left: 10px; padding-right: 10px; }
+  .cc-scr-lobby .cc-scr-section { padding-left: 8px; padding-right: 8px; }
+  .cc-scr-seat-num { display: none; }
+  .cc-scr-arch-btn { width: 26px; height: 26px; }
 }
 
 /* ── Game intro (match-start splash) ─────────────────────────────────── */
