@@ -26,6 +26,9 @@ export class CameraRig {
   height = 1;
   /** Extra padding (CSS px) around the fitted board. */
   padding = 16;
+  /** Bottom band (CSS px) the canvas draws under but the board is framed
+   *  above, e.g. behind the hand. The view's center sits in the area above. */
+  insetBottom = 0;
 
   // Targets (what input sets) and current (smoothed) values.
   rotation = 0;
@@ -52,9 +55,19 @@ export class CameraRig {
   setSize(w: number, h: number): void {
     this.width = Math.max(1, w);
     this.height = Math.max(1, h);
-    this.camera.aspect = this.width / this.height;
+    const vh = this.viewHeight;
+    // Project for the area above the inset and let the frustum run on below
+    // it, so the bottom band is still drawn.
+    this.camera.aspect = this.width / vh;
+    if (vh < this.height) this.camera.setViewOffset(this.width, vh, 0, 0, this.width, this.height);
+    else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
     this.fitCache.key = '';
+  }
+
+  /** Height (CSS px) of the framed area above `insetBottom`. */
+  get viewHeight(): number {
+    return Math.max(1, Math.min(this.height, this.height - this.insetBottom));
   }
 
   /** Points that must stay on-screen at zoom 1 (world space). */
@@ -98,15 +111,16 @@ export class CameraRig {
 
   /** Fit distance + center for a rotation/tilt (cached). */
   private fit(rotation: number, tilt: number): { dist: number; cx: number; cz: number } {
-    const key = `${rotation.toFixed(4)}|${tilt.toFixed(4)}|${this.width}|${this.height}|${this.padding}`;
+    const vh = this.viewHeight;
+    const key = `${rotation.toFixed(4)}|${tilt.toFixed(4)}|${this.width}|${vh}|${this.padding}`;
     if (this.fitCache.key === key) return this.fitCache;
     this.basis(rotation, tilt);
     // View direction (from camera into the scene).
     const view = _fwd.clone().multiplyScalar(Math.sin(tilt)).add(new Vector3(0, -Math.cos(tilt), 0)).normalize();
     const tanY = Math.tan(MathUtils.degToRad(FOV / 2));
-    const tanX = tanY * (this.width / this.height);
+    const tanX = tanY * (this.width / vh);
     const padX = 1 - (this.padding * 2) / this.width;
-    const padY = 1 - (this.padding * 2) / this.height;
+    const padY = 1 - (this.padding * 2) / vh;
     let cx = 0, cz = 0;
     let dist = 10;
     const target = new Vector3();

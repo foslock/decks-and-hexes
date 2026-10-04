@@ -1,11 +1,8 @@
 import type { Card, MarketStack } from '../types/game';
-import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground } from '../constants/cardColors';
 import { IrreversibleButton } from './Tooltip';
-import { buildCardSubtitle } from './cardSubtitle';
-import { renderSubtitle } from './SubtitlePartRenderer';
-import { CostLabel } from '../icons/Num';
 import Icon from '../icons/Icon';
-import CardName, { plainCardName } from './CardName';
+import { plainCardName } from './CardName';
+import CompactCardFace from './CompactCardFace';
 
 interface MarketPanelProps {
   archetypeMarket: Card[];
@@ -103,32 +100,14 @@ function MarketCard({
   onBuy: () => void;
   disabled: boolean;
 }) {
-  const raw = getCardDisplayColor(card);
-  const typeColor = /^#[0-9a-f]{6}$/i.test(raw) ? raw : '#555555';
   const stateClass = !canAfford ? ' is-unaffordable' : disabled ? ' is-dim' : '';
   return (
     <div className={`cc-ov-shop-item${stateClass}`}>
-      <div
-        className="cc-ov-shop-card"
-        style={{ ['--cc-type' as string]: typeColor, background: miniCardBackground(typeColor) }}
-      >
-        <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT, marginBottom: 2 }}><CardName name={card.name} upgraded={card.is_upgraded} /></div>
-        <div className="cc-ov-shop-sub">
-          <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-            if (el) {
-              const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-              el.style.setProperty('--sub-scale', String(scale));
-            }
-          }}>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            {card.buy_cost !== null ? <CostLabel cost={card.buy_cost} size={12} /> : 'Free'}
-            <span style={{ opacity: 0.65 }}>·</span>
-            {renderSubtitle(buildCardSubtitle(card), { fontSize: 12, passiveVp: card.passive_vp })}
-            {remaining !== null && <span style={{ opacity: 0.8 }}>· ×{remaining}</span>}
-          </span>
-          </span>
-        </div>
-      </div>
+      <CompactCardFace className="cc-ov-shop-card" card={card} width={154}>
+        {remaining !== null && (
+          <span style={{ position: 'absolute', right: 6, bottom: -7, fontSize: 10, padding: '0 5px', borderRadius: 999, background: 'rgba(12,12,30,0.92)', border: '1px solid rgba(232,196,106,0.35)', color: '#d8d6e8' }}>×{remaining}</span>
+        )}
+      </CompactCardFace>
       <IrreversibleButton
         className="cc-ov-buy"
         onClick={onBuy}

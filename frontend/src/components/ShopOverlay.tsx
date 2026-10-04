@@ -1,16 +1,14 @@
-import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import CardName, { plainCardName } from './CardName';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { plainCardName } from './CardName';
+import CompactCardFace from './CompactCardFace';
 import type { Card, MarketStack, CursorPosition, SharedPurchaseEvent } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { useAnimationMode } from './SettingsContext';
 import CardFull from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
-import { buildCardSubtitle } from './cardSubtitle';
-import { renderSubtitle } from './SubtitlePartRenderer';
 import Icon from '../icons/Icon';
 import { useSound } from '../audio/useSound';
-import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground } from '../constants/cardColors';
 import { useCardZoom } from './CardZoomContext';
 
 interface ShopOverlayProps {
@@ -56,13 +54,6 @@ interface HoverState {
   card: Card;
   rect: DOMRect;
   effectiveCost?: number | null;
-}
-
-/** Normalise a card display color to 6-digit hex (miniCardBackground appends alpha). */
-function hex6(color: string): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) return color;
-  const m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(color);
-  return m ? `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}` : '#555555';
 }
 
 /** Gold coin glyph used for prices inside the shop. */
@@ -186,34 +177,9 @@ function CompactShopCard({
   const { showZoom } = useCardZoom();
   const displayCost = effectiveCost ?? card.buy_cost;
   const isDiscounted = displayCost !== null && card.buy_cost !== null && displayCost < card.buy_cost;
-  const typeColor = hex6(getCardDisplayColor(card));
   const hasCurrentTurnPurchase = currentTurnPurchaseInfo && currentTurnPurchaseInfo.length > 0;
   const soldOut = remaining === 0;
 
-  // Refs + one-shot layout measurement for title / subtitle shrink-to-fit.
-  // Previously this used inline ref callbacks that re-ran on every parent
-  // render, forcing a synchronous layout read+write for every compact card
-  // on every render burst (shop has up to ~18 cards — that's ~36 forced
-  // layouts per parent render). We only need to measure once: the card
-  // instance is stable for the lifetime of this React tree node (the
-  // parent keys by card.id) and the card container width is a constant.
-  const titleSpanRef = useRef<HTMLSpanElement>(null);
-  const subtitleSpanRef = useRef<HTMLSpanElement>(null);
-  useLayoutEffect(() => {
-    const titleEl = titleSpanRef.current;
-    if (titleEl?.parentElement) {
-      const scale = Math.min(1, titleEl.parentElement.clientWidth / titleEl.scrollWidth);
-      titleEl.style.setProperty('--title-scale', String(scale));
-    }
-    const subEl = subtitleSpanRef.current;
-    if (subEl?.parentElement) {
-      const scale = Math.min(1, subEl.parentElement.clientWidth / subEl.scrollWidth);
-      subEl.style.setProperty('--sub-scale', String(scale));
-    }
-    // Re-measure if the card's visual content changes. card.id is stable
-    // per slot so this effectively runs once on mount; including name and
-    // current_vp guards against in-place mutations (e.g. VP updates).
-  }, [card.id, card.name, card.current_vp, card.description]);
   const isTrulySoldOut = soldOut && !sellingOut;
   const purchaseLines = hasCurrentTurnPurchase
     ? currentTurnPurchaseInfo!.map(p => `${p.playerName} bought ${p.count} this round`).join('\n')
@@ -237,7 +203,6 @@ function CompactShopCard({
     : disabled && (!viewOnly || !!disabledTooltip)
     ? ' is-dim'
     : '';
-  const costClass = isDiscounted ? ' is-discount' : !canAfford && !isTrulySoldOut ? ' is-short' : '';
   return (
     <div
       data-card-id={card.id}
@@ -251,30 +216,14 @@ function CompactShopCard({
       {cursors && cursors.length > 0 && (
         <CursorBadges cursors={cursors} cursorClicks={cursorClicks} />
       )}
-      {/* Card element — same dimensions as CardHand compact cards */}
-      <div
+      {/* The card itself */}
+      <CompactCardFace
         className="cc-ov-shop-card"
-        style={{
-          ['--cc-type' as string]: typeColor,
-          background: miniCardBackground(typeColor),
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT }}>
-            <span ref={titleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }}>
-              <CardName name={card.name} upgraded={card.is_upgraded} />
-            </span>
-          </div>
-          <span className={`cc-ov-cost${costClass}`}>
-            {displayCost != null ? <>{displayCost}<Coin /></> : '—'}
-          </span>
-        </div>
-        <div className="cc-ov-shop-sub" title={isDiscounted ? `Reduced from ${card.buy_cost} (dynamic discount)` : undefined}>
-          <span ref={subtitleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }}>
-          {renderSubtitle(buildCardSubtitle(card), { fontSize: 15, passiveVp: card.passive_vp })}
-          </span>
-        </div>
-      </div>
+        card={card}
+        width={COMPACT_CARD_WIDTH}
+        cost={displayCost}
+        costState={isDiscounted ? 'discount' : !canAfford && !isTrulySoldOut ? 'short' : 'normal'}
+      />
       {/* Selling Out ribbon */}
       {sellingOut && (
         <div className="cc-ov-ribbon">Selling Out</div>
@@ -302,10 +251,6 @@ function CompactShopCard({
 /** Animated card that flies from a neutral market card to a player's HUD. */
 export function PurchaseFlyAnimation({ event, onDone }: { event: SharedPurchaseEvent; onDone: () => void }) {
   const [style, setStyle] = useState<React.CSSProperties>({ display: 'none' });
-
-  const typeColor = hex6(getCardDisplayColor(event.card));
-  const subtitle = buildCardSubtitle(event.card);
-  const displayCost = event.card.buy_cost;
 
   useEffect(() => {
     // Find source card element in the shop
@@ -341,26 +286,11 @@ export function PurchaseFlyAnimation({ event, onDone }: { event: SharedPurchaseE
 
   return (
     <div style={style}>
-      <div
-        className="cc-ov-shop-card"
-        style={{
-          ['--cc-type' as string]: typeColor,
-          background: miniCardBackground(typeColor),
-          boxShadow: `0 0 14px ${event.player_color}90, 0 4px 12px rgba(0,0,0,0.55)`,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-          <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT }}>
-            <CardName name={event.card.name} upgraded={event.card.is_upgraded} />
-          </div>
-          <span className="cc-ov-cost">
-            {displayCost != null ? <>{displayCost}<Coin /></> : '—'}
-          </span>
-        </div>
-        <div className="cc-ov-shop-sub">
-          {renderSubtitle(subtitle, { fontSize: 15, passiveVp: event.card.passive_vp })}
-        </div>
-      </div>
+      <CompactCardFace
+        card={event.card}
+        width={COMPACT_CARD_WIDTH}
+        style={{ boxShadow: `0 0 0 1px rgba(0,0,0,0.6), 0 0 14px ${event.player_color}90, 0 4px 12px rgba(0,0,0,0.55)` }}
+      />
     </div>
   );
 }
@@ -689,12 +619,7 @@ export default function ShopOverlay({
                           <div style={{ position: 'relative', width: cardW }}>
                             {/* Invisible card — preserves height */}
                             <div style={{ visibility: 'hidden' }}>
-                              <div className="cc-ov-shop-card">
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-                                      <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT }}><CardName name={card.name} upgraded={card.is_upgraded} /></div>
-                                    </div>
-                                    <div style={{ fontSize: 15 }}>&nbsp;</div>
-                                  </div>
+                              <CompactCardFace card={card} width={cardW} />
                             </div>
                             {/* Overlay — exact same size */}
                             <div className={`cc-ov-purchased${animate && recentBuy === card.id ? ' cc-ov-anim' : ''}`}>

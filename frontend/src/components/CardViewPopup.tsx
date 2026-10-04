@@ -5,20 +5,15 @@ import { useAnimationMode } from './SettingsContext';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
-import { buildCardSubtitle } from './cardSubtitle';
-import { renderSubtitle } from './SubtitlePartRenderer';
 import Icon from '../icons/Icon';
-import { CostLabel } from '../icons/Num';
 import { useCardZoom } from './CardZoomContext';
-import { CARD_TITLE_FONT, getCardDisplayColor } from '../constants/cardColors';
-import CardName from './CardName';
+import CompactCardFace from './CompactCardFace';
 
 // ── Card Popup (deck viewer / discard viewer) ────────────────
 
 function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: boolean; shiftHeld: boolean; navList?: Card[] }) {
   const animMode = useAnimationMode();
   const displayCard = shiftHeld ? getUpgradedPreview(card) : card;
-  const color = getCardDisplayColor(displayCard);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const { showZoom } = useCardZoom();
   const upgradeLabel = shiftHeld && hasUpgradePreview(card) ? (
@@ -32,42 +27,9 @@ function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: b
         onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
         onPointerLeave={() => setHoverRect(null)}
         onClick={() => showZoom(displayCard, navList)}
-        style={{
-          width: 154,
-          padding: 6,
-          background: '#2a2a3e',
-          border: `1px solid ${color}`,
-          borderRadius: 6,
-          color: '#fff',
-          flexShrink: 0,
-          cursor: 'pointer',
-        }}
+        style={{ flexShrink: 0, cursor: 'pointer' }}
       >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-            <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-              <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-                if (el) {
-                  const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                  el.style.setProperty('--title-scale', String(scale));
-                }
-              }}>
-                <CardName name={displayCard.name} upgraded={displayCard.is_upgraded} />
-              </span>
-            </div>
-            <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={displayCard.buy_cost} size={15} /></span>
-          </div>
-          <div style={{ fontSize: 15, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-            <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-              if (el) {
-                const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-                el.style.setProperty('--sub-scale', String(scale));
-              }
-            }}>
-            {renderSubtitle(buildCardSubtitle(displayCard), { fontSize: 15, passiveVp: displayCard.passive_vp })}
-            </span>
-          </div>
-        </div>
+        <CompactCardFace card={displayCard} width={154} />
         {upgradeLabel}
         {hoverRect && createPortal(
           <div style={{

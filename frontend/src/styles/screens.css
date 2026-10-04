@@ -1482,24 +1482,18 @@
 .cc-scr-cb-group-btn:hover .cc-scr-cb-group-label { color: var(--cc-gold-bright); }
 .cc-scr-cb-group-count { font-size: 12px; color: var(--cc-text-faint); }
 .cc-scr-cb-grid { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+/* The face itself is CompactCardFace; this is the hover/flash wrapper. */
 .cc-scr-cb-card {
   width: 154px;
-  padding: 7px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--cb-color, #555);
-  color: var(--cc-text);
+  border-radius: 10px;
   flex-shrink: 0;
   cursor: pointer;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.18) 100%),
-    #1e1e3a;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 2px 6px rgba(0, 0, 0, 0.35);
-  transition: transform 150ms var(--cc-ease-out), background 200ms ease, border-color 200ms ease;
+  transition: transform 150ms var(--cc-ease-out), box-shadow 200ms ease;
   animation: cc-fade-in 250ms ease-out both;
 }
 .cc-scr-cb-card:hover { transform: translateY(-2px); }
 .cc-scr-cb-card:active { transform: translateY(0) scale(0.98); }
-.cc-scr-cb-card.is-flash { background: #2a4a2e; border-color: #4a4; }
+.cc-scr-cb-card.is-flash { box-shadow: 0 0 0 2px #5fdc6f, 0 0 14px rgba(95, 220, 111, 0.7); }
 .cc-scr-cb-empty { color: var(--cc-text-faint); font-size: 13px; }
 @media (max-width: 480px) {
   .cc-scr-cb-hide-narrow { display: none !important; }

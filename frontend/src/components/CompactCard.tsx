@@ -1,10 +1,7 @@
-import React from 'react';
 import type { Card } from '../types/game';
-import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground, MINI_CARD_SHADOW } from '../constants/cardColors';
-import { buildCardSubtitle, type CardSubtitleContext } from './cardSubtitle';
-import { renderSubtitle } from './SubtitlePartRenderer';
+import type { CardSubtitleContext } from './cardSubtitle';
+import CompactCardFace from './CompactCardFace';
 import { useCardZoom } from './CardZoomContext';
-import CardName from './CardName';
 
 const COL_W = 134;
 
@@ -16,43 +13,15 @@ interface CompactCardProps {
 }
 
 /**
- * Compact card display matching the "In Play" list style.
- * Shows card name + subtitle stats in a small bordered pill.
+ * Small themed card (name, cost, glyph shorthand) for tight readouts such as
+ * the board's planned-card tooltip. Click to open the full card.
  */
 export default function CompactCard({ card, subtitleContext, effectiveResourceGain, effectiveDrawCards }: CompactCardProps) {
-  const typeColor = getCardDisplayColor(card);
   const ctx: CardSubtitleContext = { ...subtitleContext, effectiveResourceGain, effectiveDrawCards };
-  const statParts = buildCardSubtitle(card, ctx);
   const { showZoom } = useCardZoom();
-
   return (
-    <div
-      onClick={() => showZoom(card)}
-      style={{
-      width: COL_W,
-      padding: '3px 6px',
-      background: miniCardBackground(typeColor),
-      border: `1px solid ${typeColor}`,
-      borderRadius: 6,
-      boxShadow: MINI_CARD_SHADOW,
-      color: '#fff',
-      cursor: 'pointer',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-        <div style={{ fontWeight: 'bold', fontSize: 14, fontFamily: CARD_TITLE_FONT, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          <CardName name={card.name} upgraded={card.is_upgraded} />
-        </div>
-      </div>
-      <div style={{ fontSize: 11, lineHeight: '13px', color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-        <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
-          if (el) {
-            const scale = Math.min(1, el.parentElement!.clientWidth / el.scrollWidth);
-            el.style.setProperty('--sub-scale', String(scale));
-          }
-        }}>
-          {renderSubtitle(statParts, { fontSize: 11, passiveVp: card.passive_vp })}
-        </span>
-      </div>
+    <div onClick={() => showZoom(card)} style={{ cursor: 'pointer' }}>
+      <CompactCardFace card={card} width={COL_W} size="sm" subtitleContext={ctx} />
     </div>
   );
 }

@@ -259,6 +259,13 @@ export class BoardEngine {
     this.kick(0.3);
   }
 
+  /** Keep the board framed above a bottom band of the canvas (CSS px). */
+  setInsetBottom(px: number): void {
+    if (this.rig.insetBottom === px) return;
+    this.rig.insetBottom = px;
+    this.resize();
+  }
+
   /** Slow idle camera sway (splash screen). Amplitude in radians. */
   setSway(amplitude: number): void {
     this.sway = amplitude;
@@ -332,7 +339,7 @@ export class BoardEngine {
     if (aboutX != null && aboutY != null && next > 1) {
       // Keep the point under the cursor fixed (approximately) while zooming.
       const before = rig.groundPoint(aboutX, aboutY, 0.05);
-      const center = rig.groundPoint(rig.width / 2, rig.height / 2, 0.05);
+      const center = rig.groundPoint(rig.width / 2, rig.viewHeight / 2, 0.05);
       if (before && center) {
         const k = 1 - prevZoom / next;
         rig.pan.x += (before.x - center.x) * k;
@@ -1057,8 +1064,9 @@ export class BoardEngine {
   }
 
   private panBy(dx: number, dy: number): void {
-    const a = this.rig.groundPoint(this.rig.width / 2, this.rig.height / 2, 0);
-    const b = this.rig.groundPoint(this.rig.width / 2 + dx, this.rig.height / 2 + dy, 0);
+    const cy = this.rig.viewHeight / 2;
+    const a = this.rig.groundPoint(this.rig.width / 2, cy, 0);
+    const b = this.rig.groundPoint(this.rig.width / 2 + dx, cy + dy, 0);
     if (!a || !b) return;
     this.rig.pan.x -= b.x - a.x;
     this.rig.pan.y -= b.z - a.z;
@@ -1112,7 +1120,7 @@ export class BoardEngine {
     if (!w || !h) return;
     this.renderer.setSize(w, h, false);
     this.rig.setSize(w, h);
-    this.pixelScale.value = (h * this.renderer.getPixelRatio()) / (2 * Math.tan((this.rig.camera.fov * Math.PI) / 360));
+    this.pixelScale.value = (this.rig.viewHeight * this.renderer.getPixelRatio()) / (2 * Math.tan((this.rig.camera.fov * Math.PI) / 360));
     this.kick(0.5);
     if (this.paused) this.renderNow();
   }

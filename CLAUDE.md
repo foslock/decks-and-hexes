@@ -51,8 +51,10 @@ at high priority, the rest of the catalog during idle time).
 
 ### Cards, Hand & Piles (frontend)
 - `CardFull` is the one full card face (fixed 220 × 308, metallic trim tiered by
-  cost via `constants/cardTrim.ts`, ability text auto-fitted). Smaller summaries
-  (`CompactCard`, `HandStyleCard`, shop tiles) stay for tight spots.
+  cost via `constants/cardTrim.ts`, ability text auto-fitted). Tight spots use
+  `CompactCardFace` (name, cost coin, glyph shorthand in the same trim/theme) —
+  `CompactCard`, `HandStyleCard`, shop tiles, deck viewers and the card browser
+  all render it.
 - Upgraded names: the engine names them "Blitz+"; render names through
   `CardName` (gold arrow glyph first, no "+"), `plainCardName()` for text.
 - `CardHand` owns the hand fan, the 3D draw/discard piles and every card
@@ -65,6 +67,9 @@ at high priority, the rest of the catalog during idle time).
   GameScreen turns every player's plays into `revealCards`; `ResolveOverlay`'s
   `onStepStart`/`onStepEnd` focus each resolving tile and send its cards home
   (your discard pile, an opponent's ID card, or a burn if trashed).
+- The board canvas runs on under the hand panel (`GameBoard` `extendBelow`);
+  `viewInsetBottom` → `CameraRig.insetBottom` frames the island above the
+  resting hand via a camera view offset.
 - Dev pages: `?preview=cards` (every card face, base/upgraded) and
   `?preview=hand` (a sandbox for draw, play, undo, discard, trash, shuffles,
   purchases and end of turn).
