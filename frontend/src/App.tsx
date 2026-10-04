@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef, Component, type ReactNode } f
 import type { GameState, LobbyState } from './types/game';
 import { SettingsProvider } from './components/SettingsContext';
 import SetupScreen from './components/SetupScreen';
+import { signalAppReady } from './utils/appReady';
 import GameScreen from './components/GameScreen';
 import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
@@ -101,6 +102,12 @@ function AppInner() {
     }
     return { type: 'home' };
   });
+  // The home screen dismisses the boot loader itself once its intro is ready;
+  // every other first screen (restored lobby / game, preview pages) dismisses
+  // it straight away.
+  useEffect(() => {
+    if (previewMode || screen.type !== 'home') signalAppReady();
+  }, [screen.type]);
   // Start warming card art as soon as the player heads into a lobby or game
   // (idle-time only; starters first). The home screen stays lightweight.
   useEffect(() => {

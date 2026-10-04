@@ -292,6 +292,12 @@ export class BoardEngine {
   }
 
   /** Base rotation from the game (seat-relative); user orbit adds on top. */
+  /** Restart the camera swoop-in (used when an intro begins after a delay). */
+  playIntro(): void {
+    this.rig.intro();
+    this.kick(2);
+  }
+
   setRotation(rad: number): void {
     this.baseRotation = rad;
     this.rig.rotation = this.baseRotation + this.userRotation;
@@ -486,6 +492,29 @@ export class BoardEngine {
   kick(seconds = 0.5): void {
     this.busyUntil = Math.max(this.busyUntil, performance.now() / 1000 + seconds);
     if (!this.raf && !this.disposed && this.ok && !this.paused) this.raf = requestAnimationFrame(this.loop);
+  }
+
+  /**
+   * Compile every shader in the scene (in parallel where the GPU driver
+   * allows) and render one real frame, so the first visible frames don't
+   * stall on shader compiles or texture uploads.
+   */
+  async warmUp(): Promise<void> {
+    const r = this.renderer;
+    if (!r || this.disposed) return;
+    this.rig.update(0);
+    try {
+      await r.compileAsync(this.scene, this.rig.camera);
+    } catch {
+      // Older drivers: fall through and let the first render compile.
+    }
+    if (this.disposed) return;
+    await new Promise<void>((resolve) => {
+      const off = this.onFrame(() => { off(); resolve(); });
+      this.kick(0.3);
+      // Paused or hidden tab: don't hang the boot on a frame that never comes.
+      setTimeout(() => { off(); resolve(); }, 1500);
+    });
   }
 
   renderNow(): void {

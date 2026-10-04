@@ -277,6 +277,18 @@
 
 /* ── Home screen ─────────────────────────────────────────────────────── */
 
+/* Boot hold: while the loading bar shows, keep the home content hidden and
+   its entrance animations un-started so they all begin, from frame zero, the
+   moment everything is ready. The hero canvas keeps rendering (warming up)
+   underneath. */
+.cc-scr-home.is-booting :is(.cc-scr-home-header, .cc-scr-home-hero, .cc-scr-home-actions, .cc-scr-home-footer, .cc-scr-embers) {
+  visibility: hidden;
+}
+.cc-scr-home.is-booting :is(.cc-scr-home-header, .cc-scr-home-actions, .cc-scr-home-footer),
+.cc-scr-home.is-booting :is(.cc-scr-home-header, .cc-scr-home-actions, .cc-scr-home-footer) * {
+  animation: none !important;
+}
+
 .cc-scr-home {
   height: 100dvh;
   min-width: 350px;

@@ -3,6 +3,7 @@ import type { HexTile } from '../types/game';
 import { BoardEngine } from '../board3d/engine';
 import { PLAYER_COLORS } from '../board3d/boardTypes';
 import { axialToWorld } from '../board3d/layout';
+import { waitForImages } from '../utils/appReady';
 
 // Generate all hex coords for a radius-r grid
 function generateHexCoords(radius: number): { q: number; r: number }[] {
@@ -108,12 +109,23 @@ interface CardState {
   alpha: number;
 }
 
-export default function HeroAnimation() {
+interface HeroAnimationProps {
+  /** Hold the intro at frame zero until this turns true. */
+  start?: boolean;
+  /** Fired once the diorama's shaders are compiled and the card art is decoded. */
+  onReady?: () => void;
+}
+
+export default function HeroAnimation({ start = true, onReady }: HeroAnimationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const blueCardRef = useRef<HTMLDivElement>(null);
   const redCardRef = useRef<HTMLDivElement>(null);
   const [cards] = useState(() => ({ blue: pick(DEFENDERS), red: pick(ATTACKERS) }));
+  const startRef = useRef(start);
+  startRef.current = start;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -171,10 +183,12 @@ export default function HeroAnimation() {
       })
       : null;
     ro?.observe(container);
+    const art = waitForImages([`/cards/${cards.blue.id}.webp`, `/cards/${cards.red.id}.webp`]);
     if (!engine.ok) {
       // No WebGL: the two cards at rest over the empty backdrop.
       showStaticCards();
-      return () => { ro?.disconnect(); engine.dispose(); };
+      void art.then(() => { if (!destroyed) onReadyRef.current?.(); });
+      return () => { destroyed = true; ro?.disconnect(); engine.dispose(); };
     }
 
     // --- A small diorama: two castles, a walled temple, a pair of peaks ---
@@ -232,6 +246,15 @@ export default function HeroAnimation() {
       onLeave: () => engine.setHover(null),
     });
 
+    // Compile the diorama's shaders and decode the card art before the intro
+    // may begin, so its first frames are smooth.
+    let warmed = false;
+    void Promise.all([engine.warmUp(), art]).then(() => {
+      if (destroyed) return;
+      warmed = true;
+      onReadyRef.current?.();
+    });
+
     // --- Animation timeline (ms) ---
     const BUILD_DUR = 900;
     const CARD_ENTER_START = 500;
@@ -259,8 +282,11 @@ export default function HeroAnimation() {
     let collided = false;
     let built = false;
     let nextBorder = TOTAL_ANIM + 1200;
-    const startTime = performance.now();
+    let startTime = 0;
     let raf = 0;
+    // Cards wait offscreen until the intro starts.
+    placeCard(blueCard, blueState);
+    placeCard(redCard, redState);
 
     const commit = () => engine.setBoard({ ...tiles }, info, new Set());
     const setOwner = (key: string, owner: string | null) => {
@@ -269,6 +295,11 @@ export default function HeroAnimation() {
 
     const tick = () => {
       if (destroyed) return;
+      if (!startTime) {
+        if (!startRef.current || !warmed) { raf = requestAnimationFrame(tick); return; }
+        startTime = performance.now();
+        engine.playIntro();
+      }
       const elapsed = performance.now() - startTime;
 
       if (!built) {
