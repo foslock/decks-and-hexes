@@ -6,6 +6,7 @@ import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import Icon from '../icons/Icon';
+import type { IconName } from '../icons/glyphs';
 import { useCardZoom } from './CardZoomContext';
 import CompactCardFace from './CompactCardFace';
 
@@ -17,8 +18,10 @@ function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: b
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const { showZoom } = useCardZoom();
   const upgradeLabel = shiftHeld && hasUpgradePreview(card) ? (
-    <div style={{ textAlign: 'center', fontSize: 10, fontWeight: 'bold', color: '#4aff6a', marginTop: 4 }}>
-      Upgraded
+    <div style={{ textAlign: 'center', marginTop: 5 }}>
+      <span className="cc-ov-tag" style={{ color: 'var(--cc-gold-bright)', borderColor: 'rgba(232, 196, 106, 0.45)' }}>
+        <Icon name="upgraded" size={10} decorative style={{ verticalAlign: '-0.1em', marginRight: 4 }} />Upgraded
+      </span>
     </div>
   ) : null;
   if (!full) {
@@ -60,8 +63,18 @@ function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: b
 // Persists view mode preference per popup title across opens (reset on page reload)
 const viewModeMemory: Record<string, boolean> = {};
 
+/** Section glyphs for the deck viewer's groups. */
+const GROUP_ICONS: Record<string, IconName> = {
+  'In Play': 'engine',
+  'In Hand': 'hand',
+  'Draw Pile': 'drawPile',
+  'Discard Pile': 'discard',
+  Trashed: 'trash',
+};
+
 export function CardViewPopup({
   title,
+  icon = 'stack',
   cards,
   onClose,
   defaultFull = false,
@@ -70,6 +83,8 @@ export function CardViewPopup({
   allowUpgradePreview = false,
 }: {
   title: string;
+  /** Header glyph (the draw pile, discard pile, whole deck…). */
+  icon?: IconName;
   cards: { label: string; items: Card[] }[];
   onClose: () => void;
   defaultFull?: boolean;
@@ -131,10 +146,10 @@ export function CardViewPopup({
 
   return (
     <div
+      className="cc-ov-backdrop"
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0,
-        background: 'rgba(0,0,0,0.75)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         zIndex: 45000,
         opacity: visible ? 1 : 0,
@@ -142,80 +157,82 @@ export function CardViewPopup({
       }}
     >
       <div
+        className="cc-ov-modal"
+        role="dialog"
+        aria-label={title}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 'min(92vw, 860px)',
-          maxHeight: '80vh',
-          background: '#12122a',
-          border: '2px solid #4a4a6a',
-          borderRadius: 14,
+          maxHeight: '85vh',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
           opacity: visible ? 1 : 0,
-          transform: visible ? 'scale(1)' : 'scale(0.95)',
+          transform: visible ? 'none' : 'translateY(10px) scale(0.96)',
           transition: panelTransition,
         }}
       >
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '10px 16px',
-          background: '#1a1a40',
-          borderBottom: '1px solid #333',
-          flexShrink: 0,
-        }}>
-          <span style={{ fontWeight: 'bold', fontSize: 15, color: '#fff' }}>{title}</span>
-          <span style={{ fontSize: 12, color: '#888' }}>
-            ({deckCount} card{deckCount !== 1 ? 's' : ''}{trashedCount > 0 && <>, <span style={{ color: '#aa4444' }}>{trashedCount} trashed</span></>})
-          </span>
-          {note && <span style={{ fontSize: 11, color: '#666', fontStyle: 'italic' }}>{note}</span>}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button
-              onClick={onClose}
-              style={{ padding: '4px 10px', background: '#2a2a3e', border: '1px solid #555', borderRadius: 5, color: '#aaa', fontSize: 13, cursor: 'pointer' }}
-              aria-label="Close"
-            >
-              <Icon name="close" size={12} decorative style={{ verticalAlign: '-0.1em' }} />
+        <div className="cc-ov-header">
+          <Icon name={icon} size={22} decorative style={{ color: 'var(--cc-gold)', flexShrink: 0, filter: 'drop-shadow(0 1px 0 rgba(0,0,0,0.6))' }} />
+          <span className="cc-ov-title">{title}</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 10, alignItems: 'center', minWidth: 0 }}>
+            {trashedCount > 0 && (
+              <span className="cc-ov-tag" style={{ color: '#e07b7b', borderColor: 'rgba(224, 123, 123, 0.4)' }}>
+                <Icon name="trash" size={10} decorative style={{ verticalAlign: '-0.1em', marginRight: 4 }} />{trashedCount} trashed
+              </span>
+            )}
+            <span className="cc-ov-purse" title={`${deckCount} card${deckCount !== 1 ? 's' : ''}`}>
+              <Icon name="card" size={18} decorative style={{ color: 'var(--cc-gold)', marginLeft: 4 }} />
+              <span className="cc-ov-purse-value">{deckCount}</span>
+              <span className="cc-ov-purse-label">card{deckCount !== 1 ? 's' : ''}</span>
+            </span>
+            <button className="cc-ov-close" onClick={onClose} title="Close" aria-label="Close">
+              <Icon name="close" size={14} decorative />
             </button>
           </div>
         </div>
-        <div style={{ overflowY: 'auto', padding: 16 }}>
+        <div style={{ overflowY: 'auto', padding: '16px 16px 18px', display: 'flex', flexDirection: 'column', gap: 18 }}>
           {cards.map((group) => {
             const isTrashed = group.label === 'Trashed';
+            const groupIcon = GROUP_ICONS[group.label];
             return (
-            <div key={group.label} style={{ marginBottom: 16 }}>
-              {cards.length > 1 && (
-                <div style={{
-                  fontSize: 12,
-                  color: isTrashed ? '#aa4444' : '#888',
-                  marginBottom: 8,
-                  fontWeight: 'bold',
-                }}>
-                  {isTrashed && <Icon name="trash" size={13} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} />}{group.label} ({group.items.length})
-                </div>
-              )}
-              {group.items.length === 0 ? (
-                <div style={{ fontSize: 12, color: '#555', fontStyle: 'italic' }}>Empty</div>
-              ) : (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, ...(isTrashed ? { opacity: 0.55 } : {}) }}>
-                  {(preserveOrder
-                    ? group.items
-                    : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name))
-                  ).map((card, i) => (
-                    <CardPopupItem
-                      key={`${card.id}-${i}`}
-                      card={card}
-                      full={false}
-                      shiftHeld={shiftHeld}
-                      navList={isTrashed ? undefined : deckNavList}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
+              <section key={group.label}>
+                {cards.length > 1 && (
+                  <div className="cc-ov-section-head" style={{ marginBottom: 10 }}>
+                    <div className="cc-ov-section-title" style={{ fontSize: 14, ...(isTrashed ? { color: '#e07b7b' } : {}) }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, whiteSpace: 'nowrap' }}>
+                        {groupIcon && <Icon name={groupIcon} size={14} decorative />}
+                        {group.label}
+                        <span style={{ fontFamily: 'var(--cc-font-body)', fontSize: 12, letterSpacing: 0, color: 'var(--cc-text-faint)' }}>{group.items.length}</span>
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {group.items.length === 0 ? (
+                  <div className="cc-ov-section-sub" style={{ textAlign: 'center' }}>Empty</div>
+                ) : (
+                  <div style={{
+                    display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'center', alignItems: 'flex-start',
+                    ...(isTrashed ? { opacity: 0.6, filter: 'saturate(0.4)' } : {}),
+                  }}>
+                    {(preserveOrder
+                      ? group.items
+                      : [...group.items].sort((a, b) => (a.buy_cost ?? -1) - (b.buy_cost ?? -1) || a.name.localeCompare(b.name))
+                    ).map((card, i) => (
+                      <CardPopupItem
+                        key={`${card.id}-${i}`}
+                        card={card}
+                        full={false}
+                        shiftHeld={shiftHeld}
+                        navList={isTrashed ? undefined : deckNavList}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
           })}
         </div>
+        {note && <div className="cc-ov-footer">{note}</div>}
       </div>
     </div>
   );

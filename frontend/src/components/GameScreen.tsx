@@ -34,7 +34,7 @@ import { useSound } from '../audio/useSound';
 import { useCardZoom } from './CardZoomContext';
 import { computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
 import { preloadCardImages } from '../utils/cardImagePreload';
-import { preloadCatalogArt } from '../cardCatalog';
+import { preloadCatalogArt, useCardCatalog } from '../cardCatalog';
 
 /** Check if an engine card needs an opponent target (forced discard or inject rubble). */
 function needsOpponentTarget(card: Card): boolean {
@@ -908,6 +908,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [showFullLog, setShowFullLog] = useState(false);
   const [showDeckViewer, setShowDeckViewer] = useState(false);
   const [showShopOverlay, setShowShopOverlay] = useState(false);
+  const showShopOverlayRef = useRef(showShopOverlay);
+  showShopOverlayRef.current = showShopOverlay;
+  const cardCatalog = useCardCatalog();
+  /** An opponent's purchase with no shop tile on screen to fly from (set
+   *  once the board-flight helpers exist, below). */
+  const popPurchaseRef = useRef<(playerId: string, card: Card, index: number) => void>(() => {});
   const [otherCursors, setOtherCursors] = useState<Record<string, CursorPosition>>({});
   const [neutralPurchaseEvents, setSharedPurchaseEvents] = useState<SharedPurchaseEvent[]>([]);
   // Your own purchases, waiting to fly into your discard pile (held while the shop is open)
@@ -3143,6 +3149,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
   }, [wsMessage, isMultiplayer]);
 
+  /** Screen rect of a shop tile's card face — a bought card lifts off from it. */
+  const shopCardRect = (cardId: string): IncomingDiscard['from'] => {
+    const slot = document.querySelector(`[data-card-id="${CSS.escape(cardId)}"]`);
+    const r = (slot?.querySelector('[data-compact-card]') ?? slot)?.getBoundingClientRect();
+    return r && r.width > 0 ? { left: r.left, top: r.top, width: r.width, height: r.height } : undefined;
+  };
+
   // Detect purchases via buy_phase_purchases state diff
   const prevBuyPhasePurchasesRef = useRef<Record<string, Array<{ card_id: string; definition_id?: string; card_name: string; source: string; cost: number }>>>({});
   const prevArchMarketRef = useRef<Card[] | null>(null);
@@ -3159,12 +3172,15 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     }
     const prev = prevBuyPhasePurchasesRef.current;
     const current = gameState.buy_phase_purchases;
-    // Find new purchases: neutral for all players, archetype for self
+    // Find new purchases. Mine fly from the shop tile to my discard pile.
+    // Opponents' shared buys fly from the shop tile to their ID card while my
+    // shop is open; otherwise (and for their archetype buys, which have no
+    // tile in my shop) the card pops up beside their ID card.
     for (const [pid, purchases] of Object.entries(current)) {
       const prevCount = prev[pid]?.length ?? 0;
       const newPurchases = purchases.slice(prevCount);
       const isSelf = pid === activePlayerId;
-      for (const p of newPurchases) {
+      for (const [n, p] of newPurchases.entries()) {
         if (p.source === 'shared') {
           const player = gameState.players[pid];
           const stack = gameState.shared_market.find(
@@ -3174,7 +3190,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           if (!stack) continue;
           if (isSelf) {
             const key = `buy-${pid}-${prevCount + newPurchases.indexOf(p)}`;
-            setIncomingDiscards(prev => [...prev, { key, card: stack.card }]);
+            const from = shopCardRect(stack.card.id);
+            setIncomingDiscards(prev => [...prev, { key, card: stack.card, from }]);
+            continue;
+          }
+          if (!showShopOverlayRef.current) {
+            popPurchaseRef.current(pid, stack.card, n);
             continue;
           }
           setSharedPurchaseEvents(evts => [...evts, {
@@ -3186,6 +3207,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             card: stack.card,
             isSelf,
           }]);
+        } else if (p.source === 'archetype' && !isSelf) {
+          const card = cardCatalog.getCardByName(p.card_name);
+          if (card) popPurchaseRef.current(pid, card, n);
         } else if (p.source === 'archetype' && isSelf) {
           // Find the card in the previous archetype market (it's been removed after purchase)
           const card = prevArchMarketRef.current?.find(
@@ -3194,7 +3218,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
           );
           if (!card) continue;
           const key = `buy-${pid}-${prevCount + newPurchases.indexOf(p)}`;
-          setIncomingDiscards(prev => [...prev, { key, card }]);
+          const from = shopCardRect(card.id);
+          setIncomingDiscards(prev => [...prev, { key, card, from }]);
         }
       }
     }
@@ -4814,6 +4839,24 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const flyRevealCardsRef = useRef(flyRevealCards);
   flyRevealCardsRef.current = flyRevealCards;
 
+  // An opponent's purchase pops up beside their ID card, holds a beat so
+  // everyone sees what they bought, then slips into it.
+  popPurchaseRef.current = (playerId, card, index) => {
+    if (animationOff) return;
+    const row = playerRowRefs.current.get(playerId)?.getBoundingClientRect();
+    if (!row || row.width === 0) return;
+    const speed = animSpeed || 1;
+    const pop: Pose = { x: row.right + 14 + CARD_W * 0.2, y: row.top + row.height / 2, rot: 0, scale: 0.4 };
+    const to: Pose = { x: row.left + row.width / 2, y: row.top + row.height / 2, rot: 0, scale: 0.06, opacity: 0 };
+    launchBoardFlight({ kind: 'toPlayer', card, frames: [
+      { offset: 0, transform: poseTransform({ ...pop, scale: 0.1 }), opacity: 0 },
+      { offset: 0.15, transform: poseTransform(pop), opacity: 1 },
+      { offset: 0.62, transform: poseTransform(pop), opacity: 1 },
+      ...flightKeyframes(pop, to, { ease: easeInOut, samples: 5, opacity: t => (t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4) })
+        .slice(1).map(f => ({ ...f, offset: 0.62 + (f.offset as number) * 0.38 })),
+    ], delay: Math.round(index * 450 * speed), duration: Math.round(1800 * speed) });
+  };
+
   const handleBoardFlightDone = useCallback((f: Flight<BoardFlightKind>) => {
     setBoardFlights(prev => prev.filter(x => x.key !== f.key));
     if (f.kind === 'toDiscard') {
@@ -4995,7 +5038,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'hidden', color: '#fff',
+      // clip, not hidden: the resting hand hangs below the screen, and a
+      // hidden-overflow box can still be scrolled (focus, scrollIntoView).
+      display: 'flex', flexDirection: 'column', height: '100dvh', overflow: 'clip', color: '#fff',
       backgroundColor: '#0e0e22',
       backgroundImage: GAME_BACKDROP,
       backgroundPosition: 'center',
@@ -6177,7 +6222,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               undoReturn={undoReturn}
               claimBuffBonus={claimBuffBonus}
               incomingDiscards={incomingDiscards}
-              holdIncoming={showShopOverlay && phase === 'buy'}
               onIncomingLanded={(key) => setIncomingDiscards(prev => prev.filter(i => i.key !== key))}
             />
             </div>
