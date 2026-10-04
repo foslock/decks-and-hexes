@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react';
+import CardName, { plainCardName } from './CardName';
 import type { Card, MarketStack, CursorPosition, SharedPurchaseEvent } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { useAnimationMode } from './SettingsContext';
@@ -224,7 +225,7 @@ function CompactShopCard({
     : disabledTooltip
     ? disabledTooltip
     : [
-        `Purchasing ${card.name} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
+        `Purchasing ${plainCardName(card.name)} spends ${displayCost} resources and adds it to your discard pile.${isDiscounted ? ` (Reduced from ${card.buy_cost})` : ''}`,
         purchaseLines,
       ].filter(Boolean).join('\n');
   // Visual state: sold out > can't afford > blocked (per-card reason, or any
@@ -261,7 +262,7 @@ function CompactShopCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
           <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT }}>
             <span ref={titleSpanRef} style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--title-scale, 1))', transformOrigin: 'left center' }}>
-              {card.name}
+              <CardName name={card.name} upgraded={card.is_upgraded} />
             </span>
           </div>
           <span className={`cc-ov-cost${costClass}`}>
@@ -350,7 +351,7 @@ export function PurchaseFlyAnimation({ event, onDone }: { event: SharedPurchaseE
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
           <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT }}>
-            {event.card.name}
+            <CardName name={event.card.name} upgraded={event.card.is_upgraded} />
           </div>
           <span className="cc-ov-cost">
             {displayCost != null ? <>{displayCost}<Coin /></> : '—'}
@@ -690,7 +691,7 @@ export default function ShopOverlay({
                             <div style={{ visibility: 'hidden' }}>
                               <div className="cc-ov-shop-card">
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
-                                      <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT }}>{card.name}</div>
+                                      <div style={{ fontWeight: 'bold', fontSize: 16, fontFamily: CARD_TITLE_FONT }}><CardName name={card.name} upgraded={card.is_upgraded} /></div>
                                     </div>
                                     <div style={{ fontSize: 15 }}>&nbsp;</div>
                                   </div>

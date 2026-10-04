@@ -6,6 +6,7 @@ import { preloadCardImages, STARTER_CARD_IDS } from './utils/cardImagePreload';
 let nameMap: Map<string, Card> | null = null;
 let catalogCards: Card[] = [];
 let namePattern: RegExp | null = null;
+let upgradedNamePattern: RegExp | null = null;
 let loadStarted = false;
 const subscribers = new Set<() => void>();
 
@@ -23,6 +24,10 @@ function buildIndex(data: Record<string, Card>) {
   }
   names.sort((a, b) => b.length - a.length);
   nameMap = map;
+  // "Blitz+" in free text (logs) → captures "Blitz".
+  upgradedNamePattern = names.length > 0
+    ? new RegExp(`\\b(${names.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\+`, 'g')
+    : null;
   namePattern = names.length > 0
     ? new RegExp(
         `\\b(${names.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`,
@@ -75,6 +80,8 @@ export function preloadCatalogArt(archetype?: string): void {
 export interface CardCatalog {
   getCardByName: (name: string) => Card | undefined;
   namePattern: RegExp | null;
+  /** Matches upgraded names ("Blitz+") in free text; group 1 is the base name. */
+  upgradedNamePattern: RegExp | null;
 }
 
 export function useCardCatalog(): CardCatalog {
@@ -87,7 +94,8 @@ export function useCardCatalog(): CardCatalog {
     return () => { subscribers.delete(cb); };
   }, []);
   return {
-    getCardByName: (name: string) => nameMap?.get(name.toLowerCase()),
+    getCardByName: (name: string) => nameMap?.get(name.replace(/\s*\+\s*$/, '').toLowerCase()),
     namePattern,
+    upgradedNamePattern,
   };
 }

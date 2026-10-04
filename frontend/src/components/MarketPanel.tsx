@@ -5,6 +5,7 @@ import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitle } from './SubtitlePartRenderer';
 import { CostLabel } from '../icons/Num';
 import Icon from '../icons/Icon';
+import CardName, { plainCardName } from './CardName';
 
 interface MarketPanelProps {
   archetypeMarket: Card[];
@@ -111,7 +112,7 @@ function MarketCard({
         className="cc-ov-shop-card"
         style={{ ['--cc-type' as string]: typeColor, background: miniCardBackground(typeColor) }}
       >
-        <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT, marginBottom: 2 }}>{card.name}</div>
+        <div className="cc-ov-shop-name" style={{ fontFamily: CARD_TITLE_FONT, marginBottom: 2 }}><CardName name={card.name} upgraded={card.is_upgraded} /></div>
         <div className="cc-ov-shop-sub">
           <span style={{ display: 'inline-block', maxWidth: '100%', transform: 'scaleX(var(--sub-scale, 1))', transformOrigin: 'left center' }} ref={(el) => {
             if (el) {
@@ -132,7 +133,7 @@ function MarketCard({
         className="cc-ov-buy"
         onClick={onBuy}
         disabled={disabled || !canAfford}
-        tooltip={`Purchasing ${card.name} spends ${card.buy_cost} resources and adds it to your discard pile.`}
+        tooltip={`Purchasing ${plainCardName(card.name)} spends ${card.buy_cost} resources and adds it to your discard pile.`}
       >
         Buy
       </IrreversibleButton>

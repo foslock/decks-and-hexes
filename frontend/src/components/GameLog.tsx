@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { renderUpgradedNames } from './CardName';
+import { useCardCatalog } from '../cardCatalog';
 
 interface GameLogProps {
   entries: string[];
@@ -6,6 +8,7 @@ interface GameLogProps {
 
 export default function GameLog({ entries }: GameLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const catalog = useCardCatalog();
 
   useEffect(() => {
     if (bottomRef.current && typeof bottomRef.current.scrollIntoView === 'function') {
@@ -20,7 +23,7 @@ export default function GameLog({ entries }: GameLogProps) {
           {entry.startsWith('===') ? (
             <strong>{entry}</strong>
           ) : (
-            entry
+            renderUpgradedNames(entry, catalog.upgradedNamePattern)
           )}
         </div>
       ))}

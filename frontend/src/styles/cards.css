@@ -1,0 +1,128 @@
+/* ── Card face finish (CardFull) ──────────────────────────────── */
+
+/* A fixed diagonal sheen across the laminate. */
+.cc-card-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  pointer-events: none;
+  background: linear-gradient(118deg, rgba(255, 255, 255, 0) 32%, rgba(255, 255, 255, 0.07) 44%, rgba(255, 255, 255, 0) 56%);
+}
+
+/* Glare a parent steers with --cc-glare-x / -y / -o (0 = hidden). */
+.cc-card-glare {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background: radial-gradient(circle at var(--cc-glare-x, 30%) var(--cc-glare-y, 10%), rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0.08) 22%, rgba(255, 255, 255, 0) 48%);
+  opacity: var(--cc-glare-o, 0);
+  transition: opacity 0.25s ease;
+}
+
+/* Upgraded cards: a rainbow holo film drifting over the art. */
+.cc-card-holo {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: color-dodge;
+  opacity: 0.55;
+  background:
+    linear-gradient(115deg, rgba(255, 60, 180, 0) 18%, rgba(255, 90, 200, 0.42) 32%, rgba(90, 220, 255, 0.42) 46%, rgba(255, 240, 120, 0.42) 60%, rgba(120, 255, 170, 0.36) 72%, rgba(255, 60, 180, 0) 86%);
+  background-size: 260% 260%;
+  animation: cc-holo-drift 7s linear infinite;
+}
+
+@keyframes cc-holo-drift {
+  from { background-position: 0% 50%; }
+  to { background-position: 260% 50%; }
+}
+
+/* ── Hand ─────────────────────────────────────────────────────── */
+
+/* Empowered: the card's live state boosts it — a warm aura breathes around it. */
+.cc-hand-empowered::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 20px;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgba(255, 196, 70, 0) 80%, rgba(255, 196, 70, 0.0) 100%);
+  box-shadow: 0 0 16px 5px rgba(255, 190, 60, 0.75), 0 0 34px 10px rgba(255, 140, 30, 0.35), inset 0 0 10px 2px rgba(255, 220, 120, 0.6);
+  animation: cc-empowered-breathe 1.8s ease-in-out infinite;
+  z-index: -1;
+}
+
+@keyframes cc-empowered-breathe {
+  0%, 100% { opacity: 0.65; transform: scale(0.995); }
+  50% { opacity: 1; transform: scale(1.012); }
+}
+
+.cc-hand-selected::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 17px;
+  pointer-events: none;
+  border: 2.5px solid rgba(255, 255, 255, 0.95);
+  box-shadow: 0 0 14px rgba(160, 220, 255, 0.85), inset 0 0 8px rgba(160, 220, 255, 0.45);
+}
+
+/* Targeting arrow: dashes march from the card toward the cursor. */
+@keyframes cc-arrow-march {
+  to { stroke-dashoffset: -48; }
+}
+
+@keyframes cc-reticle-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.18); opacity: 0.55; }
+}
+
+/* Embers rising off a burning (trashed) card. */
+@keyframes cc-ember-rise {
+  0% { transform: translate(0, 0) scale(1); opacity: 0; }
+  12% { opacity: 1; }
+  100% { transform: translate(var(--dx, 0px), var(--dy, -80px)) scale(0.2); opacity: 0; }
+}
+
+@keyframes cc-smoke-rise {
+  0% { transform: translate(-50%, 0) scale(0.6); opacity: 0; }
+  20% { opacity: 0.5; }
+  100% { transform: translate(calc(-50% + var(--dx, 0px)), -120px) scale(1.8); opacity: 0; }
+}
+
+/* A soft flash where a played card lands on the board. */
+@keyframes cc-land-flash {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0.95; }
+  100% { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+}
+
+@keyframes cc-pile-shuffle-wave {
+  0%, 100% { color: #8a88a6; }
+  50% { color: #fff; }
+}
+
+@keyframes cc-pile-glow {
+  0%, 100% { filter: drop-shadow(0 0 0 rgba(255, 255, 255, 0)); }
+  50% { filter: drop-shadow(0 0 10px rgba(255, 236, 170, 0.7)); }
+}
+
+/* Live (context-resolved) values in a card's stat line. */
+@keyframes dynamicGlow {
+  0%, 100% { text-shadow: 0 0 4px rgba(255, 225, 77, 0.3); }
+  50% { text-shadow: 0 0 8px rgba(255, 225, 77, 0.8), 0 0 12px rgba(255, 200, 0, 0.4); }
+}
+.dynamic-value {
+  animation: dynamicGlow 2s ease-in-out infinite;
+}
+
+@keyframes cardPreviewIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes upgradeBadgePulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(255, 216, 74, 0.35), 0 0 8px rgba(255, 216, 74, 0.15); }
+  50% { box-shadow: 0 0 8px rgba(255, 216, 74, 0.85), 0 0 16px rgba(255, 200, 0, 0.45); }
+}

@@ -3,6 +3,7 @@ import { CARD_TITLE_FONT, getCardDisplayColor, miniCardBackground, MINI_CARD_SHA
 import { buildCardSubtitle } from './cardSubtitle';
 import { renderSubtitle } from './SubtitlePartRenderer';
 import { CostLabel } from '../icons/Num';
+import CardName from './CardName';
 
 /**
  * A compact card rendered at exactly the same dimensions and styling as the
@@ -68,7 +69,7 @@ export default function HandStyleCard({ card, border }: HandStyleCardProps) {
               }
             }}
           >
-            {card.name}
+            <CardName name={card.name} upgraded={card.is_upgraded} />
           </span>
         </div>
         <span style={{ fontSize: 13, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}>

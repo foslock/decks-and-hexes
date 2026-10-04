@@ -533,118 +533,23 @@
   height: 100%;
 }
 .cc-scr-hero-card {
-  --hc-accent: #a83040;
   position: absolute;
   left: 0;
   top: 0;
   width: 112px;
-  height: 165px;
-  font-size: 10px;
-  display: flex;
-  flex-direction: column;
-  padding: 0.7em 0.7em 0.75em;
-  border-radius: 0.85em;
-  border: 0.16em solid var(--hc-accent);
-  color: var(--cc-text);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 35%, rgba(0, 0, 0, 0.22) 100%),
-    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 3px),
-    #1e1e3a;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    inset 0 0 0 0.12em rgba(0, 0, 0, 0.35),
-    0 1.4em 2.6em rgba(0, 0, 0, 0.6),
-    0 0.3em 0.6em rgba(0, 0, 0, 0.45);
+  height: 157px;
   opacity: 0;
   pointer-events: none;
   will-change: transform, opacity;
-  overflow: hidden;
+  filter: drop-shadow(0 1.2em 1.6em rgba(0, 0, 0, 0.5));
 }
-/* Faint top sheen, like light catching a card's varnish. */
-.cc-scr-hero-card::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(125deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 32%);
-  pointer-events: none;
+/* The real card face (220 × 308), scaled to the hero card's box. */
+.cc-scr-hero-card-face {
+  width: 220px;
+  height: 308px;
+  transform-origin: 0 0;
+  transform: scale(var(--hc-scale, 0.5));
 }
-.cc-scr-hero-card-head {
-  display: flex;
-  align-items: center;
-  gap: 0.4em;
-  min-height: 1.7em;
-}
-.cc-scr-hero-card-name {
-  flex: 1;
-  min-width: 0;
-  font-family: 'Philosopher', serif;
-  font-weight: 700;
-  font-size: 1.18em;
-  line-height: 1.1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.cc-scr-hero-card-cost {
-  flex-shrink: 0;
-  width: 1.75em;
-  height: 1.75em;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-family: var(--cc-font-display);
-  font-weight: 900;
-  font-size: 0.95em;
-  color: #2a1d05;
-  background: radial-gradient(circle at 35% 30%, #fff1c2 0%, #e8c46a 45%, #a8822c 100%);
-  box-shadow: inset 0 -0.08em 0 rgba(0, 0, 0, 0.25), 0 0.1em 0.25em rgba(0, 0, 0, 0.5);
-}
-.cc-scr-hero-card-art {
-  position: relative;
-  margin-top: 0.45em;
-  height: 5.4em;
-  flex-shrink: 0;
-  border-radius: 0.5em;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: linear-gradient(135deg, #2a2a4e, #151530);
-}
-.cc-scr-hero-card-art img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.cc-scr-hero-card-art::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  box-shadow: inset 0 0 1.2em rgba(0, 0, 0, 0.55);
-}
-.cc-scr-hero-card-type {
-  margin: 0.5em 0 0.45em;
-  text-align: center;
-  font-size: 0.66em;
-  letter-spacing: 0.06em;
-  color: #9a98b4;
-  white-space: nowrap;
-}
-.cc-scr-hero-card-type b { color: var(--hc-accent); font-weight: 700; filter: brightness(1.35); }
-.cc-scr-hero-card-text {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  padding: 0.55em 0.6em;
-  border-radius: 0.55em;
-  background: #151530;
-  border: 1px solid #2a2a4e;
-  font-size: 0.8em;
-  line-height: 1.36;
-  color: #cfcde0;
-}
-.cc-scr-hero-card-text strong { color: #fff; }
 
 /* ── Lobby ───────────────────────────────────────────────────────────── */
 

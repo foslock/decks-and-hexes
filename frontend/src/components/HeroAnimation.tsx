@@ -4,6 +4,9 @@ import { BoardEngine } from '../board3d/engine';
 import { PLAYER_COLORS } from '../board3d/boardTypes';
 import { axialToWorld } from '../board3d/layout';
 import { waitForImages } from '../utils/appReady';
+import type { Card } from '../types/game';
+import CardFull, { CARD_FULL_HEIGHT, CARD_FULL_WIDTH } from './CardFull';
+import { useCardCatalog } from '../cardCatalog';
 
 // Generate all hex coords for a radius-r grid
 function generateHexCoords(radius: number): { q: number; r: number }[] {
@@ -39,9 +42,7 @@ const GRID_RADIUS = 3;
 const LAYOUT_HEX = 24;
 const GRID_PIXEL_H = (GRID_RADIUS * 2) * Math.sqrt(3) * LAYOUT_HEX;
 const CARD_H = GRID_PIXEL_H * 0.66;
-const CARD_W = CARD_H * 0.68;
-/** Root font size of a hero card in canvas units — card internals use em. */
-const CARD_FONT = 10;
+const CARD_W = CARD_H * (CARD_FULL_WIDTH / CARD_FULL_HEIGHT);
 
 // --- The two cards that clash in the hero. Real cards + their WebP art. ---
 interface HeroCardDef {
@@ -52,9 +53,6 @@ interface HeroCardDef {
   cost: number;
   text: string;
 }
-
-const CLAIM_COLOR = '#a83040';   // CARD_TYPE_COLORS.claim
-const DEFENSE_COLOR = '#3a7abf'; // CARD_TYPE_COLORS.defense
 
 /** Blue (left) side defends… */
 const DEFENDERS: HeroCardDef[] = [
@@ -73,31 +71,27 @@ function pick<T>(list: T[]): T {
   return list[Math.floor(Math.random() * list.length)];
 }
 
-/** Bold the numbers that matter ("Power 8", "+2 defense"). */
-function renderCardText(text: string) {
-  return text.split(/(Power \d+|\+\d+(?: permanent)? defense)/).map((part, i) =>
-    i % 2 === 1 ? <strong key={i}>{part}</strong> : part,
-  );
+/** A stand-in Card until the catalog (with the real stats) has loaded. */
+function fallbackCard(def: HeroCardDef): Card {
+  return {
+    id: def.id, definition_id: def.id, name: def.name,
+    archetype: def.archetype.toLowerCase(), card_type: def.type.toLowerCase(),
+    power: 0, resource_gain: 0, action_return: 0, action_cost: 1, timing: 'immediate',
+    buy_cost: def.cost, is_upgraded: false, trash_on_use: false, stackable: false,
+    forced_discard: 0, draw_cards: 0, defense_bonus: 0, adjacency_required: true,
+    claim_range: 1, unoccupied_only: false, multi_target_count: 0, defense_target_count: 1,
+    flood: false, target_own_tile: false, passive_vp: 0, description: def.text, starter: false,
+  };
 }
 
-function HeroCard({ card, accent, cardRef }: { card: HeroCardDef; accent: string; cardRef: RefObject<HTMLDivElement> }) {
+function HeroCard({ card, cardRef }: { card: HeroCardDef; cardRef: RefObject<HTMLDivElement> }) {
+  const catalog = useCardCatalog();
+  const full = catalog.getCardByName(card.name) ?? fallbackCard(card);
   return (
-    <div
-      ref={cardRef}
-      className="cc-scr-hero-card"
-      style={{ ['--hc-accent' as string]: accent, width: CARD_W, height: CARD_H, fontSize: CARD_FONT }}
-    >
-      <div className="cc-scr-hero-card-head">
-        <span className="cc-scr-hero-card-name">{card.name}</span>
-        <span className="cc-scr-hero-card-cost">{card.cost}</span>
+    <div ref={cardRef} className="cc-scr-hero-card" style={{ width: CARD_W, height: CARD_H }}>
+      <div className="cc-scr-hero-card-face">
+        <CardFull card={full} artZoom={false} />
       </div>
-      <div className="cc-scr-hero-card-art">
-        <img src={`/cards/${card.id}.webp`} alt="" draggable={false} decoding="async" />
-      </div>
-      <div className="cc-scr-hero-card-type">
-        {card.archetype} <span style={{ opacity: 0.5 }}>—</span> <b>{card.type}</b>
-      </div>
-      <div className="cc-scr-hero-card-text">{renderCardText(card.text)}</div>
     </div>
   );
 }
@@ -150,7 +144,7 @@ export default function HeroAnimation({ start = true, onReady }: HeroAnimationPr
         if (!el) continue;
         el.style.width = `${layout.w}px`;
         el.style.height = `${layout.h}px`;
-        el.style.fontSize = `${CARD_FONT * s}px`;
+        el.style.setProperty('--hc-scale', String(layout.w / CARD_FULL_WIDTH));
       }
     };
     const placeCard = (el: HTMLDivElement | null, st: CardState) => {
@@ -401,8 +395,8 @@ export default function HeroAnimation({ start = true, onReady }: HeroAnimationPr
   return (
     <div ref={containerRef} className="cc-scr-hero" aria-hidden="true">
       <div ref={canvasHostRef} className="cc-scr-hero-canvas" />
-      <HeroCard card={cards.blue} accent={DEFENSE_COLOR} cardRef={blueCardRef} />
-      <HeroCard card={cards.red} accent={CLAIM_COLOR} cardRef={redCardRef} />
+      <HeroCard card={cards.blue} cardRef={blueCardRef} />
+      <HeroCard card={cards.red} cardRef={redCardRef} />
     </div>
   );
 }

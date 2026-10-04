@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
 import GameBoard, { type BoardControls, type BoardFx, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './GameBoard';
 import PlayerHud from './PlayerHud';
-import CardHand, { CardViewPopup, type PlayTarget } from './CardHand';
+import CardHand, { CardViewPopup, type PlayTarget, type DragTargetInfo, type UndoReturn, type IncomingDiscard } from './CardHand';
 import CardBrowser from './CardBrowser';
 import ShopOverlay, { PurchaseFlyAnimation } from './ShopOverlay';
 import PileSearchModal from './PileSearchModal';
@@ -20,9 +20,9 @@ import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed } fro
 import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
-import CompactCard from './CompactCard';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { renderSubtitle } from './SubtitlePartRenderer';
+import CardName, { plainCardName } from './CardName';
 import Icon from '../icons/Icon';
 import { CostLabel, IconValue, Num } from '../icons/Num';
 import { useSound } from '../audio/useSound';
@@ -894,6 +894,8 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
   const [showShopOverlay, setShowShopOverlay] = useState(false);
   const [otherCursors, setOtherCursors] = useState<Record<string, CursorPosition>>({});
   const [neutralPurchaseEvents, setSharedPurchaseEvents] = useState<SharedPurchaseEvent[]>([]);
+  // Your own purchases, waiting to fly into your discard pile (held while the shop is open)
+  const [incomingDiscards, setIncomingDiscards] = useState<IncomingDiscard[]>([]);
   const [cursorClicks, setCursorClicks] = useState<Record<string, number>>({}); // player_id -> timestamp
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [cardPackDefs, setCardPackDefs] = useState<{ id: string; name: string; shared_card_ids: string[] | null; archetype_card_ids: Record<string, string[]> | null }[]>([]);
@@ -2179,7 +2181,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (playCostEff) {
       const cost = (card.is_upgraded && playCostEff.upgraded_value != null) ? playCostEff.upgraded_value : playCostEff.value;
       if ((activePlayer.resources ?? 0) < cost) {
-        setError(`Need ${cost} resources to play ${card.name}`);
+        setError(`Need ${cost} resources to play ${plainCardName(card.name)}`);
         return;
       }
     }
@@ -2189,7 +2191,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     if (actionCost > 1) {
       const actionsLeft = activePlayer.actions_available - activePlayer.actions_used;
       if (actionsLeft < actionCost) {
-        setError(`Need ${actionCost} actions to play ${card.name}`);
+        setError(`Need ${actionCost} actions to play ${plainCardName(card.name)}`);
         return;
       }
     }
@@ -2199,7 +2201,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     const tileKey = `${q},${r}`;
     const tile = gameState.grid?.tiles[tileKey];
     if (!tile || tile.is_blocked) {
-      setError(`${card.name} cannot target that tile`);
+      setError(`${plainCardName(card.name)} cannot target that tile`);
       return;
     }
     if (card.card_type === 'claim') {
@@ -2213,13 +2215,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         );
         if (!inRange) {
           const rangeDesc = range > 1 ? `within ${range} tiles of` : 'adjacent to';
-          setError(`${card.name} must target a tile ${rangeDesc} one you own`);
+          setError(`${plainCardName(card.name)} must target a tile ${rangeDesc} one you own`);
           return;
         }
       }
       // Check unoccupied_only
       if (card.unoccupied_only && tile.owner) {
-        setError(`${card.name} can only target unoccupied tiles`);
+        setError(`${plainCardName(card.name)} can only target unoccupied tiles`);
         return;
       }
       // Stacking: a stackable new card may always land on a tile with
@@ -2296,7 +2298,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || !tile.owner || tile.owner === activePlayerId) {
-        setError(`${card.name} must target an opponent's tile`);
+        setError(`${plainCardName(card.name)} must target an opponent's tile`);
         return;
       }
       playCardAtTile(cardIndex, q, r, undefined, tile.owner);
@@ -2315,22 +2317,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || tile.owner !== activePlayerId) {
-        setError(`${card.name} must target a tile you own`);
+        setError(`${plainCardName(card.name)} must target a tile you own`);
         return;
       }
       if (tile.is_base) {
-        setError(`${card.name} cannot target a base tile`);
+        setError(`${plainCardName(card.name)} cannot target a base tile`);
         return;
       }
       // Consecrate: must target a connected VP tile
       if (card.effects?.some(e => e.type === 'enhance_vp_tile')) {
         if (!tile.is_vp) {
-          setError(`${card.name} must target a VP tile`);
+          setError(`${plainCardName(card.name)} must target a VP tile`);
           return;
         }
         const tileKey2 = `${q},${r}`;
         if (!connectedVpTiles.has(tileKey2)) {
-          setError(`${card.name} must target a VP tile connected to your base`);
+          setError(`${plainCardName(card.name)} must target a VP tile connected to your base`);
           return;
         }
       }
@@ -2374,7 +2376,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (tile && tile.owner !== activePlayerId) {
-        setError(`${card.name} must target a tile you own`);
+        setError(`${plainCardName(card.name)} must target a tile you own`);
         return;
       }
     }
@@ -2384,7 +2386,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (tile && tile.owner && card.unoccupied_only) {
-        setError(`${card.name} can only target unoccupied tiles`);
+        setError(`${plainCardName(card.name)} can only target unoccupied tiles`);
         return;
       }
     }
@@ -2395,7 +2397,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // the player sees as the highlighted set on the grid.
       { const { strong, weak } = getValidClaimTiles(card);
       if (!strong.has(resolvedKey) && !weak.has(resolvedKey)) {
-        setError(`${card.name} cannot target this tile`);
+        setError(`${plainCardName(card.name)} cannot target this tile`);
         return;
       } }
       setMultiTileCardIndex(cardIndex);
@@ -2564,7 +2566,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || !tile.owner || tile.owner === activePlayerId) {
-        setError(`${card.name} must target an opponent's tile`);
+        setError(`${plainCardName(card.name)} must target an opponent's tile`);
         return;
       }
       sound.tileSelect();
@@ -2577,22 +2579,22 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const tileKey = `${q},${r}`;
       const tile = gameState.grid?.tiles[tileKey];
       if (!tile || tile.owner !== activePlayerId) {
-        setError(`${card.name} must target a tile you own`);
+        setError(`${plainCardName(card.name)} must target a tile you own`);
         return;
       }
       if (tile.is_base) {
-        setError(`${card.name} cannot target a base tile`);
+        setError(`${plainCardName(card.name)} cannot target a base tile`);
         return;
       }
       // Consecrate: must target a connected VP tile
       if (card.effects?.some(e => e.type === 'enhance_vp_tile')) {
         if (!tile.is_vp) {
-          setError(`${card.name} must target a VP tile`);
+          setError(`${plainCardName(card.name)} must target a VP tile`);
           return;
         }
         const tileKey2 = `${q},${r}`;
         if (!connectedVpTiles.has(tileKey2)) {
-          setError(`${card.name} must target a VP tile connected to your base`);
+          setError(`${plainCardName(card.name)} must target a VP tile connected to your base`);
           return;
         }
       }
@@ -2608,7 +2610,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       // Validate defense card restrictions — must target own tile
       if (card.card_type === 'defense') {
         if (tile && tile.owner !== activePlayerId) {
-          setError(`${card.name} must target a tile you own`);
+          setError(`${plainCardName(card.name)} must target a tile you own`);
           return;
         }
       }
@@ -2617,7 +2619,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       if (card.card_type === 'claim') {
         if (!card.target_own_tile) {
           if (tile && tile.owner && card.unoccupied_only) {
-            setError(`${card.name} can only target unoccupied tiles`);
+            setError(`${plainCardName(card.name)} can only target unoccupied tiles`);
             return;
           }
         }
@@ -2626,7 +2628,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         if (card.multi_target_count > 0) {
           { const { strong, weak } = getValidClaimTiles(card);
           if (!strong.has(tileKey) && !weak.has(tileKey)) {
-            setError(`${card.name} cannot target this tile`);
+            setError(`${plainCardName(card.name)} cannot target this tile`);
             return;
           } }
           setMultiTileCardIndex(selectedCardIndex);
@@ -3164,6 +3166,11 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               || (!!p.definition_id && s.card.definition_id === p.definition_id),
           );
           if (!stack) continue;
+          if (isSelf) {
+            const key = `buy-${pid}-${prevCount + newPurchases.indexOf(p)}`;
+            setIncomingDiscards(prev => [...prev, { key, card: stack.card }]);
+            continue;
+          }
           setSharedPurchaseEvents(evts => [...evts, {
             player_id: pid,
             player_name: player?.name ?? pid,
@@ -3174,22 +3181,14 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
             isSelf,
           }]);
         } else if (p.source === 'archetype' && isSelf) {
-          const player = gameState.players[pid];
           // Find the card in the previous archetype market (it's been removed after purchase)
           const card = prevArchMarketRef.current?.find(
             c => c.id === p.card_id
               || (!!p.definition_id && c.definition_id === p.definition_id),
           );
           if (!card) continue;
-          setSharedPurchaseEvents(evts => [...evts, {
-            player_id: pid,
-            player_name: player?.name ?? pid,
-            player_color: player?.color ?? '#666',
-            card_id: p.card_id,
-            card_name: p.card_name,
-            card,
-            isSelf: true,
-          }]);
+          const key = `buy-${pid}-${prevCount + newPurchases.indexOf(p)}`;
+          setIncomingDiscards(prev => [...prev, { key, card }]);
         }
       }
     }
@@ -4614,9 +4613,54 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
     return new Set(undoableTiles.keys());
   }, [undoableTiles]);
 
-  // Undo fly animation: compact card flying from tile back to hand
-  const [undoFlyAnims, setUndoFlyAnims] = useState<{ id: number; card: Card; startX: number; startY: number; active: boolean }[]>([]);
+  // Undo: the returning card flies back to the hand from its tile
+  const [undoReturn, setUndoReturn] = useState<UndoReturn | null>(null);
   const undoFlyIdRef = useRef(0);
+
+  // Does this card aim at a tile when played? (Drives the aiming arrow's color.)
+  const cardTargetsTile = useCallback((card: Card) => (
+    card.card_type === 'claim'
+    || card.card_type === 'defense'
+    || (card.card_type === 'engine' && (needsOpponentTarget(card) || card.target_own_tile))
+  ), []);
+
+  // The tile under a dragged card, and whether the card can be played there.
+  const dragTarget = useMemo<DragTargetInfo | null>(() => {
+    if (draggingCardIndex === null || !dragHoverPos || !activePlayer) return null;
+    const card = activePlayer.hand[draggingCardIndex];
+    if (!card || !cardTargetsTile(card)) return null;
+    const transform = gridTransformRef.current;
+    const gRect = gridContainerRef.current?.getBoundingClientRect();
+    if (!transform || !gRect) return null;
+    const { clientX, clientY } = dragHoverPos;
+    if (clientX < gRect.left || clientX > gRect.right || clientY < gRect.top || clientY > gRect.bottom) return null;
+    const local = screenToLocal(clientX - gRect.left, clientY - gRect.top, transform, gRect.width, gRect.height);
+    const { q, r } = pixelToAxial(local.x, local.y);
+    const key = `${q},${r}`;
+    const tile = gameState.grid?.tiles[key];
+    if (!tile) return null;
+    const valid = card.card_type === 'engine' && needsOpponentTarget(card)
+      ? !!tile.owner && tile.owner !== activePlayerId
+      : getAllValidPlayTiles(card).has(key);
+    if (!valid) return { valid: false };
+    const center = axialToPixel(q, r);
+    const screen = localToScreen(center.x, center.y, transform, gRect.width, gRect.height, gRect);
+    return { valid: true, x: screen.x, y: screen.y };
+  }, [draggingCardIndex, dragHoverPos, activePlayer, activePlayerId, cardTargetsTile, gameState.grid, getAllValidPlayTiles]);
+
+  // War Banner-style buffs waiting for the next Claim: one buff per distinct
+  // source card (FIFO within each source), summed — mirrors the backend.
+  const claimBuffBonus = useMemo(() => {
+    if (phase !== 'play') return 0;
+    const seen = new Set<string | undefined>();
+    let total = 0;
+    for (const b of activePlayer?.claim_buffs ?? []) {
+      if (seen.has(b.source_card_id)) continue;
+      seen.add(b.source_card_id);
+      total += b.power_bonus ?? 0;
+    }
+    return total;
+  }, [phase, activePlayer?.claim_buffs]);
 
   const handleTileLongPress = useCallback(async (q: number, r: number) => {
     if (phase !== 'play' || !activePlayer || !undoableTiles) return;
@@ -4641,6 +4685,9 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
 
     try {
       const resp = await api.undoCard(gameState.id, activePlayer.id, actionIndex);
+      if (undoCard) {
+        setUndoReturn({ cardId: undoCard.id, screenX: tileScreenX, screenY: tileScreenY, key: ++undoFlyIdRef.current });
+      }
       onStateUpdate(resp.state);
 
       // Auto-select the returned card so the player can immediately re-play
@@ -4676,15 +4723,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
       const undoAmount = undoCard?.action_cost ?? 1;
       setFloatingActions(prev => [...prev, { id, offsetX: -20, offsetY: 0, type: 'gain', amount: undoAmount }]);
       setTimeout(() => setFloatingActions(prev => prev.filter(a => a.id !== id)), 900);
-      // Spawn undo fly animation
-      if (undoCard) {
-        const flyId = ++undoFlyIdRef.current;
-        setUndoFlyAnims(prev => [...prev, { id: flyId, card: undoCard, startX: tileScreenX, startY: tileScreenY, active: false }]);
-        requestAnimationFrame(() => {
-          setUndoFlyAnims(prev => prev.map(a => a.id === flyId ? { ...a, active: true } : a));
-        });
-        setTimeout(() => setUndoFlyAnims(prev => prev.filter(a => a.id !== flyId)), 600);
-      }
     } catch (err) {
       console.warn('Undo failed', err);
     }
@@ -4882,21 +4920,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   : null;
                 return card ? getAllValidPlayTiles(card) : undefined;
               })()}
-              previewClaimBuffBonus={phase === 'play' ? (() => {
-                // The next Claim consumes one buff per distinct source_card_id
-                // (FIFO within each source). Sum power_bonus across those to
-                // match backend consumption semantics.
-                const buffs = activePlayer?.claim_buffs ?? [];
-                const seen = new Set<string | undefined>();
-                let total = 0;
-                for (const b of buffs) {
-                  const src = b.source_card_id;
-                  if (seen.has(src)) continue;
-                  seen.add(src);
-                  total += b.power_bonus ?? 0;
-                }
-                return total;
-              })() : 0}
+              previewClaimBuffBonus={claimBuffBonus}
               claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
               vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
@@ -5171,7 +5195,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                             <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {c.name}
+                              <CardName name={c.name} upgraded={c.is_upgraded} />
                             </div>
                           </div>
                           <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
@@ -5225,7 +5249,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                     }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                         <div style={{ fontWeight: 'bold', fontSize: 12, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                          {anim.card.name}
+                          <CardName name={anim.card.name} upgraded={anim.card.is_upgraded} />
                         </div>
                       </div>
                       <div style={{ fontSize: 11, color: '#aaa', whiteSpace: 'nowrap', overflow: 'hidden' }}>
@@ -5315,37 +5339,6 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               document.body
             )}
           </div>
-
-          {/* Undo fly animation: compact card flying from tile back to hand */}
-          {undoFlyAnims.length > 0 && createPortal(
-            <>
-              {undoFlyAnims.map(anim => {
-                const destX = window.innerWidth / 2;
-                const destY = window.innerHeight - 40;
-                const dx = destX - anim.startX;
-                const dy = destY - anim.startY;
-                return (
-                  <div key={anim.id} style={{
-                    position: 'fixed',
-                    left: anim.startX,
-                    top: anim.startY,
-                    transform: anim.active
-                      ? `translate(calc(${dx}px - 50%), calc(${dy}px - 50%)) scale(1)`
-                      : 'translate(-50%, -50%) scale(0.6)',
-                    opacity: anim.active ? 0 : 1,
-                    transition: anim.active
-                      ? 'transform 500ms ease-in, opacity 200ms ease-in 300ms'
-                      : 'none',
-                    pointerEvents: 'none',
-                    zIndex: 16000,
-                  }}>
-                    <CompactCard card={anim.card} />
-                  </div>
-                );
-              })}
-            </>,
-            document.body
-          )}
 
           {/* Purchase pill hover preview (fixed, portal) */}
           {purchaseHover && createPortal(
@@ -6027,7 +6020,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         )}
 
         {/* Bottom panel: hand */}
-        <div style={{ padding: '8px 12px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
+        <div style={{ padding: '0 8px', flexShrink: 0, overflow: 'visible', position: 'relative', zIndex: 30, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease' }}>
           {/* Drag hint tooltip — right above the card hand */}
           {showDragHint && (
             <div style={{
@@ -6112,11 +6105,13 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
               upgradeCreditsAvailable={activePlayer?.upgrade_credits ?? 0}
               onUpgradeCard={handleUpgradeCard}
               isPlayPhase={phase === 'play' && !resolving && !playSubmitted}
-              cardTargetsTile={(card) => (
-                card.card_type === 'claim'
-                || card.card_type === 'defense'
-                || (card.card_type === 'engine' && (needsOpponentTarget(card) || card.target_own_tile))
-              )}
+              cardTargetsTile={cardTargetsTile}
+              dragTarget={dragTarget}
+              undoReturn={undoReturn}
+              claimBuffBonus={claimBuffBonus}
+              incomingDiscards={incomingDiscards}
+              holdIncoming={showShopOverlay && phase === 'buy'}
+              onIncomingLanded={(key) => setIncomingDiscards(prev => prev.filter(i => i.key !== key))}
             />
             </div>
           )}
@@ -6216,7 +6211,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
                       <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-                        {c.name}
+                        <CardName name={c.name} upgraded={c.is_upgraded} />
                       </div>
                       <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={c.buy_cost} size={15} /></span>
                     </div>
@@ -6284,7 +6279,7 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginBottom: 2 }}>
                     <div style={{ fontWeight: 'bold', fontSize: 16, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'clip' }}>
-                      {c.name}
+                      <CardName name={c.name} upgraded={c.is_upgraded} />
                     </div>
                     <span style={{ fontSize: 15, flexShrink: 0, color: '#aaa', whiteSpace: 'nowrap' }}><CostLabel cost={c.buy_cost} size={15} /></span>
                   </div>

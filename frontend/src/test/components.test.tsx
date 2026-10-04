@@ -89,7 +89,7 @@ describe('CardHand', () => {
       // Cards should have full opacity (no transparency through overlapping cards)
       expect((el as HTMLElement).style.opacity).toBe('1');
       // A dark overlay div should be visible inside the card
-      const overlay = (el as HTMLElement).querySelector('div[style*="position: absolute"]');
+      const overlay = (el as HTMLElement).querySelector('[data-disabled-overlay]');
       expect(overlay).toBeTruthy();
       expect((overlay as HTMLElement).style.opacity).toBe('1');
     });
@@ -100,6 +100,21 @@ describe('CardHand', () => {
     // Subtitles render glyphs + numerals; the line's aria-label carries the reading.
     expect(screen.getByRole('img', { name: /^power 1(,|$)/ })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: /^power 4(,|$)/ })).toBeInTheDocument();
+  });
+
+  it('shows upgraded cards with the arrow mark instead of a trailing +', () => {
+    const upgraded = [makeCard({ id: 'u0', name: 'Blitz+', is_upgraded: true, card_type: 'claim', power: 3 })];
+    render(<WithSettings><CardHand playerId="p0" cards={upgraded} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={0} discardCount={0} discardCards={[]} deckCards={[]} /></WithSettings>);
+    expect(screen.getByText('Blitz')).toBeInTheDocument();
+    expect(screen.queryByText('Blitz+')).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText('Upgraded').length).toBeGreaterThan(0);
+  });
+
+  it('renders draw and discard piles with their counts', () => {
+    const discard = [makeCard({ id: 'd0', name: 'Gather', card_type: 'engine' })];
+    render(<WithSettings><CardHand playerId="p0" cards={cards} selectedIndex={null} onSelect={() => {}} onDragPlay={() => {}} disabled={false} deckSize={7} discardCount={1} discardCards={discard} deckCards={[]} /></WithSettings>);
+    expect(screen.getByLabelText('Draw: 7 cards')).toBeInTheDocument();
+    expect(screen.getByLabelText('Discard: 1 card')).toBeInTheDocument();
   });
 
   it('shows resource gain for engine cards', () => {

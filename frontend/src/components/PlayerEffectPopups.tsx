@@ -3,6 +3,7 @@ import type { HexTile, PlayerEffect } from '../types/game';
 import { PLAYER_COLORS, type GridTransform } from './GameBoard';
 import { axialToPixel, localToScreen } from '../utils/hexGeometry';
 import Icon from '../icons/Icon';
+import CardName from './CardName';
 
 /**
  * Effect callouts shown above target-player base tiles during review mode.
@@ -493,7 +494,7 @@ export default function PlayerEffectPopups({
                     minWidth: 140,
                   }}>
                     <div style={{ fontSize: 13, fontWeight: 700, color: '#fff', marginBottom: 2 }}>
-                      {effect.card_name}
+                      <CardName name={effect.card_name} />
                     </div>
                     <div style={{ fontSize: 12, color: effColor, fontWeight: 700, marginBottom: 3 }}>
                       {effect.effect}
@@ -627,7 +628,7 @@ function useFlyingCards(
                 whiteSpace: 'nowrap',
                 boxShadow: `0 0 12px ${cardColor}66`,
               }}>
-                <Icon name={cardIcon} size={12} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} />{effect.added_card_name}
+                <Icon name={cardIcon} size={12} decorative style={{ verticalAlign: '-0.15em', marginRight: 4 }} /><CardName name={effect.added_card_name} />
               </div>
             </div>
           </div>

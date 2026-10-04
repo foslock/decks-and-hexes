@@ -4,6 +4,7 @@ import type { Player } from '../types/game';
 import type { VpBreakdown } from '../utils/vpBreakdown';
 import Icon from '../icons/Icon';
 import { CostLabel, IconValue } from '../icons/Num';
+import CardName from './CardName';
 
 /** Renders text that shrinks (via transform scaleX) to fit a fixed max width. */
 function ShrinkText({ text, maxWidth, style }: { text: string; maxWidth: number; style?: React.CSSProperties }) {
@@ -386,7 +387,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
                 cursor: onPurchaseHover ? 'pointer' : undefined,
               }}
             >
-              {p.card_name} (<CostLabel cost={p.cost} size={10} />)
+              <CardName name={p.card_name} /> (<CostLabel cost={p.cost} size={10} />)
             </span>
           ))}
         </div>
