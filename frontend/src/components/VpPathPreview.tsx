@@ -1,7 +1,6 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { HexTile } from '../types/game';
-import HexGrid, { PLAYER_COLORS, type VpPath } from './HexGrid';
-import type { GridTransform } from './HexGrid';
+import GameBoard, { PLAYER_COLORS, type VpPath, type GridTransform } from './GameBoard';
 
 const HEX_DIRS: [number, number][] = [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]];
 
@@ -305,7 +304,7 @@ export default function VpPathPreview() {
         </span>
       </div>
       <div style={{ flex: 1, position: 'relative' }}>
-        <HexGrid
+        <GameBoard
           tiles={tiles}
           onTileClick={handleTileClick}
           transformRef={transformRef}

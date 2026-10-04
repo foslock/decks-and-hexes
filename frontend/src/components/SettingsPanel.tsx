@@ -17,7 +17,7 @@ interface SettingsPanelProps {
 }
 
 export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, playerId, onLeaveGame, onEndGame, onRotateGrid }: SettingsPanelProps) {
-  const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setBackgroundImages } = useSettings();
+  const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume } = useSettings();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
@@ -90,21 +90,6 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
               style={{ width: 64, ['--pct' as string]: `${Math.round(settings.soundVolume * 100)}%` }}
             />
           )}
-        </div>
-
-        <div className="cc-ov-set-row">
-          <span className="cc-ov-set-label">Backgrounds:</span>
-          <div className="cc-ov-seg">
-            {([true, false] as const).map((on) => (
-              <button
-                key={String(on)}
-                className={`cc-ov-seg-btn${settings.backgroundImages === on ? ' is-active' : ''}`}
-                onClick={() => setBackgroundImages(on)}
-              >
-                {on ? 'On' : 'Off'}
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Rotate grid */}

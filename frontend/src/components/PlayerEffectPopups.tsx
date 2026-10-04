@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HexTile, PlayerEffect } from '../types/game';
-import { PLAYER_COLORS, type GridTransform } from './HexGrid';
+import { PLAYER_COLORS, type GridTransform } from './GameBoard';
 import { axialToPixel, localToScreen } from '../utils/hexGeometry';
 import Icon from '../icons/Icon';
 
@@ -300,7 +300,7 @@ export default function PlayerEffectPopups({
   // screen center, maximizing vertical room.
   //
   // This runs in a rAF loop (not useMemo) so popups keep tracking their base
-  // tiles when HexGrid animates rotation via its Pixi ticker or when the
+  // tiles when the 3D board animates its camera (rotate / tilt / zoom) or when the
   // window resizes — both of those mutate refs without re-rendering us.
   const [groupPositions, setGroupPositions] = useState<Record<string, GroupPosition>>(
     () => computeGroupPositions(gridTransform, gridRect, grouped, tiles),

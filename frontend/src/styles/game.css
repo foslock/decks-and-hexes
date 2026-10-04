@@ -11,3 +11,100 @@
   filter: brightness(1.12);
 }
 .hud-btn:active { transform: translateY(1px); }
+
+/* ── 3D board overlays ─────────────────────────────────────────────────── */
+.cc-board-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 4;
+}
+.cc-board-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  will-change: transform;
+  filter:
+    drop-shadow(0 0 1px rgba(0, 0, 0, 0.95))
+    drop-shadow(0 1px 2px rgba(0, 0, 0, 0.85));
+}
+.cc-board-label::after {
+  /* Pin stem down to the tile (only in tilted views, via --stem). */
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 1px;
+  height: var(--stem, 0px);
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(255, 244, 214, 0.75), rgba(255, 244, 214, 0));
+  opacity: var(--stem-o, 0);
+  pointer-events: none;
+}
+.cc-board-label.is-prominent {
+  filter:
+    drop-shadow(0 0 1px rgba(0, 0, 0, 1))
+    drop-shadow(0 0 1px rgba(0, 0, 0, 1))
+    drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+}
+.cc-board-tooltip {
+  position: absolute;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0) 50%), rgba(14, 14, 32, 0.96);
+  color: #e4e2ef;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  pointer-events: none;
+  white-space: pre-line;
+  z-index: 10;
+  max-width: 320px;
+  border: 1px solid rgba(232, 196, 106, 0.28);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 6px 18px rgba(0,0,0,0.55);
+}
+.cc-cam-controls {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 20;
+  padding: 5px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 45%), rgba(12, 12, 30, 0.72);
+  border: 1px solid rgba(232, 196, 106, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 8px 24px rgba(0,0,0,0.4);
+  opacity: 0.55;
+  transition: opacity 200ms ease;
+}
+.cc-cam-controls:hover { opacity: 1; }
+.cc-cam-btn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e8e2cf;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 140ms var(--cc-ease-out), border-color 160ms ease, background 160ms ease;
+}
+.cc-cam-btn:hover {
+  border-color: rgba(232, 196, 106, 0.6);
+  background: rgba(232, 196, 106, 0.12);
+  transform: translateY(-1px);
+}
+.cc-cam-btn:active { transform: translateY(1px); }
+@media (max-width: 640px) {
+  .cc-cam-controls { right: 6px; gap: 4px; padding: 4px; }
+  .cc-cam-btn { width: 26px; height: 26px; }
+}

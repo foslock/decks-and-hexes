@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { HexTile, PlayerEffect, ResolutionStep, ResolutionClaimant } from '../types/game';
-import HexGrid, { type GridTransform, type PixiContainer, PLAYER_COLORS } from './HexGrid';
+import GameBoard, { type GridTransform, type BoardFx, PLAYER_COLORS } from './GameBoard';
 import ResolveOverlay from './ResolveOverlay';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import { useSettings, useAnimationSpeed, type AnimationMode } from './SettingsContext';
@@ -8,7 +8,7 @@ import { useSettings, useAnimationSpeed, type AnimationMode } from './SettingsCo
 /**
  * Iteration sandbox for tile-battle resolution animations.
  *
- * Reuses the production `HexGrid` + `ResolveOverlay` components so any tweaks
+ * Reuses the production `GameBoard` + `ResolveOverlay` components so any tweaks
  * to the animation code paths are reflected here AND in the real game. Buttons
  * trigger scripted `ResolutionStep` payloads that match the backend shape.
  *
@@ -345,7 +345,7 @@ export default function ResolveAnimationPreview() {
 
   const transformRef = useRef<GridTransform | null>(null);
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
-  const resolveLayerRef = useRef<PixiContainer | null>(null);
+  const fxRef = useRef<BoardFx | null>(null);
 
   const { settings, setAnimationMode } = useSettings();
   const animSpeed = useAnimationSpeed();
@@ -563,11 +563,11 @@ export default function ResolveAnimationPreview() {
       </div>
 
       <div ref={gridContainerRef} style={{ flex: 1, position: 'relative' }}>
-        <HexGrid
+        <GameBoard
           tiles={tiles}
           onTileClick={handleTileClick}
           transformRef={transformRef}
-          resolveLayerRef={resolveLayerRef}
+          fxRef={fxRef}
           activePlayerId={lastScenario ? PLAYERS[0] : undefined}
           gridRotation={gridRotation}
         />
@@ -575,7 +575,7 @@ export default function ResolveAnimationPreview() {
 
       <div style={{ padding: '10px 20px', borderTop: '1px solid #333', fontSize: 12, color: '#aaa', lineHeight: 1.6 }}>
         Each player sits in one hex-direction from the central (0,0) tile. Attackers fly their power numbers in from their frontier tile;
-        the defender (if any) appears at the target. Animation code is the production <code>ResolveOverlay</code> + <code>HexGrid</code> — tweaks here flow through to the real game.{' '}
+        the defender (if any) appears at the target. Animation code is the production <code>ResolveOverlay</code> + <code>GameBoard</code> — tweaks here flow through to the real game.{' '}
         <span style={{ marginLeft: 8 }}>
           Players:{' '}
           {PLAYERS.map((p, i) => (
@@ -593,7 +593,7 @@ export default function ResolveAnimationPreview() {
           gridTransform={snapshotTransform}
           gridRect={snapshotRect}
           gridContainerRef={gridContainerRef}
-          resolveLayerRef={resolveLayerRef}
+          fxRef={fxRef}
           onStepApply={applyStep}
           onComplete={handleComplete}
         />

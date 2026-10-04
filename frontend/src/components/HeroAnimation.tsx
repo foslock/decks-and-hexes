@@ -1,59 +1,21 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
-import { Application, Container, Graphics } from 'pixi.js';
+import type { HexTile } from '../types/game';
+import { BoardEngine } from '../board3d/engine';
+import { PLAYER_COLORS } from '../board3d/boardTypes';
+import { axialToWorld } from '../board3d/layout';
 
-// --- Hex geometry (flat-top, same as HexGrid) ---
-const HEX_SIZE = 24;
-
-function axialToPixel(q: number, r: number): { x: number; y: number } {
-  const x = HEX_SIZE * (3 / 2) * q;
-  const y = HEX_SIZE * (Math.sqrt(3) / 2 * q + Math.sqrt(3) * r);
-  return { x, y };
-}
-
-function pixelToAxial(px: number, py: number): { q: number; r: number } {
-  const q = (2 / 3 * px) / HEX_SIZE;
-  const r = (-1 / 3 * px + Math.sqrt(3) / 3 * py) / HEX_SIZE;
-  return { q, r };
-}
-
-function axialRound(q: number, r: number): { q: number; r: number } {
-  const s = -q - r;
-  let rq = Math.round(q); let rr = Math.round(r); const rs = Math.round(s);
-  const dq = Math.abs(rq - q); const dr = Math.abs(rr - r); const ds = Math.abs(rs - s);
-  if (dq > dr && dq > ds) rq = -rr - rs;
-  else if (dr > ds) rr = -rq - rs;
-  return { q: rq, r: rr };
-}
-
-function hexDistance(q1: number, r1: number, q2: number, r2: number): number {
-  return (Math.abs(q1 - q2) + Math.abs(q1 + r1 - q2 - r2) + Math.abs(r1 - r2)) / 2;
-}
-
-function drawHexagon(g: Graphics, x: number, y: number, size: number) {
-  const points: number[] = [];
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 180) * (60 * i);
-    points.push(x + size * Math.cos(angle));
-    points.push(y + size * Math.sin(angle));
-  }
-  g.poly(points, true);
-}
-
-// Generate all hex coords for radius r grid
+// Generate all hex coords for a radius-r grid
 function generateHexCoords(radius: number): { q: number; r: number }[] {
   const coords: { q: number; r: number }[] = [];
   for (let q = -radius; q <= radius; q++) {
     for (let r = -radius; r <= radius; r++) {
-      if (Math.abs(q + r) <= radius) {
-        coords.push({ q, r });
-      }
+      if (Math.abs(q + r) <= radius) coords.push({ q, r });
     }
   }
   return coords;
 }
 
 // Easing functions
-function easeOutCubic(t: number): number { return 1 - Math.pow(1 - t, 3); }
 function easeInCubic(t: number): number { return t * t * t; }
 function easeOutElastic(t: number): number {
   if (t === 0 || t === 1) return t;
@@ -62,7 +24,8 @@ function easeOutElastic(t: number): number {
 
 const BLUE = 0x2f6fd0;
 const RED = 0xc8323c;
-const GRID_LINE = 0x8c7a52; // warm hairline between tiles
+const BLUE_ID = 'hero_blue';
+const RED_ID = 'hero_red';
 
 function lerp(a: number, b: number, t: number): number { return a + (b - a) * t; }
 
@@ -71,7 +34,9 @@ function lerp(a: number, b: number, t: number): number { return a + (b - a) * t;
 const CANVAS_W = 400;
 const CANVAS_H = 320;
 const GRID_RADIUS = 3;
-const GRID_PIXEL_H = (GRID_RADIUS * 2) * Math.sqrt(3) * HEX_SIZE;
+/** Legacy 2D hex radius the card layout was tuned against. */
+const LAYOUT_HEX = 24;
+const GRID_PIXEL_H = (GRID_RADIUS * 2) * Math.sqrt(3) * LAYOUT_HEX;
 const CARD_H = GRID_PIXEL_H * 0.66;
 const CARD_W = CARD_H * 0.68;
 /** Root font size of a hero card in canvas units — card internals use em. */
@@ -136,39 +101,6 @@ function HeroCard({ card, accent, cardRef }: { card: HeroCardDef; accent: string
   );
 }
 
-/**
- * Tear a Pixi app down without a white flash.
- *
- * Losing the WebGL context is slow (~40 ms) and React runs this effect's
- * cleanup in the same task as the commit that swaps the home screen for the
- * lobby. Destroying synchronously there blocks the main thread while the
- * compositor is still showing the previous frame, whose canvas layer now
- * points at a lost context — browsers paint that as a blank white rectangle
- * until the next frame lands. So: stop rendering and detach the canvas now,
- * and destroy once the next screen has actually painted.
- */
-function disposeApp(app: Application) {
-  try { app.ticker?.stop(); } catch { /* never initialised */ }
-  try {
-    const canvas = app.canvas as HTMLCanvasElement | undefined;
-    if (canvas) {
-      canvas.style.display = 'none';
-      canvas.remove();
-    }
-  } catch { /* renderer never created */ }
-  let done = false;
-  const destroy = () => {
-    if (done) return;
-    done = true;
-    try { app.destroy(true, { children: true }); } catch { /* already gone */ }
-  };
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(() => setTimeout(destroy, 32));
-  }
-  // Fallback for hidden tabs, where rAF never fires.
-  setTimeout(destroy, 1000);
-}
-
 interface CardState {
   x: number;
   y: number;
@@ -188,28 +120,9 @@ export default function HeroAnimation() {
     const canvasHost = canvasHostRef.current;
     if (!container || !canvasHost) return;
     let destroyed = false;
-    let ready = false;
 
-    const app = new Application();
-
-    // Cap resolution on phones to avoid DPR-3 + 4x antialias blowing up the
-    // WebGL backbuffer on iOS Safari. iPadOS (incl. its Macintosh UA) and
-    // macOS get full DPR for crisp output. The canvas is CSS-scaled to fill
-    // the hero area, so the backbuffer is also scaled by how much the
-    // 400x320 scene is enlarged (otherwise it's upscaled and blurry on big
-    // screens) — capped at 2 on phones and 3 elsewhere.
-    const rawDpr = window.devicePixelRatio || 1;
-    const ua = navigator.userAgent;
-    const isPhone = /iPhone|iPod/.test(ua)
-      || (/Android/.test(ua) && /Mobile/.test(ua))
-      || /webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-    const computeResolution = () => {
-      const fit = Math.min(container.clientWidth / CANVAS_W, container.clientHeight / CANVAS_H) || 1;
-      const ideal = rawDpr * Math.max(1, fit);
-      return Math.min(ideal, isPhone ? Math.min(rawDpr, 2) : Math.max(rawDpr, 3));
-    };
-
-    // --- DOM card overlay: mirror the canvas's object-fit: contain box ---
+    // --- DOM card overlay: mirror an object-fit: contain box of the
+    // 400x320 design space the card choreography is authored in ---
     const layout = { scale: 1, offX: 0, offY: 0, w: CARD_W, h: CARD_H };
     const applyLayout = () => {
       const cw = container.clientWidth;
@@ -239,447 +152,218 @@ export default function HeroAnimation() {
 
     const centerX = CANVAS_W / 2;
     const centerY = CANVAS_H / 2;
-    // Card rest positions (also used by the no-WebGL fallback)
     const restL = centerX - CARD_W * 0.55;
     const restR = centerX + CARD_W * 0.55;
-    const restAngleL = -0.08; // slight tilt left
-    const restAngleR = 0.08;  // slight tilt right
+    const restAngleL = -0.08;
+    const restAngleR = 0.08;
     const showStaticCards = () => {
       placeCard(blueCardRef.current, { x: restL, y: centerY, rotation: restAngleL, alpha: 1 });
       placeCard(redCardRef.current, { x: restR, y: centerY, rotation: restAngleR, alpha: 1 });
     };
 
-    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-    let lastResolution = computeResolution();
+    const engine = new BoardEngine(canvasHost, { hero: true });
     let onLayoutChange: (() => void) | null = null;
     const ro = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => {
         applyLayout();
         onLayoutChange?.();
-        if (resizeTimer) clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(() => {
-          if (destroyed || !ready) return;
-          const res = computeResolution();
-          if (Math.abs(res - lastResolution) > 0.05) {
-            lastResolution = res;
-            app.renderer.resize(CANVAS_W, CANVAS_H, res);
-          }
-        }, 200);
+        engine.setPadding(Math.max(8, container.clientHeight * 0.06));
       })
       : null;
     ro?.observe(container);
+    if (!engine.ok) {
+      // No WebGL: the two cards at rest over the empty backdrop.
+      showStaticCards();
+      return () => { ro?.disconnect(); engine.dispose(); };
+    }
 
-    app.init({
-      backgroundAlpha: 0,
-      width: CANVAS_W,
-      height: CANVAS_H,
-      antialias: true,
-      resolution: lastResolution,
-      autoDensity: false, // CSS size is controlled by the stylesheet (100%, contain)
-    }).then(() => {
-      if (destroyed) { disposeApp(app); return; }
-      ready = true;
-      canvasHost.appendChild(app.canvas);
-
-      const stage = app.stage;
-
-      // --- Generate grid data ---
-      const radius = GRID_RADIUS;
-      const allHexes = generateHexCoords(radius);
-      // Sort by q for left-to-right fill
-      const sortedByQ = [...allHexes].sort((a, b) => a.q - b.q || a.r - b.r);
-
-      // Split into blue (left) and red (right) halves
-      // Sort all hexes by x position, then assign first half blue, second half red
-      const withPixel = sortedByQ.map(h => ({ ...h, ...axialToPixel(h.q, h.r) }));
-      withPixel.sort((a, b) => a.x - b.x || a.y - b.y);
-      const midIdx = Math.ceil(withPixel.length / 2);
-      const blueHexes = new Set(withPixel.slice(0, midIdx).map(h => `${h.q},${h.r}`));
-
-      // --- Create containers ---
-      const gridContainer = new Container();
-      gridContainer.x = centerX;
-      gridContainer.y = centerY;
-      gridContainer.rotation = Math.PI / 6; // 30 degrees
-      stage.addChild(gridContainer);
-
-      // Hover highlight layer (behind cards)
-      const hoverG = new Graphics();
-      gridContainer.addChild(hoverG);
-      let prevHoverKey: string | null = null;
-
-      // --- Cursor proximity tracking ---
-      // Use native DOM events to avoid Pixi's coordinate mismatch with object-fit: contain
-      let cursorHex: { q: number; r: number } | null = null;
-      let cursorOnGrid = false;
-      let cursorFade = 0;
-      const CURSOR_FADE_MAX = 3; // max hex distance
-      const CURSOR_FADE_SPEED = 0.08;
-      const GRID_ROTATION = Math.PI / 6;
-
-      const canvasEl = app.canvas as HTMLCanvasElement;
-      const updateCursorHex = (clientX: number, clientY: number) => {
-        const rect = canvasEl.getBoundingClientRect();
-        // object-fit: contain scales uniformly — compute actual drawn area within the element
-        const scaleX = rect.width / CANVAS_W;
-        const scaleY = rect.height / CANVAS_H;
-        const scale = Math.min(scaleX, scaleY);
-        const drawnW = CANVAS_W * scale;
-        const drawnH = CANVAS_H * scale;
-        const offsetX = (rect.width - drawnW) / 2;
-        const offsetY = (rect.height - drawnH) / 2;
-        // Position in internal canvas coordinates
-        const px = (clientX - rect.left - offsetX) / scale;
-        const py = (clientY - rect.top - offsetY) / scale;
-        // Undo grid container transform (translate to center, then inverse rotation)
-        const dx = px - centerX;
-        const dy = py - centerY;
-        const cos = Math.cos(-GRID_ROTATION);
-        const sin = Math.sin(-GRID_ROTATION);
-        const localX = dx * cos - dy * sin;
-        const localY = dx * sin + dy * cos;
-        const frac = pixelToAxial(localX, localY);
-        cursorHex = axialRound(frac.q, frac.r);
+    // --- A small diorama: two castles, a walled temple, a pair of peaks ---
+    PLAYER_COLORS[BLUE_ID] = BLUE;
+    PLAYER_COLORS[RED_ID] = RED;
+    const GRID_ROTATION = Math.PI / 6;
+    const coords = generateHexCoords(GRID_RADIUS);
+    const blocked = new Set(['0,-3', '-1,3', '2,1']);
+    const tiles: Record<string, HexTile> = {};
+    for (const { q, r } of coords) {
+      const key = `${q},${r}`;
+      const isBlueBase = key === '-3,2';
+      const isRedBase = key === '3,-2';
+      const isTemple = key === '0,0';
+      tiles[key] = {
+        q, r,
+        is_blocked: blocked.has(key),
+        is_vp: isTemple,
+        vp_value: isTemple ? 2 : 1,
+        owner: isBlueBase ? BLUE_ID : isRedBase ? RED_ID : null,
+        defense_power: isTemple ? 3 : isBlueBase || isRedBase ? 3 : 0,
+        base_defense: isTemple ? 3 : isBlueBase || isRedBase ? 3 : 0,
+        permanent_defense_bonus: 0,
+        held_since_turn: 0,
+        is_base: isBlueBase || isRedBase,
+        base_owner: isBlueBase ? BLUE_ID : isRedBase ? RED_ID : null,
       };
-      canvasEl.addEventListener('pointermove', (e) => updateCursorHex(e.clientX, e.clientY));
-      canvasEl.addEventListener('pointerenter', () => { cursorOnGrid = true; });
-      canvasEl.addEventListener('pointerleave', () => { cursorOnGrid = false; cursorHex = null; });
-
-      // --- Draw base grid (per-tile outlines for ripple support) ---
-      const gridOutlines: { g: Graphics; hexDist: number; px: number; py: number; q: number; r: number }[] = [];
-      for (const hex of allHexes) {
-        const { x, y } = axialToPixel(hex.q, hex.r);
-        const g = new Graphics();
-        g.setStrokeStyle({ width: 1, color: GRID_LINE, alpha: 0.55 });
-        drawHexagon(g, x, y, HEX_SIZE - 1);
-        g.stroke();
-        g.alpha = 0;
-        gridContainer.addChild(g);
-        const hexDist = (Math.abs(hex.q) + Math.abs(hex.r) + Math.abs(hex.q + hex.r)) / 2;
-        gridOutlines.push({ g, hexDist, px: x, py: y, q: hex.q, r: hex.r });
-      }
-
-      // --- Hex neighbor lookup ---
-      const HEX_DIRS = [[1,0],[0,1],[-1,1],[-1,0],[0,-1],[1,-1]];
-      const hexSet = new Set(allHexes.map(h => `${h.q},${h.r}`));
-
-      function isBorderTile(q: number, r: number, isBlue: boolean): boolean {
-        for (const [dq, dr] of HEX_DIRS) {
-          const nk = `${q + dq},${r + dr}`;
-          if (!hexSet.has(nk)) continue;
-          const neighborIsBlue = blueHexes.has(nk);
-          if (neighborIsBlue !== isBlue) return true;
-        }
-        return false;
-      }
-
-      // --- Tile fill graphics (one per hex for individual alpha control) ---
-      const tileFills: { gBlue: Graphics; gRed: Graphics; key: string; isBlue: boolean; isBorder: boolean; targetAlpha: number; currentAlpha: number; px: number; py: number; hexDist: number }[] = [];
-      for (const hex of allHexes) {
-        const { x, y } = axialToPixel(hex.q, hex.r);
-        const key = `${hex.q},${hex.r}`;
-        const isBlue = blueHexes.has(key);
-        const border = isBorderTile(hex.q, hex.r, isBlue);
-
-        // Blue layer
-        const gBlue = new Graphics();
-        drawHexagon(gBlue, x, y, HEX_SIZE - 2);
-        gBlue.fill({ color: BLUE, alpha: 1 });
-        gBlue.alpha = 0;
-        gridContainer.addChild(gBlue);
-
-        // Red layer (on top)
-        const gRed = new Graphics();
-        drawHexagon(gRed, x, y, HEX_SIZE - 2);
-        gRed.fill({ color: RED, alpha: 1 });
-        gRed.alpha = 0;
-        gridContainer.addChild(gRed);
-
-        const hexDist = (Math.abs(hex.q) + Math.abs(hex.r) + Math.abs(hex.q + hex.r)) / 2;
-        tileFills.push({ gBlue, gRed, key, isBlue, isBorder: border, targetAlpha: 0, currentAlpha: 0, px: x, py: y, hexDist });
-      }
-
-      // Sort tile fills so blue fills from left and red from right
-      const blueTiles = tileFills.filter(t => t.isBlue);
-      const redTiles = tileFills.filter(t => !t.isBlue);
-      // Blue: leftmost first, Red: rightmost first
-      blueTiles.sort((a, b) => {
-        const ap = axialToPixel(parseInt(a.key.split(',')[0]), parseInt(a.key.split(',')[1]));
-        const bp = axialToPixel(parseInt(b.key.split(',')[0]), parseInt(b.key.split(',')[1]));
-        return ap.x - bp.x || ap.y - bp.y;
-      });
-      redTiles.sort((a, b) => {
-        const ap = axialToPixel(parseInt(a.key.split(',')[0]), parseInt(a.key.split(',')[1]));
-        const bp = axialToPixel(parseInt(b.key.split(',')[0]), parseInt(b.key.split(',')[1]));
-        return bp.x - ap.x || bp.y - ap.y;
-      });
-
-      // --- Cards (DOM elements laid over the canvas) ---
-      const cardW = CARD_W;
-      const blueCard = blueCardRef.current;
-      const redCard = redCardRef.current;
-
-      // --- Animation timeline ---
-      // All times in ms
-      const GRID_FADE_START = 0;
-      const GRID_FADE_DUR = 600;
-      const CARD_ENTER_START = 300;
-      const CARD_ENTER_DUR = 1000;
-      const COLLISION_TIME = CARD_ENTER_START + CARD_ENTER_DUR; // 900
-      const REBOUND_DUR = 600;
-      const TILE_FILL_START = 400;
-      const TILE_FILL_DUR = 1200;
-      const TOTAL_ANIM = COLLISION_TIME + REBOUND_DUR; // 1500
-      const RIPPLE_WAVE_DELAY = 75; // ms delay per hex distance ring
-      const RIPPLE_DURATION = 700; // ms per tile settle
-      const RIPPLE_MAGNITUDE = 13; // px max outward push
-
-      // Card positions
-      const offscreenL = -CANVAS_W / 2 - cardW;
-      const offscreenR = CANVAS_W + CANVAS_W / 2 + cardW;
-      const collisionX = centerX; // meet at center
-
-      // State
-      let animDone = false;
-      let startTime = 0;
-      const blueState: CardState = { x: offscreenL, y: centerY, rotation: 0, alpha: 0 };
-      const redState: CardState = { x: offscreenR, y: centerY, rotation: 0, alpha: 0 };
-      // Re-place the cards immediately when the hero is resized
-      onLayoutChange = () => { placeCard(blueCard, blueState); placeCard(redCard, redState); };
-
-      const tickerFn = () => {
-        if (!startTime) startTime = performance.now();
-        const elapsed = performance.now() - startTime;
-
-        // Cursor proximity fade
-        const wantCursor = cursorOnGrid;
-        const cursorTarget = wantCursor ? 1 : 0;
-        cursorFade = cursorFade < cursorTarget
-          ? Math.min(1, cursorFade + CURSOR_FADE_SPEED)
-          : Math.max(0, cursorFade - CURSOR_FADE_SPEED);
-        const proximityFactor = (q: number, r: number): number => {
-          if (cursorFade <= 0 || !cursorHex) return 1;
-          const dist = hexDistance(cursorHex.q, cursorHex.r, q, r);
-          if (dist >= CURSOR_FADE_MAX) return 1;
-          const fade = 1 - dist / CURSOR_FADE_MAX; // 1 at cursor, 0 at max dist
-          return 1 - fade * 0.25 * cursorFade; // 25% max reduction
-        };
-
-        // --- Hex hover highlight ---
-        {
-          const hoverKey = cursorHex && hexSet.has(`${cursorHex.q},${cursorHex.r}`)
-            ? `${cursorHex.q},${cursorHex.r}` : null;
-          if (hoverKey !== prevHoverKey) {
-            prevHoverKey = hoverKey;
-            hoverG.clear();
-            if (cursorHex && hoverKey) {
-              const { x: hx, y: hy } = axialToPixel(cursorHex.q, cursorHex.r);
-              // Glow fill
-              hoverG.setFillStyle({ color: 0xffffff, alpha: 0.1 });
-              drawHexagon(hoverG, hx, hy, HEX_SIZE - 1);
-              hoverG.fill();
-              // Edge highlight
-              hoverG.setStrokeStyle({ width: 2.5, color: 0xffe9b0, alpha: 0.65, cap: 'round' });
-              drawHexagon(hoverG, hx, hy, HEX_SIZE - 1);
-              hoverG.stroke();
-              // Neighbor subtle glow
-              for (const [dq, dr] of HEX_DIRS) {
-                const nk = `${cursorHex.q + dq},${cursorHex.r + dr}`;
-                if (!hexSet.has(nk)) continue;
-                const { x: nx, y: ny } = axialToPixel(cursorHex.q + dq, cursorHex.r + dr);
-                hoverG.setStrokeStyle({ width: 1.5, color: 0xffffff, alpha: 0.15, cap: 'round' });
-                drawHexagon(hoverG, nx, ny, HEX_SIZE - 1);
-                hoverG.stroke();
-              }
-            }
-          }
-        }
-
-        // --- Grid base fade in ---
-        {
-          const gridAlpha = elapsed < GRID_FADE_START + GRID_FADE_DUR
-            ? easeOutCubic(Math.max(0, (elapsed - GRID_FADE_START) / GRID_FADE_DUR))
-            : 1;
-          for (const outline of gridOutlines) {
-            outline.g.alpha = gridAlpha * proximityFactor(outline.q, outline.r);
-          }
-        }
-
-        // --- Tile fills (staggered from opposing sides) ---
-        if (elapsed >= TILE_FILL_START) {
-          const tileProgress = Math.min(1, (elapsed - TILE_FILL_START) / TILE_FILL_DUR);
-
-          // Each tile has a staggered start; the last tile starts at 60% progress
-          // so it has 40% of the duration to fully fade in.
-          const staggerEnd = 0.6;
-          const fadePortion = 1 - staggerEnd; // each tile fades over this fraction
-
-          // Blue tiles fill from left
-          for (let i = 0; i < blueTiles.length; i++) {
-            const staggerStart = (i / blueTiles.length) * staggerEnd;
-            const localT = Math.min(1, Math.max(0, (tileProgress - staggerStart) / fadePortion));
-            blueTiles[i].targetAlpha = 0.45 * easeOutCubic(localT);
-          }
-          // Red tiles fill from right
-          for (let i = 0; i < redTiles.length; i++) {
-            const staggerStart = (i / redTiles.length) * staggerEnd;
-            const localT = Math.min(1, Math.max(0, (tileProgress - staggerStart) / fadePortion));
-            redTiles[i].targetAlpha = 0.45 * easeOutCubic(localT);
-          }
-        }
-
-        // Smooth tile alpha transitions (during enter animation, show base color)
-        for (const tile of tileFills) {
-          tile.currentAlpha = lerp(tile.currentAlpha, tile.targetAlpha, 0.15);
-          const [tq, tr] = tile.key.split(',').map(Number);
-          const pf = proximityFactor(tq, tr);
-          if (tile.isBlue) {
-            tile.gBlue.alpha = tile.currentAlpha * pf;
-            tile.gRed.alpha = 0;
-          } else {
-            tile.gRed.alpha = tile.currentAlpha * pf;
-            tile.gBlue.alpha = 0;
-          }
-        }
-
-        // --- Ripple displacement from collision ---
-        const RIPPLE_START = COLLISION_TIME - 180;
-        if (elapsed >= RIPPLE_START && !animDone) {
-          const rippleElapsed = elapsed - RIPPLE_START;
-          const applyRipple = (items: { g?: Graphics; gBlue?: Graphics; gRed?: Graphics; hexDist: number; px: number; py: number }[]) => {
-            for (const item of items) {
-              const delay = item.hexDist * RIPPLE_WAVE_DELAY;
-              const localT = (rippleElapsed - delay) / RIPPLE_DURATION;
-              const targets = item.g ? [item.g] : [item.gBlue!, item.gRed!];
-              if (localT <= 0 || item.hexDist === 0 || localT >= 1) {
-                for (const t of targets) { t.x = 0; t.y = 0; }
-                continue;
-              }
-              const wave = Math.sin(localT * Math.PI) * Math.pow(1 - localT, 2);
-              const mag = RIPPLE_MAGNITUDE * wave;
-              const len = Math.sqrt(item.px * item.px + item.py * item.py) || 1;
-              const dx = (item.px / len) * mag;
-              const dy = (item.py / len) * mag;
-              for (const t of targets) { t.x = dx; t.y = dy; }
-            }
-          };
-          applyRipple(tileFills);
-          applyRipple(gridOutlines);
-        }
-
-        // --- Card enter animation (accelerating in) ---
-        if (elapsed >= CARD_ENTER_START && elapsed < COLLISION_TIME) {
-          const t = easeInCubic((elapsed - CARD_ENTER_START) / CARD_ENTER_DUR);
-          const enterTilt = 0.15;
-          blueState.x = lerp(offscreenL, collisionX - cardW / 3, t);
-          blueState.y = centerY;
-          blueState.alpha = Math.min(1, t * 3);
-          blueState.rotation = lerp(-enterTilt, 0, t);
-
-          redState.x = lerp(offscreenR, collisionX + cardW / 3, t);
-          redState.y = centerY;
-          redState.alpha = Math.min(1, t * 3);
-          redState.rotation = lerp(enterTilt, 0, t);
-        }
-
-        // --- Rebound to rest position ---
-        if (elapsed >= COLLISION_TIME && elapsed < TOTAL_ANIM) {
-          const t = (elapsed - COLLISION_TIME) / REBOUND_DUR;
-          const bounce = easeOutElastic(Math.min(1, t));
-
-          blueState.x = lerp(collisionX - cardW / 3, restL, bounce);
-          blueState.rotation = lerp(0, restAngleL, bounce);
-          blueState.alpha = 1;
-
-          redState.x = lerp(collisionX + cardW / 3, restR, bounce);
-          redState.rotation = lerp(0, restAngleR, bounce);
-          redState.alpha = 1;
-        }
-
-        // --- Idle breathing ---
-        if (elapsed >= TOTAL_ANIM) {
-          if (!animDone) {
-            animDone = true;
-            // Snap tiles to full base color and clear any ripple displacement
-            for (const tile of tileFills) {
-              tile.currentAlpha = 0.45;
-              tile.targetAlpha = 0.45;
-              tile.gBlue.x = 0; tile.gBlue.y = 0;
-              tile.gRed.x = 0; tile.gRed.y = 0;
-            }
-            for (const outline of gridOutlines) {
-              outline.g.x = 0; outline.g.y = 0;
-            }
-          }
-
-          const idleT = (elapsed - TOTAL_ANIM) / 1000;
-          const breatheRamp = Math.min(1, idleT / 0.5);
-          const breathe = Math.sin(idleT * 1.2) * 2 * breatheRamp;
-          const breathe2 = Math.sin(idleT * 1.2 + 0.5) * 2 * breatheRamp;
-
-          blueState.x = restL;
-          blueState.y = centerY + breathe;
-          blueState.rotation = restAngleL;
-          blueState.alpha = 1;
-
-          redState.x = restR;
-          redState.y = centerY + breathe2;
-          redState.rotation = restAngleR;
-          redState.alpha = 1;
-
-          placeCard(blueCard, blueState);
-          placeCard(redCard, redState);
-
-          // Tile breathing + border contest (ramps in over first 3s of idle)
-          const contestRamp = Math.min(1, idleT / 3);
-          for (const tile of tileFills) {
-            const [q, r] = tile.key.split(',').map(Number);
-            const pf = proximityFactor(q, r);
-            const baseAlpha = 0.45 + Math.sin(idleT * 0.8) * 0.05;
-            if (tile.isBorder && contestRamp > 0) {
-              const phase = (q * 1.7 + r * 2.3);
-              const contest = (Math.sin(idleT * 0.6 + phase) * 0.5 + 0.5) * contestRamp;
-              if (tile.isBlue) {
-                tile.gBlue.alpha = baseAlpha * (1 - contest * 0.7) * pf;
-                tile.gRed.alpha = baseAlpha * contest * 0.7 * pf;
-              } else {
-                tile.gRed.alpha = baseAlpha * (1 - contest * 0.7) * pf;
-                tile.gBlue.alpha = baseAlpha * contest * 0.7 * pf;
-              }
-            } else {
-              if (tile.isBlue) {
-                tile.gBlue.alpha = baseAlpha * pf;
-                tile.gRed.alpha = 0;
-              } else {
-                tile.gRed.alpha = baseAlpha * pf;
-                tile.gBlue.alpha = 0;
-              }
-            }
-          }
-          // Apply proximity to outlines during idle
-          for (const outline of gridOutlines) {
-            outline.g.alpha = proximityFactor(outline.q, outline.r);
-          }
-          return;
-        }
-
-        // Apply card state
-        placeCard(blueCard, blueState);
-        placeCard(redCard, redState);
-      };
-
-      app.ticker.add(tickerFn);
-    }).catch(() => {
-      // No WebGL (or init failed): show the two cards at rest over an empty board.
-      if (!destroyed) showStaticCards();
+    }
+    const info = {
+      [BLUE_ID]: { name: 'Blue', archetype: 'fortress' },
+      [RED_ID]: { name: 'Red', archetype: 'vanguard' },
+    };
+    // Screen-x ordering (after the 30° board rotation) decides each side's
+    // fill order: blue sweeps in from the left, red from the right.
+    const screenX = (q: number, r: number) => {
+      const w = axialToWorld(q, r);
+      return w.x * Math.cos(GRID_ROTATION) - w.z * Math.sin(GRID_ROTATION);
+    };
+    const claimable = coords.filter(({ q, r }) => {
+      const t = tiles[`${q},${r}`];
+      return !t.is_blocked && !t.is_vp && !t.is_base;
     });
+    const blueTiles = claimable.filter(c => screenX(c.q, c.r) < -0.01).sort((a, b) => screenX(a.q, a.r) - screenX(b.q, b.r));
+    const redTiles = claimable.filter(c => screenX(c.q, c.r) > 0.01).sort((a, b) => screenX(b.q, b.r) - screenX(a.q, a.r));
+    const neutralMid = claimable.filter(c => Math.abs(screenX(c.q, c.r)) <= 0.01);
+
+    engine.setBoard(tiles, info, new Set());
+    engine.setRotation(GRID_ROTATION);
+    engine.setTilt(0.62);
+    engine.setPadding(Math.max(8, container.clientHeight * 0.06));
+    engine.setSway(0.07);
+    engine.setBuildProgress(0);
+    engine.setInputListener({
+      onHover: (key) => engine.setHover(key && !tiles[key]?.is_blocked ? key : null),
+      onLeave: () => engine.setHover(null),
+    });
+
+    // --- Animation timeline (ms) ---
+    const BUILD_DUR = 900;
+    const CARD_ENTER_START = 500;
+    const CARD_ENTER_DUR = 1000;
+    const COLLISION_TIME = CARD_ENTER_START + CARD_ENTER_DUR;
+    const REBOUND_DUR = 600;
+    const TILE_FILL_START = 900;
+    const TILE_FILL_DUR = 1200;
+    const TOTAL_ANIM = COLLISION_TIME + REBOUND_DUR;
+    const BORDER_EVERY = 2300;
+
+    const cardW = CARD_W;
+    const blueCard = blueCardRef.current;
+    const redCard = redCardRef.current;
+    const offscreenL = -CANVAS_W / 2 - cardW;
+    const offscreenR = CANVAS_W + CANVAS_W / 2 + cardW;
+    const collisionX = centerX;
+
+    const blueState: CardState = { x: offscreenL, y: centerY, rotation: 0, alpha: 0 };
+    const redState: CardState = { x: offscreenR, y: centerY, rotation: 0, alpha: 0 };
+    onLayoutChange = () => { placeCard(blueCard, blueState); placeCard(redCard, redState); };
+
+    let filledBlue = 0;
+    let filledRed = 0;
+    let collided = false;
+    let built = false;
+    let nextBorder = TOTAL_ANIM + 1200;
+    const startTime = performance.now();
+    let raf = 0;
+
+    const commit = () => engine.setBoard({ ...tiles }, info, new Set());
+    const setOwner = (key: string, owner: string | null) => {
+      tiles[key] = { ...tiles[key], owner };
+    };
+
+    const tick = () => {
+      if (destroyed) return;
+      const elapsed = performance.now() - startTime;
+
+      if (!built) {
+        const b = Math.min(1, elapsed / BUILD_DUR);
+        engine.setBuildProgress(b);
+        built = b >= 1;
+      }
+
+      // Territories sweep in from opposite sides.
+      if (elapsed >= TILE_FILL_START) {
+        const p = Math.min(1, (elapsed - TILE_FILL_START) / TILE_FILL_DUR);
+        const wantBlue = Math.round(p * blueTiles.length);
+        const wantRed = Math.round(p * redTiles.length);
+        let changed = false;
+        while (filledBlue < wantBlue) { const c = blueTiles[filledBlue++]; setOwner(`${c.q},${c.r}`, BLUE_ID); changed = true; }
+        while (filledRed < wantRed) { const c = redTiles[filledRed++]; setOwner(`${c.q},${c.r}`, RED_ID); changed = true; }
+        if (changed) commit();
+      }
+
+      // Card entry (accelerating in) → collision → elastic rebound → idle breathing.
+      if (elapsed >= CARD_ENTER_START && elapsed < COLLISION_TIME) {
+        const t = easeInCubic((elapsed - CARD_ENTER_START) / CARD_ENTER_DUR);
+        const enterTilt = 0.15;
+        blueState.x = lerp(offscreenL, collisionX - cardW / 3, t);
+        blueState.y = centerY;
+        blueState.alpha = Math.min(1, t * 3);
+        blueState.rotation = lerp(-enterTilt, 0, t);
+        redState.x = lerp(offscreenR, collisionX + cardW / 3, t);
+        redState.y = centerY;
+        redState.alpha = Math.min(1, t * 3);
+        redState.rotation = lerp(enterTilt, 0, t);
+      } else if (elapsed >= COLLISION_TIME && elapsed < TOTAL_ANIM) {
+        if (!collided) {
+          collided = true;
+          const fx = engine.fx;
+          fx?.shockwave(0, 0, 0xffe2a0, 3.4, 900);
+          fx?.sparks(0, 0, 0xffd27a, 46, 1.4);
+          fx?.dust(0, 0, 16, 1.2);
+          fx?.shake(0.9, 420);
+          fx?.jolt(0, 0, 1.2);
+        }
+        const t = (elapsed - COLLISION_TIME) / REBOUND_DUR;
+        const bounce = easeOutElastic(Math.min(1, t));
+        blueState.x = lerp(collisionX - cardW / 3, restL, bounce);
+        blueState.rotation = lerp(0, restAngleL, bounce);
+        blueState.alpha = 1;
+        redState.x = lerp(collisionX + cardW / 3, restR, bounce);
+        redState.rotation = lerp(0, restAngleR, bounce);
+        redState.alpha = 1;
+      } else if (elapsed >= TOTAL_ANIM) {
+        const idleT = (elapsed - TOTAL_ANIM) / 1000;
+        const breatheRamp = Math.min(1, idleT / 0.5);
+        blueState.x = restL;
+        blueState.y = centerY + Math.sin(idleT * 1.2) * 2 * breatheRamp;
+        blueState.rotation = restAngleL;
+        blueState.alpha = 1;
+        redState.x = restR;
+        redState.y = centerY + Math.sin(idleT * 1.2 + 0.5) * 2 * breatheRamp;
+        redState.rotation = restAngleR;
+        redState.alpha = 1;
+
+        // The front line keeps shifting: a border tile changes hands now and then.
+        if (elapsed >= nextBorder) {
+          nextBorder = elapsed + BORDER_EVERY * (0.7 + Math.random() * 0.6);
+          const border = [...claimable, ...neutralMid].filter(({ q, r }) => {
+            const t = tiles[`${q},${r}`];
+            return [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]].some(([dq, dr]) => {
+              const n = tiles[`${q + dq},${r + dr}`];
+              return n && n.owner && n.owner !== t.owner;
+            });
+          });
+          const pick = border[Math.floor(Math.random() * border.length)];
+          if (pick) {
+            const key = `${pick.q},${pick.r}`;
+            const cur = tiles[key].owner;
+            setOwner(key, cur === BLUE_ID ? RED_ID : cur === RED_ID ? BLUE_ID : (Math.random() < 0.5 ? BLUE_ID : RED_ID));
+            commit();
+          }
+        }
+      }
+
+      placeCard(blueCard, blueState);
+      placeCard(redCard, redState);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
 
     return () => {
       destroyed = true;
       onLayoutChange = null;
+      cancelAnimationFrame(raf);
       ro?.disconnect();
-      if (resizeTimer) clearTimeout(resizeTimer);
-      if (ready) disposeApp(app);
+      engine.dispose();
+      delete PLAYER_COLORS[BLUE_ID];
+      delete PLAYER_COLORS[RED_ID];
     };
   }, []);
 
