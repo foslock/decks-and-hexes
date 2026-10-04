@@ -2142,9 +2142,12 @@ export default function GameScreen({ gameState, onStateUpdate, playerId: mpPlaye
         setTrashSelectedIndices(new Set());
         setSelectedCardIndex(null);
       } else {
-        // Auto-select the next card in hand (card to the right, or left if last)
+        // Auto-select the next card in hand (card to the right, or left if
+        // last) — on desktop only. On touch screens a selected card lifts and
+        // shows its tooltips over the board, so after a play the hand rests
+        // until the player picks the next card themselves.
         const newHand = updatedPlayer?.hand;
-        if (newHand && newHand.length > 0) {
+        if (newHand && newHand.length > 0 && !isMobile) {
           const visualOrder = handVisualOrderRef.current;
           const oldHandLength = newHand.length + 1;
           if (visualOrder.length === oldHandLength) {
