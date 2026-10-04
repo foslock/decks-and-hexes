@@ -1,4 +1,4 @@
-import type { GameState, LobbyState, SearchSelection } from '../types/game';
+import type { BrowseGame, BrowseLobby, GameState, LobbyState, SearchSelection } from '../types/game';
 
 const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
 export const BASE = BACKEND_HOST ? `${window.location.protocol}//${BACKEND_HOST}/api` : '/api';
@@ -202,6 +202,11 @@ export async function createLobby(
   });
 }
 
+/** Public lobbies waiting for players and public games in progress. */
+export async function browseLobbies(): Promise<{ open: BrowseLobby[]; in_progress: BrowseGame[] }> {
+  return request('/lobby/browse');
+}
+
 export async function joinLobby(
   code: string,
   name: string,
@@ -234,7 +239,7 @@ export async function getLobby(
 export async function updateLobbyConfig(
   code: string,
   token: string,
-  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null; granted_actions?: number | null; card_pack?: string; map_seed?: string },
+  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null; granted_actions?: number | null; card_pack?: string; map_seed?: string; open_to_public?: boolean },
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}/config`, {
     method: 'PATCH',

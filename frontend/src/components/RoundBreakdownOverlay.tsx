@@ -506,7 +506,7 @@ export default function RoundBreakdownOverlay({
                   >
                     <span className="cc-ov-rb-dot" style={{ background: info.color, color: info.color }} />
                     <span className="cc-ov-rb-legend-name">{info.name}</span>
-                    {info.isCpu && <span className="cc-ov-rb-cpu">CPU</span>}
+                    {info.isCpu && <span className="cc-ov-rb-cpu">BOT</span>}
                     {info.leftRound !== null && (
                       <span style={{ color: 'var(--cc-text-faint)', fontSize: 11 }}>(left round {info.leftRound})</span>
                     )}

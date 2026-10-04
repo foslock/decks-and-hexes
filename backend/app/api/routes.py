@@ -489,25 +489,25 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
         if not game.players[pid].has_left
     )
     if not has_pending_cpu:
-        raise HTTPException(400, "No CPU players pending")
+        raise HTTPException(400, "No bot players pending")
 
     if _is_multiplayer(game):
         # Launch async cursor simulation if not already running
         existing = _active_cpu_buy_tasks.get(game_id)
         if existing and not existing.done():
-            return {"message": "CPU buys already in progress", "state": game.to_dict()}
+            return {"message": "Bot buys already in progress", "state": game.to_dict()}
         task = asyncio.create_task(_process_cpu_buys_with_cursors(game_id))
         _active_cpu_buy_tasks[game_id] = task
         def _cleanup(_t: asyncio.Task[None]) -> None:
             _active_cpu_buy_tasks.pop(game_id, None)
             _game_locks.pop(game_id, None)
         task.add_done_callback(_cleanup)
-        return {"message": "CPU buys started (async)", "state": game.to_dict()}
+        return {"message": "Bot buys started (async)", "state": game.to_dict()}
 
     # Hot-seat: process instantly
     auto_play_cpu_buys(game)
     await store.save(game)
-    return {"message": "CPU buys processed", "state": game.to_dict()}
+    return {"message": "Bot buys processed", "state": game.to_dict()}
 
 
 async def _process_cpu_buys_with_cursors(game_id: str) -> None:

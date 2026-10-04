@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import type { GameState, LobbyState } from '../types/game';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useSettings, type AnimationMode } from './SettingsContext';
@@ -159,6 +159,11 @@ export default function LobbyScreen({
   const localNameRef = useRef(localName);
   localNameRef.current = localName;
   const nameDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  /** The name the server last accepted (to restore after a rejected one). */
+  const serverNameRef = useRef(selfPlayer?.name ?? '');
+  serverNameRef.current = selfPlayer?.name ?? serverNameRef.current;
   // Sync from server when name changes externally (e.g. another tab)
   useEffect(() => {
     if (selfPlayer && selfPlayer.name !== localNameRef.current) {
@@ -350,9 +355,23 @@ export default function LobbyScreen({
     try {
       setError(null);
       await api.updateLobbyPlayer(lobbyCode, playerId, token, updates);
-      if (updates.name !== undefined) savePlayerName(updates.name);
+      if (updates.name !== undefined) {
+        savePlayerName(updates.name);
+        setNameError(null);
+      }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      if (updates.name !== undefined) {
+        // Rejected name: say so under the seat; once the field is left, put
+        // the last accepted name back.
+        setNameError(msg);
+        if (document.activeElement !== nameInputRef.current) {
+          setLocalName(serverNameRef.current);
+          setTimeout(() => setNameError(null), 4000);
+        }
+      } else {
+        setError(msg);
+      }
     }
   }, [lobbyCode, playerId, token]);
 
@@ -531,8 +550,8 @@ export default function LobbyScreen({
               colorPickerFor === p.id ? 'has-popover' : '',
             ].filter(Boolean).join(' ');
             return (
+              <Fragment key={p.id}>
               <div
-                key={p.id}
                 draggable={draggable}
                 onDragStart={(e) => {
                   if (!isHost) return;
@@ -602,7 +621,9 @@ export default function LobbyScreen({
                   </span>
                   {isSelf && !p.is_cpu ? (
                     <input
-                      className="cc-scr-input cc-scr-seat-name-input"
+                      ref={nameInputRef}
+                      className={`cc-scr-input cc-scr-seat-name-input${nameError ? ' is-invalid' : ''}`}
+                      aria-invalid={!!nameError}
                       value={localName}
                       maxLength={12}
                       onChange={(e) => {
@@ -620,6 +641,10 @@ export default function LobbyScreen({
                           clearTimeout(nameDebounceRef.current);
                           nameDebounceRef.current = null;
                           handleUpdateSelf({ name: localNameRef.current });
+                        } else if (nameError) {
+                          // Leaving a rejected name: restore the accepted one.
+                          setLocalName(serverNameRef.current);
+                          setTimeout(() => setNameError(null), 4000);
                         }
                       }}
                     />
@@ -638,7 +663,7 @@ export default function LobbyScreen({
                   {p.is_cpu && isHost && (
                     <>
                       {/* Wide screens: a segmented control. Phones: a small
-                          dropdown, so a CPU seat fits on one line. */}
+                          dropdown, so a bot's seat fits on one line. */}
                       <div className="cc-scr-seg cc-scr-seg-sm cc-scr-diff-seg" style={{ flexShrink: 0 }}>
                         {DIFFICULTIES.map((d) => (
                           <Tooltip key={d.id} content={d.desc} wrapperStyle={{ display: 'flex' }}>
@@ -711,6 +736,11 @@ export default function LobbyScreen({
                   )}
                 </div>
               </div>
+              {/* A rejected name (hateful / vulgar) — right under the seat. */}
+              {isSelf && nameError && (
+                <div className="cc-scr-name-error" role="alert">{nameError}</div>
+              )}
+              </Fragment>
             );
           })}
           {isHost && players.length < 6 && (
@@ -718,7 +748,7 @@ export default function LobbyScreen({
               onClick={() => handleAddCpu('vanguard')}
               className="cc-scr-add-seat"
             >
-              + CPU Player
+              + Add Bot
             </button>
           )}
         </section>
@@ -838,6 +868,26 @@ export default function LobbyScreen({
                   {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
                 </strong>
               )}
+            </div>
+
+            {/* Open to Public */}
+            <div className="cc-scr-row">
+              <div>
+                <Tooltip content="List this lobby in the home page's Browse Games, and the game in its In Progress tab once it starts. Off: players need the join code.">
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>Open to Public</span>
+                </Tooltip>
+              </div>
+              <div className={`cc-scr-seg${isHost ? '' : ' is-readonly'}`}>
+                {([true, false] as const).map((on) => (
+                  <button
+                    key={String(on)}
+                    onClick={() => isHost && handleConfigChange('open_to_public', on)}
+                    className={`cc-scr-seg-btn${(lobby.config.open_to_public ?? true) === on ? ' is-active' : ''}`}
+                  >
+                    {on ? 'On' : 'Off'}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

@@ -14,14 +14,16 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from app.api.name_filter import NAME_REJECTED_MESSAGE, is_name_allowed
 from app.api.ws_manager import manager
 from app.data_loader.loader import load_all_cards
-from app.game_engine.card_packs import CARD_PACKS, DEFAULT_PACK_ID
+from app.game_engine.card_packs import CARD_PACKS, DEFAULT_PACK_ID, pack_display_name
 from app.game_engine.cards import Archetype
 from app.game_engine.game_state import generate_map_seed
 from app.game_engine.game_state import (
     GameState,
     Phase,
+    compute_player_vp,
     create_game,
     execute_start_of_turn,
 )
@@ -119,6 +121,7 @@ class LobbyConfig:
     max_rounds: int = 20
     map_seed: str = ""  # 6-char lowercase alphanumeric; "" = generate on init
     archetype_market_size: int = 5  # Number of cards shown in archetype market each turn
+    open_to_public: bool = True  # Listed in the home page lobby browser
 
     def __post_init__(self) -> None:
         if not self.map_seed:
@@ -136,6 +139,7 @@ class LobbyConfig:
             "max_rounds": self.max_rounds,
             "map_seed": self.map_seed,
             "archetype_market_size": self.archetype_market_size,
+            "open_to_public": self.open_to_public,
         }
 
 
@@ -171,7 +175,10 @@ class Lobby:
 # ── Storage ────────────────────────────────────────────────
 
 _lobbies: dict[str, Lobby] = {}     # code → Lobby
-_tokens: dict[str, str] = {}        # player_id → token
+# (lobby code, player_id) → token. Player ids repeat across lobbies (every
+# host is player_0), so tokens are per lobby — one lobby's token can't
+# validate in another, and a new lobby can't overwrite an older one's.
+_tokens: dict[tuple[str, str], str] = {}
 _game_to_lobby: dict[str, str] = {} # game_id → lobby code (for auth lookups)
 # Track which games have had their lobby reset for return-to-lobby
 _return_to_lobby_done: dict[str, bool] = {}  # game_id → True if lobby was already reset
@@ -208,9 +215,9 @@ def get_lobby_for_game(game_id: str) -> Optional[Lobby]:
     return _lobbies.get(code) if code else None
 
 
-def validate_token(player_id: str, token: str) -> bool:
-    """Check if a player_id/token pair is valid."""
-    return _tokens.get(player_id) == token
+def validate_token(code: str, player_id: str, token: str) -> bool:
+    """Check a player's token for the given lobby."""
+    return bool(token) and _tokens.get((code.upper(), player_id)) == token
 
 
 def get_visible_player_ids(game_id: str, player_id: str) -> set[str] | None:
@@ -264,8 +271,15 @@ _CPU_NAMES = [
 lobby_router = APIRouter(prefix="/api/lobby")
 
 
-def _require_token(player_id: str, token: str) -> None:
-    if not validate_token(player_id, token):
+def _require_token(code: str, player_id: str, token: str) -> None:
+    if not validate_token(code, player_id, token):
+        raise HTTPException(403, "Invalid token")
+
+
+def _require_game_token(game_id: str, player_id: str, token: str) -> None:
+    """Check a player's token for the lobby a game was started from."""
+    code = _game_to_lobby.get(game_id)
+    if not code or not validate_token(code, player_id, token):
         raise HTTPException(403, "Invalid token")
 
 
@@ -299,6 +313,7 @@ class UpdateConfigRequest(BaseModel):
     map_seed: Optional[str] = None
     archetype_market_size: Optional[int] = None
     max_rounds: Optional[int] = None
+    open_to_public: Optional[bool] = None
 
 
 class UpdatePlayerRequest(BaseModel):
@@ -347,9 +362,12 @@ async def create_lobby(req: CreateLobbyRequest) -> dict[str, Any]:
     player_id = f"player_0"
     token = str(uuid.uuid4())
 
+    name = req.name.strip()[:12]
+    if not name or not is_name_allowed(name):
+        name = "Player 1"
     host = LobbyPlayer(
         id=player_id,
-        name=req.name[:12],
+        name=name,
         archetype=req.archetype,
         color=PLAYER_COLOR_OPTIONS[0],
         is_host=True,
@@ -365,7 +383,7 @@ async def create_lobby(req: CreateLobbyRequest) -> dict[str, Any]:
         last_activity=now,
     )
     _lobbies[code] = lobby
-    _tokens[player_id] = token
+    _tokens[(code, player_id)] = token
 
     return {
         "code": code,
@@ -373,6 +391,70 @@ async def create_lobby(req: CreateLobbyRequest) -> dict[str, Any]:
         "token": token,
         "lobby": lobby.to_dict(),
     }
+
+
+@lobby_router.get("/browse")
+async def browse_lobbies() -> dict[str, Any]:
+    """Public lobbies waiting for players, and public games in progress.
+
+    No auth: lists only what hosts marked "Open to Public" (the default).
+    The home page polls this every few seconds.
+    """
+    open_lobbies: list[dict[str, Any]] = []
+    in_progress: list[dict[str, Any]] = []
+    store = _get_store()
+    for lobby in list(_lobbies.values()):
+        if not lobby.config.open_to_public or lobby.status == "expired":
+            continue
+        host = lobby.players.get(lobby.host_id)
+        base: dict[str, Any] = {
+            "code": lobby.code,
+            "host_name": host.name if host else "",
+            "host_color": host.color if host else "",
+            "grid_size": lobby.config.grid_size,
+            "card_pack": lobby.config.card_pack,
+            "card_pack_name": pack_display_name(lobby.config.card_pack),
+        }
+        if lobby.status in ("waiting", "countdown"):
+            cpus = sum(1 for p in lobby.players.values() if p.is_cpu)
+            humans = len(lobby.players) - cpus
+            open_lobbies.append({
+                **base,
+                "players": len(lobby.players),
+                "humans": humans,
+                "cpus": cpus,
+                "max_players": 6,
+                "full": len(lobby.players) >= 6 or humans >= lobby.config.max_players,
+                "starting": lobby.status == "countdown",
+                "last_activity": lobby.last_activity,
+            })
+        elif lobby.status == "started" and lobby.game_id:
+            game = await store.get(lobby.game_id)
+            if not game or game.current_phase == Phase.GAME_OVER:
+                continue
+            active = [(pid, p) for pid, p in game.players.items() if not p.has_left]
+            standings = sorted(((compute_player_vp(game, pid), pid) for pid, _ in active), reverse=True)
+            top = standings[0][0] if standings else 0
+            cpus = sum(1 for _, p in active if p.is_cpu)
+            in_progress.append({
+                **base,
+                "players": len(active),
+                "humans": len(active) - cpus,
+                "cpus": cpus,
+                "round": game.current_round,
+                "max_rounds": game.max_rounds,
+                "vp_target": game.vp_target,
+                # Everyone tied for the lead.
+                "leaders": [
+                    {"name": game.players[pid].name, "color": game.players[pid].color, "vp": vp}
+                    for vp, pid in standings if vp == top
+                ],
+            })
+    open_lobbies.sort(key=lambda l: -l["last_activity"])
+    in_progress.sort(key=lambda g: -g["round"])
+    for entry in open_lobbies:
+        entry.pop("last_activity", None)
+    return {"open": open_lobbies, "in_progress": in_progress}
 
 
 @lobby_router.post("/{code}/join")
@@ -404,8 +486,14 @@ async def join_lobby(code: str, req: JoinLobbyRequest) -> dict[str, Any]:
     player_id = f"player_{next_idx}"
     token = str(uuid.uuid4())
 
-    # Default name is "Player N" based on join order (total players so far + 1)
-    name = (req.name[:12] if req.name and req.name.strip() not in ('', 'Player') else f"Player {len(lobby.players) + 1}")
+    # Default name is "Player N" based on join order (total players so far + 1);
+    # also used in place of a hateful / vulgar name.
+    requested = (req.name or "").strip()[:12]
+    name = (
+        requested
+        if requested not in ('', 'Player') and is_name_allowed(requested)
+        else f"Player {len(lobby.players) + 1}"
+    )
 
     player = LobbyPlayer(
         id=player_id,
@@ -418,7 +506,7 @@ async def join_lobby(code: str, req: JoinLobbyRequest) -> dict[str, Any]:
     if lobby.player_order:
         lobby.player_order.append(player_id)
     lobby.touch()
-    _tokens[player_id] = token
+    _tokens[(lobby.code, player_id)] = token
 
     # Broadcast update to existing members
     await manager.broadcast_lobby(code, lobby.to_dict())
@@ -451,7 +539,7 @@ async def rejoin_lobby(code: str, req: RejoinRequest) -> dict[str, Any]:
     # Issue a fresh token
     token = str(uuid.uuid4())
     player.token = token
-    _tokens[req.player_id] = token
+    _tokens[(lobby.code, req.player_id)] = token
     lobby.touch()
 
     return {
@@ -465,7 +553,7 @@ async def rejoin_lobby(code: str, req: RejoinRequest) -> dict[str, Any]:
 async def get_lobby(code: str, player_id: str, token: str) -> dict[str, Any]:
     """Get current lobby state."""
     lobby = _require_lobby(code)
-    _require_token(player_id, token)
+    _require_token(lobby.code, player_id, token)
 
     if player_id not in lobby.players:
         raise HTTPException(403, "Not a member of this lobby")
@@ -480,7 +568,7 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
 
     # Find who's making the request from the token
     host = lobby.players.get(lobby.host_id)
-    if not host or not validate_token(lobby.host_id, req.token if hasattr(req, 'token') else ""):
+    if not host or not validate_token(lobby.code, lobby.host_id, req.token if hasattr(req, 'token') else ""):
         # Check token in header or body — we'll require it in the request
         pass
 
@@ -544,6 +632,9 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
             raise HTTPException(400, "max_rounds must be at least 5")
         lobby.config.max_rounds = req.max_rounds
 
+    if req.open_to_public is not None:
+        lobby.config.open_to_public = req.open_to_public
+
     lobby.touch()
     await manager.broadcast_lobby(code, lobby.to_dict())
 
@@ -556,8 +647,8 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
     lobby = _require_lobby(code)
 
     # Allow self-edit OR host editing local/CPU players
-    is_self = validate_token(player_id, req.token)
-    is_host = validate_token(lobby.host_id, req.token)
+    is_self = validate_token(lobby.code, player_id, req.token)
+    is_host = validate_token(lobby.code, lobby.host_id, req.token)
     player = lobby.players.get(player_id)
     if not player:
         raise HTTPException(404, "Player not found")
@@ -566,7 +657,10 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
         raise HTTPException(403, "Not authorized to edit this player")
 
     if req.name is not None:
-        player.name = req.name[:12]
+        new_name = req.name.strip()[:12]
+        if not is_name_allowed(new_name):
+            raise HTTPException(400, NAME_REJECTED_MESSAGE)
+        player.name = new_name
     if req.archetype is not None:
         try:
             Archetype(req.archetype)
@@ -600,7 +694,7 @@ async def update_player(code: str, player_id: str, req: UpdatePlayerRequest) -> 
 async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
     """Add a CPU player to the lobby (host only)."""
     lobby = _require_lobby(code)
-    _require_token(lobby.host_id, req.token)
+    _require_token(lobby.code, lobby.host_id, req.token)
 
     try:
         Archetype(req.archetype)
@@ -624,7 +718,7 @@ async def add_cpu(code: str, req: AddCpuRequest) -> dict[str, Any]:
     # Pick a random name not already used in this lobby
     used_names = {p.name for p in lobby.players.values()}
     available = [n for n in _CPU_NAMES if n not in used_names]
-    cpu_name = random.choice(available) if available else f"CPU {len(lobby.players)}"
+    cpu_name = random.choice(available) if available else f"Bot {len(lobby.players)}"
     cpu = LobbyPlayer(
         id=player_id,
         name=cpu_name,
@@ -649,8 +743,8 @@ async def remove_player(code: str, target_player_id: str, req: RemovePlayerReque
     lobby = _require_lobby(code)
 
     # Either host removing someone, or player removing themselves
-    is_host = validate_token(lobby.host_id, req.token)
-    is_self = validate_token(target_player_id, req.token)
+    is_host = validate_token(lobby.code, lobby.host_id, req.token)
+    is_self = validate_token(lobby.code, target_player_id, req.token)
 
     if not is_host and not is_self:
         raise HTTPException(403, "Not authorized to remove this player")
@@ -665,7 +759,7 @@ async def remove_player(code: str, target_player_id: str, req: RemovePlayerReque
     del lobby.players[target_player_id]
     if lobby.player_order and target_player_id in lobby.player_order:
         lobby.player_order.remove(target_player_id)
-    _tokens.pop(target_player_id, None)
+    _tokens.pop((lobby.code, target_player_id), None)
     lobby.touch()
 
     await manager.broadcast_lobby(code, lobby.to_dict())
@@ -683,7 +777,7 @@ async def remove_player(code: str, target_player_id: str, req: RemovePlayerReque
 async def reorder_players(code: str, req: ReorderPlayersRequest) -> dict[str, Any]:
     """Reorder players in the lobby (host only). Affects in-game turn order."""
     lobby = _require_lobby(code)
-    _require_token(lobby.host_id, req.token)
+    _require_token(lobby.code, lobby.host_id, req.token)
 
     # Validate that the order contains exactly the current player IDs
     current_ids = set(lobby.players.keys())
@@ -702,14 +796,14 @@ async def reorder_players(code: str, req: ReorderPlayersRequest) -> dict[str, An
 async def close_lobby(code: str, req: CloseLobbyRequest) -> dict[str, Any]:
     """Close/delete a lobby (host only). Disconnects all players."""
     lobby = _require_lobby(code)
-    _require_token(lobby.host_id, req.token)
+    _require_token(lobby.code, lobby.host_id, req.token)
 
     # Broadcast a lobby_closed message so other clients return to home
     await manager.broadcast(code, {"type": "lobby_closed"})
 
     # Clean up all tokens and connections
     for pid in list(lobby.players):
-        _tokens.pop(pid, None)
+        _tokens.pop((lobby.code, pid), None)
         manager.disconnect(code, pid)
 
     # Remove the lobby
@@ -722,7 +816,7 @@ async def close_lobby(code: str, req: CloseLobbyRequest) -> dict[str, Any]:
 async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
     """Start the game from the lobby (host only). Triggers countdown then creates game."""
     lobby = _require_lobby(code)
-    _require_token(lobby.host_id, req.token)
+    _require_token(lobby.code, lobby.host_id, req.token)
 
     if lobby.status != "waiting":
         raise HTTPException(400, "Lobby already started or expired")
@@ -812,7 +906,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
 async def lobby_websocket(ws: WebSocket, code: str, player_id: str, token: str) -> None:
     """WebSocket connection for real-time lobby and game updates."""
     # Validate
-    if not validate_token(player_id, token):
+    if not validate_token(code, player_id, token):
         await ws.close(code=4003, reason="Invalid token")
         return
 
@@ -894,7 +988,7 @@ class EndGameRequest(BaseModel):
 
 async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[str, Any]:
     """Handle a player leaving a game mid-play."""
-    _require_token(player_id, token)
+    _require_game_token(game_id, player_id, token)
     store = _get_store()
     game = await store.get(game_id)
     if not game:
@@ -994,7 +1088,7 @@ async def handle_leave_game(game_id: str, player_id: str, token: str) -> dict[st
 
 async def handle_end_game(game_id: str, player_id: str, token: str) -> dict[str, Any]:
     """Host ends the game for everyone."""
-    _require_token(player_id, token)
+    _require_game_token(game_id, player_id, token)
     store = _get_store()
     game = await store.get(game_id)
     if not game:
@@ -1023,7 +1117,7 @@ async def handle_end_game(game_id: str, player_id: str, token: str) -> dict[str,
         lobby = _lobbies.pop(lobby_code, None)
         if lobby:
             for pid in lobby.players:
-                _tokens.pop(pid, None)
+                _tokens.pop((lobby.code, pid), None)
 
     return {"message": "Game ended"}
 
@@ -1033,7 +1127,7 @@ async def handle_end_game(game_id: str, player_id: str, token: str) -> dict[str,
 
 async def handle_return_to_lobby(game_id: str, player_id: str, token: str) -> dict[str, Any]:
     """Handle a player returning to the lobby after a game ends."""
-    _require_token(player_id, token)
+    _require_game_token(game_id, player_id, token)
 
     lobby = get_lobby_for_game(game_id)
     if not lobby:
@@ -1116,5 +1210,5 @@ async def lobby_expiry_task() -> None:
                     except Exception:
                         pass
                 for pid in lobby.players:
-                    _tokens.pop(pid, None)
+                    _tokens.pop((lobby.code, pid), None)
                 logger.info("Expired lobby %s", code)
