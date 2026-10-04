@@ -1077,6 +1077,7 @@
   overflow: hidden;
 }
 .cc-ov-rb .cc-ov-header { align-items: flex-start; padding: 16px 22px 14px; }
+.cc-ov-rb .cc-ov-header .cc-ov-shop-head-icon { width: 26px; height: 26px; margin-top: 1px; }
 .cc-ov-rb .cc-ov-title { font-size: 22px; }
 .cc-ov-rb-body {
   overflow: auto;
@@ -1098,14 +1099,32 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   text-align: center;
   white-space: normal;
 }
-.cc-ov-rb-chart { position: relative; padding: 10px; }
+.cc-ov-rb-metrics .cc-ov-chip:not(.is-active) svg { color: var(--cc-gold); opacity: 0.8; }
+/* Chart well: a deep plaque with a gilded hairline, like the card stat plaque. */
+.cc-ov-rb-chart {
+  position: relative;
+  padding: 10px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(232, 196, 106, 0.06), transparent 60%),
+    linear-gradient(180deg, rgba(6, 6, 20, 0.6), rgba(14, 14, 36, 0.5));
+  border-color: rgba(232, 196, 106, 0.22);
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
 .cc-ov-rb-axis {
   font-family: var(--cc-font-body);
   font-size: 12px;
   fill: #a9a7bf;
+  font-variant-numeric: tabular-nums;
+}
+.cc-ov-rb-round {
+  font-family: var(--cc-font-display);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  fill: rgba(232, 196, 106, 0.8);
 }
 .cc-ov-rb-axis-title {
   font-family: var(--cc-font-display);
@@ -1117,16 +1136,50 @@
 }
 .cc-ov-rb-line { transition: opacity 0.25s ease; }
 .cc-ov-rb-legend { display: flex; flex-wrap: wrap; gap: 8px; padding: 2px; }
+/* Legend plates echo the in-game player HUD: a glass plate washed with the
+   player's color from the left, their latest value in gilded numerals. */
 .cc-ov-rb-legend-item {
+  --cc-player: #888;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 12px 4px 8px;
+  min-width: 0;
+  padding: 6px 12px 6px 10px;
   font-size: 13px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--cc-player) 18%, transparent), transparent 60%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 55%),
+    rgba(20, 20, 44, 0.85);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 3px 10px rgba(0, 0, 0, 0.35);
 }
+.cc-ov-rb-legend-name { color: var(--cc-text); font-weight: 700; white-space: nowrap; }
+.cc-ov-rb-cpu {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--cc-text-faint);
+  border: 1px solid var(--cc-panel-border-strong);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+.cc-ov-rb-legend-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(232, 196, 106, 0.22);
+  font-family: var(--cc-font-display);
+  font-weight: 900;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--cc-gold-bright);
+  text-shadow: 0 0 10px rgba(255, 216, 119, 0.3), 0 1px 0 rgba(0, 0, 0, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+.cc-ov-rb-legend-value svg { color: var(--cc-gold); }
 .cc-ov-rb-dot {
   width: 11px;
   height: 11px;

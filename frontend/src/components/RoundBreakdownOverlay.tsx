@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { GameState } from '../types/game';
 import { getGameLog, type LogEntry } from '../api/client';
 import Icon from '../icons/Icon';
+import type { IconName } from '../icons/glyphs';
 
 interface RoundBreakdownOverlayProps {
   gameId: string;
@@ -22,16 +23,30 @@ interface MetricDef {
   key: MetricKey;
   label: string;
   short: string;
+  icon: IconName;
 }
 
 const METRICS: MetricDef[] = [
-  { key: 'vp',                                label: 'VP Total',                short: 'VP' },
-  { key: 'tiles_occupied',                    label: 'Tiles Occupied',          short: 'Tiles' },
-  { key: 'cumulative_resources_gained',       label: 'Resources Gained',        short: 'Resources' },
-  { key: 'cumulative_bonus_actions_gained',   label: 'Bonus Actions Gained',    short: 'Bonus Actions' },
-  { key: 'deck_size',                         label: 'Deck Size',               short: 'Deck' },
-  { key: 'cumulative_claim_power_resolved',   label: 'Claim Power Played',      short: 'Claim Pwr' },
+  { key: 'vp',                                label: 'VP Total',                short: 'VP',            icon: 'vp' },
+  { key: 'tiles_occupied',                    label: 'Tiles Occupied',          short: 'Tiles',         icon: 'tile' },
+  { key: 'cumulative_resources_gained',       label: 'Resources Gained',        short: 'Resources',     icon: 'resource' },
+  { key: 'cumulative_bonus_actions_gained',   label: 'Bonus Actions Gained',    short: 'Bonus Actions', icon: 'action' },
+  { key: 'deck_size',                         label: 'Deck Size',               short: 'Deck',          icon: 'drawPile' },
+  { key: 'cumulative_claim_power_resolved',   label: 'Claim Power Played',      short: 'Claim Pwr',     icon: 'power' },
 ];
+
+/** Gilded line-chart glyph for the header (matches the shop's chest). */
+function ChartIcon() {
+  return (
+    <svg className="cc-ov-shop-head-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3.5 3.5v17h17" />
+      <path d="M6.5 16l4-5 3.5 3 5.5-7" />
+      <circle cx="10.5" cy="11" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="14" cy="14" r="1.1" fill="currentColor" stroke="none" />
+      <circle cx="19.5" cy="7" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
 
 interface PlayerMetricsRow {
   vp: number;
@@ -61,7 +76,7 @@ const PAD_TOP = 20;
 const PAD_BOTTOM = 36;
 
 function niceCeil(value: number): number {
-  if (value <= 0) return 4;
+  if (value <= 0) return 1;
   const exp = Math.pow(10, Math.floor(Math.log10(value)));
   const norm = value / exp;
   let nice: number;
@@ -70,6 +85,13 @@ function niceCeil(value: number): number {
   else if (norm <= 5) nice = 5;
   else nice = 10;
   return nice * exp;
+}
+
+/** Y-axis scale for whole-number stats: about four even steps of a "nice"
+ *  whole size (1, 2, 5, 10…) — every tick lands on an integer, none repeat. */
+export function yScale(max: number): { yMax: number; step: number } {
+  const step = Math.max(1, niceCeil(max / 4));
+  return { yMax: Math.max(step * 2, Math.ceil(max / step) * step), step };
 }
 
 export default function RoundBreakdownOverlay({
@@ -145,6 +167,7 @@ export default function RoundBreakdownOverlay({
           pid,
           name: p.name,
           color: p.color || '#888',
+          isCpu: !!p.is_cpu,
           leftRound,
         };
       });
@@ -165,7 +188,7 @@ export default function RoundBreakdownOverlay({
   }, [playerInfo, rounds, metric]);
 
   // Y-axis scale: max across all players for the current metric
-  const { yMax, xMin, xMax } = useMemo(() => {
+  const { yMax, yStep, xMin, xMax } = useMemo(() => {
     let max = 0;
     let xLo = Infinity;
     let xHi = -Infinity;
@@ -177,7 +200,8 @@ export default function RoundBreakdownOverlay({
       }
     }
     if (xLo === Infinity) { xLo = 1; xHi = 1; }
-    return { yMax: niceCeil(max), xMin: xLo, xMax: xHi };
+    const { yMax: top, step } = yScale(max);
+    return { yMax: top, yStep: step, xMin: xLo, xMax: xHi };
   }, [series]);
 
   const xToPx = useCallback((round: number) => {
@@ -197,13 +221,12 @@ export default function RoundBreakdownOverlay({
     return ticks;
   }, [xMin, xMax]);
 
-  // Y-axis ticks (5 evenly-spaced)
+  // Y-axis ticks: whole-number steps from 0 to yMax
   const yTicks = useMemo(() => {
     const out: number[] = [];
-    const steps = 4;
-    for (let i = 0; i <= steps; i++) out.push(Math.round((yMax / steps) * i));
+    for (let v = 0; v <= yMax; v += yStep) out.push(v);
     return out;
-  }, [yMax]);
+  }, [yMax, yStep]);
 
   const activeMetric = METRICS.find(m => m.key === metric)!;
 
@@ -256,6 +279,7 @@ export default function RoundBreakdownOverlay({
       >
         {/* Header */}
         <div className="cc-ov-header">
+          <ChartIcon />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div className="cc-ov-title">Round Breakdown</div>
             <div className="cc-ov-subtitle">
@@ -280,7 +304,8 @@ export default function RoundBreakdownOverlay({
                 className={`cc-ov-chip${selected ? ' is-active' : ''}`}
                 onClick={() => setMetric(m.key)}
               >
-                {m.label}
+                <Icon name={m.icon} size={13} decorative style={{ flexShrink: 0 }} />
+                <span>{m.label}</span>
               </button>
             );
           })}
@@ -302,6 +327,19 @@ export default function RoundBreakdownOverlay({
                 preserveAspectRatio="xMidYMid meet"
                 style={{ display: 'block', width: '100%', height: 'auto' }}
               >
+                {/* Soft fills under each player's line, fading to the axis */}
+                <defs>
+                  {series.map(s => (
+                    <linearGradient key={s.pid} id={`rb-fill-${s.pid}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={s.color} stopOpacity={0.24} />
+                      <stop offset="100%" stopColor={s.color} stopOpacity={0} />
+                    </linearGradient>
+                  ))}
+                  <radialGradient id="rb-dot-gloss" cx="35%" cy="30%" r="65%">
+                    <stop offset="0%" stopColor="#fff" stopOpacity={0.7} />
+                    <stop offset="45%" stopColor="#fff" stopOpacity={0} />
+                  </radialGradient>
+                </defs>
                 {/* Y-axis grid + labels */}
                 {yTicks.map(v => (
                   <g key={`y-${v}`}>
@@ -310,8 +348,8 @@ export default function RoundBreakdownOverlay({
                       x2={CHART_W - PAD_RIGHT}
                       y1={yToPx(v)}
                       y2={yToPx(v)}
-                      stroke="rgba(255,255,255,0.07)"
-                      strokeDasharray={v === 0 ? undefined : '3 5'}
+                      stroke={v === 0 ? 'rgba(232,196,106,0.35)' : 'rgba(232,196,106,0.1)'}
+                      strokeDasharray={v === 0 ? undefined : '2 6'}
                       strokeWidth={1}
                     />
                     <text x={PAD_LEFT - 10} y={yToPx(v) + 4} textAnchor="end" className="cc-ov-rb-axis">{v}</text>
@@ -329,7 +367,7 @@ export default function RoundBreakdownOverlay({
                 </text>
                 {/* X-axis labels */}
                 {xTicks.map(r => (
-                  <text key={`x-${r}`} x={xToPx(r)} y={CHART_H - 14} textAnchor="middle" className="cc-ov-rb-axis">R{r}</text>
+                  <text key={`x-${r}`} x={xToPx(r)} y={CHART_H - 14} textAnchor="middle" className="cc-ov-rb-axis cc-ov-rb-round">R{r}</text>
                 ))}
                 {/* Axis line */}
                 <line x1={PAD_LEFT} x2={CHART_W - PAD_RIGHT} y1={CHART_H - PAD_BOTTOM} y2={CHART_H - PAD_BOTTOM} stroke="rgba(232,196,106,0.35)" strokeWidth={1} />
@@ -344,6 +382,12 @@ export default function RoundBreakdownOverlay({
                   const opacity = s.leftRound !== null ? 0.65 : 1;
                   return (
                     <g key={s.pid} className="cc-ov-rb-line" style={{ opacity }}>
+                      {s.points.length > 1 && (
+                        <polygon
+                          points={`${xToPx(s.points[0].round)},${yToPx(0)} ${polyPoints} ${xToPx(lastPoint.round)},${yToPx(0)}`}
+                          fill={`url(#rb-fill-${s.pid})`}
+                        />
+                      )}
                       {/* Soft under-glow (a wide, faint stroke — no SVG filters) */}
                       <polyline
                         points={polyPoints}
@@ -392,11 +436,12 @@ export default function RoundBreakdownOverlay({
                             <circle
                               cx={cx}
                               cy={cy}
-                              r={5}
+                              r={isEnd ? 6.5 : 5}
                               fill={s.color}
                               stroke="#0d0c22"
                               strokeWidth={2}
                             />
+                            <circle cx={cx} cy={cy} r={isEnd ? 6.5 : 5} fill="url(#rb-dot-gloss)" pointerEvents="none" />
                             <circle cx={cx} cy={cy} r={12} fill="transparent" />
                           </g>
                         );
@@ -449,20 +494,31 @@ export default function RoundBreakdownOverlay({
             </div>
 
             {/* Legend */}
+            {/* Legend: a plate per player with their latest value for the metric */}
             <div className="cc-ov-rb-legend">
-              {playerInfo.map(info => (
-                <div
-                  key={info.pid}
-                  className="cc-ov-rb-legend-item"
-                  style={{ opacity: info.leftRound !== null ? 0.55 : 1 }}
-                >
-                  <span className="cc-ov-rb-dot" style={{ background: info.color, color: info.color }} />
-                  <span style={{ color: 'var(--cc-text)' }}>{info.name}</span>
-                  {info.leftRound !== null && (
-                    <span style={{ color: 'var(--cc-text-faint)', fontSize: 11 }}>(left round {info.leftRound})</span>
-                  )}
-                </div>
-              ))}
+              {series.map(info => {
+                const latest = info.points.length > 0 ? info.points[info.points.length - 1].value : null;
+                return (
+                  <div
+                    key={info.pid}
+                    className="cc-ov-rb-legend-item"
+                    style={{ opacity: info.leftRound !== null ? 0.55 : 1, ['--cc-player' as string]: info.color }}
+                  >
+                    <span className="cc-ov-rb-dot" style={{ background: info.color, color: info.color }} />
+                    <span className="cc-ov-rb-legend-name">{info.name}</span>
+                    {info.isCpu && <span className="cc-ov-rb-cpu">CPU</span>}
+                    {info.leftRound !== null && (
+                      <span style={{ color: 'var(--cc-text-faint)', fontSize: 11 }}>(left round {info.leftRound})</span>
+                    )}
+                    {latest !== null && (
+                      <span className="cc-ov-rb-legend-value" title={`${activeMetric.label} after round ${info.points[info.points.length - 1].round}`}>
+                        <Icon name={activeMetric.icon} size={12} decorative />
+                        {latest}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
