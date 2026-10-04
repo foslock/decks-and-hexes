@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { SettingsProvider } from '../components/SettingsContext';
 import { TileCardStack, EngineQueue, fanOffset, type BoardCardEntry } from '../components/BoardCards';
@@ -64,6 +64,39 @@ describe('board cards', () => {
     expect(stackOf(container).style.opacity).toBe('1');
     rerender(<WithSettings><TileCardStack entries={entries} scale={0.25} focus onOpen={() => {}} /></WithSettings>);
     expect(stackOf(container).style.opacity).toBe('1');
+  });
+
+  it('steps back while a card is aimed at a tile: fainter, and the pointer goes through', () => {
+    const { container } = render(<WithSettings><TileCardStack entries={[entry('a', 'Explore')]} scale={0.25} passThrough onOpen={() => {}} /></WithSettings>);
+    const stack = container.querySelector<HTMLElement>('.cc-tile-stack')!;
+    expect(stack.style.pointerEvents).toBe('none');
+    // Fainter than at rest (0.4), and hovering doesn't bring it up.
+    expect(Number(stack.style.opacity)).toBeLessThan(0.4);
+    fireEvent.pointerEnter(stack);
+    expect(Number(stack.style.opacity)).toBeLessThan(0.4);
+  });
+
+  it('opens the hover zoom only after the pointer rests on the card', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<WithSettings><TileCardStack entries={[entry('a', 'Explore')]} scale={0.25} onOpen={() => {}} /></WithSettings>);
+      const card = container.querySelector<HTMLElement>('[data-board-card]')!;
+      const zoomCount = () => document.querySelectorAll('body > div[style*="z-index: 20000"]').length;
+      // A sweep across the card on the way to a tile: no zoom.
+      fireEvent.pointerEnter(card, { pointerType: 'mouse' });
+      act(() => { vi.advanceTimersByTime(100); });
+      fireEvent.pointerLeave(card, { pointerType: 'mouse' });
+      act(() => { vi.advanceTimersByTime(400); });
+      expect(zoomCount()).toBe(0);
+      // Resting on it: the zoom opens.
+      fireEvent.pointerEnter(card, { pointerType: 'mouse' });
+      act(() => { vi.advanceTimersByTime(300); });
+      expect(zoomCount()).toBe(1);
+      fireEvent.pointerLeave(card, { pointerType: 'mouse' });
+      expect(zoomCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('grows a resolving card in step with its box', () => {

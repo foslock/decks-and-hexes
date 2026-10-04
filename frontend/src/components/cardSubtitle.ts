@@ -716,9 +716,16 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
         if (val > 0) parts.push(p(`(+${val}{nextRound}{card})`));
       }
       if (eff.type === 'conditional_draw') {
-        // Chatter: "If 3+ cards played this round, draw N additional card(s)."
+        // Chatter: "If this is your 3rd or later card played this round, draw N
+        // additional card(s)." Glows in hand once playing it would be the Nth.
         const val = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
-        if (val > 0) parts.push(p(`(+${val}{card})`));
+        if (val > 0) {
+          const threshold = eff.condition_threshold ?? 3;
+          const met = eff.condition === 'if_cards_played_this_round_gte'
+            && ctx?.playedCardNames !== undefined
+            && ctx.playedCardNames.length + 1 >= threshold;
+          parts.push(pg(`(+${val}{card})`, met && !ctx?.powerFrozen));
+        }
       }
       if (eff.type === 'resources_per_tiles_captured_last_round') {
         // Pursuit: resources scale with tiles captured from opponents last round.

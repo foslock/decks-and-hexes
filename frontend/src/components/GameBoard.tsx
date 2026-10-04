@@ -762,6 +762,8 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       const below = placeStackRef.current(engine, key, heights[i], pt);
       if (below === null) return;
       el.style.transform = `translate3d(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px, 0) translate(-50%, ${below ? '0' : '-100%'})`;
+      const flag = below ? '1' : '0';
+      if (el.dataset.below !== flag) el.dataset.below = flag;
       const a = engine.buildAlpha(key);
       el.style.opacity = a >= 1 ? '' : a.toFixed(3);
     });
