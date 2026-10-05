@@ -24,8 +24,9 @@ export interface BoardCardEntry {
   revealed?: boolean;
   /** Played face down: shows its back (no zoom) until it turns over. */
   faceDown?: boolean;
-  /** Face down in one pile with the same player's other face-down cards on
-   *  the tile, until they spread out to turn over. */
+  /** In one pile with the same player's other stacked cards on the tile —
+   *  face down at the reveal until they spread out to turn over, face up
+   *  when a tile's plays are reviewed. */
   stacked?: boolean;
   /** Pulse (a War Banner whose buff a hovered/selected Claim will use). */
   pulse?: boolean;
@@ -60,10 +61,10 @@ export function fanOffset(i: number, n: number, s: number): number {
   return (i - (n - 1) / 2) * (CARD_W * s + STACK_GAP);
 }
 
-/** Where each card sits in a tile's row: a player's stacked face-down cards
- *  share one slot as a pile (depth 0 on top); every other card has its own. */
+/** Where each card sits in a tile's row: a player's stacked cards share one
+ *  slot as a pile (depth 0 on top); every other card has its own. */
 export function tileSlots(entries: BoardCardEntry[]): { slot: number[]; depth: number[]; pile: number[]; slots: number } {
-  const piled = (e: BoardCardEntry) => !!(e.stacked && e.faceDown);
+  const piled = (e: BoardCardEntry) => !!e.stacked;
   const count = new Map<string, number>();
   for (const e of entries) if (piled(e)) count.set(e.playerId, (count.get(e.playerId) ?? 0) + 1);
   const at = new Map<string, number>();
@@ -375,7 +376,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow, still,
  * row (bottom-center) over the tile each frame. At rest the row is
  * see-through; hovering it, opening it or resolving its tile makes it solid.
  */
-export function TileCardStack({ entries, scale, focus, open, faded, passThrough, still, onOpen, onUndo }: {
+export function TileCardStack({ entries, scale, focus, open, faded, passThrough, peek, still, onOpen, onUndo }: {
   entries: BoardCardEntry[];
   scale: number;
   /** This tile is resolving: its cards grow so everyone sees what was played. */
@@ -392,6 +393,9 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   onUndo?: () => void;
   /** The resolve is playing: no hover zoom or open. */
   still?: boolean;
+  /** Shown while its tile is hovered (reviewing a round): solid, and the
+   *  pointer goes through to the board. */
+  peek?: boolean;
 }) {
   const [hot, setHot] = useState(false);
   const s = focus ? Math.max(scale, FOCUS_SCALE) : scale;
@@ -417,8 +421,8 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
         position: 'relative',
         width: w + span,
         height: h,
-        opacity: faded || passThrough ? AIMING_OPACITY : focus || open || hot ? 1 : REST_OPACITY,
-        pointerEvents: faded || passThrough ? 'none' : 'auto',
+        opacity: peek ? 1 : faded || passThrough ? AIMING_OPACITY : focus || open || hot ? 1 : REST_OPACITY,
+        pointerEvents: peek || faded || passThrough ? 'none' : 'auto',
         transition: `opacity 0.2s ease-out, width ${SIZE_EASE}, height ${SIZE_EASE}`,
       }}
     >
@@ -480,9 +484,12 @@ export function EngineQueue({ entries, onOpen, containerRef, title = 'Played', s
 
 /** Full-size view of several cards at once (a tile's stack, the queue, a
  *  player's revealed plays). Click anywhere or press Escape to close. */
-export function CardDetailOverlay({ entries, onClose }: {
+export function CardDetailOverlay({ entries, onClose, onReplay }: {
   entries: { card: Card; subtitleParts?: SubtitlePart[]; playerId?: string; playerName?: string }[];
   onClose: () => void;
+  /** A tile's plays: a gold Replay button that closes the view and plays the
+   *  tile's resolve again. */
+  onReplay?: () => void;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
@@ -508,6 +515,16 @@ export function CardDetailOverlay({ entries, onClose }: {
           </div>
         ))}
       </div>
+      {onReplay && (
+        <button
+          type="button"
+          className="cc-btn-primary"
+          style={{ marginTop: 18, padding: '10px 36px', fontSize: 16 }}
+          onClick={(e) => { e.stopPropagation(); onReplay(); }}
+        >
+          Replay
+        </button>
+      )}
       <div style={{ marginTop: 16, fontSize: 12, color: '#777' }}>Click anywhere to close</div>
     </div>,
     document.body,

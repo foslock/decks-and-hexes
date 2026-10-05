@@ -166,198 +166,120 @@ export function IrreversibleButton({
 }
 
 /**
- * A button that requires hold-to-confirm when `requireHold` is true.
- * The user must press and hold; a white outline grows around the button over
- * `animDuration` ms (driven purely by CSS transition), then after a short
- * buffer the action confirms at `holdDuration` ms total.
- * When `requireHold` is false, it acts as a normal click button.
+ * A button that asks for a second click when `needsConfirm` is true: the
+ * first click arms it — it turns into a "Confirm" button with its warning
+ * showing — and a second click goes ahead. Clicking anywhere else, Escape, or
+ * `needsConfirm` going false puts it back. Otherwise it's a plain button.
  */
-export interface HoldToSubmitHandle {
-  startKeyboardHold: () => void;
-  stopKeyboardHold: () => void;
+export interface ConfirmButtonHandle {
+  /** What a click does (the keyboard's Enter): arm, or go ahead. */
+  press: () => void;
 }
 
-export const HoldToSubmitButton = forwardRef<HoldToSubmitHandle, Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
+export const ConfirmButton = forwardRef<ConfirmButtonHandle, Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onClick'> & {
   onConfirm: () => void;
-  requireHold: boolean;
-  holdDuration?: number;
-  animDuration?: number;
+  needsConfirm: boolean;
   warning: string;
   tooltip?: string;
-}>(function HoldToSubmitButton({
+  /** The armed button's label and look. */
+  confirmLabel?: ReactNode;
+  armedStyle?: React.CSSProperties;
+  armedClassName?: string;
+}>(function ConfirmButton({
   children,
   onConfirm,
-  requireHold,
-  holdDuration = 1200,
-  animDuration = 1000,
+  needsConfirm,
   warning,
   tooltip,
+  confirmLabel = 'Confirm',
+  armedStyle,
+  armedClassName,
+  className,
   style,
   ...buttonProps
 }, ref) {
-  // 'idle' → 'holding' (outline animates via CSS) → 'filled' (outline complete, waiting for buffer) → 'idle'
-  const [phase, setPhase] = useState<'idle' | 'holding' | 'filled'>('idle');
-  const [showWarning, setShowWarning] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [hover, setHover] = useState(false);
+  const [showTip, setShowTip] = useState(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const confirmedRef = useRef(false);
+  const tipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const onConfirmRef = useRef(onConfirm);
   onConfirmRef.current = onConfirm;
 
-  const clearTimers = useCallback(() => {
-    if (warningTimerRef.current) {
-      clearTimeout(warningTimerRef.current);
-      warningTimerRef.current = null;
-    }
-    if (confirmTimerRef.current) {
-      clearTimeout(confirmTimerRef.current);
-      confirmTimerRef.current = null;
-    }
-  }, []);
+  const place = () => {
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (rect) setPosition({ x: rect.right, y: rect.top });
+  };
 
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const holdStartTimeRef = useRef<number>(0);
-  const isKeyboardHoldRef = useRef(false);
-
-  const stopHold = useCallback(() => {
-    clearTimers();
-    setPhase('idle');
-    isKeyboardHoldRef.current = false;
-  }, [clearTimers]);
-
-  const beginHold = useCallback((posX?: number, posY?: number) => {
-    if (!requireHold) return;
-    if (posX !== undefined && posY !== undefined) {
-      setPosition({ x: posX, y: posY });
-    } else if (buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      setPosition({ x: rect.right, y: rect.top });
-    }
-    setShowWarning(true);
-    clearTimers();
-    confirmedRef.current = false;
-    holdStartTimeRef.current = Date.now();
-
-    setPhase('holding');
-    confirmTimerRef.current = setTimeout(() => {
-      confirmedRef.current = true;
-      setPhase('idle');
-      isKeyboardHoldRef.current = false;
+  const press = useCallback(() => {
+    if (!needsConfirm) {
       onConfirmRef.current();
-    }, holdDuration);
-  }, [requireHold, holdDuration, clearTimers]);
-
-  const startHold = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!requireHold) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    beginHold(rect.right, rect.top);
-  }, [requireHold, beginHold]);
-
-  useImperativeHandle(ref, () => ({
-    startKeyboardHold: () => {
-      isKeyboardHoldRef.current = true;
-      beginHold();
-    },
-    stopKeyboardHold: () => {
-      if (!isKeyboardHoldRef.current) return;
-      // If held long enough (past animation), confirm immediately instead of cancelling
-      const elapsed = Date.now() - holdStartTimeRef.current;
-      if (elapsed >= animDuration && !confirmedRef.current) {
-        confirmedRef.current = true;
-        clearTimers();
-        setPhase('idle');
-        isKeyboardHoldRef.current = false;
-        onConfirmRef.current();
-      } else {
-        stopHold();
-      }
-    },
-  }), [beginHold, stopHold, animDuration, clearTimers]);
-
-  const handleClick = useCallback(() => {
-    if (!requireHold) {
-      onConfirm();
       return;
     }
-    if (confirmedRef.current) {
-      confirmedRef.current = false;
+    if (!armed) {
+      place();
+      setArmed(true);
+      return;
     }
-  }, [requireHold, onConfirm]);
+    setArmed(false);
+    onConfirmRef.current();
+  }, [needsConfirm, armed]);
 
-  const handleEnter = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    setPosition({ x: rect.right, y: rect.top });
-    if (requireHold) {
-      setShowWarning(true);
-    } else if (tooltip) {
-      warningTimerRef.current = setTimeout(() => setShowWarning(true), 1000);
-    }
-  }, [requireHold, tooltip]);
+  useImperativeHandle(ref, () => ({ press }), [press]);
 
-  const handleLeave = useCallback(() => {
-    if (phase === 'idle') {
-      clearTimers();
-      setShowWarning(false);
-    }
-  }, [phase, clearTimers]);
-
+  // Nothing left to confirm: back to the plain button.
   useEffect(() => {
-    return () => { clearTimers(); };
-  }, [clearTimers]);
+    if (!needsConfirm) setArmed(false);
+  }, [needsConfirm]);
 
-  // The outline is fully clipped when idle, fully revealed when holding/filled.
-  // CSS transition on clip-path handles the smooth left-to-right reveal.
-  const outlineRevealed = phase === 'holding' || phase === 'filled';
+  // Armed: a click anywhere else (or Escape) stands it down.
+  useEffect(() => {
+    if (!armed) return;
+    const onDown = (e: PointerEvent) => {
+      if (buttonRef.current && e.target instanceof Node && buttonRef.current.contains(e.target)) return;
+      setArmed(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setArmed(false); };
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [armed]);
+
+  useEffect(() => () => { if (tipTimerRef.current) clearTimeout(tipTimerRef.current); }, []);
+
+  const handleEnter = () => {
+    setHover(true);
+    place();
+    // The plain button's tooltip waits a moment; the warning shows at once.
+    if (!needsConfirm && tooltip) tipTimerRef.current = setTimeout(() => setShowTip(true), 1000);
+  };
+  const handleLeave = (e: React.PointerEvent<HTMLButtonElement>) => {
+    setHover(false);
+    setShowTip(false);
+    if (tipTimerRef.current) clearTimeout(tipTimerRef.current);
+    buttonProps.onPointerLeave?.(e);
+  };
+
+  const bubble = armed || (hover && needsConfirm) ? warning : showTip ? tooltip : null;
 
   return (
     <>
       <button
         {...buttonProps}
         ref={buttonRef}
-        onClick={handleClick}
-        onPointerDown={startHold}
-        onPointerUp={stopHold}
-        onPointerLeave={(e) => { stopHold(); handleLeave(); buttonProps.onPointerLeave?.(e); }}
+        onClick={press}
         onPointerEnter={handleEnter}
-        style={{
-          ...style,
-          position: 'relative',
-          overflow: 'hidden',
-          userSelect: 'none',
-          WebkitUserSelect: 'none',
-          touchAction: 'none',
-        }}
+        onPointerLeave={handleLeave}
+        className={armed && armedClassName ? armedClassName : className}
+        style={{ ...style, ...(armed ? armedStyle : null), position: 'relative', userSelect: 'none', WebkitUserSelect: 'none' }}
       >
-        {/* Charge fill that sweeps left-to-right while holding */}
-        {requireHold && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'linear-gradient(90deg, rgba(255,255,255,0.08), rgba(255,255,255,0.28))',
-            pointerEvents: 'none',
-            transformOrigin: 'left center',
-            transform: outlineRevealed ? 'scaleX(1)' : 'scaleX(0)',
-            transition: outlineRevealed ? `transform ${animDuration}ms linear` : 'transform 150ms ease-out',
-          }} />
-        )}
-        {/* White outline that reveals left-to-right via CSS transition */}
-        {requireHold && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            border: '2px solid rgba(255,255,255,0.85)',
-            borderRadius: 'inherit',
-            pointerEvents: 'none',
-            clipPath: outlineRevealed ? 'inset(0 0% 0 0)' : 'inset(0 100% 0 0)',
-            transition: outlineRevealed
-              ? `clip-path ${animDuration}ms linear`
-              : 'none',
-          }} />
-        )}
-        <span style={{ position: 'relative' }}>{children}</span>
+        {armed ? confirmLabel : children}
       </button>
-      {showWarning && createPortal(
+      {bubble && createPortal(
         <div
           style={{
             position: 'fixed',
@@ -379,10 +301,10 @@ export const HoldToSubmitButton = forwardRef<HoldToSubmitHandle, Omit<React.Butt
             textAlign: 'left',
           }}
         >
-          {requireHold ? warning : (tooltip || '')}
-          {requireHold && (
+          {bubble}
+          {needsConfirm && (
             <span style={{ fontSize: 10, color: '#aa8833', marginLeft: 6 }}>
-              — Hold to confirm
+              {armed ? '— Click Confirm to go ahead' : '— Asks you to confirm'}
             </span>
           )}
         </div>,
