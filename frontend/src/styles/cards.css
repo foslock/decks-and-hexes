@@ -122,9 +122,185 @@
   to { opacity: 1; transform: scale(1); }
 }
 
-@keyframes upgradeBadgePulse {
-  0%, 100% { box-shadow: 0 0 4px rgba(255, 216, 74, 0.35), 0 0 8px rgba(255, 216, 74, 0.15); }
-  50% { box-shadow: 0 0 8px rgba(255, 216, 74, 0.85), 0 0 16px rgba(255, 200, 0, 0.45); }
+/* ── Upgrading a card in hand ──────────────────────────────────── */
+
+/* "Hold to Upgrade": a dark-glass pill with a gold hairline above the card.
+   Held, a gold fill sweeps across it (carrying a dark copy of the label). */
+.cc-upgrade-badge {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 4px 13px 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(232, 196, 106, 0.9);
+  background: linear-gradient(180deg, rgba(44, 38, 82, 0.97), rgba(18, 16, 40, 0.97));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 4px 12px rgba(0, 0, 0, 0.5);
+  color: #f3d98b;
+  font-family: var(--cc-font-display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  overflow: visible;
+  animation: cc-upgrade-badge-breathe 1.8s ease-in-out infinite;
+}
+.cc-upgrade-badge:hover { border-color: #ffe39a; }
+.cc-upgrade-badge.is-pressing { animation: none; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 14px rgba(255, 210, 100, 0.6), 0 4px 12px rgba(0, 0, 0, 0.5); }
+.cc-upgrade-badge-label { position: relative; display: flex; align-items: center; }
+.cc-upgrade-badge-fill {
+  position: absolute;
+  inset: 0;
+  padding: inherit;
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  color: #2a1d05;
+  background: linear-gradient(180deg, #ffe39a 0%, #e8c46a 45%, #c79a3c 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  clip-path: inset(0 100% 0 0 round 999px);
+  transition: clip-path 140ms ease-out;
+  pointer-events: none;
+}
+.cc-upgrade-badge.is-pressing .cc-upgrade-badge-fill {
+  clip-path: inset(0 0 0 0 round 999px);
+  transition: clip-path var(--fill-ms, 1350ms) cubic-bezier(0.4, 0, 0.9, 0.7);
+}
+@keyframes cc-upgrade-badge-breathe {
+  0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 4px rgba(255, 210, 100, 0.25), 0 4px 12px rgba(0, 0, 0, 0.5); }
+  50% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 12px rgba(255, 210, 100, 0.65), 0 4px 12px rgba(0, 0, 0, 0.5); }
+}
+
+/* Charging: the card gathers a golden glow and trembles as the hold fills. */
+.cc-hand-charging {
+  animation: cc-upgrade-tremble var(--charge-ms, 1500ms) linear forwards;
+}
+.cc-hand-charging::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 20px;
+  pointer-events: none;
+  z-index: -1;
+  animation: cc-upgrade-charge var(--charge-ms, 1500ms) ease-in forwards;
+}
+@keyframes cc-upgrade-charge {
+  from { box-shadow: 0 0 4px 1px rgba(255, 214, 90, 0.15), 0 0 10px 2px rgba(255, 170, 40, 0.08); }
+  to { box-shadow: 0 0 22px 8px rgba(255, 224, 120, 0.95), 0 0 52px 20px rgba(255, 170, 40, 0.55), inset 0 0 14px 4px rgba(255, 236, 170, 0.7); }
+}
+@keyframes cc-upgrade-tremble {
+  0%, 55% { transform: none; filter: brightness(1); }
+  62% { transform: translate(0.5px, -0.3px) rotate(-0.25deg); }
+  69% { transform: translate(-0.8px, 0.4px) rotate(0.35deg); }
+  76% { transform: translate(1px, -0.5px) rotate(-0.45deg); filter: brightness(1.08); }
+  83% { transform: translate(-1.3px, 0.5px) rotate(0.55deg); }
+  90% { transform: translate(1.6px, -0.6px) rotate(-0.65deg); filter: brightness(1.16); }
+  96% { transform: translate(-1.8px, 0.6px) rotate(0.7deg); }
+  100% { transform: none; filter: brightness(1.25); }
+}
+
+/* Upgraded: the card pops, a white-gold flash, rays wheeling out from behind
+   it, a ring of light racing out, sparks thrown off and a sheen across the
+   new face. */
+.cc-hand-upgraded { animation: cc-upgrade-pop 620ms cubic-bezier(0.2, 1.5, 0.4, 1); }
+@keyframes cc-upgrade-pop {
+  0% { transform: scale(1); filter: brightness(1.6); }
+  28% { transform: scale(1.13); filter: brightness(1.45); }
+  100% { transform: scale(1); filter: brightness(1); }
+}
+.cc-upgrade-burst {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  pointer-events: none;
+  z-index: 6;
+}
+.cc-upgrade-flash {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 45%, rgba(255, 255, 255, 0.95), rgba(255, 228, 140, 0.75) 45%, rgba(255, 196, 70, 0.2) 80%);
+  mix-blend-mode: screen;
+  animation: cc-upgrade-flash 560ms ease-out forwards;
+}
+@keyframes cc-upgrade-flash {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.cc-upgrade-rays {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 460px;
+  height: 460px;
+  margin: -230px 0 0 -230px;
+  border-radius: 50%;
+  z-index: -1;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 226, 140, 0.6) 0deg 5deg, rgba(255, 226, 140, 0) 5deg 20deg);
+  -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 66%);
+  mask-image: radial-gradient(circle, #000 18%, transparent 66%);
+  animation: cc-upgrade-rays 1200ms cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+@keyframes cc-upgrade-rays {
+  0% { opacity: 0; transform: scale(0.35) rotate(0deg); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.15) rotate(38deg); }
+}
+.cc-upgrade-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 180px;
+  height: 180px;
+  margin: -90px 0 0 -90px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 232, 160, 0.95);
+  box-shadow: 0 0 18px rgba(255, 210, 100, 0.85), inset 0 0 12px rgba(255, 220, 130, 0.6);
+  animation: cc-upgrade-ring 820ms cubic-bezier(0.15, 0.7, 0.3, 1) forwards;
+}
+@keyframes cc-upgrade-ring {
+  0% { opacity: 1; transform: scale(0.35); }
+  100% { opacity: 0; transform: scale(2.3); border-width: 1px; }
+}
+.cc-upgrade-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.7) 50%, transparent 65%) 0 0 / 260% 100% no-repeat;
+  background-position: 130% 0;
+  mix-blend-mode: screen;
+  animation: cc-upgrade-sheen 700ms ease-in-out 220ms forwards;
+}
+@keyframes cc-upgrade-sheen {
+  from { background-position: 130% 0; }
+  to { background-position: -30% 0; }
+}
+.cc-upgrade-spark {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fffbe8 0%, #ffd56a 55%, rgba(255, 190, 60, 0) 100%);
+  box-shadow: 0 0 8px rgba(255, 210, 100, 0.95);
+  opacity: 0;
+  animation: cc-upgrade-spark 900ms cubic-bezier(0.1, 0.7, 0.3, 1) forwards;
+}
+@keyframes cc-upgrade-spark {
+  0% { opacity: 1; transform: translate(0, 0) scale(var(--s, 1)); }
+  70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(calc(var(--s, 1) * 0.3)); }
 }
 
 /* ── Board cards (played cards over tiles, engine queue) ──────── */

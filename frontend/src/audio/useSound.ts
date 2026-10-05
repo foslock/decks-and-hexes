@@ -1,6 +1,6 @@
 import { useMemo, useEffect } from 'react';
 import { useSettings } from '../components/SettingsContext';
-import { soundEngine } from './SoundEngine';
+import { soundEngine, type HeldSound } from './SoundEngine';
 
 const NO_OP = () => {};
 
@@ -25,6 +25,7 @@ const NO_OP_SOUNDS = {
   resolveBaseRaidShatter: NO_OP,
   resolveBaseRaidHold: NO_OP,
   upgradeCard: NO_OP,
+  upgradeCharge: ((): HeldSound => ({ stop: NO_OP })) as () => HeldSound,
   beginJingle: NO_OP,
   claimSmash: NO_OP as (power: number) => void,
   // Optional extras (not yet wired into components)
@@ -69,6 +70,7 @@ export function useSound(): SoundApi {
       resolveBaseRaidShatter: () => soundEngine.resolveBaseRaidShatter(),
       resolveBaseRaidHold: () => soundEngine.resolveBaseRaidHold(),
       upgradeCard: () => soundEngine.upgradeCard(),
+      upgradeCharge: () => soundEngine.upgradeCharge(),
       beginJingle: () => soundEngine.beginJingle(),
       claimSmash: (power: number) => soundEngine.claimSmash(power),
       hoverTick: () => soundEngine.hoverTick(),

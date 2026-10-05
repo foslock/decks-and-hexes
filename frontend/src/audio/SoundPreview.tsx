@@ -30,7 +30,8 @@ const GROUPS: { title: string; note?: string; entries: Entry[]; ramp?: boolean }
     title: 'Economy & magic',
     entries: [
       { name: 'cardPurchase', desc: 'Gold coins cascade into a leather purse.', burst: [3, 350] },
-      { name: 'upgradeCard', desc: 'Rising air, ascending glass-bell arpeggio, shimmer bloom.' },
+      { name: 'upgradeCharge', desc: 'Holding the upgrade badge: a tone climbing two octaves, an airy rush, quickening glassy plinks (fades if released early).' },
+      { name: 'upgradeCard', desc: 'Upgraded: warm thump and crack, a G-major bell bloom over a brass ta-da, a shower of gold glints.' },
     ],
   },
   {
