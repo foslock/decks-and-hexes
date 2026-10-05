@@ -19,7 +19,7 @@ import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed, useResolveSpeed } from './SettingsContext';
-import Tooltip, { IrreversibleButton, HoldToSubmitButton, type HoldToSubmitHandle } from './Tooltip';
+import Tooltip, { IrreversibleButton, ConfirmButton, type ConfirmButtonHandle } from './Tooltip';
 import * as api from '../api/client';
 import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
@@ -751,8 +751,22 @@ const ACTION_BUTTON_FILLS: Record<ActionButtonVariant, { bg: string; border: str
   info: { bg: 'linear-gradient(180deg, #7cbcff 0%, #4a9eff 52%, #2d74d0 100%)', border: '#a9d3ff', color: '#fff' },
 };
 
-/** Embossed, display-font style shared by the phase action buttons
- *  (Submit Play, Done Buying, Done Reviewing, Confirm/Cancel). */
+/** The buttons that move the round on (Submit Play, Done Buying, their
+ *  Confirm, Done Reviewing, confirming a multi-tile card): embossed gold, the
+ *  sheen sweeping across only while it's ready to go. */
+function progressButton(ready: boolean): { className: string; style: React.CSSProperties } {
+  return {
+    className: `cc-btn-primary cc-btn-progress${ready ? '' : ' is-waiting'}`,
+    style: { padding: '10px 24px', fontSize: 17, lineHeight: '1.2' },
+  };
+}
+
+/** How long the round's review lasts before it's accepted (the Done
+ *  Reviewing button's draining bar). */
+const REVIEW_SECONDS = 30;
+
+/** Embossed, display-font style shared by the other phase action buttons
+ *  (Cancel, Discard / Trash, the muted waiting states). */
 function actionButtonStyle(variant: ActionButtonVariant, size: 'lg' | 'sm' = 'lg'): React.CSSProperties {
   const f = ACTION_BUTTON_FILLS[variant];
   return {
@@ -1008,7 +1022,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   // Test mode: override debt recipient for animation testing
   const testDebtRecipientRef = useRef<{ id: string; name: string } | null>(null);
   const testDebtBannerRef = useRef(false); // true when banner is from test "Give Debt" button
-  const submitPlayRef = useRef<HoldToSubmitHandle>(null);
+  const submitPlayRef = useRef<ConfirmButtonHandle>(null);
   // Errors float just above the top of the resting hand (which rises out of
   // its bottom strip) — and on phones, where the toast spans the screen, above
   // the actions / Submit row too — and fade after a few seconds.
@@ -1055,7 +1069,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     if (next) actionsLabelTimerRef.current = setTimeout(() => setActionsLabelOpen(false), 3000);
   }, []);
   useEffect(() => () => { if (actionsLabelTimerRef.current) clearTimeout(actionsLabelTimerRef.current); }, []);
-  const endTurnRef = useRef<HoldToSubmitHandle>(null);
+  const endTurnRef = useRef<ConfirmButtonHandle>(null);
   // Responsive: stack top-right buttons vertically when screen is narrow
   const [narrowTop, setNarrowTop] = useState(() => window.innerWidth < 700);
   useEffect(() => {
@@ -1086,13 +1100,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const handleDoneReviewingRef = useRef<(() => void) | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewButtonVisible, setReviewButtonVisible] = useState(false);
-  const [reviewCountdown, setReviewCountdown] = useState<number | null>(null);
   /** A tile's resolve playing again (review: click a tile). */
   const [replay, setReplay] = useState<{ id: number; plans: TilePlan[] } | null>(null);
   const replayingRef = useRef(false);
   replayingRef.current = !!replay;
   /** Starts a tile's replay; false when there's nothing to replay there. */
   const startReplayRef = useRef<(tileKey: string) => boolean>(() => false);
+  /** Whether a tile's resolve can replay (the last resolve had it). */
+  const canReplayRef = useRef<(tileKey: string) => boolean>(() => false);
+  /** Review: the cards played on a tile, readable (effective stats), by player. */
+  const reviewEntriesRef = useRef<(tileKey: string) => BoardCardEntry[]>(() => []);
   const revealedActionsRef = useRef<Record<string, import('../types/game').PlannedAction[]> | null>(null);
   const [reviewHoveredTile, setReviewHoveredTile] = useState<string | null>(null);
   const [reviewTilePopupPos, setReviewTilePopupPos] = useState<{ x: number; y: number } | null>(null);
@@ -1103,6 +1120,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   /** The tile whose board cards were last clicked open (solid while open). */
   const [openCardsTile, setOpenCardsTile] = useState<string | null>(null);
   const [detailCards, setDetailCards] = useState<{ card: Card; subtitleParts?: SubtitlePart[]; playerId?: string; playerName?: string }[] | null>(null);
+  /** The tile whose plays the detail view shows, when its resolve can replay. */
+  const [detailReplay, setDetailReplay] = useState<string | null>(null);
   const playerRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   // Resolve animation state
   const [resolving, setResolving] = useState(false);
@@ -2566,27 +2585,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
 
     // Review mode: clicking a tile replays its resolve; a tile with plays but
     // nothing to replay (e.g. Sabotage) opens the full-card overlay.
+    // Review mode: clicking a tile opens its plays full size, with a Replay
+    // button when its resolve can play again.
     if (reviewing && revealedActionsRef.current) {
       const clickedKey = `${q},${r}`;
       if (replayingRef.current) return;
-      if (startReplayRef.current(clickedKey)) return;
-      const entries: { playerId: string; playerName: string; card: Card }[] = [];
-      for (const [pid, playerActions] of Object.entries(revealedActionsRef.current)) {
-        const name = gameState.players[pid]?.name ?? pid;
-        for (const action of playerActions) {
-          const isPrimary = actionTileKey(action) === clickedKey;
-          const isExtra = action.extra_targets?.some(([eq, er]: [number, number]) => `${eq},${er}` === clickedKey);
-          if (isPrimary || isExtra) {
-            entries.push({ playerId: pid, playerName: name, card: action.card });
-          }
-        }
-      }
-      if (entries.length === 1) {
-        setReviewHoveredTile(null);
-        showZoom(entries[0].card);
-      } else if (entries.length > 1) {
+      const entries = reviewEntriesRef.current(clickedKey);
+      if (entries.length) {
         setReviewHoveredTile(null);
         setDetailCards(entries);
+        setDetailReplay(canReplayRef.current(clickedKey) ? clickedKey : null);
       }
       return;
     }
@@ -3398,22 +3406,20 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
             return !!c && c.card_type === 'engine' && c.name !== 'Debt' && !needsOpponentTarget(c) && !c.target_own_tile;
           })();
           if (!hasPlayableEngine) {
-            if (submitCanStillPlay) {
-              submitPlayRef.current?.startKeyboardHold();
-            } else {
-              handleSubmitPlay();
-            }
+            // Like a click: plays left arm Confirm first.
+            if (submitPlayRef.current) submitPlayRef.current.press();
+            else handleSubmitPlay();
             return;
           }
         }
 
-        // Priority 3: End Turn (always requires hold)
+        // Priority 3: End Turn (like a click: resources left arm Confirm first)
         if (
           phase === 'buy' && activePlayer && !resolving &&
           !phaseBanner && activePlayerEffects.length === 0 &&
           !activePlayer.has_ended_turn
         ) {
-          endTurnRef.current?.startKeyboardHold();
+          endTurnRef.current?.press();
           return;
         }
         return;
@@ -3436,18 +3442,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       }
     };
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        submitPlayRef.current?.stopKeyboardHold();
-        endTurnRef.current?.stopKeyboardHold();
-      }
-    };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
     };
   }, [activePlayer, phase, playSubmitted, interactionBlocked, trashMode, trashSelectedIndices, handleTrashToggle, handleConfirmTrash, selectedCardIndex, multiTileCardIndex, multiTileTargets, multiTilePrimaryTarget, handleConfirmMultiTile, resolving, reviewing, reviewButtonVisible, handlePlayEngine, showCardBrowser, showDeckViewer, showShopOverlay, showFullLog, showUpgradePreview, activePlayerEffects, submitCanStillPlay, handleSubmitPlay, phaseBanner, showIntro, introSequence, showGameOver, handleRotateGrid, handleRotateGridReverse]);
 
@@ -3579,28 +3577,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   }, [advanceAndShowBuy]);
   handleDoneReviewingRef.current = handleDoneReviewing;
 
-  // Review countdown: 30s auto-accept timer when "Done Reviewing" button is visible
+  // Review timer: the Done Reviewing button's bar drains over this long, then
+  // accepts; it holds while the player reads a tile's plays or watches a replay.
   const reviewButtonActive = reviewButtonVisible && !activePlayer?.has_acknowledged_resolve;
-  useEffect(() => {
-    if (reviewButtonActive) {
-      setReviewCountdown(30);
-    } else {
-      setReviewCountdown(null);
-    }
-  }, [reviewButtonActive]);
-
-  useEffect(() => {
-    // Paused while a tile's resolve replays.
-    if (reviewCountdown === null || reviewCountdown <= 0 || replay) return;
-    const timer = setTimeout(() => setReviewCountdown(c => c !== null ? c - 1 : null), 1000);
-    return () => clearTimeout(timer);
-  }, [reviewCountdown, replay]);
-
-  useEffect(() => {
-    if (reviewCountdown === 0) {
-      handleDoneReviewingRef.current?.();
-    }
-  }, [reviewCountdown]);
 
   // Phase banner completed
   const handleBannerComplete = useCallback(() => {
@@ -4149,6 +4128,24 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     }
     return map;
   }, [reviewing, gameState.players, actionTileKey]);
+  /** A tile's plays for review, readable (effective stats), each player's
+   *  cards stacked in one pile when they float over the tile. */
+  const reviewEntries = useCallback((tileKey: string): BoardCardEntry[] => {
+    const list = reviewTileCards?.get(tileKey) ?? [];
+    return list.map((entry, i) => {
+      const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
+      const playerActions = revealedActionsRef.current?.[entry.playerId] ?? [];
+      const actionIdx = playerActions.findIndex(a => a.card.id === entry.card.id);
+      const priorNames = actionIdx > 0 ? playerActions.slice(0, actionIdx).map(a => a.card.name) : [];
+      const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: entry.effectiveResourceGain, effectiveDrawCards: entry.effectiveDrawCards };
+      return {
+        key: `review:${entry.playerId}:${entry.card.id}@${tileKey}#${i}`,
+        card: c, subtitleParts: buildCardSubtitle(c, ctx),
+        playerId: entry.playerId, playerName: entry.playerName, stacked: true,
+      };
+    });
+  }, [reviewTileCards, frozenSubtitleContext]);
+  reviewEntriesRef.current = reviewEntries;
 
   // Submit Play button state (used by keyboard handler and UI)
   // NOTE: declared here so it's available to the keyboard effect above
@@ -5042,7 +5039,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const turnOverRevealCards = useCallback((pick: (rc: RevealCard) => boolean): boolean => {
     const cur = revealCardsRef.current;
     if (!cur?.some(rc => rc.faceDown && pick(rc))) return false;
-    const next = cur.map(rc => (rc.faceDown && pick(rc) ? { ...rc, faceDown: false } : rc));
+    // (A card turning over leaves its pile too.)
+    const next = cur.map(rc => (rc.faceDown && pick(rc) ? { ...rc, faceDown: false, stacked: false } : rc));
     revealCardsRef.current = next;
     setRevealCards(next);
     sound.cardDraw();
@@ -5123,6 +5121,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     }
   }, [resolutionSteps, resolvePlans]);
   const replaySeqRef = useRef(0);
+  canReplayRef.current = (tileKey: string) =>
+    !!lastResolveRef.current?.plans.some(p => p.tileKey === tileKey && p.kind !== 'effect') && !!lastResolveRef.current.tiles[tileKey];
   startReplayRef.current = (tileKey: string) => {
     const last = lastResolveRef.current;
     const grid = gameState.grid;
@@ -5219,6 +5219,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       const list = tiles.get(key);
       if (list) list.push(e); else tiles.set(key, [e]);
     };
+    // Reviewing the round: the hovered tile's plays float over it, a pile per player.
+    if (reviewing && !replay && reviewHoveredTile && !revealCards?.length) {
+      const entries = reviewEntries(reviewHoveredTile);
+      if (entries.length) tiles.set(reviewHoveredTile, entries);
+      return { tiles, engines };
+    }
     if (revealCards) {
       // Opponents' cards sit face down until their tile resolves.
       for (const rc of revealCards) {
@@ -5244,7 +5250,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       }
     });
     return { tiles, engines };
-  }, [revealCards, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds]);
+  }, [revealCards, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds, reviewing, replay, reviewHoveredTile, reviewEntries]);
   const tileCardKeys = useMemo(() => [...boardCards.tiles.keys()], [boardCards]);
 
   /** Click a board card: one card opens the zoom; several show side by side. */
@@ -5270,10 +5276,11 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       <TileCardStack
         entries={entries}
         scale={boardCardScale(zoom)}
-        focus={revealFocusTile === tileKey}
+        focus={revealFocusTile === tileKey || (reviewing && !replay && tileKey === reviewHoveredTile)}
         open={openCardsTile === tileKey && (detailCards != null || zoomedCard != null)}
         faded={draggingCardIndex !== null}
         passThrough={aimingAtTiles}
+        peek={reviewing && !replay && tileKey === reviewHoveredTile}
         still={resolving || !!replay}
         onOpen={(list, i) => { setOpenCardsTile(tileKey); openBoardCards(list, i); }}
         onUndo={undoable ? () => {
@@ -6250,11 +6257,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     onPointerDown={(e) => e.stopPropagation()}
                     onClick={handleConfirmMultiTile}
                     tooltip={`Confirm all selected tiles for this ${label} card.${isFullSelection ? ' (Press Enter)' : ''}`}
-                    style={{
-                      ...actionButtonStyle(isFullSelection ? 'go' : 'info'),
-                      cursor: 'pointer',
-                      animation: isFullSelection ? 'pulseGlowGreenMulti 1.6s ease-in-out infinite' : undefined,
-                    }}
+                    {...progressButton(isFullSelection)}
                   >
                     Confirm Tiles
                   </IrreversibleButton>
@@ -6323,21 +6326,19 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 18px rgba(60,200,100,0.65), 0 4px 12px rgba(0,0,0,0.45); }
                   }
                 `}</style>
-                <HoldToSubmitButton
+                <ConfirmButton
                   ref={submitPlayRef}
                   key={activePlayerId}
                   onConfirm={handleSubmitPlay}
-                  requireHold={submitCanStillPlay}
+                  needsConfirm={submitCanStillPlay}
                   warning={`You still have ${activePlayer.hand.length} card(s) and ${submitActionsLeft} action(s) remaining.`}
                   tooltip="Submitting locks your play for this round. You cannot change it after."
-                  style={{
-                    ...actionButtonStyle(submitCanStillPlay ? 'warn' : 'go'),
-                    cursor: 'pointer',
-                    animation: submitCanStillPlay ? 'pulseGlowOrange 2s ease-in-out infinite' : 'pulseGlowGreen 2s ease-in-out infinite',
-                  }}
+                  {...progressButton(!submitCanStillPlay)}
+                  armedClassName={progressButton(true).className}
+                  confirmLabel={<>Confirm<Icon name="check" size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} /></>}
                 >
                   Submit Play<Icon name={submitCanStillPlay ? 'then' : 'check'} size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
-                </HoldToSubmitButton>
+                </ConfirmButton>
               </div>
             )}
             {resolving && (
@@ -6351,16 +6352,26 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                 Resolving...
               </button>
             )}
-            {reviewButtonVisible && !activePlayer?.has_acknowledged_resolve && (
+            {reviewButtonActive && (
               <button
                 onClick={handleDoneReviewing}
+                className={progressButton(true).className}
                 style={{
-                  ...actionButtonStyle('go'),
-                  cursor: 'pointer',
-                  animation: 'reviewBtnFadeIn 0.4s ease-out forwards, pulseGlowGreen 2s ease-in-out 0.4s infinite',
+                  ...progressButton(true).style,
+                  paddingBottom: 15,
+                  animation: 'reviewBtnFadeIn 0.4s ease-out forwards',
                 }}
               >
-                Done Reviewing{reviewCountdown !== null && reviewCountdown > 0 ? ` (${reviewCountdown}s)` : ''}<Icon name="check" size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
+                Done Reviewing<Icon name="check" size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
+                {/* Time left to review: drains, then accepts. Holds while a
+                    tile's plays are open or its resolve replays. */}
+                <span className="cc-review-bar" aria-hidden>
+                  <span
+                    className="cc-review-bar-fill"
+                    style={{ animationDuration: `${REVIEW_SECONDS}s`, animationPlayState: replay || detailCards || zoomedCard ? 'paused' : 'running' }}
+                    onAnimationEnd={handleDoneReviewing}
+                  />
+                </span>
               </button>
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && !discardingAll && !gameState.players_done_buying.includes(activePlayerId) && !activePlayer.has_ended_turn && (
@@ -6375,20 +6386,18 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     50% { box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.18), 0 0 18px rgba(60,200,100,0.65), 0 4px 12px rgba(0,0,0,0.45); }
                   }
                 `}</style>
-                <HoldToSubmitButton
+                <ConfirmButton
                   ref={endTurnRef}
                   onConfirm={handleEndTurn}
-                  requireHold={!cannotAffordAnyBuyOption}
+                  needsConfirm={!cannotAffordAnyBuyOption}
                   warning="Done buying ends your shopping. Any unspent resources carry over."
                   tooltip={cannotAffordAnyBuyOption ? "You can't afford any card, upgrade, or re-roll." : undefined}
-                  style={{
-                    ...actionButtonStyle(cannotAffordAnyBuyOption ? 'go' : 'warn'),
-                    cursor: 'pointer',
-                    animation: cannotAffordAnyBuyOption ? 'pulseGlowGreen 2s ease-in-out infinite' : 'pulseGlowOrange 2s ease-in-out infinite',
-                  }}
+                  {...progressButton(cannotAffordAnyBuyOption)}
+                  armedClassName={progressButton(true).className}
+                  confirmLabel={<>Confirm<Icon name="check" size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} /></>}
                 >
                   Done Buying<Icon name={cannotAffordAnyBuyOption ? 'check' : 'then'} size={12} decorative style={{ marginLeft: 6, verticalAlign: '-0.1em' }} />
-                </HoldToSubmitButton>
+                </ConfirmButton>
               </div>
             )}
             {phase === 'buy' && activePlayer && !resolving && !phaseBanner && activePlayerEffects.length === 0 && (discardingAll || (activePlayer.has_ended_turn && gameState.players_done_buying.includes(activePlayerId))) && (
@@ -6569,49 +6578,6 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         />
       )}
 
-      {/* Review mode: tile hover popup showing cards played on this tile */}
-      {reviewing && !replay && reviewHoveredTile && reviewTilePopupPos && reviewTileCards?.has(reviewHoveredTile) && (() => {
-        const cards = reviewTileCards.get(reviewHoveredTile)!;
-        const POPUP_W = 180;
-        const left = Math.min(reviewTilePopupPos.x + 16, window.innerWidth - POPUP_W - 12);
-        const top = Math.min(reviewTilePopupPos.y - 20, window.innerHeight - cards.length * 70 - 20);
-        return (
-          <div style={{
-            position: 'fixed',
-            left,
-            top: Math.max(8, top),
-            zIndex: 500,
-            background: 'rgba(15, 15, 30, 0.95)',
-            border: '1px solid #555',
-            borderRadius: 8,
-            padding: 8,
-            width: POPUP_W,
-            pointerEvents: 'none',
-          }}>
-            {cards.map((entry, i) => {
-              const playerColor = (() => {
-                const n = PLAYER_COLORS[entry.playerId];
-                return n != null ? `#${n.toString(16).padStart(6, '0')}` : '#888';
-              })();
-              const c = entry.effectivePower != null ? { ...entry.card, power: entry.effectivePower } : entry.card;
-              const playerActions = revealedActionsRef.current?.[entry.playerId] ?? [];
-              const actionIdx = playerActions.findIndex(a => a.card.id === entry.card.id);
-              const priorNames = actionIdx > 0 ? playerActions.slice(0, actionIdx).map(a => a.card.name) : [];
-              const ctx: CardSubtitleContext = { ...frozenSubtitleContext, playedCardNames: priorNames, effectiveResourceGain: entry.effectiveResourceGain, effectiveDrawCards: entry.effectiveDrawCards };
-              const statParts = buildCardSubtitle(c, ctx);
-              return (
-                <div key={i} style={{ marginBottom: i < cards.length - 1 ? 6 : 0 }}>
-                  <div style={{ fontSize: 10, color: playerColor, fontWeight: 'bold', marginBottom: 2 }}>
-                    {entry.playerName}
-                  </div>
-                  <CompactCardFace card={c} width={154} subtitleParts={statParts} />
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-
       {/* Review mode: player hover popup showing all cards played this turn */}
       {reviewing && reviewHoveredPlayer && revealedActionsRef.current?.[reviewHoveredPlayer] && (() => {
         const actions = revealedActionsRef.current![reviewHoveredPlayer];
@@ -6655,7 +6621,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
 
       {/* Several cards at full size (a tile's cards, the queue, a player's plays) */}
       {detailCards && detailCards.length > 0 && (
-        <CardDetailOverlay entries={detailCards} onClose={() => setDetailCards(null)} />
+        <CardDetailOverlay
+          entries={detailCards}
+          onClose={() => { setDetailCards(null); setDetailReplay(null); }}
+          onReplay={detailReplay ? () => {
+            const key = detailReplay;
+            setDetailCards(null);
+            setDetailReplay(null);
+            startReplayRef.current(key);
+          } : undefined}
+        />
       )}
 
       {/* Played cards flying home after the reveal, and trashed ones burning */}
