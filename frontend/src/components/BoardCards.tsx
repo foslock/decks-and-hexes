@@ -2,10 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import CardFull from './CardFull';
+import CardBack from './CardBack';
 import type { SubtitlePart } from './cardSubtitle';
 import { CARD_H, CARD_W, runAnimation } from './hand/cardMotion';
 import { PLAYER_COLORS } from '../board3d/boardTypes';
-import { useAnimated } from './SettingsContext';
+import { cursor } from '../utils/cursors';
+import { useAnimated, useResolveSpeed } from './SettingsContext';
 
 /** A played card shown on the board (over its tile) or in the engine queue. */
 export interface BoardCardEntry {
@@ -20,6 +22,8 @@ export interface BoardCardEntry {
   arriving?: boolean;
   /** An opponent's card turned face up at the reveal (flips in). */
   revealed?: boolean;
+  /** Played face down: shows its back (no zoom) until it turns over. */
+  faceDown?: boolean;
   /** Pulse (a War Banner whose buff a hovered/selected Claim will use). */
   pulse?: boolean;
 }
@@ -56,6 +60,18 @@ export function fanOffset(i: number, n: number, s: number): number {
 function playerColor(pid: string): string {
   const n = PLAYER_COLORS[pid];
   return n != null ? `#${n.toString(16).padStart(6, '0')}` : '#888';
+}
+
+/** How long a face-down board card takes to turn over (ms, at resolve speed 1). */
+export const BOARD_FLIP_MS = 520;
+
+/** A card back scaled down to `scale`, laid over the card's face while it's face down. */
+function ScaledBack({ scale }: { scale: number }) {
+  return (
+    <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${scale})`, transformOrigin: '0 0', transition: `transform ${SIZE_EASE}`, pointerEvents: 'none' }}>
+      <CardBack />
+    </div>
+  );
 }
 
 /** A full card face scaled down to `scale`, top-left anchored in a box of its visual size. */
@@ -146,7 +162,8 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
   placement: 'above' | 'right';
   onOpen: () => void;
   onUndo?: () => void;
-  /** Ring the card in this color (its player's, when players share a tile). */
+  /** Ring the card in this color even if it isn't attributed to a player
+   *  (players share its tile). Attributed cards ring in their player's color. */
   glow?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -169,6 +186,37 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
     if (holdTimer.current) clearTimeout(holdTimer.current);
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
   }, []);
+  // Face down → face up: the card turns edge-on showing its back, then the
+  // face comes round (the back drops away at the edge-on moment).
+  const animated = useAnimated();
+  const resolveSpeed = useResolveSpeed();
+  const flipRef = useRef<HTMLDivElement>(null);
+  const backRef = useRef<HTMLDivElement>(null);
+  const [showBack, setShowBack] = useState(!!entry.faceDown);
+  const wasDown = useRef(!!entry.faceDown);
+  useEffect(() => {
+    const down = !!entry.faceDown;
+    if (down === wasDown.current) return;
+    wasDown.current = down;
+    const canAnimate = typeof flipRef.current?.animate === 'function' && !!backRef.current;
+    if (down || !animated || !canAnimate) { setShowBack(down); return; }
+    let live = true;
+    const timing: KeyframeAnimationOptions = { duration: Math.round(BOARD_FLIP_MS * (resolveSpeed || 1)), easing: 'linear' };
+    const turn = flipRef.current!.animate([
+      { offset: 0, transform: 'perspective(600px) rotateY(0deg) scale(1)', easing: 'ease-in' },
+      { offset: 0.5, transform: 'perspective(600px) rotateY(90deg) scale(1.08)' },
+      { offset: 0.5, transform: 'perspective(600px) rotateY(-90deg) scale(1.08)', easing: 'ease-out' },
+      { offset: 1, transform: 'perspective(600px) rotateY(0deg) scale(1)' },
+    ], timing);
+    backRef.current!.animate([
+      { offset: 0, opacity: 1 }, { offset: 0.5, opacity: 1 }, { offset: 0.5, opacity: 0 }, { offset: 1, opacity: 0 },
+    ], { ...timing, fill: 'forwards' });
+    turn.finished.then(() => { if (live) setShowBack(false); }, () => { if (live) setShowBack(false); });
+    return () => { live = false; };
+  }, [entry.faceDown, animated, resolveSpeed]);
+  const hidden = !!entry.faceDown;
+  // Whose card it is: a glow all round it in their color.
+  const ring = glow ?? (entry.playerName ? playerColor(entry.playerId) : undefined);
   // A card that moves (fan reflow, focus) refreshes its zoom anchor.
   useEffect(() => {
     if (hoverRect && ref.current) setHoverRect(ref.current.getBoundingClientRect());
@@ -183,7 +231,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
       // The zoom waits for a deliberate hover, so sweeping past a card on the
       // way to a tile doesn't throw it over the board.
       onPointerEnter={(e) => {
-        if (e.pointerType === 'touch') return;
+        if (e.pointerType === 'touch' || hidden) return;
         if (hoverTimer.current) clearTimeout(hoverTimer.current);
         hoverTimer.current = setTimeout(() => {
           hoverTimer.current = null;
@@ -209,32 +257,39 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
       onClick={(e) => {
         e.stopPropagation();
         if (undone.current) { undone.current = false; return; }
+        if (hidden) return;
         endHover();
         onOpen();
       }}
       style={{
         width: CARD_W * scale,
         height: CARD_H * scale,
-        cursor: 'pointer',
+        cursor: hidden ? cursor('arrow') : 'pointer',
         borderRadius: 14 * scale,
         opacity: entry.arriving ? 0 : 1,
-        boxShadow: glow ? `0 0 0 2px ${glow}, 0 0 10px 3px ${glow}cc, 0 0 22px 6px ${glow}55` : undefined,
         transition: `opacity 0.18s ease, transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1), width ${SIZE_EASE}, height ${SIZE_EASE}, left ${SIZE_EASE}, box-shadow 0.25s ease, filter 0.45s ease-out`,
         touchAction: 'none',
         ...style,
       }}
     >
       <div style={{ animation: entry.revealed ? 'cc-board-card-reveal 0.55s ease-out both' : undefined, transformOrigin: '50% 50%' }}>
-        <ScaledFace entry={entry} scale={scale} />
+        {/* The ring sits on the part that turns over, so it turns with the card. */}
+        <div ref={flipRef} data-board-card-body style={{
+          position: 'relative', width: CARD_W * scale, height: CARD_H * scale, transformOrigin: '50% 50%',
+          borderRadius: 14 * scale,
+          boxShadow: ring ? `0 0 0 2px ${ring}, 0 0 10px 3px ${ring}cc, 0 0 22px 6px ${ring}55` : undefined,
+          transition: `width ${SIZE_EASE}, height ${SIZE_EASE}, box-shadow 0.25s ease`,
+        }}>
+          <ScaledFace entry={entry} scale={scale} />
+          {showBack && (
+            <div ref={backRef} data-face-down style={{ position: 'absolute', left: 0, top: 0 }}>
+              <ScaledBack scale={scale} />
+            </div>
+          )}
+        </div>
       </div>
       {holding && <div aria-hidden className="cc-board-card-hold" style={{ borderRadius: 14 * scale }} />}
-      {entry.playerName && !glow && (
-        <div aria-hidden style={{
-          position: 'absolute', left: 0, right: 0, bottom: -3, height: 3, borderRadius: 2,
-          background: playerColor(entry.playerId), boxShadow: `0 0 6px ${playerColor(entry.playerId)}`,
-        }} />
-      )}
-      {hoverRect && (
+      {hoverRect && !hidden && (
         <HoverZoom
           entry={entry}
           from={hoverRect}
@@ -274,6 +329,8 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   const n = entries.length;
   // Players sharing a tile: ring each card in its player's color.
   const mixed = new Set(entries.map(e => e.playerId)).size > 1;
+  // Opening the tile's cards never shows ones still face down.
+  const shown = entries.filter(e => !e.faceDown);
   const w = CARD_W * s;
   const h = CARD_H * s;
   const span = n > 1 ? Math.abs(fanOffset(n - 1, n, s) - fanOffset(0, n, s)) : 0;
@@ -300,7 +357,7 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
           entry={e}
           scale={s}
           placement="above"
-          onOpen={() => onOpen(entries, i)}
+          onOpen={() => onOpen(shown, shown.indexOf(e))}
           onUndo={onUndo}
           glow={mixed ? playerColor(e.playerId) : undefined}
           style={{

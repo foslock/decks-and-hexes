@@ -23,7 +23,7 @@ import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { plainCardName } from './CardName';
 import CompactCardFace from './CompactCardFace';
-import { TileCardStack, EngineQueue, CardDetailOverlay, boardCardScale, fanOffset, QUEUE_CARD_SCALE, type BoardCardEntry } from './BoardCards';
+import { TileCardStack, EngineQueue, CardDetailOverlay, boardCardScale, fanOffset, BOARD_FLIP_MS, QUEUE_CARD_SCALE, type BoardCardEntry } from './BoardCards';
 import FlightCard, { type Flight } from './hand/FlightCard';
 import TrashBurn from './hand/TrashBurn';
 import { discardTopSpin } from './hand/CardPile';
@@ -1785,7 +1785,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   }, [phase, phaseBanner, resolving]);
 
   // Chevron reveal animation: once the reveal banner clears, fade in all claim
-  // chevrons (with every played card face up over its tile) before the
+  // chevrons (every played card over its tile, opponents' face down) before the
   // resolve overlay starts.
   const revealHoldMs = revealCards && revealCards.length > 0 ? 1100 : 300;
   useEffect(() => {
@@ -4941,7 +4941,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     }
   }, [sound]);
 
-  // Reveal: every player's plays turn face up over their tiles.
+  // Reveal: every player's plays land over their tiles — opponents' face
+  // down, each turning over as its tile resolves.
   beginRevealRef.current = (state: GameState) => {
     const revealed = state.revealed_actions;
     if (!revealed || animationOff) return;
@@ -4964,6 +4965,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           playerId: pid,
           playerName: name,
           revealed: pid !== activePlayerId,
+          faceDown: pid !== activePlayerId,
           trash: !!a.card.trash_on_use,
         };
         if (a.target_q != null && a.target_r != null) {
@@ -4991,11 +4993,23 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     resolutionSteps.forEach((st, i) => m.set(st.tile_key, i));
     return m;
   }, [resolutionSteps]);
+  /** Turn over the face-down cards on these tiles. Returns whether any did. */
+  const turnOverRevealCards = useCallback((onTile: (tileKey: string) => boolean): boolean => {
+    const cur = revealCardsRef.current;
+    if (!cur?.some(rc => rc.faceDown && rc.tileKey && onTile(rc.tileKey))) return false;
+    const next = cur.map(rc => (rc.faceDown && rc.tileKey && onTile(rc.tileKey) ? { ...rc, faceDown: false } : rc));
+    revealCardsRef.current = next;
+    setRevealCards(next);
+    sound.cardDraw();
+    return true;
+  }, [sound]);
   const handleResolveStepStart = useCallback((idx: number) => {
     const step = resolutionSteps[idx];
     if (!step) return;
     setRevealFocusTile(step.tile_key);
-  }, [resolutionSteps]);
+    // The tile's face-down cards turn over as it resolves.
+    turnOverRevealCards(k => k === step.tile_key);
+  }, [resolutionSteps, turnOverRevealCards]);
 
   // Before the board resolves tile by tile, every card that has nothing to
   // resolve on the board — engine cards, and cards on tiles with no
@@ -5006,10 +5020,18 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   useEffect(() => {
     if (!resolveReady) { setOffBoardHome(false); return; }
     const offBoard = (rc: RevealCard) => rc.tileKey === null || !lastStepByTile.has(rc.tileKey);
-    const ms = animationOff ? 0 : flyRevealCards(offBoard, 120);
-    if (ms === 0) { setOffBoardHome(true); return; }
-    const t = setTimeout(() => setOffBoardHome(true), ms + Math.round(180 * resolveSpeed));
-    return () => clearTimeout(t);
+    // Face-down cards on tiles with nothing to resolve turn over first, so
+    // everyone still sees them before they go.
+    const flipMs = turnOverRevealCards(k => !lastStepByTile.has(k)) ? Math.round((BOARD_FLIP_MS + 350) * resolveSpeed) : 0;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const goHome = () => {
+      const ms = animationOff ? 0 : flyRevealCards(offBoard, 120);
+      if (ms === 0) { setOffBoardHome(true); return; }
+      t = setTimeout(() => setOffBoardHome(true), ms + Math.round(180 * resolveSpeed));
+    };
+    const f = flipMs > 0 ? setTimeout(goHome, flipMs) : undefined;
+    if (!f) goHome();
+    return () => { clearTimeout(f); clearTimeout(t); };
   // Runs once per resolution: flying cards home is not repeatable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolveReady]);
@@ -5069,10 +5091,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       if (list) list.push(e); else tiles.set(key, [e]);
     };
     if (revealCards) {
-      // Opponents' cards turn face up the moment the reveal banner clears.
-      const hideOthers = phaseBanner === 'reveal';
+      // Opponents' cards sit face down until their tile resolves.
       for (const rc of revealCards) {
-        if (hideOthers && rc.playerId !== activePlayerId) continue;
         if (rc.tileKey) addTile(rc.tileKey, rc);
         else if (rc.playerId === activePlayerId) engines.push(rc);
       }
@@ -5095,7 +5115,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       }
     });
     return { tiles, engines };
-  }, [revealCards, phase, phaseBanner, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds]);
+  }, [revealCards, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds]);
   const tileCardKeys = useMemo(() => [...boardCards.tiles.keys()], [boardCards]);
 
   /** Click a board card: one card opens the zoom; several show side by side. */
