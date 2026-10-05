@@ -8,6 +8,7 @@ import type { FxLayer } from './fx';
 import type { BoardLayout } from './layout';
 import { axialToWorld } from './layout';
 import { rng } from './noise';
+import { themeOf } from './props';
 import { Soup, lin, mix, type RGB } from './soup';
 
 /**
@@ -20,8 +21,13 @@ import { Soup, lin, mix, type RGB } from './soup';
  * outward with dust at the build front. Segments that disappear are torn
  * up; segments on a broken route (a tile captured mid-resolve) crumble.
  *
+ * Each road is laid in its owner's archetype style (see ROAD_STYLES):
+ * Vanguard dark slate cobbles, Fortress broad sandstone slabs, Swarm a rutted
+ * mud track.
+ *
  * Decor in a road's corridor (trees, rocks, bushes) is cleared through a
- * small mask texture the prop shader reads.
+ * small mask texture the prop shader reads — as is decor standing where an
+ * occupier pitched camp (setClearings).
  */
 
 const ROAD_VERT_HEAD = /* glsl */ `
@@ -55,10 +61,41 @@ function createRoadMaterial(progress: IUniform<number>): MeshStandardMaterial {
   return m;
 }
 
-const STONES: RGB[] = [lin(0xb4a994), lin(0xa29886), lin(0xbfb39b), lin(0x958c7c)];
-const BED = lin(0x5c4a34);
-const CURB = lin(0x6e685e);
 const WOOD = lin(0x4a3422);
+const STEEL = lin(0x9aa0a8);
+const AMBER: RGB = [1.8, 0.75, 0.18];
+
+/** How a road is laid, by its owner's archetype. */
+interface RoadStyle {
+  /** Bed width. */
+  w: number;
+  bed: RGB;
+  /** Paving: staggered cobbles, broad slabs, or none (a mud track). */
+  paving: 'cobble' | 'slab' | 'mud';
+  stones: RGB[];
+  curb: RGB;
+  /** Curb pieces: stones, heavy blocks, or mud lumps. */
+  curbs: 'stone' | 'block' | 'lump';
+  /** At the tile edge: a pennant, a capped bollard, or an amber spire. */
+  marker: 'pennant' | 'bollard' | 'spire';
+}
+const ROAD_STYLES: Record<'vanguard' | 'fortress' | 'swarm', RoadStyle> = {
+  vanguard: {
+    w: 0.2, bed: lin(0x4a3e34), paving: 'cobble',
+    stones: [lin(0x7a7680), lin(0x6c6870), lin(0x86828a), lin(0x625e66)],
+    curb: lin(0x56525a), curbs: 'stone', marker: 'pennant',
+  },
+  fortress: {
+    w: 0.24, bed: lin(0x6a5a44), paving: 'slab',
+    stones: [lin(0xc9b896), lin(0xbcab88), lin(0xd2c4a2), lin(0xb2a17e)],
+    curb: lin(0x7d7466), curbs: 'block', marker: 'bollard',
+  },
+  swarm: {
+    w: 0.21, bed: lin(0x5a4228), paving: 'mud',
+    stones: [lin(0x8a6a40), lin(0x7a5a36), lin(0x9a7848)],
+    curb: lin(0x4a3620), curbs: 'lump', marker: 'spire',
+  },
+};
 
 interface Segment {
   key: string;
@@ -73,6 +110,8 @@ interface Segment {
   state: 'building' | 'built' | 'removing';
   crumble: boolean;
   dustAcc: number;
+  /** The owner's look it was laid in. */
+  look: string;
 }
 
 /** A segment key independent of direction: player + both tiles. */
@@ -93,7 +132,10 @@ export class RoadLayer {
   private readonly maskRes = 256;
   private extent = 10;
 
-  constructor(private layout: BoardLayout, private fx: FxLayer, private ownerColor: (pid: string) => number) {
+  constructor(
+    private layout: BoardLayout, private fx: FxLayer, private ownerColor: (pid: string) => number,
+    private archetypeOf: (pid: string) => string = () => 'vanguard',
+  ) {
     this.mask = new DataTexture(new Uint8Array(this.maskRes * this.maskRes), this.maskRes, this.maskRes, RedFormat, UnsignedByteType);
     this.mask.magFilter = LinearFilter;
     this.mask.minFilter = LinearFilter;
@@ -115,6 +157,18 @@ export class RoadLayer {
     this.animate = on;
   }
 
+  private clearings: { x: number; z: number; r: number }[] = [];
+  private clearSig = '';
+
+  /** Circles (world xz) to keep clear of decor — occupiers' camps. */
+  setClearings(list: { x: number; z: number; r: number }[]): void {
+    const sig = list.map(c => `${c.x.toFixed(2)},${c.z.toFixed(2)},${c.r.toFixed(2)}`).join('|');
+    if (sig === this.clearSig) return;
+    this.clearSig = sig;
+    this.clearings = list;
+    this.maskDirty = true;
+  }
+
   private lastSig = '';
   private lastPaths: VpPath[] = [];
   private tiles: Record<string, HexTile> = {};
@@ -123,7 +177,11 @@ export class RoadLayer {
     this.tiles = tiles;
     const list = paths ?? [];
     this.lastPaths = list;
-    const sig = list.map(p => `${p.playerId}:${p.breaking ? 'x' : ''}${p.points.map(q => q.join(',')).join(';')}`).join('|');
+    // A road is rebuilt when its owner's look changes (color, archetype).
+    const look = (pid: string) => `${themeOf(this.archetypeOf(pid))}/${this.ownerColor(pid)}`;
+    const sig = list.map(p => `${p.playerId}:${look(p.playerId)}:${p.breaking ? 'x' : ''}${p.points.map(q => q.join(',')).join(';')}`).join('|');
+    const looks = new Map<string, string>();
+    for (const p of list) looks.set(p.playerId, look(p.playerId));
     if (sig === this.lastSig) return;
     this.lastSig = sig;
 
@@ -156,9 +214,11 @@ export class RoadLayer {
 
     for (const [key, w] of want) {
       const existing = this.segs.get(key);
-      if (existing && existing.state !== 'removing') continue;
+      if (existing && existing.state !== 'removing' && existing.look === looks.get(w.pid)) continue;
       if (existing) this.dropSeg(existing);
-      this.segs.set(key, this.buildSeg(key, w.pid, w.from, w.to, w.startIsBase, w.endIsTown, this.animate ? w.order * 0.32 : 0));
+      const seg = this.buildSeg(key, w.pid, w.from, w.to, w.startIsBase, w.endIsTown, this.animate ? w.order * 0.32 : 0);
+      seg.look = looks.get(w.pid) ?? '';
+      this.segs.set(key, seg);
     }
     this.maskDirty = true;
   }
@@ -180,7 +240,9 @@ export class RoadLayer {
     const segLen = Math.hypot(b.x - a.x, b.z - a.z);
 
     const owner = lin(this.ownerColor(pid));
-    const curb = mix(CURB, owner, 0.6);
+    const st = ROAD_STYLES[themeOf(this.archetypeOf(pid))];
+    const BED = st.bed;
+    const curb = mix(st.curb, owner, st.curbs === 'lump' ? 0.15 : 0.6);
     const r = rng(key.length * 7919 + Math.round(A.x * 100) * 31 + Math.round(B.z * 100));
     const s = new Soup(Math.round(A.x * 997 + B.z * 131));
     s.jitter = 0.06;
@@ -188,7 +250,7 @@ export class RoadLayer {
     const heightAt = (x: number, z: number) => this.layout.heightAt(x, z);
 
     // Earth bed (draped strip)
-    const W = 0.2;
+    const W = st.w;
     const steps = Math.max(2, Math.ceil(segLen / 0.08));
     for (let i = 0; i < steps; i++) {
       const t0 = i / steps, t1 = (i + 1) / steps;
@@ -215,27 +277,76 @@ export class RoadLayer {
         s.tri([c.x, heightAt(c.x, c.z) + 0.009, c.z], p1, p0, BED);
       }
     }
-    // Cobbles: staggered rows of flat stones
-    const rowStep = 0.042;
-    const rows = Math.max(1, Math.floor(segLen / rowStep));
-    for (let i = 0; i <= rows; i++) {
-      const t = i / Math.max(1, rows);
-      const cx = a.x + (b.x - a.x) * t, cz = a.z + (b.z - a.z) * t;
-      const stagger = i % 2 ? 0.5 : 0;
-      for (let j = -1.5; j <= 1.5; j += 1) {
-        const off = (j + stagger * (j < 1.5 ? 1 : 0)) * 0.042;
-        if (Math.abs(off) > W * 0.4) continue;
-        const sx = cx + nx * off + (r() - 0.5) * 0.006;
-        const sz = cz + nz * off + (r() - 0.5) * 0.006;
-        const sy = heightAt(sx, sz) + 0.009;
+    const stones = st.stones;
+    const roadRy = Math.atan2(-uz, ux);
+    if (st.paving === 'cobble') {
+      // Cobbles: staggered rows of flat stones
+      const rowStep = 0.042;
+      const rows = Math.max(1, Math.floor(segLen / rowStep));
+      for (let i = 0; i <= rows; i++) {
+        const t = i / Math.max(1, rows);
+        const cx = a.x + (b.x - a.x) * t, cz = a.z + (b.z - a.z) * t;
+        const stagger = i % 2 ? 0.5 : 0;
+        for (let j = -1.5; j <= 1.5; j += 1) {
+          const off = (j + stagger * (j < 1.5 ? 1 : 0)) * 0.042;
+          if (Math.abs(off) > W * 0.4) continue;
+          const sx = cx + nx * off + (r() - 0.5) * 0.006;
+          const sz = cz + nz * off + (r() - 0.5) * 0.006;
+          const sy = heightAt(sx, sz) + 0.009;
+          s.setAnchor(sx, sy, sz);
+          s.place(sx, sy, sz, roadRy + (r() - 0.5) * 0.25, 1);
+          const col = stones[Math.floor(r() * stones.length)];
+          s.box(0.036, 0.008 + r() * 0.004, 0.034, mix(col, BED, 0.1), col);
+        }
+      }
+    } else if (st.paving === 'slab') {
+      // Broad dressed slabs, two to a row, joints staggered
+      const rowStep = 0.075;
+      const rows = Math.max(1, Math.floor(segLen / rowStep));
+      for (let i = 0; i <= rows; i++) {
+        const t = i / Math.max(1, rows);
+        const cx = a.x + (b.x - a.x) * t, cz = a.z + (b.z - a.z) * t;
+        const shift = i % 2 ? 0.025 : -0.025;
+        for (const [off, wide] of [[-W * 0.22 + shift, 0.1], [W * 0.22 + shift, 0.09]] as const) {
+          if (Math.abs(off) > W * 0.42) continue;
+          const sx = cx + nx * off, sz = cz + nz * off;
+          const sy = heightAt(sx, sz) + 0.009;
+          s.setAnchor(sx, sy, sz);
+          s.place(sx, sy, sz, roadRy + (r() - 0.5) * 0.05, 1);
+          const col = stones[Math.floor(r() * stones.length)];
+          s.box(0.068, 0.01, wide, mix(col, BED, 0.08), col);
+        }
+      }
+    } else {
+      // A mud track: two dark wheel ruts, puddled lumps and scattered pebbles
+      const steps2 = Math.max(2, Math.ceil(segLen / 0.05));
+      const rut = mix(BED, [0.02, 0.015, 0.01], 0.45);
+      for (let i = 0; i < steps2; i++) {
+        const t0 = i / steps2, t1 = (i + 1) / steps2;
+        for (const side of [-1, 1]) {
+          const off = side * W * 0.22;
+          const p0 = { x: a.x + (b.x - a.x) * t0 + nx * off, z: a.z + (b.z - a.z) * t0 + nz * off };
+          const p1 = { x: a.x + (b.x - a.x) * t1 + nx * off, z: a.z + (b.z - a.z) * t1 + nz * off };
+          const q = (p: { x: number; z: number }, d: number) => [p.x + nx * d, heightAt(p.x, p.z) + 0.009, p.z + nz * d];
+          const mid = { x: (p0.x + p1.x) / 2, z: (p0.z + p1.z) / 2 };
+          s.setAnchor(mid.x, heightAt(mid.x, mid.z), mid.z);
+          s.place(0, 0, 0, 0, 1);
+          s.quad(q(p0, -0.012), q(p0, 0.012), q(p1, 0.012), q(p1, -0.012), rut);
+        }
+      }
+      const lumps = Math.max(2, Math.floor(segLen / 0.06));
+      for (let i = 0; i <= lumps; i++) {
+        const t = (i + r() * 0.6) / (lumps + 0.6);
+        const off = (r() - 0.5) * W * 0.6;
+        const sx = a.x + (b.x - a.x) * t + nx * off, sz = a.z + (b.z - a.z) * t + nz * off;
+        const sy = heightAt(sx, sz) + 0.004;
         s.setAnchor(sx, sy, sz);
-        s.place(sx, sy, sz, Math.atan2(-uz, ux) + (r() - 0.5) * 0.25, 1);
-        const col = STONES[Math.floor(r() * STONES.length)];
-        s.box(0.036, 0.008 + r() * 0.004, 0.034, mix(col, BED, 0.1), col);
+        s.place(sx, sy, sz, r() * 6, 1);
+        s.blob(0.012 + r() * 0.01, stones[Math.floor(r() * stones.length)], { sy: 0.35, noise: 0.3 });
       }
     }
-    // Owner-tinted curb stones along both edges
-    const curbStep = 0.07;
+    // Curbs along both edges (owner-tinted stones, heavy blocks, mud lumps)
+    const curbStep = st.curbs === 'block' ? 0.095 : st.curbs === 'lump' ? 0.06 : 0.07;
     const curbs = Math.max(1, Math.floor(segLen / curbStep));
     for (const side of [-1, 1]) {
       for (let i = 0; i <= curbs; i++) {
@@ -244,11 +355,19 @@ export class RoadLayer {
         const pz = a.z + (b.z - a.z) * t + nz * side * W * 0.5;
         const py = heightAt(px, pz);
         s.setAnchor(px, py, pz);
-        s.place(px, py, pz, Math.atan2(-uz, ux), 1);
-        s.box(0.052, 0.02, 0.022, curb, mix(curb, [1, 1, 1], 0.12));
+        if (st.curbs === 'lump') {
+          s.place(px, py - 0.004, pz, r() * 6, 1);
+          s.blob(0.016 + r() * 0.008, mix(curb, stones[0], r() * 0.5), { sy: 0.55, noise: 0.3 });
+        } else if (st.curbs === 'block') {
+          s.place(px, py, pz, roadRy, 1);
+          s.box(0.07, 0.03, 0.03, curb, mix(curb, [1, 1, 1], 0.12));
+        } else {
+          s.place(px, py, pz, roadRy, 1);
+          s.box(0.052, 0.02, 0.022, curb, mix(curb, [1, 1, 1], 0.12));
+        }
       }
     }
-    // Marker pennant where the road crosses the tile edge
+    // A marker where the road crosses the tile edge
     {
       const t = Math.min(0.95, Math.max(0.05, (len / 2 - startClip) / Math.max(0.01, segLen)));
       const side = r() < 0.5 ? -1 : 1;
@@ -257,14 +376,36 @@ export class RoadLayer {
       const py = heightAt(px, pz);
       s.setAnchor(px, py, pz);
       s.place(px, py, pz, Math.atan2(-nz, nx) + (side < 0 ? Math.PI : 0), 1);
-      s.cylinder(0.008, 0.006, 0.17, 4, WOOD, { top: null });
-      const fl = s.push(0.004, 0.165, 0, 0, 1);
-      s.windScale = 6;
-      s.windAlongX = true;
-      s.pennant(0.07, 0.04, owner);
-      s.windAlongX = false;
-      s.windScale = 0;
-      s.pop(fl);
+      if (st.marker === 'bollard') {
+        // A squat stone bollard capped in the owner's color
+        s.cylinder(0.022, 0.02, 0.06, 6, st.curb, { top: stones[0] });
+        const cap = s.push(0, 0.06, 0, 0, 1);
+        s.pyramid(0.034, 0.026, owner);
+        s.pop(cap);
+      } else if (st.marker === 'spire') {
+        // A little mud spire with an amber node, tipped in the owner's color
+        s.cone(0.024, 0.09, 6, stones[1], 0.12);
+        const tip = s.push(0, 0.075, 0, 0, 1);
+        s.cone(0.009, 0.03, 4, mix(owner, st.curb, 0.3));
+        s.pop(tip);
+        const node = s.push(0.012, 0.028, 0.012, 0, 1);
+        s.glow = AMBER;
+        s.blob(0.009, st.curb, { noise: 0 });
+        s.glow = [0, 0, 0];
+        s.pop(node);
+      } else {
+        s.cylinder(0.008, 0.006, 0.17, 4, WOOD, { top: null });
+        const tip = s.push(0, 0.17, 0, 0, 1);
+        s.cone(0.006, 0.02, 4, STEEL);
+        s.pop(tip);
+        const fl = s.push(0.004, 0.165, 0, 0, 1);
+        s.windScale = 6;
+        s.windAlongX = true;
+        s.pennant(0.07, 0.04, owner);
+        s.windAlongX = false;
+        s.windScale = 0;
+        s.pop(fl);
+      }
     }
 
     const geo = s.toGeometry();
@@ -281,7 +422,7 @@ export class RoadLayer {
     this.group.add(mesh);
     const seg: Segment = {
       key, playerId: pid, a, b, mesh, mat, progress,
-      start: this.now + delay, duration: 0.42, state: 'building', crumble: false, dustAcc: 0,
+      start: this.now + delay, duration: 0.42, state: 'building', crumble: false, dustAcc: 0, look: '',
     };
     if (!this.animate) seg.state = 'built';
     return seg;
@@ -333,6 +474,17 @@ export class RoadLayer {
           const t = Math.max(0, Math.min(1, ((x - seg.a.x) * dx + (z - seg.a.z) * dz) / l2));
           const d = Math.hypot(x - (seg.a.x + dx * t), z - (seg.a.z + dz * t));
           if (d < R) data[j * res + i] = 255;
+        }
+      }
+    }
+    for (const c of this.clearings) {
+      const minX = Math.max(0, Math.floor(toPix(c.x - c.r))), maxX = Math.min(res - 1, Math.ceil(toPix(c.x + c.r)));
+      const minZ = Math.max(0, Math.floor(toPix(c.z - c.r))), maxZ = Math.min(res - 1, Math.ceil(toPix(c.z + c.r)));
+      for (let j = minZ; j <= maxZ; j++) {
+        for (let i = minX; i <= maxX; i++) {
+          const x = ((i + 0.5) / res - 0.5) * 2 * E;
+          const z = ((j + 0.5) / res - 0.5) * 2 * E;
+          if (Math.hypot(x - c.x, z - c.z) < c.r) data[j * res + i] = 255;
         }
       }
     }

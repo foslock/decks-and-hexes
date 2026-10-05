@@ -16,7 +16,8 @@ import {
   tileTexIndex, TF, type SharedUniforms, type TerrainUniforms, type TileTextures,
 } from './materials';
 import { ParticlePool } from './particles';
-import { buildDecor, buildStructure, buildWallEdge, emptySpots, structureHeight, structureSpec, wallEdges, type AmbientSpots } from './props';
+import { buildDecor, buildStructure, buildWallEdge, emptySpots, structureHeight, structureSpec, wallEdges, type AmbientSpots, type Footprint } from './props';
+import { buildTerritoryPiece, territoryPieces } from './territory';
 import { Soup } from './soup';
 import { FloatingOverlay } from './floating';
 import { RoadLayer } from './roads';
@@ -98,6 +99,8 @@ interface StructureEntry {
 }
 
 /** One edge of a tile's defensive wall (see wallEdges). */
+/** A piece that rises in and sinks away on its own: a wall edge, or a
+ *  piece of occupied territory (camp, outline edge). */
 interface WallEntry {
   tileKey: string;
   k: number;
@@ -139,6 +142,11 @@ export class BoardEngine {
   private decorMesh: Mesh | null = null;
   private structures = new Map<string, StructureEntry>();
   private walls = new Map<string, WallEntry>();
+  /** Occupied territory: camps and outline markers (see territory.ts). */
+  private territory = new Map<string, WallEntry>();
+  private territorySpots = new Map<string, AmbientSpots>();
+  /** Where each tile's decor stands (camps look for open ground). */
+  private decorTaken = new Map<string, Footprint[]>();
   private structureGroup = new Group();
   private sun: DirectionalLight;
   private layout: BoardLayout | null = null;
@@ -190,7 +198,7 @@ export class BoardEngine {
   private input: BoardInputListener = {};
   private pointers = new Map<number, { x: number; y: number }>();
   private orbit: { id: number; x: number; y: number; button: number } | null = null;
-  /** Primary-button press: becomes a click on release, or an orbit once dragged. */
+  /** Primary-button press: becomes a click on release, or a pan once dragged. */
   private press: { id: number; x0: number; y0: number; key: string | null; moved: boolean; mouse: boolean } | null = null;
   private gesture: { dist: number; angle: number; midY: number; zoom: number; rot: number; tilt: number } | null = null;
   private baseRotation = 0;
@@ -506,6 +514,9 @@ export class BoardEngine {
     }
     this.syncStructures();
     this.syncWalls();
+    this.syncTerritory();
+    // Roads follow their owners' looks (archetype, color).
+    if (this.paths) this.roads?.setPaths(this.paths, this.tiles);
     this.shadowDirty = true;
     this.writeTileTextures();
     this.syncBarriers();
@@ -737,6 +748,7 @@ export class BoardEngine {
     this.structures.clear();
     this.structureSpots.clear();
     this.clearWalls();
+    this.clearTerritory();
     if (this.ambient) { this.world.remove(this.ambient.group); this.ambient.dispose(); this.ambient = null; }
     if (this.clouds) { this.world.remove(this.clouds.group); this.clouds.dispose(); this.clouds = null; }
     if (this.markers) { this.world.remove(this.markers.group); this.markers.dispose(); this.markers = null; }
@@ -773,7 +785,8 @@ export class BoardEngine {
     this.world.add(water.mesh);
 
     this.decorSpots = emptySpots();
-    const decor = buildDecor(layout, this.tiles, this.decorSpots);
+    this.decorTaken = new Map();
+    const decor = buildDecor(layout, this.tiles, this.decorSpots, this.decorTaken);
     const decorMat = this.decorMat ?? this.propMat;
     this.decorMesh = new Mesh(decor.toGeometry(), decorMat.material);
     this.decorMesh.customDepthMaterial = decorMat.depth;
@@ -786,6 +799,7 @@ export class BoardEngine {
     this.structures.clear();
     this.structureSpots.clear();
     this.clearWalls();
+    this.clearTerritory();
 
     if (!this.fxLayer) {
       const fx = new FxLayer(layout, this.glowPool, this.smokePool, {
@@ -806,7 +820,7 @@ export class BoardEngine {
       this.markers.setLayout(layout);
     }
     if (!this.roads) {
-      this.roads = new RoadLayer(layout, this.fxLayer!, this.ownerColor);
+      this.roads = new RoadLayer(layout, this.fxLayer!, this.ownerColor, this.archetypeOf);
       this.roads.setAnimate(this.speed > 0);
       this.world.add(this.roads.group);
       this.decorMat = createPropMaterial(this.shared, { tex: this.roads.mask, rect: this.roads.maskRect });
@@ -920,20 +934,58 @@ export class BoardEngine {
         }
       }
     }
-    if (spotsChanged && this.ambient) {
-      const merged = emptySpots();
-      const append = (s: AmbientSpots) => {
-        merged.chimneys.push(...s.chimneys);
-        merged.windmills.push(...s.windmills);
-        merged.pastures.push(...s.pastures);
-        merged.peaks.push(...s.peaks);
-        merged.torches.push(...s.torches);
-      };
-      append(this.decorSpots);
-      for (const s of this.structureSpots.values()) append(s);
-      const castles = layout.tiles.filter(tl => this.tiles[tl.key]?.is_base).map(tl => ({ x: tl.x, y: layout.heightAt(tl.x, tl.z), z: tl.z }));
-      // Pastures on tiles that are no longer pastures (became mountains) are dropped by decor rebuild.
-      this.ambient.setSpots(merged, castles);
+    if (spotsChanged) this.refreshSpots();
+  }
+
+  /** Hand the ambient layer every smoke / flicker / pasture anchor. */
+  private refreshSpots(): void {
+    const layout = this.layout;
+    if (!layout || !this.ambient) return;
+    const merged = emptySpots();
+    const append = (s: AmbientSpots) => {
+      merged.chimneys.push(...s.chimneys);
+      merged.windmills.push(...s.windmills);
+      merged.pastures.push(...s.pastures);
+      merged.peaks.push(...s.peaks);
+      merged.torches.push(...s.torches);
+    };
+    append(this.decorSpots);
+    for (const s of this.structureSpots.values()) append(s);
+    for (const s of this.territorySpots.values()) append(s);
+    const castles = layout.tiles.filter(tl => this.tiles[tl.key]?.is_base).map(tl => ({ x: tl.x, y: layout.heightAt(tl.x, tl.z), z: tl.z }));
+    // Pastures on tiles that are no longer pastures (became mountains) are dropped by decor rebuild.
+    this.ambient.setSpots(merged, castles);
+  }
+
+  /** Rise in / sink away (removed when down) and jolt each piece. */
+  private animatePieces(map: Map<string, WallEntry>, t: number): void {
+    for (const [key, w] of map) {
+      if (w.mode === 'rise') {
+        const k = Math.min(1, (t - w.born) / Math.max(0.2, 0.75 * Math.max(0.5, this.speed)));
+        const e = k >= 1 ? 1 : 1 - Math.pow(1 - k, 3) * Math.cos(k * 6);
+        const sy = Math.max(0.001, Math.min(1.12, e));
+        w.mesh.scale.set(1, sy, 1);
+        w.mesh.position.y = w.base.y * (1 - sy);
+        if (k >= 1) { w.mode = 'idle'; w.mesh.scale.set(1, 1, 1); w.mesh.position.y = 0; }
+        this.kick(0.1);
+        this.shadowsLive = true;
+      } else if (w.mode === 'sink') {
+        this.shadowsLive = true;
+        const k = Math.min(1, (t - w.born) / Math.max(0.15, 0.5 * Math.max(0.5, this.speed)));
+        const sy = Math.max(0.001, 1 - k * k);
+        w.mesh.scale.set(1, sy, 1);
+        w.mesh.position.y = w.base.y * (1 - sy);
+        if (k >= 1) { this.disposeWall(w); map.delete(key); continue; }
+        this.kick(0.1);
+      }
+      if (w.jolt > 0) {
+        this.shadowsLive = true;
+        const age = t - w.joltAt;
+        const amp = w.jolt * 0.03 * Math.max(0, 1 - age / 0.45);
+        w.mesh.position.x = Math.sin(age * 90) * amp;
+        w.mesh.position.z = Math.cos(age * 77) * amp;
+        if (age > 0.45) { w.jolt = 0; w.mesh.position.x = 0; w.mesh.position.z = 0; }
+      }
     }
   }
 
@@ -945,11 +997,13 @@ export class BoardEngine {
       s.joltAt = this.time;
       hit = true;
     }
-    for (const w of this.walls.values()) {
-      if (w.tileKey !== key) continue;
-      w.jolt = Math.max(w.jolt, strength);
-      w.joltAt = this.time;
-      hit = true;
+    for (const map of [this.walls, this.territory]) {
+      for (const w of map.values()) {
+        if (w.tileKey !== key) continue;
+        w.jolt = Math.max(w.jolt, strength);
+        w.joltAt = this.time;
+        hit = true;
+      }
     }
     if (hit) this.kick(0.6);
   }
@@ -962,6 +1016,13 @@ export class BoardEngine {
   private clearWalls(): void {
     for (const w of this.walls.values()) this.disposeWall(w);
     this.walls.clear();
+  }
+
+  private clearTerritory(): void {
+    for (const w of this.territory.values()) this.disposeWall(w);
+    this.territory.clear();
+    this.territorySpots.clear();
+    this.roads?.setClearings([]);
   }
 
   /** Dust where a wall edge rises or falls (local px, like other fx). */
@@ -985,7 +1046,7 @@ export class BoardEngine {
     const now = this.time;
     const want = new Set<string>();
     let changed = false;
-    for (const e of wallEdges(layout, this.tiles)) {
+    for (const e of wallEdges(layout, this.tiles, this.archetypeOf, this.ownerColor)) {
       want.add(e.key);
       const cur = this.walls.get(e.key);
       if (cur && cur.mode !== 'sink' && cur.signature === e.signature) continue;
@@ -1028,6 +1089,76 @@ export class BoardEngine {
       changed = true;
     }
     if (changed) this.kick(0.8);
+  }
+
+  /**
+   * Occupied territory: each held tile's camp and its outline markers, in
+   * the holder's archetype style. A tile that changes hands raises its new
+   * occupier's camp and markers while the old ones sink; an outline edge
+   * appears or goes as the neighbours change.
+   */
+  private syncTerritory(): void {
+    const layout = this.layout;
+    if (!layout) return;
+    // A board arriving with its territory (a game loading) just shows it;
+    // changes after that rise and sink.
+    const animate = this.speed > 0 && this.build >= 1 && this.territory.size > 0;
+    const now = this.time;
+    const pieces = territoryPieces(layout, this.tiles, this.decorTaken, this.archetypeOf, this.ownerColor);
+    const want = new Set<string>();
+    const clearings: { x: number; z: number; r: number }[] = [];
+    let changed = false;
+    let spotsChanged = false;
+    for (const p of pieces) {
+      want.add(p.key);
+      if (p.spot?.clear) clearings.push({ x: p.spot.x, z: p.spot.z, r: p.spot.clear });
+      const cur = this.territory.get(p.key);
+      if (cur && cur.mode !== 'sink' && cur.signature === p.signature) continue;
+      const tl = layout.byKey.get(p.tileKey);
+      if (!tl) continue;
+      const soup = new Soup(tl.seed ^ (p.k + 7));
+      const spots = emptySpots();
+      buildTerritoryPiece(soup, tl, layout, p, spots);
+      if (soup.vertexCount === 0) continue;
+      const mesh = new Mesh(soup.toGeometry(), this.propMat.material);
+      mesh.customDepthMaterial = this.propMat.depth;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.structureGroup.add(mesh);
+      if (cur) this.disposeWall(cur);
+      const base = new Vector3(tl.x, layout.heightAt(tl.x, tl.z), tl.z);
+      if (animate) {
+        mesh.scale.set(1, 0.001, 1);
+        mesh.position.y = base.y * 0.999;
+        if (p.spot) this.fxLayer?.dust(p.spot.x * HEX_SIZE, p.spot.z * HEX_SIZE, 8, 0.6);
+        else this.wallDust(p.tileKey, p.k);
+      }
+      this.territory.set(p.key, {
+        tileKey: p.tileKey, k: p.k, signature: p.signature, level: 0, mesh,
+        born: now, mode: animate ? 'rise' : 'idle', jolt: 0, joltAt: 0, base,
+      });
+      this.territorySpots.set(p.key, spots);
+      spotsChanged = true;
+      changed = true;
+    }
+    for (const [key, w] of this.territory) {
+      if (want.has(key) || w.mode === 'sink') continue;
+      if (this.territorySpots.delete(key)) spotsChanged = true;
+      if (animate) {
+        w.mode = 'sink';
+        w.born = now;
+      } else {
+        this.disposeWall(w);
+        this.territory.delete(key);
+      }
+      changed = true;
+    }
+    this.roads?.setClearings(clearings);
+    if (spotsChanged) this.refreshSpots();
+    if (changed) {
+      this.shadowDirty = true;
+      this.kick(0.8);
+    }
   }
 
   /** In-flight ownership sweeps: tile → start time + origin angle. */
@@ -1196,7 +1327,10 @@ export class BoardEngine {
         const dy = e.clientY - this.orbit.y;
         this.orbit.x = e.clientX;
         this.orbit.y = e.clientY;
-        if (e.shiftKey || this.orbit.button === 1) {
+        // Left-drag (or middle-drag) pans — the ground follows the cursor;
+        // right-drag, or shift + left-drag, turns and tilts.
+        const turn = this.orbit.button === 2 || (this.orbit.button === 0 && e.shiftKey);
+        if (!turn) {
           this.panBy(dx, dy);
         } else {
           // Grab-and-turn: the board's near side follows the cursor
@@ -1219,7 +1353,7 @@ export class BoardEngine {
         if (dist > (pr.mouse ? 6 : 10)) {
           pr.moved = true;
           if (pr.mouse && this.cameraInput) {
-            // Left-drag orbits: hand this pointer over to the camera.
+            // Left-drag pans: hand this pointer over to the camera.
             this.orbit = { id: e.pointerId, x: e.clientX, y: e.clientY, button: 0 };
             canvas.style.cursor = 'var(--cc-cursor-grabbing)';
             this.input.onGesture?.();
@@ -1473,35 +1607,9 @@ export class BoardEngine {
       }
     }
 
-    // Wall edges: rise in / sink away + jolts
-    for (const [key, w] of this.walls) {
-      if (w.mode === 'rise') {
-        const k = Math.min(1, (t - w.born) / Math.max(0.2, 0.75 * Math.max(0.5, this.speed)));
-        const e = k >= 1 ? 1 : 1 - Math.pow(1 - k, 3) * Math.cos(k * 6);
-        const sy = Math.max(0.001, Math.min(1.12, e));
-        w.mesh.scale.set(1, sy, 1);
-        w.mesh.position.y = w.base.y * (1 - sy);
-        if (k >= 1) { w.mode = 'idle'; w.mesh.scale.set(1, 1, 1); w.mesh.position.y = 0; }
-        this.kick(0.1);
-        this.shadowsLive = true;
-      } else if (w.mode === 'sink') {
-        this.shadowsLive = true;
-        const k = Math.min(1, (t - w.born) / Math.max(0.15, 0.5 * Math.max(0.5, this.speed)));
-        const sy = Math.max(0.001, 1 - k * k);
-        w.mesh.scale.set(1, sy, 1);
-        w.mesh.position.y = w.base.y * (1 - sy);
-        if (k >= 1) { this.disposeWall(w); this.walls.delete(key); continue; }
-        this.kick(0.1);
-      }
-      if (w.jolt > 0) {
-        this.shadowsLive = true;
-        const age = t - w.joltAt;
-        const amp = w.jolt * 0.03 * Math.max(0, 1 - age / 0.45);
-        w.mesh.position.x = Math.sin(age * 90) * amp;
-        w.mesh.position.z = Math.cos(age * 77) * amp;
-        if (age > 0.45) { w.jolt = 0; w.mesh.position.x = 0; w.mesh.position.z = 0; }
-      }
-    }
+    // Wall edges and territory pieces: rise in / sink away + jolts
+    this.animatePieces(this.walls, t);
+    this.animatePieces(this.territory, t);
 
     const tilt = this.rig.currentTilt;
     this.tiltFactor = Math.max(0, Math.min(1, (tilt - 0.5) / 0.28));

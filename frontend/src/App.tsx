@@ -7,6 +7,7 @@ import GameScreen from './components/GameScreen';
 import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
 import ResolveAnimationPreview from './components/ResolveAnimationPreview';
+import TerritoryPreview from './components/TerritoryPreview';
 import SoundPreview from './audio/SoundPreview';
 import IconPreview from './icons/IconPreview';
 import CardsPreview, { HandPreview } from './components/CardsPreview';
@@ -308,6 +309,13 @@ function AppInner() {
     return (
       <SettingsProvider>
         <ResolveAnimationPreview />
+      </SettingsProvider>
+    );
+  }
+  if (previewMode === 'territory') {
+    return (
+      <SettingsProvider>
+        <TerritoryPreview />
       </SettingsProvider>
     );
   }

@@ -5232,7 +5232,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           style={{ flex: 1, position: 'relative', minHeight: 0, overflow: 'visible' }}
           onPointerDown={(e) => {
             // Presses on the board itself are handled by GameBoard (a click on
-            // empty board deselects via onEmptyClick; a drag orbits the camera).
+            // empty board deselects via onEmptyClick; a drag pans the camera).
             // Anything else in the grid area (HUD chrome) deselects as before.
             if ((e.target as HTMLElement).tagName === 'CANVAS') return;
             setSelectedCardIndex(null);
