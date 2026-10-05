@@ -36,17 +36,43 @@ describe('board cards', () => {
     expect(onOpen).toHaveBeenCalledWith(entries, 1);
   });
 
-  it('rings each card in its player\'s color only when players share a tile', () => {
+  it('keeps an opponent\'s face-down card hidden until it turns over', () => {
+    const onOpen = vi.fn();
+    const mine = entry('a', 'Explore', 'p0');
+    const theirs: BoardCardEntry = { ...entry('b', 'Dog Pile', 'p1'), faceDown: true };
+    const stack = (e: BoardCardEntry[]) => <WithSettings><TileCardStack entries={e} scale={0.25} onOpen={onOpen} /></WithSettings>;
+    const { container, rerender } = render(stack([mine, theirs]));
+    const cards = container.querySelectorAll('[data-board-card]');
+    expect(cards[1].querySelector('[data-face-down]')).not.toBeNull();
+    expect(cards[0].querySelector('[data-face-down]')).toBeNull();
+    // Face down: nothing to open; opening the tile leaves it out.
+    fireEvent.click(cards[1]);
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.click(cards[0]);
+    expect(onOpen).toHaveBeenCalledWith([mine], 0);
+    // Its tile resolves: it turns face up.
+    rerender(stack([mine, { ...theirs, faceDown: false }]));
+    expect(container.querySelector('[data-face-down]')).toBeNull();
+  });
+
+  it('rings revealed cards, and every card on a shared tile, in its player\'s color', () => {
     const shared = [entry('a', 'Explore', 'player_0'), entry('b', 'Gather', 'player_1')];
     const { container, unmount } = render(<WithSettings><TileCardStack entries={shared} scale={0.25} onOpen={() => {}} /></WithSettings>);
-    const cards = container.querySelectorAll<HTMLElement>('[data-board-card]');
+    const cards = container.querySelectorAll<HTMLElement>('[data-board-card-body]');
     expect(cards[0].style.boxShadow).toContain('#e6194b');
     expect(cards[1].style.boxShadow).toContain('#3cb44b');
     unmount();
 
+    // Your own planned cards (not attributed) carry no ring…
     const solo = [entry('c', 'Explore', 'player_0'), entry('d', 'Rabble', 'player_0')];
-    const { container: c2 } = render(<WithSettings><TileCardStack entries={solo} scale={0.25} onOpen={() => {}} /></WithSettings>);
-    c2.querySelectorAll<HTMLElement>('[data-board-card]').forEach(el => expect(el.style.boxShadow).toBe(''));
+    const { container: c2, unmount: u2 } = render(<WithSettings><TileCardStack entries={solo} scale={0.25} onOpen={() => {}} /></WithSettings>);
+    c2.querySelectorAll<HTMLElement>('[data-board-card-body]').forEach(el => expect(el.style.boxShadow).toBe(''));
+    u2();
+
+    // …revealed cards do, all the way round.
+    const revealed = [{ ...entry('e', 'Explore', 'player_1'), playerName: 'Xander' }];
+    const { container: c3 } = render(<WithSettings><TileCardStack entries={revealed} scale={0.25} onOpen={() => {}} /></WithSettings>);
+    expect(c3.querySelector<HTMLElement>('[data-board-card-body]')!.style.boxShadow).toContain('0 0 0 2px #3cb44b');
   });
 
   it('keeps tile cards see-through until hovered, opened or resolving', () => {
