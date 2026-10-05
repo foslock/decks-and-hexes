@@ -34,7 +34,7 @@ export interface BoardControls {
   /** Scripted camera glide (the tutorial). */
   flyTo(shot: CameraShot): void;
   /** The current framing, and a glide back to one. */
-  getView(): CameraView | null;
+  getView(current?: boolean): CameraView | null;
   setView(view: CameraView, seconds?: number): void;
   /** Close in on a tile, keeping the board's orbit. */
   focusTile(key: string, shot: { zoom: number; tilt: number; lower?: number; seconds?: number; arc?: number }): void;
@@ -290,7 +290,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
         resetView: () => engine.resetView(),
         zoom: (f) => engine.zoomBy(f),
         flyTo: (shot) => engine.flyTo(shot),
-        getView: () => engine.getView(),
+        getView: (current) => engine.getView(current),
         setView: (view, seconds) => engine.setView(view, seconds),
         focusTile: (key, shot) => engine.focusTile(key, shot),
         tileAnchor: (key) => {

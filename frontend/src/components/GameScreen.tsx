@@ -4978,15 +4978,19 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           trash: !!a.card.trash_on_use,
           gain: Math.max(0, a.effective_resource_gain ?? a.card.resource_gain ?? 0),
         };
+        // Every deck's starter cards share ids, so a rival's card keys carry
+        // their player id: it never mistakes one of your cards for theirs
+        // (yours keep the keys they had in play, so they don't remount).
+        const cardKey = (at: string) => (pid === activePlayerId ? `${a.card.id}@${at}` : `${pid}:${a.card.id}@${at}`);
         if (a.target_q != null && a.target_r != null) {
           const tileKey = `${a.target_q},${a.target_r}`;
-          cards.push({ ...base, key: `${a.card.id}@${tileKey}`, tileKey, primary: true });
+          cards.push({ ...base, key: cardKey(tileKey), tileKey, primary: true });
           for (const [eq, er] of a.extra_targets ?? []) {
             const k = `${eq},${er}`;
-            cards.push({ ...base, key: `${a.card.id}@${k}`, tileKey: k, primary: false });
+            cards.push({ ...base, key: cardKey(k), tileKey: k, primary: false });
           }
         } else {
-          cards.push({ ...base, key: `${a.card.id}@queue`, tileKey: null, primary: true });
+          cards.push({ ...base, key: cardKey('queue'), tileKey: null, primary: true });
         }
       });
     }

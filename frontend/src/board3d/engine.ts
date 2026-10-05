@@ -449,8 +449,14 @@ export class BoardEngine {
   }
 
   /** Where the camera is aimed, to come back to after a close-up. */
-  getView(): CameraView {
+  /** The framing the camera is headed for — or, with `current`, where it
+   *  is right now on the way there. */
+  getView(current = false): CameraView {
     const rig = this.rig;
+    if (current) {
+      const c = rig.currentState;
+      return { rotation: c.rotation - this.baseRotation, tilt: c.tilt, zoom: c.zoom, panX: c.panX, panZ: c.panZ };
+    }
     return { rotation: this.userRotation, tilt: rig.tilt, zoom: rig.zoom, panX: rig.pan.x, panZ: rig.pan.y };
   }
 

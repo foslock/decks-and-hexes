@@ -15,9 +15,10 @@ import { Num } from '../icons/Num';
 /** What the resolve asks of the game screen as it goes. */
 export interface ResolverApi {
   /** Close in on a tile ('pass': only part way, for a tile that doesn't
-   *  involve the player between two that do); null: back to the player's
-   *  own view. Resolves on arrival. */
-  focus(tileKey: string | null, shot?: CloseUp): Promise<void>;
+   *  involve the player between two that do); null with 'overview': the
+   *  whole board; null alone: back to the player's own view. Resolves on
+   *  arrival. */
+  focus(tileKey: string | null, shot?: Shot): Promise<void>;
   /** The tile now resolving: its cards come forward, its label steps aside
    *  and its claim arrows fade. */
   setActive(plan: TilePlan | null): void;
@@ -42,42 +43,71 @@ interface Props {
   onComplete(): void;
 }
 
-/** How near the camera closes in on a resolving tile than the player's own
+/** How near the camera closes in on a resolving tile than the whole-board
  *  view (capped at the board's maximum zoom): all the way for a tile that
  *  involves the player, part way for one passed on the way between two. */
 const CLOSE_UP_ZOOM = { close: 1.8, pass: 1.3 } as const;
 const CLOSE_UP_TILT = { close: 0.16, pass: 0.08 } as const;
 export type CloseUp = keyof typeof CLOSE_UP_ZOOM;
+/** A resolve camera move: a close-up, or the whole board. */
+export type Shot = CloseUp | 'overview';
+
+/** Two framings close enough to skip a camera move between them. */
+function sameView(a: CameraView, b: CameraView): boolean {
+  return Math.abs(a.zoom - b.zoom) < 0.02 && Math.abs(a.tilt - b.tilt) < 0.01
+    && Math.abs(a.rotation - b.rotation) < 0.01 && Math.hypot(a.panX - b.panX, a.panZ - b.panZ) < 0.05;
+}
 
 /**
- * The resolve's camera: close in on a tile — nearer by CLOSE_UP_ZOOM, tipped down
- * a little, the tile low enough that its cards float in view above it —
- * remembering the player's own framing; or (null) glide back to it. Tile to
- * tile, the camera eases back a touch mid-flight rather than sliding flat.
- * Returns how long the move takes (ms).
+ * The resolve's camera, remembering the player's own framing on its first
+ * move:
+ *  - a tile: close in on it — nearer by CLOSE_UP_ZOOM, tipped down a little,
+ *    the tile low enough that its cards float in view above it (tile to
+ *    tile, it eases back a touch mid-flight rather than sliding flat);
+ *  - 'overview' (no tile): the whole board in the player's orientation, so
+ *    nothing resolving between other players happens off screen;
+ *  - null: glide back to the player's own view.
+ * Returns how long the move takes (ms); 0 when the camera is already there.
  */
 export function resolveCamera(
   controls: BoardControls | null,
   saved: { current: CameraView | null },
   key: string | null,
   speed: number,
-  shot: CloseUp = 'close',
+  shot: Shot = 'close',
 ): number {
   const seconds = 0.7 * (speed || 1);
-  if (key) {
-    const hopping = !!saved.current;
-    if (!saved.current) saved.current = controls?.getView() ?? null;
+  // The player's framing is what the camera was headed for; whether a move
+  // is needed goes by where it actually is (it may still be on its way).
+  const now = controls?.getView() ?? null;
+  const at = controls?.getView(true) ?? null;
+  if (key || shot === 'overview') {
+    if (!saved.current) saved.current = now;
     const base = saved.current;
-    if (controls && base) {
-      controls.focusTile(key, {
-        zoom: base.zoom * CLOSE_UP_ZOOM[shot], tilt: base.tilt + CLOSE_UP_TILT[shot],
-        lower: 0.45, seconds, arc: hopping ? 0.12 : 0,
-      });
+    if (!controls || !base) return 0;
+    if (!key || shot === 'overview') {
+      const overview: CameraView = { ...base, zoom: 1, panX: 0, panZ: 0 };
+      if (at && sameView(at, overview)) {
+        controls.setView(overview, seconds);
+        return 0;
+      }
+      controls.setView(overview, seconds);
+      return seconds * 1000;
     }
-  } else {
-    if (controls && saved.current) controls.setView(saved.current, seconds);
-    saved.current = null;
+    controls.focusTile(key, {
+      zoom: CLOSE_UP_ZOOM[shot], tilt: base.tilt + CLOSE_UP_TILT[shot],
+      lower: 0.45, seconds, arc: at && at.zoom > 1.2 ? 0.12 : 0,
+    });
+    return seconds * 1000;
   }
+  const home = saved.current;
+  saved.current = null;
+  if (!controls || !home) return 0;
+  if (at && sameView(at, home)) {
+    controls.setView(home, seconds);
+    return 0;
+  }
+  controls.setView(home, seconds);
   return seconds * 1000;
 }
 
@@ -92,7 +122,9 @@ type DefenseView =
    *  the tile is decided. */
   | { mode: 'held'; value: number; playerId: string | null; settled?: boolean };
 
-interface ClaimView { playerId: string; value: number; dx: number; dy: number }
+/** A claim's badge: `value` stays null (just the claim glyph) until the
+ *  first card counts — then it shows its power, even a 0. */
+interface ClaimView { playerId: string; value: number | null; dx: number; dy: number }
 interface Shard { id: number; dx: number; dy: number; rot: number; color: string }
 
 const CANCELLED = Symbol('cancelled');
@@ -278,6 +310,21 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
 
     const holderView = (plan: TilePlan, perm = plan.perm, temp = plan.temp): DefenseView =>
       ({ mode: 'defense', perm, temp, immune: plan.immune, holder: plan.holder });
+    /** Whether this tile's defense badge has shown. A defense of 0 stays
+     *  hidden — unless it showed more and was lowered (then the 0 shows). */
+    let defShown = false;
+    /** What holds the tile when no claim does: its owner's defense, or
+     *  nothing to show (a plain 0). */
+    const ownerView = (plan: TilePlan): DefenseView | null =>
+      (plan.immune || plan.perm + plan.temp > 0 || defShown ? holderView(plan) : null);
+    /** The defense badge pops in. */
+    const popDefense = async (view: DefenseView) => {
+      flushSync(() => setDefense(view));
+      defShown = true;
+      await animate(defRef.current, [
+        { transform: 'scale(0.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 },
+      ], ms(220), 'cubic-bezier(0.34, 1.56, 0.64, 1)');
+    };
 
     /** One attacker's claim: count it up, then smash into what holds the tile.
      *  `last`: no claim comes after it (a tie then hands the tile back). */
@@ -285,7 +332,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       const { from, ...dir } = approach(plan, a);
       const color = colorOf(a.playerId);
       // Commit now so the badge's first frame is its entrance's first frame.
-      flushSync(() => setClaim({ playerId: a.playerId, value: countUp ? 0 : a.total, ...dir }));
+      flushSync(() => setClaim({ playerId: a.playerId, value: countUp && a.beats.length ? null : a.total, ...dir }));
       if (from) {
         // It sets out from the claimer's closest tile and flies in beside this one.
         const sx = from.x - dir.dx * CLAIM_R, sy = from.y - dir.dy * CLAIM_R;
@@ -317,6 +364,12 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       } else {
         await wait(260);
       }
+
+      // A claim that bounces needs something to bounce off: an unseen 0
+      // defense (a 0-power claim tying the owner) shows itself first.
+      if (a.clash === 'bounce' && !defRef.current) await popDefense(holderView(plan));
+      // Nothing showing (an empty tile): the claim strikes the ground itself.
+      const hadDefense = !!defRef.current;
 
       // The smash — the bigger the claim, the harder it hits (0 → 8+).
       const k = heft(a.total);
@@ -353,8 +406,10 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
 
       if (a.clash === 'break' || a.clash === 'stalemate') {
         f?.shake((plan.baseRaid ? 0.6 : 0.2) + 0.9 * k, ms(260 + 240 * k));
-        burst(colorOf(holder), 6 + Math.round(10 * k), 1 + 0.9 * k);
-        animate(defRef.current, [{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: `scale(${1.6 + 0.9 * k})` }], ms(160), 'ease-out', 'forwards');
+        if (hadDefense) {
+          burst(colorOf(holder), 6 + Math.round(10 * k), 1 + 0.9 * k);
+          animate(defRef.current, [{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: `scale(${1.6 + 0.9 * k})` }], ms(160), 'ease-out', 'forwards');
+        }
         if (plan.baseRaid && a.clash === 'break') { ring?.shatter(); sfx.resolveBaseRaidShatter(); }
         // A tie with the claim in the lead: neither takes it — both shatter.
         if (a.clash === 'stalemate') {
@@ -372,7 +427,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           // still to come has to beat the tied value first.
           flushSync(() => {
             setClaim(null);
-            setDefense(last ? holderView(plan) : { mode: 'held', value: a.total, playerId: null });
+            setDefense(last ? ownerView(plan) : { mode: 'held', value: a.total, playerId: null });
           });
           await animate(defRef.current, [
             { transform: 'scale(0.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 },
@@ -441,10 +496,9 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
 
     const buildDefense = async (plan: TilePlan, countUp: boolean) => {
       let perm = plan.startPerm, temp = plan.startTemp;
-      flushSync(() => setDefense({ mode: 'defense', perm, temp, immune: false, holder: plan.holder }));
-      await animate(defRef.current, [
-        { transform: 'scale(0.4)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 },
-      ], ms(220), 'cubic-bezier(0.34, 1.56, 0.64, 1)');
+      const view = (): DefenseView => ({ mode: 'defense', perm, temp, immune: false, holder: plan.holder });
+      // No defense, no badge: it appears once there's something to show.
+      if (perm + temp > 0) await popDefense(view());
       if (countUp) {
         await spreadOut(plan.defenseBeats.map(b => b.card));
         for (const b of plan.defenseBeats as Beat[]) {
@@ -452,10 +506,14 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           await reveal([b.card]);
           if (b.add) {
             if (b.temp) temp += b.add; else perm += b.add;
-            flushSync(() => setDefense({ mode: 'defense', perm, temp, immune: false, holder: plan.holder }));
             sfx.hoverTick();
             bump(b.card);
-            await guard(pulse(defRef.current, b.temp ? TEMP_DEF : '#fff'));
+            if (!defShown) {
+              await popDefense(view());
+            } else {
+              flushSync(() => setDefense(view()));
+              await guard(pulse(defRef.current, b.temp ? TEMP_DEF : '#fff'));
+            }
           }
           counting(b.card, false);
           leaveSoon(b.card);
@@ -464,8 +522,13 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       }
       // What the attackers face (immunity, or siege stripping bonuses).
       if (perm !== plan.perm || temp !== plan.temp || plan.immune) {
-        flushSync(() => setDefense(holderView(plan)));
-        await guard(pulse(defRef.current, plan.immune ? TEMP_DEF : '#fff'));
+        const faced = ownerView(plan);
+        if (faced && !defShown) {
+          await popDefense(faced);
+        } else if (faced) {
+          flushSync(() => setDefense(faced));
+          await guard(pulse(defRef.current, plan.immune ? TEMP_DEF : '#fff'));
+        }
       }
       if (plan.immune) sfx.resolveDefenseFortify();
       for (const idx of plan.defenseSteps) api.applyStep(idx);
@@ -473,6 +536,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
     };
 
     const resolveTile = async (plan: TilePlan, full: boolean) => {
+      defShown = false;
       api.setActive(plan);
       setTile({ q: plan.q, r: plan.r, run: ++seq });
 
@@ -552,6 +616,8 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       let lastClose = -1;
       plans.forEach((p, i) => { if (isClose(p)) lastClose = i; });
       try {
+        // Zoom out first: what resolves between other players stays on screen.
+        await guard(api.focus(null, 'overview'));
         for (const [i, plan] of plans.entries()) {
           const close = isClose(plan);
           if (close) {
@@ -560,7 +626,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           } else if (zoomed && i < lastClose && plan.kind !== 'effect') {
             await guard(api.focus(plan.tileKey, 'pass'));
           } else if (zoomed) {
-            await guard(api.focus(null));
+            await guard(api.focus(null, 'overview'));
             zoomed = false;
           }
           await resolveTile(plan, close);
@@ -569,7 +635,8 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           setTile(null);
           api.setActive(null);
         }
-        if (zoomed) await guard(api.focus(null));
+        // Then back to the player's own view.
+        await guard(api.focus(null));
         if (!cancelled) live.current.onComplete();
       } catch (e) {
         if (e !== CANCELLED) {
@@ -618,7 +685,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           <div className="cc-rs-slot" style={{ left: claim.dx * CLAIM_R, top: claim.dy * CLAIM_R }}>
             <div ref={claimRef} className="cc-rs-badge is-claim" style={{ ['--ring' as string]: colorOf(claim.playerId) }}>
               <Icon name="power" size={20} color={readable(colorOf(claim.playerId))} decorative />
-              <Num value={claim.value} size={21} color={readable(colorOf(claim.playerId))} />
+              {claim.value != null && <Num value={claim.value} size={21} color={readable(colorOf(claim.playerId))} />}
             </div>
           </div>
         )}
