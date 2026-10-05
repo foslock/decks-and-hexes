@@ -10,6 +10,22 @@ export interface HeldSound {
 
 const SILENT: HeldSound = { stop: () => {} };
 
+/**
+ * Whether the browser will hold a new audio context back until the page has
+ * had a gesture: Firefox says so outright; Chromium always does before the
+ * first gesture. (Safari can't tell us — prepare() waits and sees.)
+ */
+function autoplayBlocked(): boolean {
+  if (typeof navigator === 'undefined') return true;
+  const nav = navigator as Navigator & {
+    getAutoplayPolicy?: (type: string) => string;
+    userActivation?: { hasBeenActive: boolean };
+    userAgentData?: unknown;
+  };
+  if (typeof nav.getAutoplayPolicy === 'function') return nav.getAutoplayPolicy('audiocontext') === 'disallowed';
+  return !!nav.userAgentData && !!nav.userActivation && !nav.userActivation.hasBeenActive;
+}
+
 /** Fanfares the background music dips under. */
 const DUCK_UNDER = new Set<SoundName>(['victoryJingle', 'defeatJingle', 'beginJingle']);
 
@@ -77,6 +93,8 @@ class SoundEngine {
         const musicGraph = createMusicGraph(this.ctx, this.ctx.destination, this.graph.noise);
         musicGraph.volume.gain.value = this.musicVolume;
         this.music = new DistantMarch(musicGraph);
+        // Safari may start a context on its own (or only at the first click).
+        this.ctx.addEventListener?.('statechange', () => this.syncMusic());
       } catch (e) {
         console.warn('[SoundEngine] audio unavailable', e);
         this.unavailable = true;
@@ -173,14 +191,34 @@ class SoundEngine {
   }
 
   /**
-   * Whether a sound with no click behind it (the title animation) may play:
-   * only once the page has had a gesture — before that the browser holds the
-   * audio back and would let it all out at the first click.
+   * Whether sound can be heard right now: the context runs and its clock has
+   * started. A sound with no click behind it (the title animation) only plays
+   * then — otherwise a held-back context would let it all out late, at the
+   * first click or whenever the audio device wakes.
    */
-  private get unlocked(): boolean {
-    const nav = typeof navigator !== 'undefined' ? navigator as Navigator & { userActivation?: { hasBeenActive: boolean } } : null;
-    if (nav?.userActivation) return nav.userActivation.hasBeenActive;
-    return this.ctx?.state === 'running';
+  private get audible(): boolean {
+    return this.ctx?.state === 'running' && this.ctx.currentTime > 0.02;
+  }
+
+  /**
+   * Get audio going before the title animation: start the context and resolve
+   * true once it can be heard, or false when the browser holds audio back
+   * until a gesture (known up front where the browser says so) or it hasn't
+   * started within `timeoutMs`.
+   */
+  prepare(timeoutMs = 2500): Promise<boolean> {
+    if (!this.enabled && !this.musicEnabled) return Promise.resolve(false);
+    if (autoplayBlocked()) return Promise.resolve(false);
+    if (!this.ensureContext()) return Promise.resolve(false);
+    const t0 = performance.now();
+    return new Promise((resolve) => {
+      const check = () => {
+        if (this.audible) { this.syncMusic(); resolve(true); return; }
+        if (performance.now() - t0 >= timeoutMs) { resolve(false); return; }
+        setTimeout(check, 50);
+      };
+      check();
+    });
   }
 
   /**
@@ -245,9 +283,9 @@ class SoundEngine {
   upgradeCharge(): HeldSound { return this.playHeld('upgradeCharge'); }
   beginJingle() { this.play('beginJingle'); }
   /** The title cards rushing in (they collide 1 s later). */
-  heroWhoosh() { if (this.unlocked) this.play('heroWhoosh'); }
+  heroWhoosh() { if (this.audible) this.play('heroWhoosh'); }
   /** The title cards colliding. */
-  swordClash() { if (this.unlocked) this.play('swordClash'); }
+  swordClash() { if (this.audible) this.play('swordClash'); }
   /** A phase banner's bugle call: 1 → 3, 4 or 5. */
   phaseCall(step: 3 | 4 | 5) { this.play(`phaseCall${step}`); }
   /** A ring of tiles popping up as the board builds, `delay` s from now. */
