@@ -91,7 +91,7 @@ function HeroCard({ card, cardRef }: { card: HeroCardDef; cardRef: RefObject<HTM
   return (
     <div ref={cardRef} className="cc-scr-hero-card" style={{ width: CARD_W, height: CARD_H }}>
       <div className="cc-scr-hero-card-face">
-        <CardFull card={full} artZoom={false} />
+        <CardFull card={full} />
       </div>
     </div>
   );

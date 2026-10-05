@@ -62,7 +62,7 @@ function playerColor(pid: string): string {
 function ScaledFace({ entry, scale }: { entry: BoardCardEntry; scale: number }) {
   return (
     <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${scale})`, transformOrigin: '0 0', transition: `transform ${SIZE_EASE}`, pointerEvents: 'none' }}>
-      <CardFull card={entry.card} subtitleParts={entry.subtitleParts} artZoom={false} />
+      <CardFull card={entry.card} subtitleParts={entry.subtitleParts} />
     </div>
   );
 }
@@ -118,7 +118,7 @@ function HoverZoom({ entry, from, placement, hint, hangsBelow }: {
       transform: to, transformOrigin: '50% 50%', pointerEvents: 'none', zIndex: 20000,
       filter: 'drop-shadow(0 14px 28px rgba(0,0,0,0.6))',
     }}>
-      <CardFull card={entry.card} subtitleParts={entry.subtitleParts} artZoom={false} />
+      <CardFull card={entry.card} subtitleParts={entry.subtitleParts} />
       {hint && (
         <div style={{
           position: 'absolute', left: '50%', top: '100%', marginTop: 8 / ZOOM_SCALE,

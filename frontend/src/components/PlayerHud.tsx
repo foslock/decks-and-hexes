@@ -55,7 +55,7 @@ function StatTip({ label, children, color }: { label: string; children: ReactNod
   return (
     <span
       ref={anchorRef}
-      style={{ position: 'relative', cursor: 'default', color }}
+      style={{ position: 'relative', cursor: 'var(--cc-cursor-arrow)', color }}
       onPointerEnter={() => setShow(true)}
       onPointerLeave={() => { setShow(false); setPos(null); }}
     >
@@ -104,7 +104,7 @@ function VpStatTip({ breakdown, children }: { breakdown: VpBreakdown; children: 
   return (
     <span
       ref={anchorRef}
-      style={{ position: 'relative', cursor: 'default' }}
+      style={{ position: 'relative', cursor: 'var(--cc-cursor-arrow)' }}
       onPointerEnter={() => setShow(true)}
       onPointerLeave={() => { setShow(false); setPos(null); }}
     >

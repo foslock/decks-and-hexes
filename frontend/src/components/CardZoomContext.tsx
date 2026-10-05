@@ -140,7 +140,7 @@ function TiltingZoomedCard({ card }: { card: Card }) {
       ref={wrapRef}
       onClick={(e) => e.stopPropagation()}
       style={{
-        cursor: 'default',
+        cursor: 'var(--cc-cursor-arrow)',
         transform: 'scale(2)',
         transformOrigin: 'center center',
         perspective: '1400px',

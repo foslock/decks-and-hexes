@@ -228,7 +228,7 @@
   background: linear-gradient(180deg, #ffc27a, #f0973c);
   border-color: #ffc98a;
 }
-.cc-scr-seg.is-readonly .cc-scr-seg-btn { cursor: default; }
+.cc-scr-seg.is-readonly .cc-scr-seg-btn { cursor: var(--cc-cursor-arrow); }
 .cc-scr-seg.is-readonly .cc-scr-seg-btn:active { transform: none; }
 .cc-scr-seg-sm .cc-scr-seg-btn { height: 22px; padding: 0 7px; font-size: 11px; border-radius: 6px; }
 

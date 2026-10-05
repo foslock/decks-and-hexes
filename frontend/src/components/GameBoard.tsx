@@ -6,6 +6,7 @@ import { useAnimationSpeed, useTooltips, useVisualQuality } from './SettingsCont
 import CompactCard, { COMPACT_CARD_WIDTH } from './CompactCard';
 import type { IconName } from '../icons/glyphs';
 import { ACTION_SIZE, BoardLabelRow, TILE_SIZE, defenseRow, ownerLabelColor, row, type LabelRow } from './BoardLabel';
+import { cursor } from '../utils/cursors';
 import { HEX_DIRS, type GridTransform } from '../utils/hexGeometry';
 import { BoardEngine, type CameraShot } from '../board3d/engine';
 import { CARD_FULL_HEIGHT } from './CardFull';
@@ -778,13 +779,20 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
 
   const hasLabels = labels.length > 0;
   const engine = ready ? engineRef.current : null;
+  // Aiming a card: the reticle over tiles it can go on. Otherwise the
+  // inspect pointer wherever a tile has details to show.
+  const boardCursor = !hovered || disableHover
+    ? undefined
+    : previewCard
+      ? (previewValidTiles?.has(hovered) ? cursor('target') : undefined)
+      : tooltip ? cursor('inspect') : undefined;
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       <div
         ref={hostRef}
         className="cc-board3d"
-        style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: `calc(100% + ${extendBelow}px)`, overflow: 'hidden' }}
+        style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: `calc(100% + ${extendBelow}px)`, overflow: 'hidden', cursor: boardCursor }}
       />
       {noWebgl && (
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: 'var(--cc-text-dim)', fontSize: 14 }}>

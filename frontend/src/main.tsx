@@ -7,6 +7,9 @@ import './styles/overlays.css'
 import './styles/game.css'
 import './styles/cards.css'
 import './styles/tutorial.css'
+import { installCursors } from './utils/cursors'
+
+installCursors()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

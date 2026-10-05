@@ -168,8 +168,8 @@ export default function TrashBurn({ card, pose, speed, onDone, maxScale = 0.9 }:
         pointerEvents: 'none',
         zIndex: 9995,
       }}>
-        <div ref={leftRef} style={halfStyle(leftClip)}><CardFull card={card} artZoom={false} /></div>
-        <div ref={rightRef} style={halfStyle(rightClip)}><CardFull card={card} artZoom={false} /></div>
+        <div ref={leftRef} style={halfStyle(leftClip)}><CardFull card={card} /></div>
+        <div ref={rightRef} style={halfStyle(rightClip)}><CardFull card={card} /></div>
         <svg width={CARD_W} height={CARD_H} style={{ position: 'absolute', inset: 0, overflow: 'visible' }} aria-hidden>
           <polyline
             ref={seamRef}
