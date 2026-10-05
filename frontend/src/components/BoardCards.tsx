@@ -454,6 +454,50 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   );
 }
 
+/** Size of a rival's engine-card pile beside their ID card. */
+const RIVAL_PILE_SCALE = 0.26;
+
+/**
+ * At the reveal, a rival's engine cards (no tile to land on) wait in a face
+ * down pile beside their ID card until they peel off into it. The piles
+ * follow the ID cards' rows (the player panel can move and resize), above
+ * the HUD but under the overlays (shop, deck viewer…).
+ */
+export function RivalEnginePiles({ piles, rowOf }: {
+  piles: { playerId: string; entries: BoardCardEntry[] }[];
+  rowOf: (playerId: string) => HTMLElement | null | undefined;
+}) {
+  const boxes = useRef(new Map<string, HTMLDivElement>());
+  useEffect(() => {
+    let raf = 0;
+    const place = () => {
+      for (const [pid, el] of boxes.current) {
+        const r = rowOf(pid)?.getBoundingClientRect();
+        if (!r || r.width === 0) { el.style.visibility = 'hidden'; continue; }
+        el.style.visibility = '';
+        el.style.transform = `translate(${Math.round(r.right + 12)}px, ${Math.round(r.top + r.height / 2 - el.offsetHeight / 2)}px)`;
+      }
+      raf = requestAnimationFrame(place);
+    };
+    place();
+    return () => cancelAnimationFrame(raf);
+  }, [rowOf]);
+  return createPortal(
+    <>
+      {piles.map(p => (
+        <div
+          key={p.playerId}
+          ref={el => { if (el) boxes.current.set(p.playerId, el); else boxes.current.delete(p.playerId); }}
+          style={{ position: 'fixed', left: 0, top: 0, zIndex: 400, pointerEvents: 'none', visibility: 'hidden' }}
+        >
+          <TileCardStack entries={p.entries} scale={RIVAL_PILE_SCALE} peek still onOpen={() => {}} />
+        </div>
+      ))}
+    </>,
+    document.body,
+  );
+}
+
 /** Engine cards played this round (they resolve as they are played), under the player's ID card. */
 export function EngineQueue({ entries, onOpen, containerRef, title = 'Played', still }: {
   entries: BoardCardEntry[];

@@ -1349,8 +1349,10 @@ export default function CardHand({
                   height: CARD_H,
                   transform: `translate(${pose.x - CARD_W / 2}px, ${pose.y - CARD_H / 2}px) rotate(${pose.rot}deg) scale(${pose.scale})`,
                   zIndex: enter ? 1100 + di : pose.z,
+                  // Ease-out cubic over 0.32s: the zoom starts gently and settles
+                  // (a steeper curve covered most of the rise in a few frames).
                   transition: animated && !(isLifted && drag?.mode === 'reorder')
-                    ? 'transform 0.2s cubic-bezier(0.2, 0.8, 0.3, 1), filter 0.2s ease'
+                    ? 'transform 0.32s cubic-bezier(0.33, 1, 0.68, 1), filter 0.25s ease'
                     : 'none',
                   opacity: 1,
                   visibility: hidden ? 'hidden' : undefined,

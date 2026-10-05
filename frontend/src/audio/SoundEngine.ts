@@ -1,4 +1,5 @@
 import { createAudioGraph, type AudioGraph } from './graph';
+import { createMusicGraph, DistantMarch } from './music';
 import { SOUNDS, smashSoundName, type SoundName } from './sounds';
 
 /** A sound that can be cut short (a charge-up while a button is held). */
@@ -9,20 +10,32 @@ export interface HeldSound {
 
 const SILENT: HeldSound = { stop: () => {} };
 
+/** Fanfares the background music dips under. */
+const DUCK_UNDER = new Set<SoundName>(['victoryJingle', 'defeatJingle', 'beginJingle']);
+
 /**
  * Owns the (lazily created) AudioContext and master graph, and exposes one
  * method per sound. Recipes live in sounds.ts; the master bus in graph.ts.
+ * Background music (music.ts) has its own bus, volume and on/off, and pauses
+ * while the tab is hidden.
  */
 class SoundEngine {
   private ctx: AudioContext | null = null;
   private graph: AudioGraph | null = null;
   private enabled = true;
   private volume = 1;
+  private musicEnabled = true;
+  private musicVolume = 0.5;
+  private musicHeld = false;
+  private music: DistantMarch | null = null;
   private unavailable = false;
   private unlockBound = false;
 
   constructor() {
     this.bindUnlock();
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      document.addEventListener('visibilitychange', () => this.syncMusic());
+    }
   }
 
   /**
@@ -37,8 +50,9 @@ class SoundEngine {
     this.unlockBound = true;
     const events = ['pointerdown', 'keydown', 'touchend'] as const;
     const unlock = () => {
-      if (!this.enabled) return;
+      if (!this.enabled && !this.musicEnabled) return;
       const graph = this.ensureContext();
+      this.syncMusic();
       if (!graph || this.ctx?.state === 'running') {
         events.forEach((e) => window.removeEventListener(e, unlock, true));
       }
@@ -60,6 +74,9 @@ class SoundEngine {
         this.ctx = new AC({ latencyHint: 'interactive' });
         this.graph = createAudioGraph(this.ctx);
         this.graph.volume.gain.value = this.volume;
+        const musicGraph = createMusicGraph(this.ctx, this.ctx.destination, this.graph.noise);
+        musicGraph.volume.gain.value = this.musicVolume;
+        this.music = new DistantMarch(musicGraph);
       } catch (e) {
         console.warn('[SoundEngine] audio unavailable', e);
         this.unavailable = true;
@@ -88,16 +105,82 @@ class SoundEngine {
     this.enabled = on;
   }
 
+  setMusicVolume(v: number) {
+    this.musicVolume = Math.max(0, Math.min(1, v));
+    this.music?.setVolume(this.musicVolume);
+  }
+
+  setMusicEnabled(on: boolean) {
+    this.musicEnabled = on;
+    // Switched on after the page has had a gesture: start the context now
+    // rather than waiting for the next click.
+    const nav = typeof navigator !== 'undefined' ? navigator as Navigator & { userActivation?: { hasBeenActive: boolean } } : null;
+    if (on && !this.graph && nav?.userActivation?.hasBeenActive) this.ensureContext();
+    this.syncMusic();
+  }
+
+  /** Hold the music silent (the lobby countdown), or let it play again. */
+  holdMusic(on: boolean) {
+    this.musicHeld = on;
+    this.syncMusic();
+  }
+
+  /** Start the music over from the top (a new game). */
+  restartMusic() {
+    this.musicHeld = false;
+    this.music?.stop(0.4);
+    this.syncMusic();
+  }
+
+  /** Music plays while it's on (and not held), the context exists and the tab is visible. */
+  private syncMusic() {
+    const music = this.music;
+    if (!music) return;
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    if (this.musicEnabled && !hidden && !this.musicHeld) {
+      if (!music.playing) {
+        this.ensureContext();
+        music.start();
+      }
+    } else if (music.playing) {
+      music.stop();
+    }
+  }
+
   /** Play any sound by name. Audio failures never propagate into game code. */
   play(name: SoundName) {
     if (!this.enabled) return;
     const graph = this.ensureContext();
     if (!graph) return;
+    if (DUCK_UNDER.has(name)) this.music?.duck(SOUNDS[name].length + 0.3);
     try {
       SOUNDS[name].play(graph);
     } catch (e) {
       console.warn(`[SoundEngine] failed to play ${name}`, e);
     }
+  }
+
+  /** Play a sound `delay` seconds from now, on the audio clock. */
+  playIn(name: SoundName, delay: number) {
+    if (!this.enabled) return;
+    const graph = this.ensureContext();
+    if (!graph) return;
+    try {
+      SOUNDS[name].play(graph, graph.ctx.currentTime + Math.max(0, delay));
+    } catch (e) {
+      console.warn(`[SoundEngine] failed to play ${name}`, e);
+    }
+  }
+
+  /**
+   * Whether a sound with no click behind it (the title animation) may play:
+   * only once the page has had a gesture — before that the browser holds the
+   * audio back and would let it all out at the first click.
+   */
+  private get unlocked(): boolean {
+    const nav = typeof navigator !== 'undefined' ? navigator as Navigator & { userActivation?: { hasBeenActive: boolean } } : null;
+    if (nav?.userActivation) return nav.userActivation.hasBeenActive;
+    return this.ctx?.state === 'running';
   }
 
   /**
@@ -161,6 +244,14 @@ class SoundEngine {
   /** Power gathering while the upgrade badge is held; stop it on release. */
   upgradeCharge(): HeldSound { return this.playHeld('upgradeCharge'); }
   beginJingle() { this.play('beginJingle'); }
+  /** The title cards rushing in (they collide 1 s later). */
+  heroWhoosh() { if (this.unlocked) this.play('heroWhoosh'); }
+  /** The title cards colliding. */
+  swordClash() { if (this.unlocked) this.play('swordClash'); }
+  /** A phase banner's bugle call: 1 → 3, 4 or 5. */
+  phaseCall(step: 3 | 4 | 5) { this.play(`phaseCall${step}`); }
+  /** A ring of tiles popping up as the board builds, `delay` s from now. */
+  tilePop(delay = 0) { this.playIn('tilePop', delay); }
 
   /** A claim smashing into a defense: heavier with its power (0 … 8+). */
   claimSmash(power: number) { this.play(smashSoundName(power)); }

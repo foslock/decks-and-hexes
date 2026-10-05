@@ -264,7 +264,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
   // ── Script context ──
   const makeCtx = useCallback((run: Run): TutorialCtx => {
     const wait = (ms: number) => run.guard(new Promise<void>(r => setTimeout(r, ms * paceRef.current)));
-    const sfx = (name: Exclude<keyof typeof soundRef.current, 'claimSmash'>) => { if (!run.cancelled) soundRef.current[name](); };
+    const sfx = (name: Exclude<keyof typeof soundRef.current, 'claimSmash' | 'phaseCall'>) => { if (!run.cancelled) soundRef.current[name](); };
     const get = () => worldRef.current;
     const set = (patch: Partial<World> | ((w: World) => Partial<World>)) => {
       if (run.cancelled) return;
@@ -508,7 +508,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
 
       reveal: async () => {
         set({ phase: 'Reveal' });
-        sfx('phaseChange');
+        if (!run.cancelled) soundRef.current.phaseCall(4);
         await banner('Reveal');
         const down = facedownRef.current;
         setDown(() => ({}));

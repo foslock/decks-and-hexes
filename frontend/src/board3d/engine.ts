@@ -360,10 +360,11 @@ export class BoardEngine {
     }
   }
 
-  /** Board build-in (0 = hidden, 1 = built). undefined = no animation. */
+  /** Board build-in (0 = hidden, 1 = built). undefined = no animation. The
+   *  camera holds still for it (no swoop): it starts on its resting view. */
   setBuildProgress(p: number | undefined): void {
     const v = p === undefined ? 1 : Math.max(0, Math.min(1, p));
-    if (v < 1 && this.build >= 1 && v < 0.05) this.rig.intro();
+    if (v < 1 && this.build >= 1 && v < 0.05) this.rig.snap();
     this.build = v;
     this.shared.uBuild.value = v;
     this.kick(1.5);

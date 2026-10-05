@@ -1,5 +1,7 @@
-import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from 'react';
+import { soundEngine } from '../audio/SoundEngine';
 
+/** 'off' is kept for the dev preview pages; players choose Normal or Fast. */
 export type AnimationMode = 'normal' | 'fast' | 'off';
 /** Board rendering quality. Low turns off antialiasing and renders at a 1x
  *  pixel ratio, for a faster frame rate. */
@@ -10,6 +12,8 @@ interface Settings {
   tooltips: boolean;
   soundEnabled: boolean;
   soundVolume: number;
+  musicEnabled: boolean;
+  musicVolume: number;
   visualQuality: VisualQuality;
 }
 
@@ -19,13 +23,16 @@ interface SettingsContextValue {
   setTooltips: (on: boolean) => void;
   setSoundEnabled: (on: boolean) => void;
   setSoundVolume: (v: number) => void;
+  setMusicEnabled: (on: boolean) => void;
+  setMusicVolume: (v: number) => void;
   setVisualQuality: (q: VisualQuality) => void;
 }
 
 const STORAGE_KEY = 'cardclash_settings';
 
 const DEFAULT_SETTINGS: Settings = {
-  animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5, visualQuality: 'high',
+  animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5,
+  musicEnabled: true, musicVolume: 0.5, visualQuality: 'high',
 };
 
 function loadSettings(): Settings {
@@ -34,10 +41,13 @@ function loadSettings(): Settings {
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
-        animationMode: parsed.animationMode || 'normal',
+        // Animations can no longer be turned off: Off becomes Fast.
+        animationMode: parsed.animationMode === 'fast' || parsed.animationMode === 'off' ? 'fast' : 'normal',
         tooltips: parsed.tooltips !== false,  // default true
         soundEnabled: parsed.soundEnabled !== false,  // default true
         soundVolume: typeof parsed.soundVolume === 'number' ? parsed.soundVolume : 0.5,
+        musicEnabled: parsed.musicEnabled !== false,  // default true
+        musicVolume: typeof parsed.musicVolume === 'number' ? parsed.musicVolume : 0.5,
         visualQuality: parsed.visualQuality === 'low' ? 'low' : 'high',
       };
     }
@@ -57,11 +67,20 @@ const SettingsContext = createContext<SettingsContextValue>({
   setTooltips: () => {},
   setSoundEnabled: () => {},
   setSoundVolume: () => {},
+  setMusicEnabled: () => {},
+  setMusicVolume: () => {},
   setVisualQuality: () => {},
 });
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<Settings>(loadSettings);
+
+  // Music and sounds play on every screen, so their settings reach the engine
+  // from here.
+  useEffect(() => { soundEngine.setVolume(settings.soundVolume); }, [settings.soundVolume]);
+  useEffect(() => { soundEngine.setEnabled(settings.soundEnabled); }, [settings.soundEnabled]);
+  useEffect(() => { soundEngine.setMusicVolume(settings.musicVolume); }, [settings.musicVolume]);
+  useEffect(() => { soundEngine.setMusicEnabled(settings.musicEnabled); }, [settings.musicEnabled]);
 
   const setAnimationMode = useCallback((mode: AnimationMode) => {
     setSettings((prev) => {
@@ -95,6 +114,22 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const setMusicEnabled = useCallback((on: boolean) => {
+    setSettings((prev) => {
+      const next = { ...prev, musicEnabled: on };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
+  const setMusicVolume = useCallback((v: number) => {
+    setSettings((prev) => {
+      const next = { ...prev, musicVolume: v };
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+
   const setVisualQuality = useCallback((q: VisualQuality) => {
     setSettings((prev) => {
       const next = { ...prev, visualQuality: q };
@@ -104,7 +139,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setVisualQuality }}>
+    <SettingsContext.Provider value={{ settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setMusicEnabled, setMusicVolume, setVisualQuality }}>
       {children}
     </SettingsContext.Provider>
   );
