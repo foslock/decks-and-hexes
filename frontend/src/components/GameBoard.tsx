@@ -8,7 +8,7 @@ import type { IconName } from '../icons/glyphs';
 import { ACTION_SIZE, BoardLabelRow, TILE_SIZE, defenseRow, ownerLabelColor, row, type LabelRow } from './BoardLabel';
 import { cursor } from '../utils/cursors';
 import { HEX_DIRS, type GridTransform } from '../utils/hexGeometry';
-import { BoardEngine, type CameraShot } from '../board3d/engine';
+import { BoardEngine, type CameraShot, type CameraView } from '../board3d/engine';
 import { CARD_FULL_HEIGHT } from './CardFull';
 import { boardCardScale } from './BoardCards';
 import { TOKEN_LABEL_LIFT, type TokenKind, type TokenSpec } from '../board3d/markers';
@@ -21,7 +21,7 @@ export {
   PLAYER_COLORS, cssHexToNumber, syncPlayerColors, computeStackingPowerBonus,
 } from '../board3d/boardTypes';
 export type {
-  BoardFx, ClaimChevron, FxWedge, FxFortifyRing, PlannedActionIcon, VpPath,
+  BoardFx, ClaimChevron, FxFortifyRing, PlannedActionIcon, VpPath,
 } from '../board3d/boardTypes';
 export type { GridTransform } from '../utils/hexGeometry';
 
@@ -33,6 +33,11 @@ export interface BoardControls {
   zoom(factor: number): void;
   /** Scripted camera glide (the tutorial). */
   flyTo(shot: CameraShot): void;
+  /** The current framing, and a glide back to one. */
+  getView(): CameraView | null;
+  setView(view: CameraView, seconds?: number): void;
+  /** Close in on a tile, keeping the board's orbit. */
+  focusTile(key: string, shot: { zoom: number; tilt: number; lower?: number; seconds?: number; arc?: number }): void;
   /** Where a tile's card stack sits on screen — its bottom-center, or its
    *  top-center when it hangs below the tile (`below`, near the board's top
    *  edge) — and the board's label zoom. Lets a played card land right on it. */
@@ -65,6 +70,9 @@ interface GameBoardProps {
   previewValidTiles?: Set<string>;
   /** War Banner: +power the active player's next Claim will consume (preview only). */
   previewClaimBuffBonus?: number;
+  /** A claim's power on a tile from its own effects (hand size, tiles owned,
+   *  cards played, the tile itself…) — the hover preview's number. */
+  claimPowerOn?: (card: Card, tileKey: string) => number;
   /** Claim direction chevrons shown during play/reveal phases */
   claimChevrons?: ClaimChevron[];
   /** VP connection paths shown during resolve phase */
@@ -89,7 +97,7 @@ interface GameBoardProps {
   onLongPress?: (q: number, r: number) => void;
   /** Tile keys where long-press triggers undo */
   undoableTiles?: Set<string>;
-  /** Populated with the board's effects API — read by ResolveOverlay. */
+  /** Populated with the board's effects API — read by the resolve (TileResolver). */
   fxRef?: React.MutableRefObject<BoardFx | null>;
   /** Populated with camera controls for buttons / hotkeys. */
   controlsRef?: React.MutableRefObject<BoardControls | null>;
@@ -104,6 +112,10 @@ interface GameBoardProps {
   viewInsetBottom?: number;
   /** Tile whose card row draws above every other row (the one resolving). */
   raisedTileKey?: string | null;
+  /** Ring this tile (the one resolving) with a fading gold outline. */
+  focusTileKey?: string | null;
+  /** Leave this tile's defense readout to the resolve (it draws its own). */
+  hideDefenseLabelKey?: string | null;
 }
 
 // ── Labels ──────────────────────────────────────────────────────────────
@@ -214,10 +226,10 @@ export default function GameBoard(props: GameBoardProps) {
 function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   const {
     tiles, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, activePlayerId,
-    plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimChevrons, vpPaths,
+    plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimPowerOn, claimChevrons, vpPaths,
     connectedVpTiles, disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
     paused, undoableTiles, fxRef, controlsRef, showCameraControls, dragHoverPosition,
-    tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0, raisedTileKey,
+    tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0, raisedTileKey, focusTileKey, hideDefenseLabelKey,
   } = props;
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BoardEngine | null>(null);
@@ -241,10 +253,8 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   // Stable BoardFx proxy so callers never hold a stale layer reference.
   const fxProxy = useMemo<BoardFx>(() => {
     const fx = () => engineRef.current?.fx ?? null;
-    const noopWedge = { setPoints() {}, setAlpha() {}, setOrder() {}, destroy() {} };
     const noopRing = { setProgress() {}, flash() {}, shatter() {}, setAlpha() {}, destroy() {} };
     return {
-      createWedge: (pid, q, r) => fx()?.createWedge(pid, q, r) ?? noopWedge,
       createFortifyRing: (q, r) => fx()?.createFortifyRing(q, r) ?? noopRing,
       sparks: (...a) => fx()?.sparks(...a),
       dust: (...a) => fx()?.dust(...a),
@@ -252,6 +262,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       pillar: (...a) => fx()?.pillar(...a),
       shake: (...a) => fx()?.shake(...a),
       jolt: (...a) => fx()?.jolt(...a),
+      captureBurst: (...a) => fx()?.captureBurst(...a),
       setSpeed: (m) => engineRef.current?.setSpeed(m),
     };
   }, []);
@@ -276,6 +287,9 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
         resetView: () => engine.resetView(),
         zoom: (f) => engine.zoomBy(f),
         flyTo: (shot) => engine.flyTo(shot),
+        getView: () => engine.getView(),
+        setView: (view, seconds) => engine.setView(view, seconds),
+        focusTile: (key, shot) => engine.focusTile(key, shot),
         tileAnchor: (key) => {
           const host = hostRef.current;
           const pt = { x: 0, y: 0 };
@@ -302,6 +316,10 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   useEffect(() => {
     if (ready) engineRef.current?.setInsetBottom(viewInsetBottom);
   }, [ready, viewInsetBottom]);
+
+  useEffect(() => {
+    if (ready) engineRef.current?.setFocusTile(focusTileKey ?? null);
+  }, [ready, focusTileKey]);
 
   // ── State → engine ──
   useEffect(() => {
@@ -586,7 +604,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
         const kind: TokenKind = c.isConsecrate ? 'consecrate' : c.isAbandon ? 'abandon' : c.isPlayerTarget ? 'target' : c.isDefensive ? 'defense' : 'claim';
         lift = Math.max(lift, TOKEN_LABEL_LIFT[kind]);
       }
-      if (main) rows.push(main);
+      if (main && key !== hideDefenseLabelKey) rows.push(main);
       if (rows.length) out.push({ key, lift, rows, prominent: !!pa || isHoverPreview || isMulti });
     }
     return out;
@@ -600,8 +618,9 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       const permDef = card.effects?.find(e => e.type === 'permanent_defense');
       const defPower = permDef ? effVal(card, permDef) : card.defense_bonus;
       const isImmunity = !!card.effects?.some(e => e.type === 'tile_immunity');
-      let base = card.card_type === 'defense' ? defPower : card.power;
-      for (const eff of card.effects ?? []) {
+      const claimPower = card.card_type === 'claim' ? claimPowerOn : undefined;
+      let base = card.card_type === 'defense' ? defPower : claimPower ? claimPower(card, key) : card.power;
+      for (const eff of claimPower ? [] : card.effects ?? []) {
         if (eff.type !== 'power_modifier') continue;
         const mod = effVal(card, eff);
         if (eff.condition === 'if_defending_owned' && tile.owner === activePlayerId) base += mod;
@@ -623,8 +642,10 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       if (existing && card.card_type === 'claim') {
         const claims = existing.allCards.filter(ac => ac.card.card_type === 'claim').map(ac => ac.card);
         if (claims.length > 0) {
+          // What this card adds to the stack: its own power plus any change
+          // in Dog Pile-style stacking bonuses.
           adds = true;
-          power = base + buff + computeStackingPowerBonus([...claims, card]);
+          power = base + buff + computeStackingPowerBonus([...claims, card]) - computeStackingPowerBonus(claims);
         }
       }
       const persist = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
@@ -639,13 +660,13 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       const permDef = card.effects?.find(e => e.type === 'permanent_defense');
       const isImmunity = !!card.effects?.some(e => e.type === 'tile_immunity');
       const defPower = permDef ? effVal(card, permDef) : card.defense_bonus;
-      const cardPower = isDefenseCard ? defPower : card.power;
+      const cardPower = isDefenseCard ? defPower : card.card_type === 'claim' && claimPowerOn ? claimPowerOn(card, key) : card.power;
       const buff = card.card_type === 'claim' ? (previewClaimBuffBonus ?? 0) : 0;
       let power = cardPower + buff;
       const existing = plannedActions?.get(key);
       if (existing && card.card_type === 'claim') {
         const claims = existing.allCards.filter(ac => ac.card.card_type === 'claim').map(ac => ac.card);
-        power = existing.power + cardPower + buff + computeStackingPowerBonus([...claims, card]);
+        power = existing.power + cardPower + buff + computeStackingPowerBonus([...claims, card]) - computeStackingPowerBonus(claims);
       }
       const isDefensive = isDefenseCard || tile.owner === activePlayerId;
       const persist = tile.base_defense + (tile.permanent_defense_bonus ?? 0);
@@ -669,7 +690,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       const persist = tile.base_defense + (tile.permanent_defense_bonus ?? 0) + pa.permanentDefPower;
       return defenseRow(persist, hasImmunity ? 0 : pa.tempDefPower, hasImmunity, ACTION_SIZE);
     }
-  }, [tiles, plannedActions, multiKeys, previewCard, previewValidTiles, previewClaimBuffBonus, connectedVpTiles, hovered, activePlayerId]);
+  }, [tiles, plannedActions, multiKeys, previewCard, previewValidTiles, previewClaimBuffBonus, claimPowerOn, connectedVpTiles, hovered, activePlayerId, hideDefenseLabelKey]);
 
   // Position labels every rendered frame.
   const labelEls = useRef(new Map<string, HTMLDivElement>());

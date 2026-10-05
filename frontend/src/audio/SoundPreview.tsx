@@ -15,7 +15,7 @@ interface Entry {
   burst?: [number, number];
 }
 
-const GROUPS: { title: string; note?: string; entries: Entry[] }[] = [
+const GROUPS: { title: string; note?: string; entries: Entry[]; ramp?: boolean }[] = [
   {
     title: 'Cards',
     entries: [
@@ -40,6 +40,22 @@ const GROUPS: { title: string; note?: string; entries: Entry[] }[] = [
       { name: 'resolveTileOccupied', desc: 'Banner snaps taut, planted with a war drum.', burst: [4, 700] },
       { name: 'resolveDefenseFortify', desc: 'Shield raised: resonant clang over a solid thunk.' },
       { name: 'resolveContested', desc: 'Tense clash: swing, "ba-DUM" drums, crossing blades.' },
+    ],
+  },
+  {
+    title: 'Claim smash (power 0 → 8+)',
+    ramp: true,
+    note: 'A claim\'s number smashing into the defense — one per power level, each heavier than the last.',
+    entries: [
+      { name: 'claimSmash0', desc: 'Power 0: a feeble wooden poke.' },
+      { name: 'claimSmash1', desc: 'Power 1: a light jab — knock and a thin ring.' },
+      { name: 'claimSmash2', desc: 'Power 2: a blade strike over a small drum.' },
+      { name: 'claimSmash3', desc: 'Power 3: crossing swords and a scrape.' },
+      { name: 'claimSmash4', desc: 'Power 4: a war-drum blow through a shield clang.' },
+      { name: 'claimSmash5', desc: 'Power 5: a mace — crushing double clang, splinters.' },
+      { name: 'claimSmash6', desc: 'Power 6: a war hammer — crack, timpani, ringing plate, stone chips.' },
+      { name: 'claimSmash7', desc: 'Power 7: a siege ram — sub boom, low brass, tumbling stone.' },
+      { name: 'claimSmash8', desc: 'Power 8+: a cataclysm — thunderclap, aftershock, brass chord, falling stone.' },
     ],
   },
   {
@@ -144,6 +160,15 @@ export default function SoundPreview() {
           <section key={group.title} className="cc-panel" style={{ padding: '12px 16px', marginBottom: 14 }}>
             <h2 style={{ fontFamily: 'var(--cc-font-display)', fontSize: 15, letterSpacing: '0.06em', color: 'var(--cc-gold)', margin: '2px 0 8px' }}>{group.title}</h2>
             {group.note && <p style={{ fontSize: 12, color: 'var(--cc-text-faint)', margin: '-4px 0 8px' }}>{group.note}</p>}
+            {group.ramp && (
+              <button
+                className="cc-btn-secondary"
+                style={{ padding: '6px 14px', fontSize: 13, marginBottom: 8 }}
+                onClick={() => group.entries.forEach((e, i) => timers.current.push(setTimeout(() => play(e.name), i * 900)))}
+              >
+                Play all in order
+              </button>
+            )}
             {group.entries.map((e) => {
               const lv = levels[e.name];
               return (

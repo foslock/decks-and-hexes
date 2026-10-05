@@ -58,6 +58,15 @@ export interface BoardInputListener {
 
 /** A framed camera position for `flyTo` (rotation is an orbit on top of the
  *  board's base rotation; zoom 1 fits the whole island). */
+/** A camera framing: board orbit (on top of the seat's), tilt, zoom, pan. */
+export interface CameraView {
+  rotation: number;
+  tilt: number;
+  zoom: number;
+  panX: number;
+  panZ: number;
+}
+
 export interface CameraShot {
   keys?: string[];
   zoom?: number;
@@ -186,6 +195,8 @@ export class BoardEngine {
   private gesture: { dist: number; angle: number; midY: number; zoom: number; rot: number; tilt: number } | null = null;
   private baseRotation = 0;
   private userRotation = 0;
+  /** The tile ringed while it resolves (kept while the ring fades out). */
+  private focusKey: string | null = null;
   readonly quality: BoardQuality;
   private hostEl: HTMLElement;
   private cleanup: (() => void)[] = [];
@@ -425,6 +436,49 @@ export class BoardEngine {
     this.kick(seconds + 0.5);
   }
 
+  /** Where the camera is aimed, to come back to after a close-up. */
+  getView(): CameraView {
+    const rig = this.rig;
+    return { rotation: this.userRotation, tilt: rig.tilt, zoom: rig.zoom, panX: rig.pan.x, panZ: rig.pan.y };
+  }
+
+  /** Glide back to a framing from `getView`. */
+  setView(v: CameraView, seconds = 0.8): void {
+    const rig = this.rig;
+    this.userRotation = v.rotation;
+    rig.rotation = this.baseRotation + this.userRotation;
+    rig.tilt = v.tilt;
+    this.swayTilt = v.tilt;
+    rig.zoom = v.zoom;
+    rig.pan.set(v.panX, v.panZ);
+    rig.beginFlight(seconds, 0);
+    this.kick(seconds + 0.5);
+  }
+
+  /** Close in on a tile without turning the board: centre it, a little
+   *  below the middle (`lower`) so cards floating above it stay in view. */
+  focusTile(key: string, shot: { zoom: number; tilt: number; lower?: number; seconds?: number; arc?: number }): void {
+    const v = this.tileWorld(key);
+    if (!v) return;
+    const rig = this.rig;
+    rig.tilt = Math.max(0, Math.min(MAX_TILT, shot.tilt));
+    this.swayTilt = rig.tilt;
+    rig.zoom = Math.max(1, Math.min(MAX_ZOOM, shot.zoom));
+    const r = rig.rotation, lower = shot.lower ?? 0;
+    rig.centerOn(v.x - Math.sin(r) * lower, v.z - Math.cos(r) * lower);
+    const seconds = shot.seconds ?? 0.8;
+    rig.beginFlight(seconds, shot.arc ?? 0);
+    this.kick(seconds + 0.5);
+  }
+
+  /** Ring the tile being resolved (fades in); null fades it out. */
+  setFocusTile(key: string | null): void {
+    if (key) this.focusKey = key;
+    this.floating?.setFocusOn(!!key);
+    this.syncFloating();
+    this.kick(1.2);
+  }
+
   resetView(): void {
     this.userRotation = 0;
     this.rig.rotation = this.baseRotation;
@@ -470,6 +524,7 @@ export class BoardEngine {
       weak: this.overlay.weak,
       multi: this.overlay.multi,
       review: this.overlay.review,
+      focus: this.focusKey ? new Set([this.focusKey]) : undefined,
     });
   }
 

@@ -56,6 +56,11 @@ function publishShown(playerId: string, value: number | null) {
   else shownStore.set(playerId, value);
   for (const l of listeners) l();
 }
+/** Show a player's bank as `value` everywhere it's displayed (null: back
+ *  to their real bank) — e.g. a rival's while their coins are in flight. */
+export function setShownResources(playerId: string, value: number | null): void {
+  publishShown(playerId, value);
+}
 function subscribe(l: () => void) {
   listeners.add(l);
   return () => { listeners.delete(l); };

@@ -24,6 +24,9 @@ export interface BoardCardEntry {
   revealed?: boolean;
   /** Played face down: shows its back (no zoom) until it turns over. */
   faceDown?: boolean;
+  /** Face down in one pile with the same player's other face-down cards on
+   *  the tile, until they spread out to turn over. */
+  stacked?: boolean;
   /** Pulse (a War Banner whose buff a hovered/selected Claim will use). */
   pulse?: boolean;
 }
@@ -52,9 +55,46 @@ const SIZE_EASE = '0.25s ease';
 /** Gap between cards sharing a tile (px). */
 const STACK_GAP = 8;
 /** Horizontal offset (center) of card i of n laid side by side over a tile
- *  (px at scale s). Cards on one tile never overlap. */
+ *  (px at scale s). Cards on one tile never overlap (piles aside). */
 export function fanOffset(i: number, n: number, s: number): number {
   return (i - (n - 1) / 2) * (CARD_W * s + STACK_GAP);
+}
+
+/** Where each card sits in a tile's row: a player's stacked face-down cards
+ *  share one slot as a pile (depth 0 on top); every other card has its own. */
+export function tileSlots(entries: BoardCardEntry[]): { slot: number[]; depth: number[]; pile: number[]; slots: number } {
+  const piled = (e: BoardCardEntry) => !!(e.stacked && e.faceDown);
+  const count = new Map<string, number>();
+  for (const e of entries) if (piled(e)) count.set(e.playerId, (count.get(e.playerId) ?? 0) + 1);
+  const at = new Map<string, number>();
+  const seen = new Map<string, number>();
+  const slot: number[] = [], depth: number[] = [], pile: number[] = [];
+  let slots = 0;
+  for (const e of entries) {
+    const n = piled(e) ? count.get(e.playerId) ?? 0 : 0;
+    if (n > 1) {
+      if (!at.has(e.playerId)) at.set(e.playerId, slots++);
+      slot.push(at.get(e.playerId)!);
+      const d = seen.get(e.playerId) ?? 0;
+      seen.set(e.playerId, d + 1);
+      depth.push(d);
+      pile.push(n);
+    } else {
+      slot.push(slots++);
+      depth.push(0);
+      pile.push(1);
+    }
+  }
+  return { slot, depth, pile, slots };
+}
+
+/** A card's place in its pile: the ones under the top peek out askew. */
+function pileTransform(depth: number, size: number, w: number, h: number): string | undefined {
+  if (size < 2) return undefined;
+  const dx = (depth - (size - 1) / 2) * w * 0.12;
+  const dy = -depth * h * 0.05;
+  const rot = depth === 0 ? -2 : depth % 2 ? 7 : -6;
+  return `translate(${dx}px, ${dy}px) rotate(${rot}deg)`;
 }
 
 function playerColor(pid: string): string {
@@ -64,6 +104,8 @@ function playerColor(pid: string): string {
 
 /** How long a face-down board card takes to turn over (ms, at resolve speed 1). */
 export const BOARD_FLIP_MS = 520;
+/** The turn-over animation's id (so the resolve can wait for it to finish). */
+export const BOARD_FLIP_ID = 'board-card-flip';
 
 /** A card back scaled down to `scale`, laid over the card's face while it's face down. */
 function ScaledBack({ scale }: { scale: number }) {
@@ -155,7 +197,7 @@ const HOLD_MS = 550;
 const HOVER_DELAY_MS = 220;
 
 /** One mini card: hover to zoom, click to open, hold to undo (when offered). */
-function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
+function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow, still, count }: {
   entry: BoardCardEntry;
   scale: number;
   style?: CSSProperties;
@@ -165,6 +207,11 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
   /** Ring the card in this color even if it isn't attributed to a player
    *  (players share its tile). Attributed cards ring in their player's color. */
   glow?: string;
+  /** No hover zoom or open (the resolve is playing; previews get in the way). */
+  still?: boolean;
+  /** Top of a face-down pile: how many cards it holds (rides on its corner,
+   *  so it follows the card as the board zooms). */
+  count?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
@@ -208,6 +255,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
       { offset: 0.5, transform: 'perspective(600px) rotateY(-90deg) scale(1.08)', easing: 'ease-out' },
       { offset: 1, transform: 'perspective(600px) rotateY(0deg) scale(1)' },
     ], timing);
+    turn.id = BOARD_FLIP_ID;
     backRef.current!.animate([
       { offset: 0, opacity: 1 }, { offset: 0.5, opacity: 1 }, { offset: 0.5, opacity: 0 }, { offset: 1, opacity: 0 },
     ], { ...timing, fill: 'forwards' });
@@ -215,6 +263,12 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
     return () => { live = false; };
   }, [entry.faceDown, animated, resolveSpeed]);
   const hidden = !!entry.faceDown;
+  const inert = hidden || !!still;
+  // A zoom that was open when the resolve began closes.
+  useEffect(() => {
+    if (still) endHover();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [still]);
   // Whose card it is: a glow all round it in their color.
   const ring = glow ?? (entry.playerName ? playerColor(entry.playerId) : undefined);
   // A card that moves (fan reflow, focus) refreshes its zoom anchor.
@@ -231,7 +285,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
       // The zoom waits for a deliberate hover, so sweeping past a card on the
       // way to a tile doesn't throw it over the board.
       onPointerEnter={(e) => {
-        if (e.pointerType === 'touch' || hidden) return;
+        if (e.pointerType === 'touch' || inert) return;
         if (hoverTimer.current) clearTimeout(hoverTimer.current);
         hoverTimer.current = setTimeout(() => {
           hoverTimer.current = null;
@@ -257,14 +311,14 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
       onClick={(e) => {
         e.stopPropagation();
         if (undone.current) { undone.current = false; return; }
-        if (hidden) return;
+        if (inert) return;
         endHover();
         onOpen();
       }}
       style={{
         width: CARD_W * scale,
         height: CARD_H * scale,
-        cursor: hidden ? cursor('arrow') : 'pointer',
+        cursor: inert ? cursor('arrow') : 'pointer',
         borderRadius: 14 * scale,
         opacity: entry.arriving ? 0 : 1,
         transition: `opacity 0.18s ease, transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1), width ${SIZE_EASE}, height ${SIZE_EASE}, left ${SIZE_EASE}, box-shadow 0.25s ease, filter 0.45s ease-out`,
@@ -280,16 +334,29 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
           boxShadow: ring ? `0 0 0 2px ${ring}, 0 0 10px 3px ${ring}cc, 0 0 22px 6px ${ring}55` : undefined,
           transition: `width ${SIZE_EASE}, height ${SIZE_EASE}, box-shadow 0.25s ease`,
         }}>
-          <ScaledFace entry={entry} scale={scale} />
-          {showBack && (
-            <div ref={backRef} data-face-down style={{ position: 'absolute', left: 0, top: 0 }}>
-              <ScaledBack scale={scale} />
-            </div>
-          )}
+          {/* The card itself (inside its player ring): the resolve pulses
+              this, so the ring stays steady. */}
+          <div data-board-card-face style={{ position: 'absolute', inset: 0, transformOrigin: '50% 50%', borderRadius: 14 * scale }}>
+            <ScaledFace entry={entry} scale={scale} />
+            {showBack && (
+              <div ref={backRef} data-face-down style={{ position: 'absolute', left: 0, top: 0 }}>
+                <ScaledBack scale={scale} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
       {holding && <div aria-hidden className="cc-board-card-hold" style={{ borderRadius: 14 * scale }} />}
-      {hoverRect && !hidden && (
+      {count != null && count > 1 && (
+        <div
+          aria-label={`${count} cards`}
+          className="cc-tile-pile-count"
+          style={{ fontSize: Math.max(10, Math.min(16, CARD_W * scale * 0.2)), borderColor: playerColor(entry.playerId) }}
+        >
+          ×{count}
+        </div>
+      )}
+      {hoverRect && !inert && (
         <HoverZoom
           entry={entry}
           from={hoverRect}
@@ -308,7 +375,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow }: {
  * row (bottom-center) over the tile each frame. At rest the row is
  * see-through; hovering it, opening it or resolving its tile makes it solid.
  */
-export function TileCardStack({ entries, scale, focus, open, faded, passThrough, onOpen, onUndo }: {
+export function TileCardStack({ entries, scale, focus, open, faded, passThrough, still, onOpen, onUndo }: {
   entries: BoardCardEntry[];
   scale: number;
   /** This tile is resolving: its cards grow so everyone sees what was played. */
@@ -323,6 +390,8 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   onOpen: (entries: BoardCardEntry[], index: number) => void;
   /** Hold a card to undo it (only the player's own undoable plays). */
   onUndo?: () => void;
+  /** The resolve is playing: no hover zoom or open. */
+  still?: boolean;
 }) {
   const [hot, setHot] = useState(false);
   const s = focus ? Math.max(scale, FOCUS_SCALE) : scale;
@@ -333,7 +402,9 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   const shown = entries.filter(e => !e.faceDown);
   const w = CARD_W * s;
   const h = CARD_H * s;
-  const span = n > 1 ? Math.abs(fanOffset(n - 1, n, s) - fanOffset(0, n, s)) : 0;
+  const lay = tileSlots(entries);
+  const m = lay.slots;
+  const span = m > 1 ? Math.abs(fanOffset(m - 1, m, s) - fanOffset(0, m, s)) : 0;
   return (
     <div
       className={focus ? 'cc-tile-stack is-focus' : 'cc-tile-stack'}
@@ -360,11 +431,18 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
           onOpen={() => onOpen(shown, shown.indexOf(e))}
           onUndo={onUndo}
           glow={mixed ? playerColor(e.playerId) : undefined}
+          still={still}
+          count={lay.depth[i] === 0 ? lay.pile[i] : undefined}
           style={{
             position: 'absolute',
-            left: (w + span) / 2 - w / 2 + fanOffset(i, n, s),
+            left: (w + span) / 2 - w / 2 + fanOffset(lay.slot[i], m, s),
             bottom: 0,
-            zIndex: i + 1,
+            // Piles sit under every card that's out on its own (spread,
+            // turning over, counting); within a pile the top card is highest.
+            zIndex: lay.pile[i] > 1 ? lay.pile[i] - lay.depth[i] : n + 2 + i,
+            transform: pileTransform(lay.depth[i], lay.pile[i], w, h),
+            // The cards under the top one sit in its shadow.
+            filter: lay.pile[i] > 1 && lay.depth[i] > 0 ? 'brightness(0.72)' : undefined,
           }}
         />
       ))}
@@ -373,11 +451,13 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
 }
 
 /** Engine cards played this round (they resolve as they are played), under the player's ID card. */
-export function EngineQueue({ entries, onOpen, containerRef, title = 'Played' }: {
+export function EngineQueue({ entries, onOpen, containerRef, title = 'Played', still }: {
   entries: BoardCardEntry[];
   onOpen: (entries: BoardCardEntry[], index: number) => void;
   containerRef?: React.Ref<HTMLDivElement>;
   title?: string;
+  /** The resolve is playing: no hover zoom or open. */
+  still?: boolean;
 }) {
   return (
     <div ref={containerRef} data-engine-queue>
@@ -391,7 +471,7 @@ export function EngineQueue({ entries, onOpen, containerRef, title = 'Played' }:
         gap: 6,
       }}>
         {entries.map((e, i) => (
-          <MiniCard key={e.key} entry={e} scale={QUEUE_CARD_SCALE} placement="right" onOpen={() => onOpen(entries, i)} style={{ position: 'relative' }} />
+          <MiniCard key={e.key} entry={e} scale={QUEUE_CARD_SCALE} placement="right" onOpen={() => onOpen(entries, i)} style={{ position: 'relative' }} still={still} />
         ))}
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { createAudioGraph, type AudioGraph } from './graph';
-import { SOUNDS, type SoundName } from './sounds';
+import { SOUNDS, smashSoundName, type SoundName } from './sounds';
 
 /**
  * Owns the (lazily created) AudioContext and master graph, and exposes one
@@ -113,6 +113,9 @@ class SoundEngine {
   resolveBaseRaidHold() { this.play('resolveBaseRaidHold'); }
   upgradeCard() { this.play('upgradeCard'); }
   beginJingle() { this.play('beginJingle'); }
+
+  /** A claim smashing into a defense: heavier with its power (0 … 8+). */
+  claimSmash(power: number) { this.play(smashSoundName(power)); }
 
   // Optional extras — available but not yet wired into components.
   hoverTick() { this.play('hoverTick'); }

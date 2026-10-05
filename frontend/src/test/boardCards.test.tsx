@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { SettingsProvider } from '../components/SettingsContext';
-import { TileCardStack, EngineQueue, fanOffset, type BoardCardEntry } from '../components/BoardCards';
+import { TileCardStack, EngineQueue, fanOffset, tileSlots, type BoardCardEntry } from '../components/BoardCards';
 import { makeCard } from './fixtures';
 
 function WithSettings({ children }: { children: ReactNode }) {
@@ -26,6 +26,29 @@ describe('board cards', () => {
     }
   });
 
+  it('piles a player\'s stacked face-down cards in one slot until they spread', () => {
+    const down = (id: string, pid: string, stacked = true): BoardCardEntry => ({ ...entry(id, 'Blitz', pid), faceDown: true, stacked });
+    const mine = entry('m', 'Explore', 'p0');
+    // Two rivals: p1 with three cards (a pile), p2 with one (nothing to pile).
+    const all = [mine, down('a', 'p1'), down('b', 'p1'), down('c', 'p1'), down('d', 'p2')];
+    const lay = tileSlots(all);
+    expect(lay.slots).toBe(3);
+    expect(lay.slot).toEqual([0, 1, 1, 1, 2]);
+    expect(lay.depth).toEqual([0, 0, 1, 2, 0]);
+    expect(lay.pile).toEqual([1, 3, 3, 3, 1]);
+    // Spread out (still face down), each card has its own slot again.
+    const spread = all.map(e => ({ ...e, stacked: false }));
+    expect(tileSlots(spread).slot).toEqual([0, 1, 2, 3, 4]);
+    // The pile shows its count, and sits under the cards out on their own.
+    const { container, rerender } = render(<WithSettings><TileCardStack entries={all} scale={0.25} onOpen={() => {}} /></WithSettings>);
+    expect(container.querySelector('.cc-tile-pile-count')?.textContent).toBe('×3');
+    const z = (id: string) => Number(container.querySelector<HTMLElement>(`[data-board-card="${id}@1,2"]`)!.style.zIndex);
+    expect(Math.max(z('a'), z('b'), z('c'))).toBeLessThan(Math.min(z('m'), z('d')));
+    expect(z('a')).toBeGreaterThan(z('b'));
+    rerender(<WithSettings><TileCardStack entries={spread} scale={0.25} onOpen={() => {}} /></WithSettings>);
+    expect(container.querySelector('.cc-tile-pile-count')).toBeNull();
+  });
+
   it('opens every card on a tile when one is clicked', () => {
     const onOpen = vi.fn();
     const entries = [entry('a', 'Coordinated Push'), entry('b', 'Dog Pile', 'p1')];
@@ -34,6 +57,19 @@ describe('board cards', () => {
     expect(cards.length).toBe(2);
     fireEvent.click(cards[1]);
     expect(onOpen).toHaveBeenCalledWith(entries, 1);
+  });
+
+  it('stays still (no zoom, no open) while the resolve plays', () => {
+    vi.useFakeTimers();
+    const onOpen = vi.fn();
+    const { container } = render(<WithSettings><TileCardStack entries={[entry('a', 'Explore')]} scale={0.25} still onOpen={onOpen} /></WithSettings>);
+    const card = container.querySelector('[data-board-card]')!;
+    fireEvent.pointerEnter(card, { pointerType: 'mouse' });
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(document.body.querySelectorAll('[style*="z-index: 20000"]').length).toBe(0);
+    fireEvent.click(card);
+    expect(onOpen).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('keeps an opponent\'s face-down card hidden until it turns over', () => {

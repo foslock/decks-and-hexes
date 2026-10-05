@@ -64,9 +64,17 @@ at high priority, the rest of the catalog during idle time).
   tiles, `EngineQueue` under the ID card, hover zoom, `CardDetailOverlay`).
   GameBoard positions stacks each frame (`tileCardKeys` / `renderTileCards`;
   `controls.tileAnchor` gives a played card its landing spot). At the reveal
-  GameScreen turns every player's plays into `revealCards`; `ResolveOverlay`'s
-  `onStepStart`/`onStepEnd` focus each resolving tile and send its cards home
-  (your discard pile, an opponent's ID card, or a burn if trashed).
+  GameScreen turns every player's plays into `revealCards` (opponents' face
+  down, each player's cards on a tile in one pile — `stacked`, `tileSlots`).
+  `utils/resolvePlan.ts` turns the resolution steps into a per-tile plan
+  (defense build-up, then attackers weakest-first: break / bounce / stalemate)
+  and `TileResolver` plays it: camera close-ups on tiles that involve you
+  (`resolveCamera`; tiles between them are passed half-zoomed), defense + claim
+  badges, piles spreading then cards turning over as they count, a smash that
+  hits harder with the claim's power (`heft` and the `claimSmash0`–`8` sounds,
+  0–8+), and cards flying home (your discard pile, an opponent's ID card, or a
+  burn if trashed). Rivals' earnings fly in as coins (`setShownResources`).
+  Preview: `?preview=resolve-animations`.
 - The board canvas runs on under the hand panel (`GameBoard` `extendBelow`);
   `viewInsetBottom` → `CameraRig.insetBottom` frames the island above the
   resting hand via a camera view offset.
