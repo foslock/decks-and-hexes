@@ -6,7 +6,7 @@ import { rng } from './noise';
 import { Soup, lin, mix, scaleRGB, type RGB } from './soup';
 
 // ── Palette ──────────────────────────────────────────────────────────────
-const C = {
+export const C = {
   trunk: lin(0x5a3f2a),
   trunkDark: lin(0x45301f),
   pine: [lin(0x2c4527), lin(0x33522d), lin(0x2a4024), lin(0x3b5a30)],
@@ -43,14 +43,17 @@ const C = {
   vanguardTrim: lin(0x56525a),
   swarmMud: [lin(0x8a6a40), lin(0x7a5a36), lin(0x9a7848)],
   swarmDark: lin(0x4a3620),
+  chitin: lin(0x3a2c2a),
+  chitinTip: lin(0x6a5048),
+  steel: lin(0x9aa0a8),
 };
 
 /** Lit-window emissive (linear, > 1 for a soft bloom-ish punch). */
-const WINDOW_GLOW: RGB = [1.6, 0.85, 0.32];
-const AMBER_GLOW: RGB = [1.8, 0.75, 0.18];
+export const WINDOW_GLOW: RGB = [1.6, 0.85, 0.32];
+export const AMBER_GLOW: RGB = [1.8, 0.75, 0.18];
 const GOLD_GLOW: RGB = [1.1, 0.75, 0.2];
 
-function pick<T>(arr: T[], r: () => number): T {
+export function pick<T>(arr: T[], r: () => number): T {
   return arr[Math.floor(r() * arr.length) % arr.length];
 }
 
@@ -75,14 +78,14 @@ export function emptySpots(): AmbientSpots {
 // ── Small helpers ────────────────────────────────────────────────────────
 
 /** Run `fn` with a local transform pushed on the soup. */
-function at(s: Soup, x: number, y: number, z: number, fn: () => void, ry = 0, sc = 1, sy = sc): void {
+export function at(s: Soup, x: number, y: number, z: number, fn: () => void, ry = 0, sc = 1, sy = sc): void {
   const saved = s.push(x, y, z, ry, sc, sy);
   fn();
   s.pop(saved);
 }
 
 /** World position of a local point under the soup's current transform. */
-function worldOf(s: Soup, x: number, y: number, z: number): Vector3 {
+export function worldOf(s: Soup, x: number, y: number, z: number): Vector3 {
   return new Vector3(x, y, z).applyMatrix4(s.matrix);
 }
 
@@ -281,12 +284,16 @@ function fence(s: Soup, layout: BoardLayout, pts: { x: number; z: number }[]): v
 
 // ── Decor per biome ──────────────────────────────────────────────────────
 
+/** Ground a decor piece stands on (world xz, footprint radius). */
+export interface Footprint { x: number; z: number; d: number }
+
 /**
  * Static decoration for every claimable tile (trees, farms, pastures, rocks…).
  * Built once per map layout; blocked / VP / base tiles get dynamic structures
- * instead (see buildStructure).
+ * instead (see buildStructure). `taken` collects each tile's footprints, so
+ * later pieces (an occupier's camp) can find open ground.
  */
-export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTile>, spots: AmbientSpots): Soup {
+export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTile>, spots: AmbientSpots, taken?: Map<string, Footprint[]>): Soup {
   const s = new Soup(layout.mapSeed);
   const maxRing = Math.max(1, layout.maxRing);
   for (const tile of layout.tiles) {
@@ -295,6 +302,9 @@ export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTil
     const r = rng(tile.seed);
     s.build = tile.ring / maxRing;
     const h = (x: number, z: number) => layout.heightAt(x, z);
+    const marks: Footprint[] = [];
+    taken?.set(tile.key, marks);
+    const mark = (pts: { x: number; z: number }[], d: number) => { for (const p of pts) marks.push({ x: p.x, z: p.z, d }); };
     switch (tile.biome) {
       case 'forest': {
         const trees = scatter(tile, r, 10 + Math.floor(r() * 4), 0.12, 0.84, 0.19);
@@ -303,16 +313,26 @@ export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTil
           if (r() < 0.68) pine(s, p.x, h(p.x, p.z), p.z, sc, r);
           else broadleaf(s, p.x, h(p.x, p.z), p.z, sc * 0.9, r, r() < 0.3);
         }
-        for (const p of scatter(tile, r, 3, 0.1, 0.8, 0.1, trees.map(t => ({ ...t, d: 0.09 })))) bush(s, p.x, h(p.x, p.z), p.z, 0.8 + r() * 0.5, r);
+        const bushes = scatter(tile, r, 3, 0.1, 0.8, 0.1, trees.map(t => ({ ...t, d: 0.09 })));
+        for (const p of bushes) bush(s, p.x, h(p.x, p.z), p.z, 0.8 + r() * 0.5, r);
+        mark(trees, 0.15);
+        mark(bushes, 0.07);
         break;
       }
       case 'meadow': {
         const trees = scatter(tile, r, 1 + Math.floor(r() * 3), 0.35, 0.8, 0.3);
         for (const p of trees) broadleaf(s, p.x, h(p.x, p.z), p.z, 0.85 + r() * 0.35, r, r() < 0.35);
         const taken = trees.map(t => ({ ...t, d: 0.12 }));
-        for (const p of scatter(tile, r, 3 + Math.floor(r() * 3), 0.25, 0.82, 0.12, taken)) bush(s, p.x, h(p.x, p.z), p.z, 0.7 + r() * 0.6, r);
-        for (const p of scatter(tile, r, 3, 0.25, 0.8, 0.15, taken)) flowerPatch(s, p.x, p.z, layout, r);
-        if (r() < 0.5) for (const p of scatter(tile, r, 2, 0.4, 0.8, 0.12, taken)) rock(s, p.x, h(p.x, p.z), p.z, 0.6 + r() * 0.4, r);
+        const bushes = scatter(tile, r, 3 + Math.floor(r() * 3), 0.25, 0.82, 0.12, taken);
+        for (const p of bushes) bush(s, p.x, h(p.x, p.z), p.z, 0.7 + r() * 0.6, r);
+        const flowers = scatter(tile, r, 3, 0.25, 0.8, 0.15, taken);
+        for (const p of flowers) flowerPatch(s, p.x, p.z, layout, r);
+        const rocks = r() < 0.5 ? scatter(tile, r, 2, 0.4, 0.8, 0.12, taken) : [];
+        for (const p of rocks) rock(s, p.x, h(p.x, p.z), p.z, 0.6 + r() * 0.4, r);
+        mark(trees, 0.15);
+        mark(bushes, 0.06);
+        mark(flowers, 0.05);
+        mark(rocks, 0.07);
         break;
       }
       case 'pasture': {
@@ -325,10 +345,22 @@ export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTil
         }
         fence(s, layout, pts);
         const ta = a0 + Math.PI * 1.4;
-        broadleaf(s, tile.x + Math.cos(ta) * 0.55, h(tile.x + Math.cos(ta) * 0.55, tile.z + Math.sin(ta) * 0.55), tile.z + Math.sin(ta) * 0.55, 1, r);
-        for (const p of scatter(tile, r, 2, 0.4, 0.8, 0.2, [{ x: tile.x + Math.cos(ta) * 0.55, z: tile.z + Math.sin(ta) * 0.55, d: 0.2 }])) bush(s, p.x, h(p.x, p.z), p.z, 0.8, r);
-        for (const p of scatter(tile, r, 2, 0.3, 0.75, 0.2)) flowerPatch(s, p.x, p.z, layout, r);
+        const tree = { x: tile.x + Math.cos(ta) * 0.55, z: tile.z + Math.sin(ta) * 0.55 };
+        broadleaf(s, tree.x, h(tree.x, tree.z), tree.z, 1, r);
+        const bushes = scatter(tile, r, 2, 0.4, 0.8, 0.2, [{ ...tree, d: 0.2 }]);
+        for (const p of bushes) bush(s, p.x, h(p.x, p.z), p.z, 0.8, r);
+        const flowers = scatter(tile, r, 2, 0.3, 0.75, 0.2);
+        for (const p of flowers) flowerPatch(s, p.x, p.z, layout, r);
         spots.pastures.push({ x: tile.x, z: tile.z, radius: 0.55, count: 3 + Math.floor(r() * 3), key: tile.key });
+        // The fence (sampled along its arc), the tree, and the flock's range.
+        for (let i = 0; i <= 16; i++) {
+          const a = a0 + (i / 16) * Math.PI * 0.9;
+          marks.push({ x: tile.x + Math.cos(a) * 0.66, z: tile.z + Math.sin(a) * 0.66, d: 0.05 });
+        }
+        mark([tree], 0.15);
+        mark(bushes, 0.07);
+        mark(flowers, 0.05);
+        marks.push({ x: tile.x, z: tile.z, d: 0.47 });
         break;
       }
       case 'farm': {
@@ -353,21 +385,31 @@ export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTil
           if (top) spots.chimneys.push(top);
           const hs = scatter(tile, r, 2, 0.2, 0.7, 0.12, used);
           for (const p of hs) haystack(s, p.x, h(p.x, p.z), p.z, r);
+          mark(hs, 0.07);
         }
         used.push({ x: bx, z: bz, d: 0.22 });
-        for (const p of scatter(tile, r, 1, 0.55, 0.82, 0.2, used)) broadleaf(s, p.x, h(p.x, p.z), p.z, 0.8, r);
+        const trees = scatter(tile, r, 1, 0.55, 0.82, 0.2, used);
+        for (const p of trees) broadleaf(s, p.x, h(p.x, p.z), p.z, 0.8, r);
+        marks.push(...used);
+        mark(trees, 0.14);
         break;
       }
       case 'hills': {
         const rocks = scatter(tile, r, 4 + Math.floor(r() * 3), 0.2, 0.84, 0.18);
         for (const p of rocks) rock(s, p.x, h(p.x, p.z), p.z, 0.8 + r() * 0.9, r);
         const taken = rocks.map(t => ({ ...t, d: 0.12 }));
-        for (const p of scatter(tile, r, 2 + Math.floor(r() * 2), 0.3, 0.8, 0.18, taken)) pine(s, p.x, h(p.x, p.z), p.z, 0.75 + r() * 0.3, r);
-        for (const p of scatter(tile, r, 3, 0.25, 0.8, 0.1, taken)) bush(s, p.x, h(p.x, p.z), p.z, 0.6, r);
+        const pines = scatter(tile, r, 2 + Math.floor(r() * 2), 0.3, 0.8, 0.18, taken);
+        for (const p of pines) pine(s, p.x, h(p.x, p.z), p.z, 0.75 + r() * 0.3, r);
+        const bushes = scatter(tile, r, 3, 0.25, 0.8, 0.1, taken);
+        for (const p of bushes) bush(s, p.x, h(p.x, p.z), p.z, 0.6, r);
+        mark(rocks, 0.1);
+        mark(pines, 0.15);
+        mark(bushes, 0.06);
         if (r() < 0.35) {
           // Ruined standing stones
           const a = r() * 6.28;
           const cx = tile.x + Math.cos(a) * 0.32, cz = tile.z + Math.sin(a) * 0.32;
+          marks.push({ x: cx, z: cz, d: 0.15 });
           for (let i = 0; i < 5; i++) {
             const sa = (i / 5) * Math.PI * 2;
             const sx = cx + Math.cos(sa) * 0.1, sz = cz + Math.sin(sa) * 0.1;
@@ -480,7 +522,7 @@ function buildMountain(s: Soup, tile: TileLayout, layout: BoardLayout, gameTiles
   }
 }
 
-function crenellate(s: Soup, len: number, y: number, thick: number, color: RGB, step = 0.05): void {
+export function crenellate(s: Soup, len: number, y: number, thick: number, color: RGB, step = 0.05): void {
   const n = Math.max(2, Math.floor(len / step));
   for (let i = 0; i < n; i += 2) {
     const x = -len / 2 + (i + 0.5) * (len / n);
@@ -488,7 +530,7 @@ function crenellate(s: Soup, len: number, y: number, thick: number, color: RGB, 
   }
 }
 
-function roundTowerTop(s: Soup, radius: number, color: RGB): void {
+export function roundTowerTop(s: Soup, radius: number, color: RGB): void {
   const n = 8;
   for (let i = 0; i < n; i += 1) {
     if (i % 2) continue;
@@ -497,7 +539,7 @@ function roundTowerTop(s: Soup, radius: number, color: RGB): void {
   }
 }
 
-function banner(s: Soup, color: RGB, height: number, width = 0.09): void {
+export function banner(s: Soup, color: RGB, height: number, width = 0.09): void {
   s.cylinder(0.006, 0.005, height, 4, C.woodDark, { top: null });
   const saved = s.windScale;
   s.windScale = 7;
@@ -614,7 +656,7 @@ function castleVanguard(s: Soup, owner: RGB, r: () => number, spots: AmbientSpot
   });
 }
 
-function hiveMound(s: Soup, radius: number, height: number, r: () => number, glow: boolean, spots: AmbientSpots): void {
+export function hiveMound(s: Soup, radius: number, height: number, r: () => number, glow: boolean, spots: AmbientSpots): void {
   const tiers = 5;
   let y = 0;
   for (let i = 0; i < tiers; i++) {
@@ -773,10 +815,10 @@ function wallHolder(t: HexTile | undefined): string | null {
 }
 
 /** Direction (radians) from a tile's center across edge k. */
-const edgeAngle = (k: number) => (Math.PI / 3) * k + Math.PI / 6;
+export const edgeAngle = (k: number) => (Math.PI / 3) * k + Math.PI / 6;
 
 /** Key of the tile across edge k (between corners k and k+1). */
-function neighbourAcross(tile: TileLayout, k: number): string {
+export function neighbourAcross(tile: TileLayout, k: number): string {
   const a = edgeAngle(k);
   return worldToTileKey(tile.x + Math.sqrt(3) * Math.cos(a), tile.z + Math.sqrt(3) * Math.sin(a));
 }
@@ -791,6 +833,14 @@ function neighbourAcross(tile: TileLayout, k: number): string {
  */
 export type WallEnd = 'corner' | 'merge' | 'abut';
 
+/** Whose style a wall is built in: its holder's archetype, or unowned. */
+export type WallTheme = 'neutral' | 'vanguard' | 'swarm' | 'fortress';
+
+/** A player's archetype as a building style (unknown ones build as Vanguard). */
+export function themeOf(archetype: string | undefined): Exclude<WallTheme, 'neutral'> {
+  return archetype === 'swarm' || archetype === 'fortress' ? archetype : 'vanguard';
+}
+
 export interface WallEdgeSpec {
   /** `${tileKey}#${k}` */
   key: string;
@@ -800,18 +850,28 @@ export interface WallEdgeSpec {
   start: WallEnd;
   end: WallEnd;
   gate: boolean;
+  theme: WallTheme;
+  /** The holder's color (banners, bands), when owned. */
+  owner: number | null;
   /** Changes whenever the edge must be rebuilt. */
   signature: string;
 }
 
-/** Every wall edge on the board for the current tile states. */
-export function wallEdges(layout: BoardLayout, tiles: Record<string, HexTile>): WallEdgeSpec[] {
+/** Every wall edge on the board for the current tile states. Owned walls
+ *  take their holder's archetype style. */
+export function wallEdges(
+  layout: BoardLayout, tiles: Record<string, HexTile>,
+  archetypeOf?: (pid: string) => string, ownerColor?: (pid: string) => number,
+): WallEdgeSpec[] {
   const out: WallEdgeSpec[] = [];
   for (const tile of layout.tiles) {
     const t = tiles[tile.key];
     const holder = wallHolder(t);
     if (!holder) continue;
     const level = wallLevel(t);
+    const owned = holder !== 'neutral';
+    const theme: WallTheme = owned && archetypeOf ? themeOf(archetypeOf(holder)) : 'neutral';
+    const owner = owned && ownerColor ? ownerColor(holder) : null;
     const across = Array.from({ length: 6 }, (_, k) => tiles[neighbourAcross(tile, k)]);
     const same = across.map(n => wallHolder(n) === holder);
     const open = across.map((n, k) => same[k] && wallLevel(n) >= level);
@@ -825,8 +885,8 @@ export function wallEdges(layout: BoardLayout, tiles: Record<string, HexTile>): 
       const start = endAt((k + 5) % 6);
       const end = endAt((k + 1) % 6);
       out.push({
-        key: `${tile.key}#${k}`, tileKey: tile.key, k, level, start, end, gate: k === gate,
-        signature: `${level}|${start[0]}${end[0]}|${k === gate ? 1 : 0}`,
+        key: `${tile.key}#${k}`, tileKey: tile.key, k, level, start, end, gate: k === gate, theme, owner,
+        signature: `${level}|${start[0]}${end[0]}|${k === gate ? 1 : 0}|${theme}|${owner ?? '-'}`,
       });
     }
   }
@@ -869,12 +929,122 @@ const STONE_TIERS: StoneTier[] = [
   /* 5 */ { h: 0.21, thick: 0.075, body: C.vanguardStone, trim: C.vanguardTrim, merlon: 0.05, plinth: true, band: C.gold, tower: { r: 0.078, h: 0.36, roof: C.roofs[1], tip: C.gold, pennant: true } },
 ];
 
+/** A wall tier in its holder's style:
+ *  - Vanguard: dark slate, iron spikes on the battlements, roofs in the
+ *    holder's darkened color with steel tips and their pennants;
+ *  - Fortress: heavy sandstone — thicker, always footed, buttressed, round
+ *    battlemented towers, the holder's band once it's strong (4+). */
+function themedTier(level: number, theme: WallTheme, owner: number | null): StoneTier & { spikes?: boolean; buttress?: boolean } {
+  const base = STONE_TIERS[Math.min(level, MAX_WALL_LEVEL) - 2];
+  const own = owner != null ? lin(owner) : null;
+  if (theme === 'vanguard') {
+    const roof = own ? mix(own, [0.05, 0.05, 0.06], 0.45) : C.roofs[2];
+    return {
+      ...base, body: C.vanguardStone, trim: C.vanguardTrim, spikes: true,
+      band: level >= 5 ? (own ?? C.gold) : undefined,
+      tower: base.tower ? { ...base.tower, roof, tip: C.steel, pennant: true } : undefined,
+    };
+  }
+  if (theme === 'fortress') {
+    return {
+      ...base, body: C.fortressStone, trim: C.fortressTrim, thick: base.thick * 1.25, plinth: true, buttress: true,
+      band: level >= 4 ? (own ?? C.gold) : undefined,
+      tower: base.tower ? { ...base.tower, r: base.tower.r * 1.15, h: base.tower.h * 0.92, roof: null, tip: undefined, pennant: false } : undefined,
+    };
+  }
+  return base;
+}
+
 /** One straight run of stone wall, centered on the current placement. */
-function stoneRun(s: Soup, len: number, tier: StoneTier): void {
+function stoneRun(s: Soup, len: number, tier: StoneTier & { spikes?: boolean; buttress?: boolean }): void {
   if (tier.plinth) s.box(len, 0.035, tier.thick * 1.55, tier.trim);
   s.box(len, tier.h, tier.thick, tier.body, tier.trim);
   if (tier.band) at(s, 0, tier.h * 0.8, 0, () => s.box(len, 0.012, tier.thick * 1.06, tier.band!));
   crenellate(s, len, tier.h, tier.thick, tier.trim, tier.merlon);
+  if (tier.spikes) {
+    // An iron spike on every merlon.
+    const n = Math.max(2, Math.floor(len / tier.merlon));
+    for (let i = 0; i < n; i += 2) {
+      const x = -len / 2 + (i + 0.5) * (len / n);
+      at(s, x, tier.h + 0.025, 0, () => s.cone(0.006, 0.03, 4, C.steel));
+    }
+  }
+  if (tier.buttress) {
+    // Sloping buttresses on both faces.
+    const n = Math.max(1, Math.round(len / 0.16));
+    for (let i = 0; i < n; i++) {
+      const x = -len / 2 + ((i + 0.5) / n) * len;
+      for (const side of [-1, 1]) {
+        at(s, x, 0, side * tier.thick * 0.62, () => s.box(0.03, tier.h * 0.62, tier.thick * 0.5, tier.trim, tier.body));
+      }
+    }
+  }
+}
+
+/** Swarm walls: a thorn hedge of chitin spikes (1), then a mud rampart that
+ *  thickens with the defense — spikes along its crest (3+), amber nodes
+ *  glowing in it (4+) and hive mounds for towers. */
+function swarmRun(s: Soup, layout: BoardLayout, a: { x: number; z: number }, b: { x: number; z: number }, e: WallEdgeSpec, r: () => number): void {
+  const len = Math.hypot(b.x - a.x, b.z - a.z);
+  const ry = -Math.atan2(b.z - a.z, b.x - a.x);
+  const level = Math.min(e.level, MAX_WALL_LEVEL);
+  const gateGap = (t: number) => e.gate && t > 0.36 && t < 0.64;
+  if (level <= 1) {
+    const n = Math.max(4, Math.round(16 * len / 0.86));
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      if (gateGap(t)) continue;
+      if (i === 0 && e.start === 'merge') continue;
+      const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+      s.place(px, layout.heightAt(px, pz) - 0.01, pz, ry, 1);
+      const lean = (r() - 0.5) * 0.7;
+      const sv = s.push(0, 0, 0, 0, 1, 1, lean, (r() - 0.5) * 0.5);
+      s.cone(0.012, 0.07 + r() * 0.04, 4, mix(C.chitin, C.chitinTip, r() * 0.5));
+      s.pop(sv);
+      if (i % 3 === 0) at(s, 0, -0.005, 0, () => s.blob(0.02, pick(C.swarmMud, r), { sy: 0.6, noise: 0.25 }));
+    }
+    return;
+  }
+  const h = [0, 0, 0.09, 0.12, 0.15, 0.18][level];
+  const thick = [0, 0, 0.06, 0.07, 0.08, 0.09][level];
+  const n = Math.max(4, Math.round(len / 0.045));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    if (gateGap(t)) continue;
+    if (i === 0 && e.start === 'merge') continue;
+    const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+    s.place(px, layout.heightAt(px, pz) - 0.02, pz, ry + (r() - 0.5) * 0.4, 1);
+    // Lumps about as tall as the rampart (a blob stands 2·r·sy high).
+    const sy = (h / (2 * thick * 0.62)) * (0.9 + r() * 0.25);
+    s.blob(thick * 0.62, mix(pick(C.swarmMud, r), C.swarmDark, r() * 0.25), { sy, noise: 0.22 });
+    if (level >= 3 && i % 2 === 0) {
+      at(s, 0, h * 0.85, 0, () => {
+        const sv = s.push(0, 0, 0, 0, 1, 1, (r() - 0.5) * 0.6, (r() - 0.5) * 0.6);
+        s.cone(0.011, 0.05 + r() * 0.03, 4, mix(C.chitin, C.chitinTip, r() * 0.5));
+        s.pop(sv);
+      });
+    }
+    if (level >= 4 && i % 4 === 2) {
+      at(s, 0, h * 0.45, thick * 0.5, () => {
+        s.glow = AMBER_GLOW;
+        s.blob(0.012, C.swarmDark, { noise: 0 });
+        s.glow = [0, 0, 0];
+      });
+    }
+  }
+  if (e.gate) {
+    // Two swollen mounds flank the opening.
+    for (const t of [0.33, 0.67]) {
+      const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+      s.place(px, layout.heightAt(px, pz) - 0.02, pz, ry, 1);
+      hiveMound(s, thick * 0.75, h * 1.5, r, level >= 4, emptySpots());
+    }
+  }
+  if (level >= 3 && e.start === 'corner') {
+    s.place(a.x, layout.heightAt(a.x, a.z) - 0.02, a.z, 0, 1);
+    hiveMound(s, thick * 0.95, h * 2.1, r, level >= 5, emptySpots());
+    if (e.owner != null) at(s, thick * 0.4, h * 1.4, 0, () => banner(s, lin(e.owner!), 0.12, 0.07));
+  }
 }
 
 /** Geometry for one wall edge of a tile. */
@@ -888,8 +1058,36 @@ export function buildWallEdge(s: Soup, tile: TileLayout, layout: BoardLayout, e:
   const len = Math.hypot(b.x - a.x, b.z - a.z);
   const ry = -Math.atan2(b.z - a.z, b.x - a.x);
   const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+  const owner = e.owner != null ? lin(e.owner) : null;
+  if (e.theme === 'swarm') {
+    swarmRun(s, layout, a, b, e, r);
+    return;
+  }
+  if (e.level <= 1 && e.theme === 'fortress') {
+    // A low dry-stone wall of rough-cut blocks.
+    const n = Math.max(4, Math.round(len / 0.05));
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      if (e.gate && t > 0.38 && t < 0.62) continue;
+      if (i === 0 && e.start === 'merge') continue;
+      const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+      s.place(px, layout.heightAt(px, pz) - 0.01, pz, ry + (r() - 0.5) * 0.25, 1);
+      s.box(0.05, 0.035 + r() * 0.012, 0.045, mix(C.fortressStone, C.fortressTrim, r() * 0.6));
+      at(s, (r() - 0.5) * 0.02, 0.04, 0, () => s.box(0.034, 0.025, 0.036, mix(C.fortressStone, C.stone, r() * 0.5)));
+    }
+    if (e.gate && owner) {
+      for (const t of [0.36, 0.64]) {
+        const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+        s.place(px, layout.heightAt(px, pz) - 0.01, pz, ry, 1);
+        s.box(0.045, 0.1, 0.045, C.fortressTrim, C.fortressStone);
+        at(s, 0, 0.1, 0, () => s.pyramid(0.05, 0.03, owner));
+      }
+    }
+    return;
+  }
   if (e.level <= 1) {
-    // Sharpened palisade stakes
+    // Sharpened palisade stakes (Vanguard: dark, iron-tipped, its pennants on the gate)
+    const vanguard = e.theme === 'vanguard';
     const n = Math.max(3, Math.round(13 * len / 0.86));
     for (let i = 0; i <= n; i++) {
       const t = i / n;
@@ -898,18 +1096,29 @@ export function buildWallEdge(s: Soup, tile: TileLayout, layout: BoardLayout, e:
       if (i === 0 && e.start === 'merge') continue;
       const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
       s.place(px, layout.heightAt(px, pz) - 0.01, pz, ry + (r() - 0.5) * 0.3, 1);
-      const hh = 0.08 + r() * 0.03;
-      s.box(0.02, hh, 0.02, mix(C.wood, C.woodDark, r()));
-      at(s, 0, hh, 0, () => s.pyramid(0.02, 0.025, C.woodDark));
+      const hh = (vanguard ? 0.09 : 0.08) + r() * 0.03;
+      s.box(0.02, hh, 0.02, vanguard ? mix(C.woodDark, C.vanguardTrim, r() * 0.6) : mix(C.wood, C.woodDark, r()));
+      at(s, 0, hh, 0, () => s.pyramid(0.02, vanguard ? 0.035 : 0.025, vanguard ? C.steel : C.woodDark));
+    }
+    if (e.gate && vanguard && owner) {
+      for (const t of [0.33, 0.67]) {
+        const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+        s.place(px, layout.heightAt(px, pz) - 0.01, pz, ry, 1);
+        banner(s, owner, 0.17, 0.07);
+      }
     }
     return;
   }
-  const tier = STONE_TIERS[Math.min(e.level, MAX_WALL_LEVEL) - 2];
+  const tier = themedTier(e.level, e.theme, e.owner);
   s.place(mx, layout.heightAt(mx, mz) - 0.02, mz, ry, 1);
   if (e.gate) {
     for (const sx of [-1, 1]) at(s, sx * len * 0.33, 0, 0, () => stoneRun(s, len * 0.34, tier));
     for (const sx of [-1, 1]) at(s, sx * len * 0.15, 0, 0, () => s.box(0.045, tier.h + 0.045, tier.thick * 1.4, tier.trim));
     if (tier.band) at(s, 0, tier.h + 0.03, 0, () => s.box(len * 0.34, 0.03, tier.thick * 1.2, tier.trim));
+    // Vanguard hangs its colors either side of the gate.
+    if (e.theme === 'vanguard' && owner) {
+      for (const sx of [-1, 1]) at(s, sx * len * 0.15, tier.h + 0.02, tier.thick * 0.72, () => s.box(0.035, -tier.h * 0.8, 0.004, owner));
+    }
   } else {
     stoneRun(s, len, tier);
   }
@@ -927,9 +1136,11 @@ export function buildWallEdge(s: Soup, tile: TileLayout, layout: BoardLayout, e:
       if (tw.roof) {
         s.cone(tw.r * 1.3, tw.r * 1.9, 8, tw.roof);
         if (tw.tip) at(s, 0, tw.r * 1.85, 0, () => s.cone(tw.r * 0.32, tw.r * 0.7, 6, tw.tip!));
-        if (tw.pennant) at(s, 0, tw.r * 2.4, 0, () => banner(s, C.gold, 0.1, 0.05));
+        if (tw.pennant) at(s, 0, tw.r * 2.4, 0, () => banner(s, e.theme === 'vanguard' && owner ? owner : C.gold, 0.1, 0.05));
       } else {
         roundTowerTop(s, tw.r, tier.trim);
+        // A Fortress tower flies its holder's flag.
+        if (e.theme === 'fortress' && owner) at(s, 0, 0.01, 0, () => banner(s, owner, 0.1, 0.055));
       }
     });
   }

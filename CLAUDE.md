@@ -81,6 +81,14 @@ at high priority, the rest of the catalog during idle time).
 - Dev pages: `?preview=cards` (every card face, base/upgraded) and
   `?preview=hand` (a sandbox for draw, play, undo, discard, trash, shuffles,
   purchases and end of turn).
+- Occupied territory is themed by the holder's archetype
+  (`board3d/territory.ts`): a camp on each held plain tile (Vanguard war
+  camp, Fortress watch post, Swarm hive cluster) in the most open corner —
+  `buildDecor` records decor footprints; a camp clears trees through the
+  roads' decor mask only when there's no room — plus outline markers on
+  edges facing other land. Walls (`wallEdges` / `buildWallEdge`) and roads
+  (`ROAD_STYLES` in `roads.ts`) take the holder's style too; pieces rise and
+  sink per piece like walls. Preview: `?preview=territory`.
 - Cursors: gilded PNGs in `frontend/public/cursors/` (arrow, inspect, target,
   grab, grabbing), drawn as SVG in `frontend/scripts/build_cursors.py`
   (`python3 frontend/scripts/build_cursors.py`, macOS `sips`). Use them via
