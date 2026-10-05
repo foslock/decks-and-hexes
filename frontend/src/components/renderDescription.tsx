@@ -10,14 +10,17 @@ import type { CardCatalog } from '../cardCatalog';
  *     referenced CardFull.
  *
  * Self-references (the card naming itself) are left as plain text so the
- * name's own card doesn't link back to itself.
+ * name's own card doesn't link back to itself. With tooltips turned off in
+ * the settings the text is plain: no underlines, no hover popups.
  */
 export function renderDescription(
   text: string,
   catalog: CardCatalog,
   selfDefinitionId?: string,
+  tooltips = true,
 ): ReactNode {
   if (!text) return null;
+  if (!tooltips) return text;
   const pattern = catalog.namePattern;
   if (!pattern) return renderWithKeywords(text);
 

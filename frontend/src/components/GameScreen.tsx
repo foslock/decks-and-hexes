@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { GameState, Card, HexTile, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
 import GameBoard, { type BoardControls, type BoardFx, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors } from './GameBoard';
 import PlayerHud from './PlayerHud';
+import UpgradeCreditCounter from './UpgradeCreditCounter';
 import ResourceCounter, { CoinFlight, setShownResources, splitCoins, type Coin, type ResourceCounterHandle, type ResourceSource } from './ResourceCounter';
 import CardHand, { CardViewPopup, type PlayTarget, type DragTargetInfo, type UndoReturn, type IncomingDiscard } from './CardHand';
 import CardBrowser from './CardBrowser';
@@ -25,15 +26,16 @@ import CardFull, { CARD_FULL_WIDTH, CARD_FULL_MIN_HEIGHT } from './CardFull';
 import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from './cardSubtitle';
 import { plainCardName } from './CardName';
 import CompactCardFace from './CompactCardFace';
-import { TileCardStack, EngineQueue, CardDetailOverlay, boardCardScale, fanOffset, BOARD_FLIP_MS, QUEUE_CARD_SCALE, type BoardCardEntry } from './BoardCards';
-import FlightCard, { type Flight } from './hand/FlightCard';
+import { TileCardStack, EngineQueue, CardDetailOverlay, RivalEnginePiles, boardCardScale, fanOffset, BOARD_FLIP_MS, QUEUE_CARD_SCALE, type BoardCardEntry } from './BoardCards';
+import FlightCard, { turnOver, type Flight } from './hand/FlightCard';
 import TrashBurn from './hand/TrashBurn';
 import { discardTopSpin } from './hand/CardPile';
-import { CARD_H, CARD_W, PILE_SCALE, PILE_TILT, easeInOut, elementCenter, flightKeyframes, poseTransform, type Pose } from './hand/cardMotion';
+import { CARD_H, CARD_W, PILE_SCALE, PILE_TILT, easeInOut, easeOut, elementCenter, flightKeyframes, poseTransform, type Pose } from './hand/cardMotion';
 import { handSizing, handStripHeight, REST_VISIBLE } from './hand/handLayout';
 import Icon from '../icons/Icon';
 import { IconValue, Num } from '../icons/Num';
 import { useSound } from '../audio/useSound';
+import { soundEngine } from '../audio/SoundEngine';
 import { useCardZoom } from './CardZoomContext';
 import { computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
 import { preloadCardImages } from '../utils/cardImagePreload';
@@ -764,6 +766,10 @@ function progressButton(ready: boolean): { className: string; style: React.CSSPr
 /** How long the round's review lasts before it's accepted (the Done
  *  Reviewing button's draining bar). */
 const REVIEW_SECONDS = 30;
+/** A rival's engine cards peeling off their pile into the ID card: the gap
+ *  between cards and each card's trip (ms, at resolve speed 1). */
+const PEEL_GAP_MS = 240;
+const PEEL_MS = 900;
 
 /** Embossed, display-font style shared by the other phase action buttons
  *  (Cancel, Discard / Trash, the muted waiting states). */
@@ -1044,6 +1050,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     handPanelRo.current.observe(el);
   }, []);
   const boardViewInset = handPanelH > 0 ? Math.round(Math.max(handPanelH, CARD_H * handSizes.rest * REST_VISIBLE)) : 0;
+  /** How far the resting hand cards rise above the hand panel — the counters
+   *  and progress button sit clear above them. */
+  const handRise = handPanelH > 0 ? Math.max(0, boardViewInset - handPanelH) : 0;
   useEffect(() => {
     if (!error) return;
     const t = setTimeout(() => setError(null), 4000);
@@ -1758,12 +1767,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   }, [phase, phaseBanner, resolving]);
 
   // Chevron reveal animation: once the reveal banner clears, fade in all claim
-  // chevrons (every played card over its tile, opponents' face down) before the
-  // resolve overlay starts.
-  const revealHoldMs = revealCards && revealCards.length > 0 ? 1100 : 300;
+  // chevrons (every played card over its tile, opponents' face down) while the
+  // off-board cards go home, then hold a beat before the resolve starts.
+  const revealHoldMs = revealCards && revealCards.length > 0 ? 500 : 300;
   useEffect(() => {
     if (!chevronRevealPhase || phaseBanner) return;
-    const duration = Math.round(1500 * resolveSpeed);
+    const duration = Math.round(1000 * resolveSpeed);
 
     if (duration === 0) {
       setChevronAlpha(1);
@@ -3460,6 +3469,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     return () => clearTimeout(t);
   }, [heldState]);
 
+  // The board's tiles pop in once per build.
+  const tilePopsRef = useRef(false);
+  useEffect(() => { if (introSequence === 'overlay') tilePopsRef.current = false; }, [introSequence]);
+  // A new game starts the music over from the top.
+  useEffect(() => { soundEngine.restartMusic(); }, [gameState.id]);
+
   // Intro overlay dismissed — start shuffle → draw → play banner sequence
   const handleIntroReady = useCallback(() => {
     setShowIntro(false);
@@ -3486,6 +3501,18 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     if (introSequence === 'grid_build') {
       // Animate grid build from center over ~1.5s, then start card draw
       const buildDuration = Math.round(1500 * animSpeed) || 600;
+      // Each ring of tiles pops up out of the water (the build shader's
+      // stagger: ring k rises from k / maxRing × 0.6 of the way through).
+      if (!tilePopsRef.current) {
+        tilePopsRef.current = true;
+        const rings = Object.values(gameState.grid.tiles).map(t => (Math.abs(t.q) + Math.abs(t.r) + Math.abs(t.q + t.r)) / 2);
+        const maxRing = Math.max(1, ...rings);
+        for (let k = 0; k <= maxRing; k++) {
+          const at = (buildDuration / 1000) * ((k / maxRing) * 0.6 + 0.08);
+          const pops = 1 + Math.min(2, Math.floor(k / 2));
+          for (let j = 0; j < pops; j++) sound.tilePop(at + j * 0.045 + Math.random() * 0.02);
+        }
+      }
       const startTime = performance.now();
       let raf: number;
       const tick = () => {
@@ -4862,7 +4889,11 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     if (!current) return 0;
     const leaving = current.filter(pick);
     if (leaving.length === 0) return 0;
-    const remaining = current.filter(rc => !pick(rc));
+    // A rival's engine cards wait in a pile beside their ID card: they peel
+    // off it one by one (each leaves the pile as it goes). The rest go now.
+    const peels = leaving.filter(rc => rc.tileKey === null && rc.playerId !== activePlayerId && rc.stacked);
+    const now = leaving.filter(rc => !peels.includes(rc));
+    const remaining = current.filter(rc => !now.includes(rc));
     revealCardsRef.current = remaining;
     setRevealCards(remaining);
     const speed = resolveSpeed || 1;
@@ -4871,12 +4902,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       doneAt = Math.max(doneAt, (f.delay ?? 0) + f.duration);
       launchBoardFlight(f);
     };
-    leaving.forEach((rc, i) => {
-      const el = document.querySelector(`[data-board-card="${CSS.escape(rc.key)}"]`);
-      const r = el?.getBoundingClientRect();
-      const from: Pose | null = r && r.width > 0
-        ? { x: r.left + r.width / 2, y: r.top + r.height / 2, rot: 0, scale: r.width / CARD_W }
-        : null;
+    const poseOf = (rc: RevealCard): Pose | null => {
+      const r = document.querySelector(`[data-board-card="${CSS.escape(rc.key)}"]`)?.getBoundingClientRect();
+      return r && r.width > 0 ? { x: r.left + r.width / 2, y: r.top + r.height / 2, rot: 0, scale: r.width / CARD_W } : null;
+    };
+    now.forEach((rc, i) => {
+      const from = poseOf(rc);
       const delay = Math.round(i * stagger * speed);
       const duration = Math.round(600 * speed);
       if (!rc.primary) {
@@ -4911,8 +4942,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           arc: 50, ease: easeInOut, opacity: t => (t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3),
         }), delay, duration });
       } else {
-        // An opponent's engine card has no spot on the board: it pops up
-        // beside their ID card, holds a beat, then slips into it.
+        // No spot to fly from: it pops up beside their ID card, holds a
+        // beat, then slips into it.
         const pop: Pose = { x: row.right + 14 + CARD_W * 0.17, y: row.top + row.height / 2, rot: 0, scale: 0.34 };
         launchHome({ kind: 'toPlayer', card: rc.card, frames: [
           { offset: 0, transform: poseTransform({ ...pop, scale: 0.1 }), opacity: 0 },
@@ -4923,6 +4954,46 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         ], delay, duration: Math.round(1300 * speed) });
       }
     });
+
+    // Peeling: the top card lifts off the pile and turns over, shows itself
+    // for a moment, then slips into the ID card; the next follows quickly.
+    const peelGap = Math.round(PEEL_GAP_MS * speed);
+    const peelMs = Math.round(PEEL_MS * speed);
+    const piles = new Map<string, RevealCard[]>();
+    for (const rc of peels) piles.set(rc.playerId, [...(piles.get(rc.playerId) ?? []), rc]);
+    for (const pile of piles.values()) {
+      pile.forEach((rc, j) => {
+        const delay = j * peelGap;
+        doneAt = Math.max(doneAt, delay + peelMs);
+        setTimeout(() => {
+          const from = poseOf(rc);
+          const left = (revealCardsRef.current ?? []).filter(x => x !== rc);
+          revealCardsRef.current = left;
+          setRevealCards(left);
+          const row = playerRowRefs.current.get(rc.playerId)?.getBoundingClientRect();
+          if (!row || !from) return;
+          const lifted: Pose = { x: from.x + CARD_W * 0.12, y: from.y - CARD_H * 0.16, rot: 0, scale: Math.max(from.scale * 1.5, 0.4) };
+          if (rc.trash) {
+            setBoardBurns(b => [...b, { key: `burn-${rc.key}`, card: rc.card, pose: from }]);
+            sound.cardTrash();
+            return;
+          }
+          if (rc.gain > 0) launchRivalCoins(rc.playerId, rc.gain, lifted, Math.round(peelMs * 0.45));
+          sound.cardDraw();
+          const to: Pose = { x: row.left + row.width / 2, y: row.top + row.height / 2, rot: 0, scale: 0.06, opacity: 0 };
+          launchBoardFlight({
+            kind: 'toPlayer', card: rc.card, delay: 0, duration: peelMs,
+            frames: [
+              ...flightKeyframes(from, lifted, { ease: easeOut, samples: 4 }).map(f => ({ ...f, offset: (f.offset as number) * 0.3 })),
+              { offset: 0.5, transform: poseTransform(lifted), opacity: 1 },
+              ...flightKeyframes(lifted, to, { arc: 30, ease: easeInOut, samples: 6, opacity: t => (t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4) })
+                .slice(1).map(f => ({ ...f, offset: 0.5 + (f.offset as number) * 0.5 })),
+            ],
+            flipFrames: turnOver(false, 0, 0.3),
+          });
+        }, delay);
+      });
+    }
     return doneAt;
   }, [resolveSpeed, activePlayerId, discardPilePose, launchBoardFlight, sound, launchRivalCoins]);
   const flyRevealCardsRef = useRef(flyRevealCards);
@@ -5047,14 +5118,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     return true;
   }, [sound]);
 
-  // Before the board resolves tile by tile, every card that has nothing to
-  // resolve on the board — engine cards, and cards on tiles with no
-  // resolution step (e.g. Sabotage on an opponent's tile) — goes home, all
-  // together. The tile-by-tile resolution starts once they've landed.
-  const resolveReady = resolving && resolutionSteps.length > 0 && !phaseBanner && !chevronRevealPhase;
+  // First thing once the reveal banner clears: every card that has nothing
+  // to resolve on the board — engine cards (rivals' peel off their piles),
+  // and cards on tiles with no resolution step (e.g. Sabotage on an
+  // opponent's tile) — goes home, while the claim arrows fade in. The
+  // tile-by-tile resolution starts once both are done.
+  const revealCleared = resolving && resolutionSteps.length > 0 && !phaseBanner;
+  const resolveReady = revealCleared && !chevronRevealPhase;
   const [offBoardHome, setOffBoardHome] = useState(false);
   useEffect(() => {
-    if (!resolveReady) { setOffBoardHome(false); return; }
+    if (!revealCleared) { setOffBoardHome(false); return; }
     const offBoard = (rc: RevealCard) => rc.tileKey === null || !lastStepByTile.has(rc.tileKey);
     // Face-down cards on tiles with nothing to resolve turn over first, so
     // everyone still sees them before they go.
@@ -5070,7 +5143,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     return () => { clearTimeout(f); clearTimeout(t); };
   // Runs once per resolution: flying cards home is not repeatable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resolveReady]);
+  }, [revealCleared]);
 
   // ── Tile by tile (TileResolver) ──
   const resolvePlans = useMemo<TilePlan[]>(
@@ -5252,6 +5325,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     return { tiles, engines };
   }, [revealCards, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds, reviewing, replay, reviewHoveredTile, reviewEntries]);
   const tileCardKeys = useMemo(() => [...boardCards.tiles.keys()], [boardCards]);
+  /** Rivals' engine cards at the reveal: a face-down pile beside each one's ID card. */
+  const rivalPiles = useMemo(() => {
+    const piles = new Map<string, BoardCardEntry[]>();
+    for (const rc of revealCards ?? []) {
+      if (rc.tileKey !== null || rc.playerId === activePlayerId) continue;
+      piles.set(rc.playerId, [...(piles.get(rc.playerId) ?? []), rc]);
+    }
+    return [...piles].map(([playerId, entries]) => ({ playerId, entries }));
+  }, [revealCards, activePlayerId]);
+  const rowOf = useCallback((pid: string) => playerRowRefs.current.get(pid), []);
 
   /** Click a board card: one card opens the zoom; several show side by side. */
   const openBoardCards = useCallback((entries: BoardCardEntry[], index: number) => {
@@ -6008,7 +6091,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
               Wrapper is pointer-events: none so the full-width bar (including
               the left spacer) passes clicks through to the hex grid canvas
               underneath. Only the button column opts back into pointer events. */}
-          <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'flex-end', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', bottom: 12 + handRise, left: 12, right: 12, display: 'flex', alignItems: 'flex-end', gap: 8, zIndex: 20, minHeight: 34, opacity: hudVisible ? 1 : 0, transition: 'opacity 2.5s ease', pointerEvents: 'none' }}>
             {/* Actions left — bottom-aligned with the action buttons on the right */}
             <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end' }}>
               {/* The action counter folds away outside your play turn; the
@@ -6132,6 +6215,13 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                   speed={animSpeed}
                   visible={introSequence === 'done' && !showIntro && !showGameOver}
                   sourcesForGain={resourceSourcesForGain}
+                />
+              )}
+              {activePlayer && (
+                <UpgradeCreditCounter
+                  value={displayState.players[activePlayerId]?.upgrade_credits ?? activePlayer.upgrade_credits ?? 0}
+                  playerId={activePlayerId}
+                  visible={introSequence === 'done' && !showIntro && !showGameOver}
                 />
               )}
             </div>
@@ -6634,6 +6724,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       )}
 
       {/* Played cards flying home after the reveal, and trashed ones burning */}
+      {rivalPiles.length > 0 && <RivalEnginePiles piles={rivalPiles} rowOf={rowOf} />}
       {boardFlights.length > 0 && createPortal(
         <>{boardFlights.map(f => <FlightCard key={f.key} flight={f} onDone={handleBoardFlightDone} />)}</>,
         document.body,

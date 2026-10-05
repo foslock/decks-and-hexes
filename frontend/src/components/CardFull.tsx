@@ -648,7 +648,7 @@ export default function CardFull({
             text={displayDescription}
             notes={notes}
             fitKey={fitKey}
-            catalogRender={(s) => renderDescription(s, catalog, card.definition_id)}
+            catalogRender={(s) => renderDescription(s, catalog, card.definition_id, tooltipsEnabled)}
           />
         </div>
       </div>

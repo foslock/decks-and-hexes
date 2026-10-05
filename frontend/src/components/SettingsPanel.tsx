@@ -4,6 +4,7 @@ import { useSettings, type AnimationMode, type VisualQuality } from './SettingsC
 import { KEYWORDS } from './Keywords';
 import { downloadGameLog } from '../utils/downloadGameLog';
 import Icon from '../icons/Icon';
+import { previewSoundLevel, VolumeControl } from './LocalSettingsMenu';
 
 interface SettingsPanelProps {
   isMultiplayer?: boolean;
@@ -16,7 +17,10 @@ interface SettingsPanelProps {
 }
 
 export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, playerId, onLeaveGame, onEndGame }: SettingsPanelProps) {
-  const { settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume, setVisualQuality } = useSettings();
+  const {
+    settings, setAnimationMode, setTooltips, setSoundEnabled, setSoundVolume,
+    setMusicEnabled, setMusicVolume, setVisualQuality,
+  } = useSettings();
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
@@ -39,13 +43,13 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
         <div className="cc-ov-set-row">
           <span className="cc-ov-set-label">Animations:</span>
           <div className="cc-ov-seg">
-            {(['normal', 'fast', 'off'] as AnimationMode[]).map((mode) => (
+            {(['normal', 'fast'] as AnimationMode[]).map((mode) => (
               <button
                 key={mode}
                 className={`cc-ov-seg-btn${settings.animationMode === mode ? ' is-active' : ''}`}
                 onClick={() => setAnimationMode(mode)}
               >
-                {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
+                {mode === 'normal' ? 'Normal' : 'Fast'}
               </button>
             ))}
           </div>
@@ -79,30 +83,29 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
           </div>
         </div>
         <div className="cc-ov-set-row">
-          <span className="cc-ov-set-label">Sound:</span>
-          <div className="cc-ov-seg">
-            {([true, false] as const).map((on) => (
-              <button
-                key={String(on)}
-                className={`cc-ov-seg-btn${settings.soundEnabled === on ? ' is-active' : ''}`}
-                onClick={() => setSoundEnabled(on)}
-              >
-                {on ? 'On' : 'Off'}
-              </button>
-            ))}
-          </div>
-          {settings.soundEnabled && (
-            <input
-              type="range"
-              className="cc-ov-range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={settings.soundVolume}
-              onChange={(e) => setSoundVolume(parseFloat(e.target.value))}
-              style={{ width: 64, ['--pct' as string]: `${Math.round(settings.soundVolume * 100)}%` }}
-            />
-          )}
+          <span className="cc-ov-set-label">Music:</span>
+          <VolumeControl
+            label="Music"
+            on={settings.musicEnabled}
+            volume={settings.musicVolume}
+            onToggle={setMusicEnabled}
+            onVolume={setMusicVolume}
+            segClass="cc-ov-seg"
+            segBtnClass="cc-ov-seg-btn"
+          />
+        </div>
+        <div className="cc-ov-set-row">
+          <span className="cc-ov-set-label">Sounds:</span>
+          <VolumeControl
+            label="Sounds"
+            on={settings.soundEnabled}
+            volume={settings.soundVolume}
+            onToggle={setSoundEnabled}
+            onVolume={setSoundVolume}
+            onRelease={previewSoundLevel}
+            segClass="cc-ov-seg"
+            segBtnClass="cc-ov-seg-btn"
+          />
         </div>
 
         {/* Map seed (read-only) */}

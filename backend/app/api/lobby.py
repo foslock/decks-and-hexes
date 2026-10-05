@@ -595,6 +595,10 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
 
     if req.test_mode is not None:
         lobby.config.test_mode = req.test_mode
+        # A test game is the host's own sandbox: turning test mode on takes
+        # the lobby out of the public listing (the host can reopen it).
+        if req.test_mode:
+            lobby.config.open_to_public = False
 
     if req.vp_target is not None:
         if req.vp_target < 1:

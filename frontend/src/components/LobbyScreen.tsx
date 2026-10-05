@@ -1,7 +1,8 @@
 import { Fragment, useState, useEffect, useCallback, useRef } from 'react';
 import type { GameState, LobbyState } from '../types/game';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { useSettings, type AnimationMode, type VisualQuality } from './SettingsContext';
+import LocalSettingsMenu from './LocalSettingsMenu';
+import { soundEngine } from '../audio/SoundEngine';
 import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
@@ -133,15 +134,12 @@ interface LobbyScreenProps {
 export default function LobbyScreen({
   lobbyCode, playerId, token, isHost, initialLobby, onGameStart, onLeave, onTokenRefresh,
 }: LobbyScreenProps) {
-  const { settings, setAnimationMode, setTooltips, setVisualQuality } = useSettings();
   const [lobby, setLobby] = useState<LobbyState>(initialLobby);
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [countdownStart, setCountdownStart] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
   const [showCopied, setShowCopied] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const settingsRef = useRef<HTMLDivElement>(null);
   const [cardPacks, setCardPacks] = useState<CardPackDef[]>([]);
   const selectedPackId = lobby.config.card_pack || 'everything';
   const selectedPackDescription = cardPacks.find(p =>
@@ -211,16 +209,6 @@ export default function LobbyScreen({
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (!settingsOpen) return;
-    const handleClick = (e: MouseEvent) => {
-      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
-        setSettingsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, [settingsOpen]);
   const gameStartRef = useRef(false);
 
   // Color picker state
@@ -245,6 +233,11 @@ export default function LobbyScreen({
 
   const { lastMessage, status } = useWebSocket(lobbyCode, playerId, token, onTokenRefresh);
   const sound = useSound();
+
+  // The music falls silent for the countdown (the game starts it over).
+  const counting = countdown !== null;
+  useEffect(() => { soundEngine.holdMusic(counting); }, [counting]);
+  useEffect(() => () => { if (!gameStartRef.current) soundEngine.holdMusic(false); }, []);
 
   // Handle WebSocket messages
   useEffect(() => {
@@ -453,62 +446,7 @@ export default function LobbyScreen({
   return (
     <div className="cc-scr-backdrop cc-scr-lobby">
       {/* Settings gear — top right */}
-      <div ref={settingsRef} className="cc-scr-gear-wrap">
-        <button
-          onClick={() => setSettingsOpen(p => !p)}
-          className={`cc-btn-secondary cc-scr-gear${settingsOpen ? ' is-open' : ''}`}
-          title="Settings"
-        >
-          <Icon name="settings" size={20} decorative />
-        </button>
-        {settingsOpen && (
-          <div className="cc-panel cc-scr-gear-pop">
-            <div className="cc-scr-eyebrow">Local Settings</div>
-            <div className="cc-scr-gear-row">
-              <span>Animations</span>
-              <div className="cc-scr-seg cc-scr-seg-sm">
-                {(['normal', 'fast', 'off'] as AnimationMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setAnimationMode(mode)}
-                    className={`cc-scr-seg-btn${settings.animationMode === mode ? ' is-active' : ''}`}
-                  >
-                    {mode === 'normal' ? 'Normal' : mode === 'fast' ? 'Fast' : 'Off'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="cc-scr-gear-row" title="Low renders the board at standard resolution without antialiasing, for a smoother frame rate on large or high-resolution screens.">
-              <span>Visual Quality</span>
-              <div className="cc-scr-seg cc-scr-seg-sm">
-                {(['low', 'high'] as VisualQuality[]).map((q) => (
-                  <button
-                    key={q}
-                    onClick={() => setVisualQuality(q)}
-                    className={`cc-scr-seg-btn${settings.visualQuality === q ? ' is-active' : ''}`}
-                  >
-                    {q === 'low' ? 'Low' : 'High'}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="cc-scr-gear-row">
-              <span>Tooltips</span>
-              <div className="cc-scr-seg cc-scr-seg-sm">
-                {([true, false] as const).map((on) => (
-                  <button
-                    key={String(on)}
-                    onClick={() => setTooltips(on)}
-                    className={`cc-scr-seg-btn${settings.tooltips === on ? ' is-active' : ''}`}
-                  >
-                    {on ? 'On' : 'Off'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <LocalSettingsMenu />
 
       <div className="cc-scr-lobby-inner">
         {/* Header with lobby code */}

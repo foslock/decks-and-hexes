@@ -8,6 +8,7 @@ import { waitForImages } from '../utils/appReady';
 import type { Card } from '../types/game';
 import CardFull, { CARD_FULL_HEIGHT, CARD_FULL_WIDTH } from './CardFull';
 import { useCardCatalog } from '../cardCatalog';
+import { soundEngine } from '../audio/SoundEngine';
 
 // Generate all hex coords for a radius-r grid
 function generateHexCoords(radius: number): { q: number; r: number }[] {
@@ -116,8 +117,11 @@ interface HeroAnimationProps {
 export default function HeroAnimation({ start = true, onReady, paused = false }: HeroAnimationProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<BoardEngine | null>(null);
-  // Read once when the diorama is built (it isn't rebuilt on a change).
-  const lowQualityRef = useRef(useVisualQuality() === 'low');
+  // Changing the visual quality rebuilds the diorama (its renderer's
+  // antialiasing and pixel ratio are fixed at creation).
+  const lowQuality = useVisualQuality() === 'low';
+  /** The intro has played: a rebuild goes straight to the settled scene. */
+  const introPlayedRef = useRef(false);
   const canvasHostRef = useRef<HTMLDivElement>(null);
   const blueCardRef = useRef<HTMLDivElement>(null);
   const redCardRef = useRef<HTMLDivElement>(null);
@@ -173,7 +177,8 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       placeCard(redCardRef.current, { x: restR, y: centerY, rotation: restAngleR, alpha: 1 });
     };
 
-    const engine = new BoardEngine(canvasHost, lowQualityRef.current ? { hero: true, antialias: false, maxPixelRatio: 1 } : { hero: true });
+    const engine = new BoardEngine(canvasHost, lowQuality ? { hero: true, antialias: false, maxPixelRatio: 1 } : { hero: true });
+    const rebuild = introPlayedRef.current;
     engineRef.current = engine;
     if (import.meta.env.DEV) (window as unknown as { __hero?: BoardEngine }).__hero = engine;
     let onLayoutChange: (() => void) | null = null;
@@ -242,7 +247,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
     engine.setTilt(0.62);
     engine.setPadding(Math.max(8, container.clientHeight * 0.06));
     engine.setSway(0.07);
-    engine.setBuildProgress(0);
+    engine.setBuildProgress(rebuild ? 1 : 0);
     engine.setInputListener({
       onHover: (key) => engine.setHover(key && !tiles[key]?.is_blocked ? key : null),
       onLeave: () => engine.setHover(null),
@@ -281,8 +286,10 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
 
     let filledBlue = 0;
     let filledRed = 0;
-    let collided = false;
-    let built = false;
+    // A rebuild has nothing left to introduce: no whoosh, clash or build.
+    let collided = rebuild;
+    let whooshed = rebuild;
+    let built = rebuild;
     let nextBorder = TOTAL_ANIM + 1200;
     let startTime = 0;
     let raf = 0;
@@ -299,8 +306,14 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       if (destroyed) return;
       if (!startTime) {
         if (!startRef.current || !warmed) { raf = requestAnimationFrame(tick); return; }
-        startTime = performance.now();
-        engine.playIntro();
+        if (rebuild) {
+          // Pick up where the intro leaves off: territories filled, cards at rest.
+          startTime = performance.now() - TOTAL_ANIM;
+        } else {
+          startTime = performance.now();
+          introPlayedRef.current = true;
+          engine.playIntro();
+        }
       }
       const elapsed = performance.now() - startTime;
 
@@ -322,6 +335,11 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       }
 
       // Card entry (accelerating in) → collision → elastic rebound → idle breathing.
+      if (!whooshed && elapsed >= CARD_ENTER_START) {
+        whooshed = true;
+        // (Skipped if the tab stalled past the moment.)
+        if (elapsed < CARD_ENTER_START + 150) soundEngine.heroWhoosh();
+      }
       if (elapsed >= CARD_ENTER_START && elapsed < COLLISION_TIME) {
         const t = easeInCubic((elapsed - CARD_ENTER_START) / CARD_ENTER_DUR);
         const enterTilt = 0.15;
@@ -336,6 +354,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       } else if (elapsed >= COLLISION_TIME && elapsed < TOTAL_ANIM) {
         if (!collided) {
           collided = true;
+          if (elapsed < COLLISION_TIME + 150) soundEngine.swordClash();
           const fx = engine.fx;
           fx?.shockwave(0, 0, 0xffe2a0, 3.4, 900);
           fx?.sparks(0, 0, 0xffd27a, 46, 1.4);
@@ -399,9 +418,9 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       delete PLAYER_COLORS[BLUE_ID];
       delete PLAYER_COLORS[RED_ID];
     };
-  }, []);
+  }, [lowQuality]);
 
-  useEffect(() => { engineRef.current?.setPaused(paused); }, [paused]);
+  useEffect(() => { engineRef.current?.setPaused(paused); }, [paused, lowQuality]);
 
   return (
     <div ref={containerRef} className="cc-scr-hero" aria-hidden="true">

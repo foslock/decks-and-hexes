@@ -70,6 +70,17 @@ class TestBrowse:
         client.patch(f"/api/lobby/{lob['code']}/config", json={"open_to_public": True, "token": lob["token"]})
         assert len(_browse(client)["open"]) == 1
 
+    def test_enabling_test_mode_makes_the_lobby_private(self, client: TestClient) -> None:
+        lob = _create(client)
+        res = client.patch(f"/api/lobby/{lob['code']}/config", json={"test_mode": True, "token": lob["token"]})
+        assert res.json()["lobby"]["config"]["open_to_public"] is False
+        assert _browse(client)["open"] == []
+        # Turning it off again leaves the lobby private; the host can reopen it.
+        res = client.patch(f"/api/lobby/{lob['code']}/config", json={"test_mode": False, "token": lob["token"]})
+        assert res.json()["lobby"]["config"]["open_to_public"] is False
+        client.patch(f"/api/lobby/{lob['code']}/config", json={"open_to_public": True, "token": lob["token"]})
+        assert len(_browse(client)["open"]) == 1
+
     def test_started_game_moves_to_in_progress(self, client: TestClient, no_countdown: None) -> None:
         lob = _create(client)
         client.post(f"/api/lobby/{lob['code']}/cpu", json={"archetype": "swarm", "token": lob["token"]})

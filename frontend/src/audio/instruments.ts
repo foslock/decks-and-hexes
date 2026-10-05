@@ -275,6 +275,75 @@ export function brass(v: Voice, o: {
   return at + len;
 }
 
+const bugleWaves = new WeakMap<BaseAudioContext, PeriodicWave>();
+/** A bugle's spectrum: 2nd–4th harmonics as strong as the fundamental, then a steady roll-off. */
+function bugleWave(ctx: BaseAudioContext): PeriodicWave {
+  let w = bugleWaves.get(ctx);
+  if (!w) {
+    const amps = [0, 0.8, 1, 0.85, 0.7, 0.52, 0.38, 0.27, 0.19, 0.13, 0.09, 0.06, 0.04, 0.028, 0.02, 0.014, 0.01];
+    const real = new Float32Array(amps.length);
+    const imag = Float32Array.from(amps);
+    w = ctx.createPeriodicWave(real, imag);
+    bugleWaves.set(ctx, w);
+  }
+  return w;
+}
+
+/**
+ * A natural bugle note, one player: the lips slur up into the pitch from
+ * below, the tone brightens with the breath and mellows as it's held, a
+ * little air and a tongued start, and vibrato only on held notes.
+ */
+export function bugle(v: Voice, o: {
+  f: number; at?: number; dur: number; gain?: number; bright?: number; vibrato?: boolean; scoop?: number; dest?: AudioNode;
+}): number {
+  const ctx = v.ctx;
+  const at = o.at ?? 0;
+  const t = v.at(at);
+  const gain = o.gain ?? 1;
+  const attack = 0.035;
+  const release = Math.min(0.18, o.dur * 0.4);
+  const hold = Math.max(0, o.dur - attack - 0.06);
+  const bright = Math.min(9000, o.f * (o.bright ?? 5));
+  const dest = o.dest ?? v.out;
+
+  const osc = ctx.createOscillator();
+  osc.setPeriodicWave(bugleWave(ctx));
+  osc.frequency.value = o.f;
+  osc.detune.setValueAtTime(-(o.scoop ?? 45), t);
+  osc.detune.linearRampToValueAtTime(6, t + 0.04);
+  osc.detune.linearRampToValueAtTime(0, t + 0.09);
+
+  const lp = v.reg(ctx.createBiquadFilter());
+  lp.type = 'lowpass';
+  lp.Q.value = 0.7;
+  const relStart = t + attack + 0.06 + hold;
+  lp.frequency.setValueAtTime(o.f * 1.3, t);
+  lp.frequency.linearRampToValueAtTime(Math.min(11000, bright * 1.3), t + attack);
+  lp.frequency.exponentialRampToValueAtTime(bright, t + attack + 0.12);
+  lp.frequency.setValueAtTime(bright, relStart);
+  lp.frequency.exponentialRampToValueAtTime(o.f * 1.2, relStart + release);
+
+  const amp = v.gain(0);
+  const len = applyEnv(amp.gain, t, { a: attack, d: 0.06, s: 0.82, hold, r: release, peak: gain });
+  osc.connect(lp).connect(amp).connect(dest);
+  if (o.vibrato ?? o.dur > 0.4) {
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = rand(4.8, 5.4);
+    const depth = v.gain(0);
+    depth.gain.setValueAtTime(0, t);
+    depth.gain.linearRampToValueAtTime(0, t + 0.25);
+    depth.gain.linearRampToValueAtTime(9, t + 0.6);
+    lfo.connect(depth).connect(osc.detune);
+    v.run(lfo, at, at + len);
+  }
+  v.run(osc, at, at + len);
+  // Air through the horn, and the tongue's "t".
+  v.noise({ color: 'pink', at, gain: gain * 0.05, env: { a: attack, d: 0.06, s: 0.5, hold, r: release }, filters: [{ type: 'bandpass', f: Math.min(5000, o.f * 4), q: 1.2 }], dest });
+  v.noise({ color: 'white', at, gain: gain * 0.08, env: { a: 0.002, d: 0.025 }, filters: [{ type: 'bandpass', f: 1800, q: 0.9 }], dest });
+  return at + len;
+}
+
 /** String-section pad: pairs of detuned saws per pitch, soft low-pass, slow swell. */
 export function strings(v: Voice, o: {
   freqs: readonly number[]; at?: number; dur: number; gain?: number; attack?: number; release?: number; cutoff?: number; dest?: AudioNode;

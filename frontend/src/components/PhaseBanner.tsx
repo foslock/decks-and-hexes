@@ -28,6 +28,9 @@ const PHASE_ACCENTS: Record<string, string> = {
   buy: '255, 170, 74',
 };
 
+/** Each phase's bugle call: up from the 1 to the 3, 4 or 5. */
+const PHASE_CALLS: Record<string, 3 | 4 | 5> = { play: 3, reveal: 4, buy: 5 };
+
 const PHASE_LABELS: Record<string, string> = {
   upkeep: 'Upkeep',
   play: 'Play Cards',
@@ -79,14 +82,17 @@ export default function PhaseBanner({ phase, labelOverride, subtitle, onMidpoint
     return () => cancelAnimationFrame(raf);
   }, [stage]);
 
-  // Swell as the ribbon sweeps in. Banners with a custom label (e.g. the
-  // match-start "Begin!") already have their own jingle.
+  // A bugle call as the ribbon sweeps in, climbing through the round. Banners
+  // with a custom label (the round announcement) stay quiet.
   const sound = useSound();
   const soundRef = useRef(sound);
   soundRef.current = sound;
   useEffect(() => {
-    if (stage === 'enter' && !labelOverride) soundRef.current.phaseChange();
-  }, [stage, labelOverride]);
+    if (stage !== 'enter' || labelOverride) return;
+    const step = PHASE_CALLS[phase];
+    if (step) soundRef.current.phaseCall(step);
+    else soundRef.current.phaseChange();
+  }, [stage, labelOverride, phase]);
 
   // enter → hold: wait for the slide-in transition to finish
   useEffect(() => {

@@ -94,6 +94,18 @@ at high priority, the rest of the catalog during idle time).
   (`python3 frontend/scripts/build_cursors.py`, macOS `sips`). Use them via
   `cursor('target')` from `utils/cursors.ts` (CSS `var(--cc-cursor-target)`).
 
+### Audio (frontend)
+All sound is synthesized live with Web Audio (no files): recipes in
+`frontend/src/audio/sounds.ts` (levels in `LEVELS`, calibrated with
+`offlineRender.ts`), instruments (incl. the natural `bugle`) in `instruments.ts`,
+the engine in `SoundEngine.ts`. Phase banners (`PhaseBanner`) sound a bugle
+call that climbs through the round: 1 → 3 Play, 1 → 4 Resolve, 1 → 5 Buy
+(`phaseCall3`–`5`). Background music is `audio/music.ts`: distant march drums
+generated bar by bar on their own bus/volume; it starts at the first gesture, pauses while the tab is hidden,
+holds silent through the lobby countdown (`holdMusic`) and starts over with
+each game (`restartMusic`). Music/Sounds settings reach the engine from
+`SettingsProvider`. Audition page: `?preview=sounds`.
+
 ### Game Log Analysis
 When the user refers to a "game log" they mean a JSON file produced by
 `GET /api/games/{game_id}/log` or the in-app **Download Log** button — typically

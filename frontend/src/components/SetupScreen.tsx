@@ -6,6 +6,7 @@ import HowToPlay from './HowToPlay';
 import TutorialOverlay from './tutorial/TutorialOverlay';
 import HeroAnimation from './HeroAnimation';
 import LobbyBrowser from './LobbyBrowser';
+import LocalSettingsMenu from './LocalSettingsMenu';
 import packageJson from '../../package.json';
 import { appHasBooted, signalAppReady, waitForFonts } from '../utils/appReady';
 
@@ -91,6 +92,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   return (
     <div className={`cc-scr-backdrop cc-scr-home${ready ? '' : ' is-booting'}`} aria-busy={!ready}>
       <HomeEmbers />
+      <LocalSettingsMenu />
 
       {/* Title */}
       <header className="cc-scr-home-header">

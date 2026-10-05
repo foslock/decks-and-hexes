@@ -14,13 +14,14 @@
  * offline renders to a common short-term loudness (see LEVELS).
  */
 import { dbToGain, jitter, pick, rand, randInt, semi, variant, Voice, type Bus } from './synth';
-import { bell, brass, clang, coin, crackle, drum, feltTap, note, scatter, shimmerSwell, strings, swish, thump, timpani, woodKnock } from './instruments';
+import { bell, brass, bugle, clang, coin, crackle, drum, feltTap, note, scatter, shimmerSwell, strings, swish, thump, timpani, woodKnock } from './instruments';
 
 export const CORE_SOUND_NAMES = [
   'cardDraw', 'cardPlay', 'cardDiscard', 'cardTrash', 'cardPurchase', 'tileSelect',
   'countdownTick', 'countdownGo', 'buttonClick', 'deckShuffle', 'victoryJingle', 'defeatJingle',
   'resolveDefenseFortify', 'resolveTileOccupied', 'resolveContested', 'resolveBaseRaidFortify',
   'resolveBaseRaidRam', 'resolveBaseRaidShatter', 'resolveBaseRaidHold', 'upgradeCharge', 'upgradeCard', 'beginJingle',
+  'heroWhoosh', 'swordClash', 'tilePop', 'phaseCall3', 'phaseCall4', 'phaseCall5',
 ] as const;
 
 /** Optional extras (available on the engine + hook, not yet wired into components). */
@@ -56,7 +57,7 @@ const LEVELS: Record<SoundName, number> = {
   cardPurchase: -12.4,
   tileSelect: -4.9,
   countdownTick: -6.3,
-  countdownGo: -12.5,
+  countdownGo: -9.5,
   buttonClick: -7.1,
   deckShuffle: 9.0,
   victoryJingle: -13.9,
@@ -70,7 +71,13 @@ const LEVELS: Record<SoundName, number> = {
   resolveBaseRaidHold: -14.7,
   upgradeCharge: -13,
   upgradeCard: -12.5,
-  beginJingle: -13.2,
+  beginJingle: -9.7,
+  heroWhoosh: -10,
+  swordClash: -14,
+  tilePop: -6,
+  phaseCall3: -11.1,
+  phaseCall4: -11.2,
+  phaseCall5: -11.7,
   hoverTick: -9.9,
   coinSpend: -11.6,
   vpGain: -9.6,
@@ -287,22 +294,38 @@ const countdownTick: Recipe = (bus, when) => {
   v.done();
 };
 
-/**
- * Big drum + bright D-major brass stab + bell.
- * Scheduled ~60 ms ahead so the audio thread has the nodes queued BEFORE the
- * heavy lobby→game navigation that follows (a long main-thread block right
- * after start(now) can otherwise swallow the sound in production builds).
- */
+/** The bugle's G2 harmonics: × 3 = D4, × 4 = G4, × 6 = D5. */
+const BUGLE_G = 98;
+
+/** Countdown over, the game is on: a bugle's "ta-ta-taaa" (G4 G4 D5) over a bass drum. */
 const countdownGo: Recipe = (bus, when) => {
-  const v = voice(bus, (when ?? bus.ctx.currentTime) + 0.06, 'countdownGo', { reverb: 0.3 });
-  drum(v, { f: 62, gain: 1, decay: 0.55, skin: 0.5, drive: 2.4, snap: 0.3 });
-  ['D4', 'A4', 'D5', 'F#5'].forEach((n, i) => {
-    brass(v, { f: note(n), dur: 0.22, gain: [0.5, 0.45, 0.4, 0.3][i], bright: 7, attack: 0.018, release: 0.4, vibrato: false });
-  });
-  bell(v, { f: note('D6'), gain: 0.18, decay: 0.8 });
-  swish(v, { from: 1500, to: 6000, dur: 0.2, attack: 0.01, q: 0.6, gain: 0.12, hp: 1000, lp: 9000 });
+  const v = voice(bus, (when ?? bus.ctx.currentTime) + 0.06, 'countdownGo', { reverb: 0.32 });
+  bugle(v, { f: BUGLE_G * 4, dur: 0.11, gain: 0.8, vibrato: false });
+  bugle(v, { f: BUGLE_G * 4, at: 0.14, dur: 0.11, gain: 0.8, vibrato: false, scoop: 20 });
+  bugle(v, { f: BUGLE_G * 6, at: 0.28, dur: 0.75 });
+  drum(v, { f: 60, at: 0.28, gain: 0.6, decay: 0.55, skin: 0.35, drive: 1.6 });
   v.done();
 };
+
+/**
+ * A phase banner sweeping in: the bugle flicks up from a grace note on the 1
+ * (G4) to a held 3, 4 or 5 — climbing through the round (Play → Resolve → Buy).
+ */
+function phaseCall(name: 'phaseCall3' | 'phaseCall4' | 'phaseCall5', target: number): Recipe {
+  return (bus, when) => {
+    const v = voice(bus, when, name, { reverb: 0.4 });
+    const grace = 0.085;
+    bugle(v, { f: BUGLE_G * 4, dur: grace, gain: 0.7, bright: 4.5, vibrato: false, scoop: 30 });
+    bugle(v, { f: target, at: grace, dur: 0.6, gain: 0.9, bright: 4.5, scoop: 15 });
+    v.done();
+  };
+}
+/** G4 up to B4 (the 5th harmonic). */
+const phaseCall3 = phaseCall('phaseCall3', BUGLE_G * 5);
+/** G4 up to C5 (between the harmonics: the player lips it up). */
+const phaseCall4 = phaseCall('phaseCall4', BUGLE_G * 4 * (4 / 3));
+/** G4 up to D5 (the 6th harmonic). */
+const phaseCall5 = phaseCall('phaseCall5', BUGLE_G * 6);
 
 // ── Claim resolution ───────────────────────────────────────────────
 
@@ -345,6 +368,60 @@ const resolveContested: Recipe = (bus, when) => {
     color: 'white', at: H + 0.01, gain: 0.12, env: { a: 0.004, d: 0.22 },
     filters: [{ type: 'bandpass', f: 3000, f2: 1600, sweep: 0.2, q: 2 }, { type: 'lowpass', f: 6000, q: 0.5 }],
   });
+  v.done();
+};
+
+// ── Title screen & board build ────────────────────────────────────
+
+/**
+ * The title cards rushing in from both sides: two air rushes swelling toward
+ * the middle over a rising rumble, cut off at the collision (t = 1.0).
+ */
+const heroWhoosh: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'heroWhoosh', { reverb: 0.2 });
+  const T = 1.0;
+  const rush = { a: T - 0.02, d: 0.02, s: 1, hold: 0, r: 0.06, attackCurve: 'exp' as const };
+  for (const side of [-1, 1]) {
+    v.noise({
+      color: 'pink', gain: 0.75, env: rush, dest: v.bus(1, side * 0.6),
+      filters: [
+        { type: 'highpass', f: 250, q: 0.7 },
+        { type: 'bandpass', f: 350, f2: 2800, sweep: T, q: 1.1 },
+        { type: 'lowpass', f: 7000, q: 0.5 },
+      ],
+    });
+  }
+  v.tone({ f: 70, f2: 190, glide: T, gain: 0.35, env: rush, drive: 1.6 });
+  shimmerSwell(v, { gain: 0.18, rise: T - 0.05, decay: 0.12 });
+  v.done();
+};
+
+/**
+ * Steel on steel: a sharp strike, two blades ringing against each other, the
+ * "shing" of the edges sliding apart, and a heavy thump under it all.
+ */
+const swordClash: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'swordClash', { vary: 0.3, reverb: 0.35 });
+  v.noise({ color: 'white', gain: 0.5, env: { a: 0.0004, d: 0.025 }, filters: [{ type: 'highpass', f: 2200, q: 0.7 }, { type: 'lowpass', f: 12000, q: 0.5 }] });
+  thump(v, { f: 140, f2: 48, drop: 0.09, gain: 0.6, decay: 0.42, drive: 2.2 });
+  drum(v, { f: 66, gain: 0.35, decay: 0.4, skin: 0.4 });
+  const f = pick([1580, 1660, 1740]);
+  clang(v, { f, gain: 0.42, decay: 1.1, bright: 1.2, strike: 0.5, dest: v.bus(1, -0.25) });
+  clang(v, { f: f * 1.34, at: 0.006, gain: 0.32, decay: 0.9, bright: 1.1, strike: 0.4, dest: v.bus(1, 0.25) });
+  v.noise({
+    color: 'white', at: 0.012, gain: 0.22, env: { a: 0.01, d: 0.32 },
+    filters: [{ type: 'bandpass', f: 6500, f2: 3200, sweep: 0.3, q: 3 }, { type: 'lowpass', f: 9000, q: 0.5 }],
+  });
+  v.done();
+};
+
+/** A tile popping up out of the water as the board builds. */
+const tilePop: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'tilePop', { vary: 1.2, pan: rand(-0.4, 0.4), reverb: 0.12 });
+  const f = rand(620, 980);
+  v.tone({ f, f2: f * 0.42, glide: 0.035, gain: 0.7, env: { a: 0.002, d: 0.06 } });
+  v.tone({ type: 'triangle', f: f * 1.5, f2: f * 0.8, glide: 0.025, gain: 0.15, env: { a: 0.001, d: 0.035 } });
+  v.noise({ color: 'pink', gain: 0.18, env: { a: 0.0005, d: 0.012 }, filters: [{ type: 'bandpass', f: 1800, q: 1 }] });
   v.done();
 };
 
@@ -550,21 +627,13 @@ const resolveBaseRaidHold: Recipe = (bus, when) => {
 
 // ── Jingles ────────────────────────────────────────────────────────
 
-/** Short horn call "da-da-da-DAAA" over drums — the match begins. */
+/** The first round begins: a bugle call (D4 G4 · D5, held) with a bass drum under the held note. */
 const beginJingle: Recipe = (bus, when) => {
-  const v = voice(bus, when, 'beginJingle', { reverb: 0.3 });
-  const mel = v.bus(1, 0.08);
-  const low = v.bus(0.85, -0.12);
-  ([['G4', 0, 0.08], ['G4', 0.11, 0.08], ['C5', 0.22, 0.1], ['E5', 0.36, 0.55]] as const).forEach(([n, at, dur]) => {
-    brass(v, { f: note(n), at, dur, gain: 0.55, bright: 7, attack: 0.02, release: dur > 0.3 ? 0.5 : 0.1, vibrato: dur > 0.3, dest: mel });
-  });
-  brass(v, { f: note('C4'), at: 0.36, dur: 0.55, gain: 0.35, bright: 5, attack: 0.03, release: 0.5, dest: low });
-  brass(v, { f: note('G4'), at: 0.365, dur: 0.55, gain: 0.32, bright: 5, attack: 0.03, release: 0.5, dest: low });
-  brass(v, { f: note('C3'), at: 0.36, dur: 0.55, gain: 0.3, bright: 4, attack: 0.03, release: 0.5, voices: 2, dest: low });
-  [0, 0.11, 0.22].forEach((at) => drum(v, { f: 110, at, gain: 0.35, decay: 0.15, snap: 0.3 }));
-  drum(v, { f: 70, at: 0.36, gain: 0.9, decay: 0.5 });
-  timpani(v, { f: note('C3'), at: 0.36, gain: 0.5, decay: 1.0 });
-  bell(v, { f: note('C6'), at: 0.36, gain: 0.12, decay: 1.0 });
+  const v = voice(bus, when, 'beginJingle', { reverb: 0.32 });
+  bugle(v, { f: BUGLE_G * 3, dur: 0.13, gain: 0.8, vibrato: false });
+  bugle(v, { f: BUGLE_G * 4, at: 0.16, dur: 0.13, gain: 0.85, vibrato: false, scoop: 25 });
+  bugle(v, { f: BUGLE_G * 6, at: 0.36, dur: 0.95 });
+  drum(v, { f: 60, at: 0.36, gain: 0.6, decay: 0.6, skin: 0.35, drive: 1.6 });
   v.done();
 };
 
@@ -684,7 +753,7 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   cardPurchase: { play: cardPurchase, length: 0.6 },
   tileSelect: { play: tileSelect, length: 0.15 },
   countdownTick: { play: countdownTick, length: 0.45 },
-  countdownGo: { play: countdownGo, length: 1.0 },
+  countdownGo: { play: countdownGo, length: 1.3 },
   buttonClick: { play: buttonClick, length: 0.1 },
   deckShuffle: { play: deckShuffle, length: 1.3 },
   victoryJingle: { play: victoryJingle, length: 3.8 },
@@ -699,6 +768,12 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   upgradeCharge: { play: upgradeCharge, length: 1.55 },
   upgradeCard: { play: upgradeCard, length: 1.9 },
   beginJingle: { play: beginJingle, length: 1.6 },
+  heroWhoosh: { play: heroWhoosh, length: 1.1 },
+  swordClash: { play: swordClash, length: 1.6 },
+  tilePop: { play: tilePop, length: 0.12 },
+  phaseCall3: { play: phaseCall3, length: 0.9 },
+  phaseCall4: { play: phaseCall4, length: 0.9 },
+  phaseCall5: { play: phaseCall5, length: 0.9 },
   hoverTick: { play: hoverTick, length: 0.06 },
   coinSpend: { play: coinSpend, length: 0.35 },
   vpGain: { play: vpGain, length: 1.4 },
