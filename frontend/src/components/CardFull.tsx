@@ -23,6 +23,7 @@ import {
 import Icon from '../icons/Icon';
 import { CostLabel, IconValue } from '../icons/Num';
 import type { IconName } from '../icons/glyphs';
+import { cursor } from '../utils/cursors';
 
 const ARCHETYPE_LABEL: Record<string, string> = {
   vanguard: 'Vanguard',
@@ -398,7 +399,7 @@ export default function CardFull({
             background: 'rgba(0,0,0,0.25)',
             color: isUnique ? '#ffd700' : '#b8b6c8',
             fontWeight: isUnique ? 'bold' : undefined,
-            cursor: tooltipText ? 'help' : undefined,
+            cursor: tooltipText ? cursor('inspect') : undefined,
             display: 'inline-flex',
             alignItems: 'center',
             gap: 3,
@@ -464,7 +465,7 @@ export default function CardFull({
                 : `This card costs you ${Math.abs(card.current_vp)} VP`
             }>
               <div style={{
-                cursor: 'help',
+                cursor: cursor('inspect'),
                 fontSize: 12,
                 fontWeight: 'bold',
                 color: card.current_vp > 0 ? '#ffd700' : card.current_vp < 0 ? '#ff6666' : '#888',
@@ -487,7 +488,7 @@ export default function CardFull({
                 : `Cost to purchase: ${displayCost} resources`
             }>
               <div style={{
-                cursor: 'help',
+                cursor: cursor('inspect'),
                 fontSize: 12.5,
                 fontWeight: 'bold',
                 // Minted-coin cost badge (green when discounted).

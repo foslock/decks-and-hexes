@@ -895,7 +895,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--cc-text-dim);
-  cursor: help;
+  cursor: var(--cc-cursor-inspect);
 }
 .cc-scr-row-label.is-warn { color: #ffbf5c; }
 .cc-scr-row-value { color: var(--cc-text); font-weight: 700; }

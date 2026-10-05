@@ -10,6 +10,7 @@ import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import Icon from '../icons/Icon';
 import { useSound } from '../audio/useSound';
 import { useCardZoom } from './CardZoomContext';
+import { cursor } from '../utils/cursors';
 
 interface ShopOverlayProps {
   archetypeMarket: Card[];
@@ -594,7 +595,7 @@ export default function ShopOverlay({
               <div className="cc-ov-section-head">
                 <div className="cc-ov-section-title">
                   <Tooltip content="These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.">
-                    <span style={{ cursor: 'help' }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
+                    <span style={{ cursor: cursor('inspect') }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
                   </Tooltip>
                 </div>
                 <div className="cc-ov-section-sub">New card options every round</div>
@@ -713,7 +714,7 @@ export default function ShopOverlay({
               <div className="cc-ov-section-head">
                 <div className="cc-ov-section-title">
                   <Tooltip content="Purchases from the shared market are visible to all players. Each card has limited copies — once they're gone, they're gone for the game.">
-                    <span style={{ cursor: 'help' }}>Shared Market</span>
+                    <span style={{ cursor: cursor('inspect') }}>Shared Market</span>
                   </Tooltip>
                 </div>
                 <div className="cc-ov-section-sub">Limit 1 copy of each card per round</div>

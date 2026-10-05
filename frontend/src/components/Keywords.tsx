@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react';
 import Tooltip from './Tooltip';
+import { cursor } from '../utils/cursors';
 
 /**
  * Game keyword definitions. Each keyword maps to a one-sentence explanation.
@@ -60,7 +61,7 @@ SURFACE_FORMS.sort((a, b) => b.length - a.length);
 /** Style for keyword spans inside tooltips. */
 const KEYWORD_STYLE: React.CSSProperties = {
   borderBottom: '1px dotted #888',
-  cursor: 'help',
+  cursor: cursor('inspect'),
 };
 
 /**

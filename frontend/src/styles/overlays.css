@@ -957,7 +957,7 @@
   font-size: 1.15em;
   color: var(--cc-gold-bright);
   text-shadow: 0 0 12px rgba(255, 216, 119, 0.3), 0 1px 0 rgba(0, 0, 0, 0.6);
-  cursor: help;
+  cursor: var(--cc-cursor-inspect);
   font-variant-numeric: tabular-nums;
 }
 .cc-ov-go-stat {
