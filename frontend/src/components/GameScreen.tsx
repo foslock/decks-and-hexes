@@ -5450,7 +5450,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                         }}
                         onPointerEnter={reviewing ? () => setReviewHoveredPlayer(pid) : undefined}
                         onPointerLeave={reviewing ? () => setReviewHoveredPlayer(null) : undefined}
-                        style={{ cursor: reviewing ? 'pointer' : 'default', marginBottom: i < gameState.player_order.length - 1 ? 4 : 0, opacity: isCpu ? 0.8 : 1, position: 'relative' }}
+                        style={{ cursor: reviewing ? 'pointer' : 'var(--cc-cursor-arrow)', marginBottom: i < gameState.player_order.length - 1 ? 4 : 0, opacity: isCpu ? 0.8 : 1, position: 'relative' }}
                       >
                         <PlayerHud
                           player={p}
@@ -5878,7 +5878,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                   style={{
                     position: 'relative',
                     pointerEvents: 'auto',
-                    cursor: 'default',
+                    cursor: 'var(--cc-cursor-arrow)',
                     boxSizing: 'border-box',
                     height: 42,
                     display: 'flex', alignItems: 'center',

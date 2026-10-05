@@ -1015,7 +1015,7 @@ export default function LobbyScreen({
 
             {/* Round Limit */}
             <div className="cc-scr-row">
-              <span className="cc-scr-row-label" style={{ cursor: 'default' }}>Round Limit</span>
+              <span className="cc-scr-row-label" style={{ cursor: 'var(--cc-cursor-arrow)' }}>Round Limit</span>
               {isHost ? (
                 <div className="cc-scr-row-controls">
                   <input

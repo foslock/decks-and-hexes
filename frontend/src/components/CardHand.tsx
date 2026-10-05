@@ -21,6 +21,7 @@ import {
   easeIn, easeInOut, easeOut, enterKeyframes, flightKeyframes, poseTransform, runAnimation, type Pose,
 } from './hand/cardMotion';
 import { handSizing, handStripHeight, layoutHand, nearestSlot, reconcileHandOrder, shiftLayout, stripAt } from './hand/handLayout';
+import { cursor } from '../utils/cursors';
 
 export { CardViewPopup };
 
@@ -630,6 +631,14 @@ export default function CardHand({
   handlers.current = { onDragStart, onDragEnd, onDragMove, onDragPlay, onSelect, onTrashToggle, trashMode, order, cards, restLayout };
   const dragStateRef = useRef(drag);
   dragStateRef.current = drag;
+  // The closed hand follows a held card over the board and everything else.
+  const holding = !!drag;
+  useEffect(() => {
+    if (!holding) return;
+    const html = document.documentElement;
+    html.classList.add('cc-holding-card');
+    return () => html.classList.remove('cc-holding-card');
+  }, [holding]);
 
   useEffect(() => {
     const onMove = (e: PointerEvent) => {
@@ -1325,7 +1334,7 @@ export default function CardHand({
                   opacity: 1,
                   visibility: hidden ? 'hidden' : undefined,
                   filter: dimmed ? 'brightness(0.5) saturate(0.65)' : undefined,
-                  cursor: trashMode ? (isTrashPlayed ? 'default' : 'pointer') : disabled ? 'not-allowed' : drag ? 'grabbing' : 'grab',
+                  cursor: trashMode ? (isTrashPlayed ? cursor('arrow') : 'pointer') : disabled ? 'not-allowed' : cursor(drag ? 'grabbing' : 'grab'),
                   pointerEvents: enter || hidden ? 'none' : 'auto',
                   userSelect: 'none',
                   WebkitUserSelect: 'none',
@@ -1353,7 +1362,6 @@ export default function CardHand({
                         card={faceCard}
                         subtitleContext={subtitleContext}
                         showDynamic
-                        artZoom={false}
                         showKeywordHints={isHovered && !drag}
                       />
                       {/* Dark veil outside the player's turn */}

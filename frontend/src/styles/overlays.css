@@ -1228,7 +1228,7 @@
 .cc-ov-lb-tabs .cc-ov-chip { padding: 6px 12px; font-size: 13px; white-space: nowrap; }
 .cc-ov-lb-refresh { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
 .cc-ov-lb-refresh .cc-ov-chip { white-space: nowrap; }
-.cc-ov-lb-refresh .cc-ov-chip:disabled { opacity: 0.45; cursor: default; }
+.cc-ov-lb-refresh .cc-ov-chip:disabled { opacity: 0.45; cursor: var(--cc-cursor-arrow); }
 /* Fixed width (right-aligned, tabular digits) so the bar never reflows as it ticks. */
 /* Join by code: the bar becomes a code field. */
 .cc-ov-lb-code {

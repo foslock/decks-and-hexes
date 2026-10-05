@@ -64,10 +64,10 @@ function FlightCardImpl<K extends string>({ flight, onDone }: { flight: Flight<K
     }}>
       {flight.flipFrames && flight.card ? (
         <div ref={flipRef} style={{ position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d', transform: String(flight.flipFrames[0].transform) }}>
-          <div style={FACE_STYLE}><CardFull card={flight.card} artZoom={false} /></div>
+          <div style={FACE_STYLE}><CardFull card={flight.card} /></div>
           <div style={{ ...FACE_STYLE, transform: 'rotateY(180deg)' }}><CardBack /></div>
         </div>
-      ) : flight.card ? <CardFull card={flight.card} artZoom={false} /> : <CardBack />}
+      ) : flight.card ? <CardFull card={flight.card} /> : <CardBack />}
     </div>
   );
 }

@@ -22,7 +22,7 @@ export default function CardDetail({ card, onClose }: CardDetailProps) {
         cursor: 'pointer',
       }}
     >
-      <div onClick={(e) => e.stopPropagation()} style={{ cursor: 'default' }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ cursor: 'var(--cc-cursor-arrow)' }}>
         <CardFull
           card={card}
           style={{ width: 300, padding: '16px 18px 18px', borderWidth: 3, borderRadius: 16, boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}

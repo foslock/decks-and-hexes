@@ -1152,7 +1152,7 @@ export class BoardEngine {
           if (pr.mouse && cameraInput) {
             // Left-drag orbits: hand this pointer over to the camera.
             this.orbit = { id: e.pointerId, x: e.clientX, y: e.clientY, button: 0 };
-            canvas.style.cursor = 'grabbing';
+            canvas.style.cursor = 'var(--cc-cursor-grabbing)';
             this.input.onGesture?.();
             return;
           }

@@ -202,7 +202,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
           className="cc-btn-primary cc-scr-intro-ready"
           onClick={handleReady}
           disabled={!readyVisible}
-          style={{ cursor: readyVisible ? 'pointer' : 'default' }}
+          style={{ cursor: readyVisible ? 'pointer' : 'var(--cc-cursor-arrow)' }}
         >
           I'm Ready
         </button>

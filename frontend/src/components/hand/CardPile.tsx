@@ -144,7 +144,7 @@ const CardPile = memo(forwardRef<HTMLButtonElement, CardPileProps>(function Card
             <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${PILE_SCALE})`, transformOrigin: '0 0' }}>
               {kind === 'draw' || !top
                 ? <CardBack />
-                : <CardFull card={top} artZoom={false} style={{ boxShadow: '0 0 0 1px rgba(0,0,0,0.6)' }} />}
+                : <CardFull card={top} style={{ boxShadow: '0 0 0 1px rgba(0,0,0,0.6)' }} />}
             </div>
           </div>
         )}

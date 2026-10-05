@@ -235,6 +235,10 @@
   z-index: 46;
   pointer-events: none;
 }
+/* Same shadow as a hand card, so a card lands (or takes off) seamlessly. */
+.cc-tut-flights > div {
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.55));
+}
 
 /* Hand, piles and the hover peek */
 .cc-tut-handcard {
@@ -244,9 +248,10 @@
   width: 220px;
   height: 308px;
   z-index: 10;
-  transition: transform 380ms var(--cc-ease-out), opacity 160ms ease, filter 300ms ease;
+  /* No opacity fade: a dealt card shows the instant its flight lands. */
+  transition: transform 380ms var(--cc-ease-out), filter 300ms ease;
   filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.55));
-  cursor: default;
+  cursor: var(--cc-cursor-arrow);
 }
 .cc-tut-handcard.is-lifted {
   filter: drop-shadow(0 0 14px rgba(255, 216, 119, 0.85)) drop-shadow(0 10px 18px rgba(0, 0, 0, 0.6));

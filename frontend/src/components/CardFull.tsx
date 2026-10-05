@@ -1,5 +1,4 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
 import { extractKeywordsFromText, KEYWORDS } from './Keywords';
@@ -78,9 +77,6 @@ interface CardFullProps {
   subtitleParts?: SubtitlePart[];
   /** Highlight values resolved from live game context in the stat plaque. */
   showDynamic?: boolean;
-  /** Press-and-hold the art to view it full screen. Off where a press means
-   *  something else (dragging a card out of the hand). */
-  artZoom?: boolean;
 }
 
 /** Build the list of stat-note pills shown under a card's description. */
@@ -213,8 +209,8 @@ function FittedName({ children, maxSize, length }: { children: React.ReactNode; 
  *  frontend/scripts/optimize_images.py to generate its compressed .webp.
  *  Art that was preloaded (see utils/cardImagePreload) paints immediately;
  *  anything else shows a soft shimmer and fades in when it arrives. */
-function CardArtSlot({ cardId, cardName, cardType, typeColor, zoomable, upgraded }: {
-  cardId: string; cardName: string; cardType: string; typeColor: string; zoomable: boolean; upgraded: boolean;
+function CardArtSlot({ cardId, cardName, cardType, typeColor, upgraded }: {
+  cardId: string; cardName: string; cardType: string; typeColor: string; upgraded: boolean;
 }) {
   const [imgFailed, setImgFailed] = useState(() => isCardImageMissing(cardId));
   // Bumped when the WebP fails so the <img> re-renders with the PNG URL.
@@ -222,7 +218,6 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor, zoomable, upgraded
   const [loaded, setLoaded] = useState(() => isCardImageReady(cardId));
   // Only animate the fade when the art wasn't already warm at mount.
   const fadeIn = useRef(!loaded);
-  const [showFull, setShowFull] = useState(false);
   const imgUrl = cardImageUrl(cardId);
 
   const hasImage = !imgFailed;
@@ -234,114 +229,68 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor, zoomable, upgraded
     return onCardImageReady(cardId, () => setLoaded(true));
   }, [cardId, loaded]);
 
-  // Close fullscreen on pointer/mouse up anywhere
-  useEffect(() => {
-    if (!showFull) return;
-    const close = () => setShowFull(false);
-    window.addEventListener('pointerup', close);
-    window.addEventListener('pointercancel', close);
-    return () => {
-      window.removeEventListener('pointerup', close);
-      window.removeEventListener('pointercancel', close);
-    };
-  }, [showFull]);
-
   return (
-    <>
-      <div
-        onPointerDown={(e) => {
-          if (hasImage && zoomable) {
-            e.preventDefault();
-            setShowFull(true);
-          }
-        }}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 5,
-          background: hasImage && !loaded
-            ? 'linear-gradient(100deg, #151530 30%, #20204a 50%, #151530 70%) 0 0 / 300% 100%'
-            : '#151530',
-          animation: hasImage && !loaded ? 'cc-art-shimmer 1.2s linear infinite' : undefined,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          userSelect: 'none',
-          overflow: 'hidden',
-          cursor: hasImage && zoomable ? 'zoom-in' : undefined,
-        }}
-      >
-        {hasImage ? (
-          <img
-            src={imgUrl}
-            alt={cardName}
-            draggable={false}
-            decoding="async"
-            onLoad={() => { markCardImageReady(cardId); setLoaded(true); }}
-            onError={() => {
-              if (!imgUrl.endsWith('.png')) {
-                markCardImageWebpFailed(cardId);
-                setUrlEpoch(n => n + 1);
-              } else {
-                markCardImageMissing(cardId);
-                setImgFailed(true);
-              }
-            }}
-            style={{
-              display: 'block', width: '100%', height: '100%', objectFit: 'cover',
-              opacity: loaded ? 1 : 0,
-              transition: fadeIn.current ? 'opacity 220ms ease-out' : undefined,
-            }}
-          />
-        ) : (
-          <span style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%',
-            background: `radial-gradient(circle at 50% 45%, ${typeColor}55 0%, rgba(0,0,0,0) 72%)`,
-          }}>
-            <Icon
-              name={fallbackSigil(cardId, cardType)}
-              size={46}
-              color="#f3e9d2"
-              title={`${cardName} (art unavailable)`}
-              style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.6))', ['--cc-icon-accent-opacity' as string]: 0.5 }}
-            />
-          </span>
-        )}
-        {/* Upgraded cards are printed holo: a rainbow film drifts over the art. */}
-        {upgraded && <div aria-hidden className="cc-card-holo" />}
-        {/* Vignette so the art sits inside the frame rather than on top of it. */}
-        <div aria-hidden style={{
-          position: 'absolute', inset: 0, pointerEvents: 'none',
-          boxShadow: 'inset 0 0 18px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(0,0,0,0.45)',
-          borderRadius: 'inherit',
-        }} />
-      </div>
-      {showFull && hasImage && createPortal(
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.9)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 60000,
-          cursor: 'zoom-out',
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        borderRadius: 5,
+        background: hasImage && !loaded
+          ? 'linear-gradient(100deg, #151530 30%, #20204a 50%, #151530 70%) 0 0 / 300% 100%'
+          : '#151530',
+        animation: hasImage && !loaded ? 'cc-art-shimmer 1.2s linear infinite' : undefined,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        userSelect: 'none',
+        overflow: 'hidden',
+      }}
+    >
+      {hasImage ? (
+        <img
+          src={imgUrl}
+          alt={cardName}
+          draggable={false}
+          decoding="async"
+          onLoad={() => { markCardImageReady(cardId); setLoaded(true); }}
+          onError={() => {
+            if (!imgUrl.endsWith('.png')) {
+              markCardImageWebpFailed(cardId);
+              setUrlEpoch(n => n + 1);
+            } else {
+              markCardImageMissing(cardId);
+              setImgFailed(true);
+            }
+          }}
+          style={{
+            display: 'block', width: '100%', height: '100%', objectFit: 'cover',
+            opacity: loaded ? 1 : 0,
+            transition: fadeIn.current ? 'opacity 220ms ease-out' : undefined,
+          }}
+        />
+      ) : (
+        <span style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%',
+          background: `radial-gradient(circle at 50% 45%, ${typeColor}55 0%, rgba(0,0,0,0) 72%)`,
         }}>
-          <img
-            src={imgUrl}
-            alt={cardName}
-            draggable={false}
-            style={{
-              maxWidth: '95vw',
-              maxHeight: '95vh',
-              objectFit: 'contain',
-              borderRadius: 8,
-            }}
+          <Icon
+            name={fallbackSigil(cardId, cardType)}
+            size={46}
+            color="#f3e9d2"
+            title={`${cardName} (art unavailable)`}
+            style={{ filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.6))', ['--cc-icon-accent-opacity' as string]: 0.5 }}
           />
-        </div>,
-        document.body
+        </span>
       )}
-    </>
+      {/* Upgraded cards are printed holo: a rainbow film drifts over the art. */}
+      {upgraded && <div aria-hidden className="cc-card-holo" />}
+      {/* Vignette so the art sits inside the frame rather than on top of it. */}
+      <div aria-hidden style={{
+        position: 'absolute', inset: 0, pointerEvents: 'none',
+        boxShadow: 'inset 0 0 18px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(0,0,0,0.45)',
+        borderRadius: 'inherit',
+      }} />
+    </div>
   );
 }
 
@@ -357,7 +306,7 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor, zoomable, upgraded
  */
 export default function CardFull({
   card, effectiveCost, remaining, style, showKeywordHints,
-  subtitleContext, subtitleParts, showDynamic, artZoom = true,
+  subtitleContext, subtitleParts, showDynamic,
 }: CardFullProps) {
   const typeColor = getCardDisplayColor(card);
   const typeInk = mixHex(typeColor, '#ffffff', 0.38);
@@ -576,7 +525,6 @@ export default function CardFull({
                 cardName={card.name}
                 cardType={card.card_type}
                 typeColor={typeColor}
-                zoomable={artZoom}
                 upgraded={card.is_upgraded}
               />
             </div>

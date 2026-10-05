@@ -73,6 +73,10 @@ at high priority, the rest of the catalog during idle time).
 - Dev pages: `?preview=cards` (every card face, base/upgraded) and
   `?preview=hand` (a sandbox for draw, play, undo, discard, trash, shuffles,
   purchases and end of turn).
+- Cursors: gilded PNGs in `frontend/public/cursors/` (arrow, inspect, target,
+  grab, grabbing), drawn as SVG in `frontend/scripts/build_cursors.py`
+  (`python3 frontend/scripts/build_cursors.py`, macOS `sips`). Use them via
+  `cursor('target')` from `utils/cursors.ts` (CSS `var(--cc-cursor-target)`).
 
 ### Game Log Analysis
 When the user refers to a "game log" they mean a JSON file produced by

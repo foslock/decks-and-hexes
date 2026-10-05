@@ -7,6 +7,7 @@ import ResolveOverlay from '../ResolveOverlay';
 import CardFull from '../CardFull';
 import CardBack from '../CardBack';
 import FlightCard, { turnOver, type Flight } from '../hand/FlightCard';
+import { CoinFlight, splitCoins, type Coin } from '../ResourceCounter';
 import TargetArrow from '../hand/TargetArrow';
 import CardPile from '../hand/CardPile';
 import { TileCardStack, CardDetailOverlay, boardCardScale, type BoardCardEntry } from '../BoardCards';
@@ -205,6 +206,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
   const [resolving, setResolving] = useState<{ key: number; steps: ResolutionStep[] } | null>(null);
   const [lifted, setLifted] = useState<string | null>(null);
   const [arriving, setArriving] = useState<Set<string>>(() => new Set());
+  const [coins, setCoins] = useState<Coin[]>([]);
   const [peek, setPeek] = useState<Card | null>(null);
   const [detail, setDetail] = useState<BoardCardEntry[] | null>(null);
   /** Rival cards lying face down on tiles until the reveal. */
@@ -317,6 +319,35 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
       setTimeout(() => setPops(ps => ps.filter(x => x.id !== id)), 1600);
     };
 
+    /** A gain flies up to the resources chip as coins (like the game's
+     *  counter); the count ticks up as each one lands. */
+    const gainCoins = async (amount: number, from: { x: number; y: number }) => {
+      const icon = rootRef.current?.querySelector('[data-tut-hud="resources"] svg');
+      const r = icon?.getBoundingClientRect();
+      if (!r || r.width === 0 || paceRef.current === 0) {
+        sfx('coinSpend');
+        set(w => ({ resources: w.resources + amount }));
+        pop(`+${amount}`, { hud: 'resources' }, 'green');
+        return;
+      }
+      const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      const pace = paceRef.current;
+      let first = true;
+      await Promise.all(splitCoins(amount).map((value, i) => {
+        const id = ++seq.current;
+        const landed = new Promise<void>(res => landings.current.set(`c${id}`, res));
+        setCoins(cs => [...cs, { id, from, to, value, batch: 0, delay: i * 85 * pace, duration: Math.max(320, 680 * pace) }]);
+        return run.guard(landed).then(() => {
+          set(w => ({ resources: w.resources + value }));
+          if (first) {
+            first = false;
+            sfx('coinSpend');
+            pop(`+${amount}`, { hud: 'resources' }, 'green');
+          }
+        });
+      }));
+    };
+
     const banner = async (text: string, sub?: string, opts: { hold?: number; stay?: boolean; big?: boolean } = {}) => {
       if (run.cancelled) return;
       setBanner({ key: ++seq.current, text, sub, big: opts.big });
@@ -403,6 +434,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           }
         }
         // Into play: out of the hand, its actions spent.
+        let gain: Promise<void> | null = null;
         sfx('cardPlay');
         set(w => ({ hand: w.hand.filter(c => c.id !== cardId), actions: w.actions - card.action_cost }));
         setLifted(null);
@@ -426,7 +458,9 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
             chevrons: opts.from ? [...w.chevrons, { from: opts.from, to: tile, pid: YOU }] : w.chevrons,
           }));
         } else {
-          // An engine card does its thing at once, then goes to the discard pile.
+          // An engine card does its thing at once — its resources take off
+          // as coins from the card — then it goes to the discard pile.
+          if (card.resource_gain) gain = gainCoins(card.resource_gain, { x: from.x, y: from.y });
           const dest = point({ pile: 'discard' });
           const to: Pose = dest
             ? { x: dest.x, y: dest.y, rot: 6, scale: 0.26 * layoutRef.current.pileZoom }
@@ -434,11 +468,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           await fly(card, from, { ...to, y: to.y }, { duration: 620, arc: 120 });
           set(w => ({ discard: [...w.discard, card] }));
         }
-        if (card.resource_gain) {
-          sfx('coinSpend');
-          set(w => ({ resources: w.resources + card.resource_gain }));
-          pop(`+${card.resource_gain}`, { hud: 'resources' }, 'green');
-        }
+        if (card.resource_gain) await (gain ?? gainCoins(card.resource_gain, (tile && tileCenter(tile)) || from));
         if (card.action_return) {
           set(w => ({ actions: w.actions + card.action_return }));
           pop(`+${card.action_return} action`, { hud: 'actions' }, 'blue');
@@ -540,6 +570,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
     setResolving(null);
     setLifted(null);
     setArriving(new Set());
+    setCoins([]);
     setPeek(null);
     setDetail(null);
     facedownRef.current = {};
@@ -629,6 +660,11 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
     landings.current.delete(f.key);
     setFlights(fs => fs.filter(x => x.key !== f.key));
   }, []);
+  const onCoinLand = useCallback((c: Coin) => {
+    landings.current.get(`c${c.id}`)?.();
+    landings.current.delete(`c${c.id}`);
+    setCoins(cs => cs.filter(x => x.id !== c.id));
+  }, []);
   const onStarDone = useCallback((key: string) => {
     landings.current.get(key)?.();
     landings.current.delete(key);
@@ -712,12 +748,12 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           onPointerEnter={() => setPeek(c)}
           onPointerLeave={() => setPeek(p => (p?.id === c.id ? null : p))}
         >
-          <CardFull card={c} artZoom={false} />
+          <CardFull card={c} />
         </div>
       ))}
       {peek && !lifted && !L.mobile && world.hand.some(c => c.id === peek.id) && (
         <div className="cc-tut-peek" style={{ left: L.w / 2, top: L.panelTop - CARD_H * L.handScale * 0.75 - 12 }}>
-          <CardFull card={peek} artZoom={false} />
+          <CardFull card={peek} />
         </div>
       )}
 
@@ -737,7 +773,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
                 return (
                   <div key={c.id} className={`cc-tut-shop-card${hot ? ' is-hot' : ''}${bought ? ' is-bought' : ''}`}>
                     <div data-tut-shop-card={c.id} style={{ width: CARD_W * s, height: CARD_H * s }}>
-                      <div style={{ transform: `scale(${s})`, transformOrigin: 'top left' }}><CardFull card={c} artZoom={false} /></div>
+                      <div style={{ transform: `scale(${s})`, transformOrigin: 'top left' }}><CardFull card={c} /></div>
                     </div>
                     <span className="cc-tut-price"><Icon name="resource" size={11} decorative /> {c.buy_cost}</span>
                     {bought && <span className="cc-tut-bought">Bought</span>}
@@ -806,6 +842,11 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
         {flights.map(f => <FlightCard key={f.key} flight={f} onDone={onFlightDone} />)}
       </div>
       {stars.map(f => <StarMote key={f.key} f={f} onDone={onStarDone} />)}
+      {coins.length > 0 && (
+        <div className="cc-res-coins">
+          {coins.map(c => <CoinFlight key={c.id} coin={c} onLand={onCoinLand} />)}
+        </div>
+      )}
       {arrow && <TargetArrow from={arrow.from} to={arrow.to} state="valid" />}
 
       {resolving && (

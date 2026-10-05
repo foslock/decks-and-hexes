@@ -67,7 +67,7 @@ export function useShownResources(playerId: string, fallback: number): number {
 }
 
 // ── Coins ───────────────────────────────────────────────────────────────────
-interface Coin { id: number; from: Point; to: Point; value: number; delay: number; duration: number; batch: number }
+export interface Coin { id: number; from: Point; to: Point; value: number; delay: number; duration: number; batch: number }
 interface Float { id: number; amount: number; offsetX: number }
 
 const MAX_COINS = 10;
@@ -91,7 +91,8 @@ export function shareGain(amount: number, sources: ResourceSource[]): number[] {
   return shares;
 }
 
-function CoinFlight({ coin, onLand }: { coin: Coin; onLand: (c: Coin) => void }) {
+/** One coin arcing from `from` to `to` (position: fixed — inside `.cc-res-coins`). */
+export function CoinFlight({ coin, onLand }: { coin: Coin; onLand: (c: Coin) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const { from, to } = coin;
@@ -272,7 +273,7 @@ const ResourceCounter = forwardRef<ResourceCounterHandle, Props>(function Resour
         style={{
           position: 'relative',
           pointerEvents: visible ? 'auto' : 'none',
-          cursor: 'default',
+          cursor: 'var(--cc-cursor-arrow)',
           boxSizing: 'border-box',
           height: 42,
           display: 'flex', alignItems: 'center',

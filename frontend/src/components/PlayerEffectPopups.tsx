@@ -733,7 +733,7 @@ function useFlyingCards(
                 // A mini copy of the card itself, like the cards on the board.
                 <div style={{ width: CARD_W * FLY_CARD_SCALE, height: CARD_H * FLY_CARD_SCALE, filter: `drop-shadow(0 0 8px ${cardColor}99) drop-shadow(0 4px 6px rgba(0,0,0,0.6))` }}>
                   <div style={{ width: CARD_W, height: CARD_H, transform: `scale(${FLY_CARD_SCALE})`, transformOrigin: '0 0' }}>
-                    <CardFull card={addedCard} artZoom={false} />
+                    <CardFull card={addedCard} />
                   </div>
                 </div>
               ) : (
