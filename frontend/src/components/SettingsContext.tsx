@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react';
 
 export type AnimationMode = 'normal' | 'fast' | 'off';
 /** Board rendering quality. Low turns off antialiasing and renders at a 1x
@@ -112,6 +112,17 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
 export function useSettings() {
   return useContext(SettingsContext);
+}
+
+/** Everything inside animates at Normal, whatever the animation setting (the
+ *  tutorial is paced to be followed). Other settings pass through. */
+export function NormalAnimations({ children }: { children: ReactNode }) {
+  const outer = useSettings();
+  const value = useMemo(
+    () => ({ ...outer, settings: { ...outer.settings, animationMode: 'normal' as const } }),
+    [outer],
+  );
+  return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
 
 export function useAnimated() {

@@ -103,6 +103,9 @@ interface GameBoardProps {
   controlsRef?: React.MutableRefObject<BoardControls | null>;
   /** Show the on-board camera control cluster. */
   showCameraControls?: boolean;
+  /** The player can't move the camera (no drag, wheel or pinch) — a guided
+   *  camera is telling the story (the tutorial). */
+  cameraLocked?: boolean;
   /** Effective drag-cursor position in client coords while a card is dragged. */
   dragHoverPosition?: { clientX: number; clientY: number } | null;
   /** Draw the scene this many px past the bottom of the board's box (under
@@ -228,7 +231,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
     tiles, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, activePlayerId,
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimPowerOn, claimChevrons, vpPaths,
     connectedVpTiles, disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
-    paused, undoableTiles, fxRef, controlsRef, showCameraControls, dragHoverPosition,
+    paused, undoableTiles, fxRef, controlsRef, showCameraControls, cameraLocked = false, dragHoverPosition,
     tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0, raisedTileKey, focusTileKey, hideDefenseLabelKey,
   } = props;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -320,6 +323,10 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   useEffect(() => {
     if (ready) engineRef.current?.setFocusTile(focusTileKey ?? null);
   }, [ready, focusTileKey]);
+
+  useEffect(() => {
+    if (ready) engineRef.current?.setCameraInput(!cameraLocked);
+  }, [ready, cameraLocked]);
 
   // ── State → engine ──
   useEffect(() => {
