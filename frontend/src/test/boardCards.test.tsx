@@ -128,14 +128,24 @@ describe('board cards', () => {
     expect(stackOf(container).style.opacity).toBe('1');
   });
 
-  it('steps back while a card is aimed at a tile: fainter, and the pointer goes through', () => {
+  it('while a card is aimed at a tile: the pointer goes through, and the pile fades only when the pointer comes near', async () => {
     const { container } = render(<WithSettings><TileCardStack entries={[entry('a', 'Explore')]} scale={0.25} passThrough onOpen={() => {}} /></WithSettings>);
     const stack = container.querySelector<HTMLElement>('.cc-tile-stack')!;
     expect(stack.style.pointerEvents).toBe('none');
-    // Fainter than at rest (0.4), and hovering doesn't bring it up.
+    // (jsdom boxes sit at 0,0 with no size.) Pointer far away: still readable.
+    const moveTo = async (x: number, y: number) => {
+      await act(async () => {
+        window.dispatchEvent(new MouseEvent('pointermove', { clientX: x, clientY: y }));
+        await new Promise(r => setTimeout(r, 200));
+      });
+    };
+    await moveTo(600, 600);
+    expect(Number(stack.style.opacity)).toBe(0.8);
+    // Hovering doesn't bring it up to full; coming near fades it out of the way.
+    await moveTo(20, 20);
     expect(Number(stack.style.opacity)).toBeLessThan(0.4);
-    fireEvent.pointerEnter(stack);
-    expect(Number(stack.style.opacity)).toBeLessThan(0.4);
+    await moveTo(600, 600);
+    expect(Number(stack.style.opacity)).toBe(0.8);
   });
 
   it('opens the hover zoom only after the pointer rests on the card', () => {

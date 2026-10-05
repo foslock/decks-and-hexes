@@ -47,8 +47,53 @@ const QUEUE_PER_ROW = 3;
 const ZOOM_SCALE = 0.8;
 /** Tile cards at rest are see-through so the board shows under them. */
 const REST_OPACITY = 0.4;
-/** …and fainter still while a card is dragged or aimed at a tile. */
+/** While a card is dragged or aimed at a tile they stay readable… */
+const AIM_REST_OPACITY = 0.8;
+/** …except the pile the pointer comes near, which fades out of the way. */
 const AIMING_OPACITY = 0.15;
+/** How near (px from a pile's box) counts as near. */
+const AIM_NEAR_PX = 56;
+
+/** Where the pointer was last seen (piles check it as soon as aiming starts). */
+let lastPointer: { x: number; y: number } | null = null;
+let pointerTracked = false;
+function trackPointer() {
+  if (pointerTracked || typeof window === 'undefined') return;
+  pointerTracked = true;
+  window.addEventListener('pointermove', (e) => { lastPointer = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
+  window.addEventListener('pointerdown', (e) => { lastPointer = { x: e.clientX, y: e.clientY }; }, { passive: true, capture: true });
+}
+
+/** While `on`, whether the pointer is within AIM_NEAR_PX of the element's box
+ *  (rechecked as the pointer moves, and now and then as the board moves). */
+function usePointerNear(ref: React.RefObject<HTMLElement | null>, on: boolean): boolean {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    if (!on) { setNear(false); return; }
+    trackPointer();
+    let raf = 0;
+    const check = () => {
+      raf = 0;
+      const el = ref.current;
+      const p = lastPointer;
+      if (!el || !p) { setNear(false); return; }
+      const r = el.getBoundingClientRect();
+      const dx = Math.max(r.left - p.x, 0, p.x - r.right);
+      const dy = Math.max(r.top - p.y, 0, p.y - r.bottom);
+      setNear(Math.hypot(dx, dy) < AIM_NEAR_PX);
+    };
+    const onMove = () => { if (!raf) raf = requestAnimationFrame(check); };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    const timer = setInterval(onMove, 150);
+    check();
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      clearInterval(timer);
+      cancelAnimationFrame(raf);
+    };
+  }, [on, ref]);
+  return near;
+}
 /** Matches the card box's size transition, so a growing card scales in step
  *  with its box instead of snapping out of its top-left corner. */
 const SIZE_EASE = '0.25s ease';
@@ -383,10 +428,11 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   focus?: boolean;
   /** Its cards are open in the zoom / detail view. */
   open?: boolean;
-  /** Out of the way (a card is being dragged from the hand). */
+  /** A card is being dragged from the hand: see `passThrough`. */
   faded?: boolean;
-  /** A card is being aimed at a tile: fainter, and the pointer goes through
-   *  to the tiles beneath (no hover zoom while picking a tile). */
+  /** A card is being aimed at a tile: the pointer goes through to the tiles
+   *  beneath (no hover zoom while picking a tile), and the cards stay at 80%
+   *  except when the pointer comes near them — then they fade out of the way. */
   passThrough?: boolean;
   onOpen: (entries: BoardCardEntry[], index: number) => void;
   /** Hold a card to undo it (only the player's own undoable plays). */
@@ -398,6 +444,9 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   peek?: boolean;
 }) {
   const [hot, setHot] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const aiming = !!(faded || passThrough) && !peek;
+  const near = usePointerNear(rootRef, aiming);
   const s = focus ? Math.max(scale, FOCUS_SCALE) : scale;
   const n = entries.length;
   // Players sharing a tile: ring each card in its player's color.
@@ -411,6 +460,7 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
   const span = m > 1 ? Math.abs(fanOffset(m - 1, m, s) - fanOffset(0, m, s)) : 0;
   return (
     <div
+      ref={rootRef}
       className={focus ? 'cc-tile-stack is-focus' : 'cc-tile-stack'}
       // Final height (the box eases toward it) — the board places the row
       // above or below its tile by the size it's growing to.
@@ -421,7 +471,7 @@ export function TileCardStack({ entries, scale, focus, open, faded, passThrough,
         position: 'relative',
         width: w + span,
         height: h,
-        opacity: peek ? 1 : faded || passThrough ? AIMING_OPACITY : focus || open || hot ? 1 : REST_OPACITY,
+        opacity: peek ? 1 : aiming ? (near ? AIMING_OPACITY : AIM_REST_OPACITY) : focus || open || hot ? 1 : REST_OPACITY,
         pointerEvents: peek || faded || passThrough ? 'none' : 'auto',
         transition: `opacity 0.2s ease-out, width ${SIZE_EASE}, height ${SIZE_EASE}`,
       }}

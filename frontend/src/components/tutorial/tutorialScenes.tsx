@@ -31,9 +31,11 @@ export interface TutorialCtx {
   /** Play a hand card: lift it, aim at the tile, fly it onto the board.
    *  No tile: an engine card (it resolves at once). */
   play(cardId: string, tile?: string, opts?: { from?: string; pay?: number; temp?: number; perm?: number }): Promise<void>;
-  /** The rival plays a card face down from one of their tiles. */
+  /** The rival plays a card face down: it goes out of sight (to their chip in
+   *  the top bar) and only lands on its tile at the reveal. */
   rivalPlay(card: Card, tile: string, from: string): Promise<void>;
-  /** "Reveal" — face-down cards turn over. */
+  /** "Reveal" — the rival's hidden plays land on their tiles and every
+   *  face-down card turns over. */
   reveal(): Promise<void>;
   /** Run the real resolve animation for these steps. */
   resolve(steps: ResolutionStep[]): Promise<void>;
@@ -104,9 +106,11 @@ export const SCENES: Scene[] = [
       const b = px(BASE_YOU), r = px(BASE_RIVAL);
       fx?.pillar(b.x, b.y, YOU_COLOR, 1600);
       fx?.shockwave(b.x, b.y, YOU_COLOR, 1.2, 900);
+      ctx.sfx('spotlightYou');
       await ctx.wait(500);
       fx?.pillar(r.x, r.y, RIVAL_COLOR, 1600);
       fx?.shockwave(r.x, r.y, RIVAL_COLOR, 1.2, 900);
+      ctx.sfx('spotlightRival');
       await ctx.fly({ zoom: 0.96, tilt: 0.58, rotation: 0.2, seconds: 4 });
     },
   },
@@ -121,12 +125,15 @@ export const SCENES: Scene[] = [
       const b = px(BASE_YOU);
       ctx.fx()?.pillar(b.x, b.y, YOU_COLOR, 1400);
       ctx.fx()?.shockwave(b.x, b.y, YOU_COLOR, 1.1, 800);
+      ctx.sfx('spotlightYou');
       await ctx.wait(700);
       ctx.set(w => ({ highlight: frontier(w.tiles, YOU) }));
+      ctx.sfx('tileGlow');
       await ctx.wait(2200);
       await ctx.fly({ keys: [BASE_RIVAL, '0,-3'], zoom: 2.1, tilt: 0.7, rotation: 0.2, seconds: 2.6, arc: 0.3 });
       const r = px(BASE_RIVAL);
       ctx.fx()?.pillar(r.x, r.y, RIVAL_COLOR, 1400);
+      ctx.sfx('spotlightRival');
       await ctx.wait(1500);
       await ctx.fly({ keys: [BASE_YOU, '0,3'], zoom: 2.15, tilt: 0.66, rotation: -0.1, seconds: 2.4, arc: 0.3 });
     },
@@ -159,6 +166,7 @@ export const SCENES: Scene[] = [
     run: async (ctx) => {
       await ctx.fly({ keys: ['0,3', '-1,3', '1,2'], zoom: 2.4, tilt: 0.6, rotation: 0.12, seconds: 1.8, lower: 0.8 });
       ctx.set(w => ({ highlight: frontier(w.tiles, YOU) }));
+      ctx.sfx('tileGlow');
       await ctx.wait(500);
       await ctx.play(E1.id, '-1,3', { from: '0,3' });
       await ctx.play(E2.id, '1,2', { from: '0,3' });
@@ -176,8 +184,8 @@ export const SCENES: Scene[] = [
     id: 'clash',
     eyebrow: 'A few rounds later',
     title: 'Everyone plays at once',
-    body: <>Everyone places cards <b>face down at the same time</b>, then all are revealed together. When players claim the same tile, the <b>higher power wins</b>. <b>Levy</b> has power 1 and gives back the action it cost.</>,
-    tip: 'Opponents\' cards stay hidden until the reveal — so do yours.',
+    body: <>Everyone places cards <b>face down at the same time</b>. You <b>won't know which tiles your rival plays on</b> — or what — until every card is revealed together. When players claim the same tile, the <b>higher power wins</b>. <b>Levy</b> has power 1 and gives back the action it cost.</>,
+    tip: 'Your rival can\'t see where you play until the reveal, either.',
     start: () => makeWorld({
       tiles: boardMid(), round: 4, showHand: true, phase: 'Play phase',
       hand: [levy, ...filler('c')], drawCount: 6, discard: [E1, G1], resources: 3,
@@ -185,6 +193,7 @@ export const SCENES: Scene[] = [
     run: async (ctx) => {
       await ctx.fly({ keys: [FRONT, '2,1', '2,-1'], zoom: 2.3, tilt: 0.62, rotation: -0.35, seconds: 2.4, arc: 0.2, lower: 1.3 });
       ctx.set({ highlight: [FRONT] });
+      ctx.sfx('tileGlow');
       await ctx.wait(500);
       await ctx.play(levy.id, FRONT, { from: '2,1' });
       ctx.set({ highlight: [] });
@@ -258,6 +267,7 @@ export const SCENES: Scene[] = [
       await ctx.fly({ keys: [STAR, '-1,3'], zoom: 2.45, tilt: 0.66, rotation: 0.4, seconds: 2.6, arc: 0.2, lower: 1.0 });
       const s = px(STAR);
       ctx.fx()?.pillar(s.x, s.y, 0xffd24a, 1300);
+      ctx.sfx('spotlightStar');
       await ctx.wait(800);
       await ctx.play(merc.id, STAR, { from: '-1,3', pay: 2 });
       await ctx.wait(BEAT);
@@ -272,6 +282,7 @@ export const SCENES: Scene[] = [
       const c = px(CENTER_VP);
       ctx.fx()?.pillar(c.x, c.y, 0xffd24a, 1500);
       ctx.fx()?.shockwave(c.x, c.y, 0xffd24a, 1.3, 900);
+      ctx.sfx('spotlightStar');
       await ctx.wait(1200);
     },
   },
@@ -294,6 +305,7 @@ export const SCENES: Scene[] = [
         await ctx.wait(1100);
       }
       ctx.set({ pulse: [STAR], highlight: [STAR] });
+      ctx.sfx('spotlightStar');
       ctx.pop('+1 VP', { tile: STAR }, 'gold');
       await ctx.wait(1500);
       ctx.set({ pulse: [], highlight: [] });

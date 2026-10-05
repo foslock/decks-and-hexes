@@ -138,6 +138,9 @@ class SoundEngine {
     this.syncMusic();
   }
 
+  /** Whether a screen has the music on (to put it back as it was). */
+  get musicOn(): boolean { return this.musicActive; }
+
   /** Start the music over from the top (a new game). */
   restartMusic() {
     this.musicHeld = false;
@@ -252,6 +255,11 @@ class SoundEngine {
   beginJingle() { this.play('beginJingle'); }
   /** A phase banner's bugle call: 1 → 3, 4 or 5. */
   phaseCall(step: 3 | 4 | 5) { this.play(`phaseCall${step}`); }
+  /** The tutorial pointing something out: your base, the rival's, a star hex, glowing tiles. */
+  spotlightYou() { this.play('spotlightYou'); }
+  spotlightRival() { this.play('spotlightRival'); }
+  spotlightStar() { this.play('spotlightStar'); }
+  tileGlow() { this.play('tileGlow'); }
   /** A ring of tiles popping up as the board builds, `delay` s from now. */
   tilePop(delay = 0) { this.playIn('tilePop', delay); }
 

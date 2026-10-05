@@ -22,6 +22,7 @@ export const CORE_SOUND_NAMES = [
   'resolveDefenseFortify', 'resolveTileOccupied', 'resolveContested', 'resolveBaseRaidFortify',
   'resolveBaseRaidRam', 'resolveBaseRaidShatter', 'resolveBaseRaidHold', 'upgradeCharge', 'upgradeCard', 'beginJingle',
   'tilePop', 'phaseCall3', 'phaseCall4', 'phaseCall5',
+  'spotlightYou', 'spotlightRival', 'spotlightStar', 'tileGlow',
 ] as const;
 
 /** Optional extras (available on the engine + hook, not yet wired into components). */
@@ -73,6 +74,10 @@ const LEVELS: Record<SoundName, number> = {
   upgradeCard: -12.5,
   beginJingle: -9.7,
   tilePop: -6,
+  spotlightYou: -9.5,
+  spotlightRival: -7.7,
+  spotlightStar: -7.2,
+  tileGlow: -5,
   phaseCall3: -11.1,
   phaseCall4: -11.2,
   phaseCall5: -11.7,
@@ -370,6 +375,54 @@ const resolveContested: Recipe = (bus, when) => {
 };
 
 // ── Board build ───────────────────────────────────────────────────
+
+// ── Spotlights (the tutorial pointing things out) ────────────────
+
+/** Your base lit up: a warm swell, a rising G-major chime and a soft drum. */
+const spotlightYou: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'spotlightYou', { reverb: 0.4 });
+  shimmerSwell(v, { gain: 0.16, rise: 0.22, decay: 0.5 });
+  drum(v, { f: 72, at: 0.2, gain: 0.4, decay: 0.45, skin: 0.25 });
+  ['G5', 'B5', 'D6'].forEach((n, i) => {
+    bell(v, { f: note(n), at: 0.2 + i * 0.07, gain: 0.42 - i * 0.05, decay: 1.2, ratio: 3, index: 0.9, dest: v.bus(1, -0.3 + i * 0.3) });
+  });
+  strings(v, { freqs: [note('G3'), note('D4'), note('B4')], at: 0.18, dur: 0.7, gain: 0.22, attack: 0.12, release: 0.6, cutoff: 1800 });
+  v.done();
+};
+
+/** The rival's base: a low drum, a darker falling chime over a minor chord. */
+const spotlightRival: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'spotlightRival', { reverb: 0.4 });
+  drum(v, { f: 56, gain: 0.55, decay: 0.6, skin: 0.35, drive: 1.6 });
+  timpani(v, { f: note('D2'), at: 0.02, gain: 0.3, decay: 0.9 });
+  ['A5', 'F5', 'D5'].forEach((n, i) => {
+    bell(v, { f: note(n), at: 0.08 + i * 0.11, gain: 0.34, decay: 1.1, ratio: 2.4, index: 0.7, dest: v.bus(1, 0.3 - i * 0.3) });
+  });
+  strings(v, { freqs: [note('D3'), note('F3'), note('A3')], at: 0.05, dur: 0.8, gain: 0.24, attack: 0.15, release: 0.6, cutoff: 1100 });
+  v.done();
+};
+
+/** A star hex lit up: a quick sparkle of high bells and glints over a shimmer. */
+const spotlightStar: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'spotlightStar', { reverb: 0.45 });
+  shimmerSwell(v, { gain: 0.2, rise: 0.15, decay: 0.7 });
+  ['G6', 'D7', 'B6', 'G7'].forEach((n, i) => {
+    bell(v, { f: note(n), at: 0.1 + i * 0.055, gain: 0.3, decay: 0.9, ratio: 3, index: 1.0, dest: v.bus(1, rand(-0.6, 0.6)) });
+  });
+  for (let i = 0; i < 6; i++) coin(v, { f: rand(3200, 5600), at: 0.12 + rand(0, 0.5), gain: 0.12, decay: 0.6, dest: v.bus(1, rand(-0.7, 0.7)) });
+  bell(v, { f: note('G5'), at: 0.1, gain: 0.25, decay: 1.4, ratio: 3, index: 0.6 });
+  v.done();
+};
+
+/** Tiles starting to glow: a soft airy shimmer and a few gentle chimes. */
+const tileGlow: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'tileGlow', { reverb: 0.5 });
+  shimmerSwell(v, { gain: 0.14, rise: 0.3, decay: 0.45 });
+  ['E6', 'G6', 'D6'].forEach((n, i) => {
+    bell(v, { f: note(n), at: 0.12 + i * 0.13 + rand(0, 0.03), gain: 0.18, decay: 0.8, ratio: 3, index: 0.6, dest: v.bus(1, rand(-0.5, 0.5)) });
+  });
+  v.done();
+};
 
 /** A tile popping up out of the water as the board builds. */
 const tilePop: Recipe = (bus, when) => {
@@ -725,6 +778,10 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   upgradeCard: { play: upgradeCard, length: 1.9 },
   beginJingle: { play: beginJingle, length: 1.6 },
   tilePop: { play: tilePop, length: 0.12 },
+  spotlightYou: { play: spotlightYou, length: 1.6 },
+  spotlightRival: { play: spotlightRival, length: 1.6 },
+  spotlightStar: { play: spotlightStar, length: 1.5 },
+  tileGlow: { play: tileGlow, length: 1.2 },
   phaseCall3: { play: phaseCall3, length: 0.9 },
   phaseCall4: { play: phaseCall4, length: 0.9 },
   phaseCall5: { play: phaseCall5, length: 0.9 },
