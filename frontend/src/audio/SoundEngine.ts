@@ -1,6 +1,14 @@
 import { createAudioGraph, type AudioGraph } from './graph';
 import { SOUNDS, smashSoundName, type SoundName } from './sounds';
 
+/** A sound that can be cut short (a charge-up while a button is held). */
+export interface HeldSound {
+  /** Fade it out now (default 120 ms). */
+  stop: (fadeMs?: number) => void;
+}
+
+const SILENT: HeldSound = { stop: () => {} };
+
 /**
  * Owns the (lazily created) AudioContext and master graph, and exposes one
  * method per sound. Recipes live in sounds.ts; the master bus in graph.ts.
@@ -92,6 +100,44 @@ class SoundEngine {
     }
   }
 
+  /**
+   * Play a sound through its own fader so it can be stopped early: its dry
+   * and reverb sends ramp down (whatever already reached the reverb rings
+   * out naturally).
+   */
+  playHeld(name: SoundName): HeldSound {
+    if (!this.enabled) return SILENT;
+    const graph = this.ensureContext();
+    if (!graph) return SILENT;
+    const ctx = graph.ctx;
+    const dry = ctx.createGain();
+    const wet = ctx.createGain();
+    dry.connect(graph.input);
+    wet.connect(graph.send);
+    try {
+      SOUNDS[name].play({ ctx, noise: graph.noise, input: dry, send: wet });
+    } catch (e) {
+      console.warn(`[SoundEngine] failed to play ${name}`, e);
+    }
+    let stopped = false;
+    const release = () => { dry.disconnect(); wet.disconnect(); };
+    const natural = setTimeout(release, (SOUNDS[name].length + 0.5) * 1000);
+    return {
+      stop: (fadeMs = 120) => {
+        if (stopped) return;
+        stopped = true;
+        clearTimeout(natural);
+        const t = ctx.currentTime;
+        for (const g of [dry, wet]) {
+          g.gain.cancelScheduledValues(t);
+          g.gain.setValueAtTime(g.gain.value, t);
+          g.gain.linearRampToValueAtTime(0, t + fadeMs / 1000);
+        }
+        setTimeout(release, fadeMs + 60);
+      },
+    };
+  }
+
   cardDraw() { this.play('cardDraw'); }
   cardPlay() { this.play('cardPlay'); }
   cardDiscard() { this.play('cardDiscard'); }
@@ -112,6 +158,8 @@ class SoundEngine {
   resolveBaseRaidShatter() { this.play('resolveBaseRaidShatter'); }
   resolveBaseRaidHold() { this.play('resolveBaseRaidHold'); }
   upgradeCard() { this.play('upgradeCard'); }
+  /** Power gathering while the upgrade badge is held; stop it on release. */
+  upgradeCharge(): HeldSound { return this.playHeld('upgradeCharge'); }
   beginJingle() { this.play('beginJingle'); }
 
   /** A claim smashing into a defense: heavier with its power (0 … 8+). */

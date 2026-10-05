@@ -65,8 +65,8 @@ function shuffled<T>(arr: T[]): T[] {
 /**
  * Dev page (?preview=hand): the hand, piles and every card animation on a
  * stand-in board — draw, play to a tile (drag one onto the gold hex), undo,
- * discard, trash, shuffle, end of turn and purchases — plus a tile two
- * players share.
+ * discard, trash, shuffle, end of turn, purchases and upgrades (hold the
+ * badge) — plus a tile two players share.
  */
 export function HandPreview() {
   const [catalog, setCatalog] = useState<Card[]>([]);
@@ -246,6 +246,7 @@ export function HandPreview() {
           onIncomingLanded={(key) => setIncoming(list => list.filter(i => i.key !== key))}
           isPlayPhase
           upgradeCreditsAvailable={1}
+          onUpgradeCard={(idx) => setHand(h => h.map((c, i) => (i === idx ? { ...getUpgradedPreview(c), id: c.id } : c)))}
         />
       </div>
     </div>

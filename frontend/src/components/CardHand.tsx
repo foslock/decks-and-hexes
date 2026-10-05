@@ -22,6 +22,8 @@ import {
 } from './hand/cardMotion';
 import { handSizing, handStripHeight, layoutHand, nearestSlot, reconcileHandOrder, shiftLayout, stripAt } from './hand/handLayout';
 import { cursor } from '../utils/cursors';
+import UpgradeBurst, { UPGRADE_BURST_MS } from './hand/UpgradeBurst';
+import type { HeldSound } from '../audio/SoundEngine';
 
 export { CardViewPopup };
 
@@ -180,23 +182,30 @@ const TOUCH_DRAG_Y_OFFSET = 56;
 /** Width of each pile column beside the hand. */
 const PILE_COL = 100;
 
-// Press-and-hold "Hold to Upgrade" pill rendered above upgradeable hand cards.
-// Fills left-to-right over HOLD_MS; completing fires onComplete().
+/** Holding the upgrade badge this long upgrades the card. */
+const UPGRADE_HOLD_MS = 1500;
+
+// Press-and-hold "Hold to Upgrade" pill above an upgradeable hand card: dark
+// glass and gold like the rest of the UI. While held, gold fills it left to
+// right (its label turning dark as the fill passes) and the card gathers a
+// golden glow; completing fires onComplete().
 function UpgradeHoldBadge({
   label,
   animated,
   onHoverChange,
+  onChargeChange,
   onComplete,
 }: {
   label: string;
   animated: boolean;
   onHoverChange: (hovering: boolean) => void;
+  /** The hold started (true) or was let go early (false). */
+  onChargeChange: (charging: boolean) => void;
   onComplete: () => void;
 }) {
-  const HOLD_MS = 1500;
-  // Fill animation completes slightly before the upgrade fires so the user
-  // gets to see the bar fully filled before the card transforms.
-  const FILL_MS = 1300;
+  // The fill completes slightly before the upgrade fires so the full bar
+  // shows before the card transforms.
+  const FILL_MS = UPGRADE_HOLD_MS - 150;
   const [pressing, setPressing] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -214,67 +223,45 @@ function UpgradeHoldBadge({
     e.preventDefault();
     if (timerRef.current) return;
     setPressing(true);
-    const duration = animated ? HOLD_MS : 0;
+    onChargeChange(true);
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       setPressing(false);
       onComplete();
-    }, duration);
-  }, [animated, onComplete]);
+    }, animated ? UPGRADE_HOLD_MS : 0);
+  }, [animated, onComplete, onChargeChange]);
 
   const cancelPress = useCallback(() => {
+    if (!timerRef.current) return;
     clearTimer();
     setPressing(false);
-  }, [clearTimer]);
+    onChargeChange(false);
+  }, [clearTimer, onChargeChange]);
 
+  const content = (
+    <>
+      <Icon name="upgrade" size={13} decorative style={{ marginRight: 5, verticalAlign: '-0.15em' }} />
+      {label}
+    </>
+  );
   return (
     <div
       data-upgrade-badge
+      className={`cc-upgrade-badge${pressing ? ' is-pressing' : ''}`}
       onPointerEnter={() => onHoverChange(true)}
       onPointerLeave={() => { onHoverChange(false); cancelPress(); }}
       onPointerDown={startPress}
       onPointerUp={cancelPress}
       onPointerCancel={cancelPress}
-      style={{
-        position: 'absolute',
-        left: '50%',
-        bottom: 'calc(100% + 6px)',
-        transform: 'translateX(-50%)',
-        padding: '3px 10px',
-        background: '#3a2f00',
-        border: '1px solid #ffd84a',
-        borderRadius: 7,
-        color: '#ffe566',
-        fontSize: 12,
-        fontWeight: 'bold',
-        letterSpacing: 0.3,
-        whiteSpace: 'nowrap',
-        cursor: 'pointer',
-        zIndex: 20,
-        userSelect: 'none',
-        WebkitUserSelect: 'none',
-        touchAction: 'none',
-        animation: animated && !pressing ? 'upgradeBadgePulse 1.8s ease-in-out infinite' : 'none',
-      }}
+      style={{ ['--fill-ms' as string]: `${animated ? FILL_MS : 0}ms` }}
     >
-      {/* Fill bar — sweeps left→right while held. */}
-      <div style={{ position: 'absolute', inset: 0, borderRadius: 'inherit', overflow: 'hidden', pointerEvents: 'none' }}>
-        <div style={{
-          position: 'absolute',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          width: pressing ? '100%' : '0%',
-          background: 'rgba(255, 216, 74, 0.55)',
-          transition: animated
-            ? (pressing ? `width ${FILL_MS}ms linear` : 'width 120ms ease-out')
-            : 'none',
-        }} />
-      </div>
-      <span style={{ position: 'relative' }}>{label}</span>
+      <span className="cc-upgrade-badge-label">{content}</span>
+      {/* The gold fill, carrying a dark copy of the label so the text stays
+          readable as the fill passes under it. */}
+      <span className="cc-upgrade-badge-fill" aria-hidden>{content}</span>
       {/* Transparent bridge over the gap to the card top, so the card+badge
           hover survives slow mouse transits. */}
-      <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', height: 8 }} />
+      <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', height: 10 }} />
     </div>
   );
 }
@@ -436,6 +423,17 @@ export default function CardHand({
   // ── Interaction state ──
   const [hovered, setHovered] = useState<number | null>(null);
   const [badgeHover, setBadgeHover] = useState<number | null>(null);
+  /** The card whose upgrade badge is held (it gathers a golden glow) and the
+   *  card that just upgraded (its burst), with the charge-up sound. */
+  const [chargingId, setChargingId] = useState<string | null>(null);
+  const [upgradeFx, setUpgradeFx] = useState<{ id: string; n: number } | null>(null);
+  const chargeSoundRef = useRef<HeldSound | null>(null);
+  useEffect(() => () => chargeSoundRef.current?.stop(), []);
+  useEffect(() => {
+    if (!upgradeFx) return;
+    const t = setTimeout(() => setUpgradeFx(null), UPGRADE_BURST_MS);
+    return () => clearTimeout(t);
+  }, [upgradeFx]);
   const dragRef = useRef<{
     localIdx: number; startX: number; startY: number; pointerType: string;
     active: boolean; lastX: number; lastT: number; vx: number;
@@ -1347,9 +1345,12 @@ export default function CardHand({
                   className={[
                     empowered ? 'cc-hand-empowered' : '',
                     isSelected || isLifted ? 'cc-hand-selected' : '',
+                    chargingId === card.id ? 'cc-hand-charging' : '',
+                    upgradeFx?.id === card.id ? 'cc-hand-upgraded' : '',
                   ].join(' ')}
-                  style={{ position: 'relative', width: '100%', height: '100%' }}
+                  style={{ position: 'relative', width: '100%', height: '100%', ['--charge-ms' as string]: `${UPGRADE_HOLD_MS}ms` }}
                 >
+                  {upgradeFx?.id === card.id && <UpgradeBurst key={upgradeFx.n} />}
                   {/* Flat (no preserve-3d / backface culling): Safari drops parts of
                       the face — the stat plaque — while such a card animates. A
                       dealt card's back covers the face until it turns edge-on. */}
@@ -1414,7 +1415,21 @@ export default function CardHand({
                       if (hov) setBadgeHover(di);
                       else setBadgeHover(prev => (prev === di ? null : prev));
                     }}
-                    onComplete={() => onUpgradeCard?.(cardIdx)}
+                    onChargeChange={(on) => {
+                      chargeSoundRef.current?.stop(on ? 0 : 160);
+                      chargeSoundRef.current = on ? soundRef.current.upgradeCharge() : null;
+                      setChargingId(on ? card.id : null);
+                    }}
+                    onComplete={() => {
+                      // The charge has peaked: the payoff plays at once (not
+                      // after the server answers), and the card bursts.
+                      chargeSoundRef.current?.stop(60);
+                      chargeSoundRef.current = null;
+                      setChargingId(null);
+                      soundRef.current.upgradeCard();
+                      if (animated) setUpgradeFx(f => ({ id: card.id, n: (f?.n ?? 0) + 1 }));
+                      onUpgradeCard?.(cardIdx);
+                    }}
                   />
                 )}
               </div>

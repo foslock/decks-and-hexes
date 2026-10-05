@@ -3080,8 +3080,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const handleUpgradeCard = useCallback(async (cardIndex: number) => {
     try {
       setError(null);
+      // (The hand plays the upgrade's sound and burst as the hold completes.)
       const result = await api.upgradeCard(gameState.id, activePlayerId, cardIndex);
-      sound.upgradeCard();
       onStateUpdate(result.state);
       // Upgrade button unmounts once the card is upgraded (no more preview),
       // so its onMouseLeave never fires. Clear the preview state manually —
@@ -3091,7 +3091,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [gameState.id, activePlayerId, onStateUpdate, sound]);
+  }, [gameState.id, activePlayerId, onStateUpdate]);
 
   const handleReroll = useCallback(async () => {
     try {

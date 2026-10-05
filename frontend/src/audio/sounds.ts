@@ -20,7 +20,7 @@ export const CORE_SOUND_NAMES = [
   'cardDraw', 'cardPlay', 'cardDiscard', 'cardTrash', 'cardPurchase', 'tileSelect',
   'countdownTick', 'countdownGo', 'buttonClick', 'deckShuffle', 'victoryJingle', 'defeatJingle',
   'resolveDefenseFortify', 'resolveTileOccupied', 'resolveContested', 'resolveBaseRaidFortify',
-  'resolveBaseRaidRam', 'resolveBaseRaidShatter', 'resolveBaseRaidHold', 'upgradeCard', 'beginJingle',
+  'resolveBaseRaidRam', 'resolveBaseRaidShatter', 'resolveBaseRaidHold', 'upgradeCharge', 'upgradeCard', 'beginJingle',
 ] as const;
 
 /** Optional extras (available on the engine + hook, not yet wired into components). */
@@ -68,7 +68,8 @@ const LEVELS: Record<SoundName, number> = {
   resolveBaseRaidRam: -11.2,
   resolveBaseRaidShatter: -12.9,
   resolveBaseRaidHold: -14.7,
-  upgradeCard: -11.0,
+  upgradeCharge: -13,
+  upgradeCard: -12.5,
   beginJingle: -13.2,
   hoverTick: -9.9,
   coinSpend: -11.6,
@@ -204,16 +205,56 @@ const deckShuffle: Recipe = (bus, when) => {
 };
 
 /** Rising air + ascending glass-bell arpeggio + shimmering bloom. */
-const upgradeCard: Recipe = (bus, when) => {
-  const v = voice(bus, when, 'upgradeCard', { vary: 0.5, reverb: 0.45 });
-  swish(v, { from: 500, to: 4500, dur: 0.35, attack: 0.32, q: 1.2, gain: 0.35, hp: 300, lp: 8000 });
-  ['E5', 'G#5', 'B5', 'C#6', 'E6'].forEach((n, i) => {
-    bell(v, { f: note(n), at: 0.04 + i * 0.055, gain: 0.55 - i * 0.04, decay: 0.9, ratio: 3, index: 1.0, dest: v.bus(1, -0.35 + i * 0.175) });
+/**
+ * Holding the upgrade badge: power gathering for 1.5 s (the hold) — a tone
+ * climbing two octaves as it swells, an airy rush opening up, and a run of
+ * glassy plinks quickening upward. Played held (SoundEngine.playHeld), so
+ * letting go early fades it out.
+ */
+const upgradeCharge: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'upgradeCharge', { vary: 0.3, reverb: 0.35 });
+  const T = 1.5;
+  const grow = { a: T - 0.05, d: 0.05, s: 1, hold: 0, r: 0.12, attackCurve: 'exp' as const };
+  v.tone({ f: note('G3'), f2: note('G5'), glide: T, gain: 0.32, env: grow, vibrato: { rate: 5.5, cents: 16, delay: 0.5 } });
+  v.tone({ type: 'triangle', f: note('D4'), f2: note('D6'), glide: T, gain: 0.1, env: grow, detune: 6 });
+  v.noise({
+    color: 'pink', gain: 0.3, env: grow,
+    filters: [{ type: 'bandpass', f: 500, f2: 5200, sweep: T, q: 1.4 }, { type: 'lowpass', f: 9000, q: 0.5 }],
   });
-  v.tone({ f: note('E6'), at: 0.32, gain: 0.16, env: { a: 0.06, d: 0.9 }, vibrato: { rate: 6.5, cents: 12 } });
-  v.tone({ f: note('B6'), at: 0.34, gain: 0.1, env: { a: 0.06, d: 0.8 }, vibrato: { rate: 7, cents: 12 } });
-  v.tone({ type: 'triangle', f: note('E4'), gain: 0.1, env: { a: 0.12, d: 0.9 } });
-  v.tone({ type: 'triangle', f: note('B4'), at: 0.05, gain: 0.07, env: { a: 0.12, d: 0.8 } });
+  shimmerSwell(v, { gain: 0.22, rise: T - 0.1, decay: 0.2 });
+  // Plinks climbing a G-major pentatonic, coming faster as the hold fills.
+  const run = ['G5', 'A5', 'B5', 'D6', 'E6', 'G6', 'A6', 'B6', 'D7', 'E7'];
+  run.forEach((n, i) => {
+    const u = i / run.length;
+    const at = T * (1 - Math.pow(1 - u, 1.7)) * 0.96;
+    bell(v, { f: note(n), at, gain: 0.16 + 0.16 * u, decay: 0.28, ratio: 3, index: 0.8, dest: v.bus(1, -0.4 + 0.8 * u) });
+  });
+  v.done();
+};
+
+/**
+ * The card is upgraded: a warm thump and crack, a G-major chord blooming in
+ * glass bells over a short brass "ta-da", a shower of gold glints, and a
+ * shimmering tail.
+ */
+const upgradeCard: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'upgradeCard', { vary: 0.4, reverb: 0.45 });
+  thump(v, { f: 130, f2: 55, drop: 0.12, gain: 0.55, decay: 0.38, drive: 2 });
+  v.noise({ color: 'white', gain: 0.35, env: { a: 0.0005, d: 0.05 }, filters: [{ type: 'highpass', f: 1800, q: 0.7 }, { type: 'lowpass', f: 10000, q: 0.5 }] });
+  ['G5', 'B5', 'D6', 'G6', 'B6'].forEach((n, i) => {
+    bell(v, { f: note(n), at: i * 0.018, gain: 0.5 - i * 0.05, decay: 1.4, ratio: 3, index: 1.1, dest: v.bus(1, -0.5 + i * 0.25) });
+  });
+  ['G3', 'D4', 'G4', 'B4'].forEach((n, i) => {
+    brass(v, { f: note(n), at: 0.01 + i * 0.008, dur: 0.42, gain: 0.2, bright: 6, attack: 0.02, release: 0.45, voices: 2 });
+  });
+  // Gold glints scattered over the first second, thinning out.
+  for (let i = 0; i < 14; i++) {
+    const at = Math.pow(rand(0, 1), 1.8) * 0.9;
+    coin(v, { f: rand(2400, 5200), at: 0.04 + at, gain: 0.22 * (1 - at), decay: 0.5, dest: v.bus(1, rand(-0.7, 0.7)) });
+  }
+  v.tone({ f: note('G6'), at: 0.08, gain: 0.12, env: { a: 0.08, d: 1.2 }, vibrato: { rate: 6.5, cents: 14 } });
+  v.tone({ type: 'triangle', f: note('G3'), gain: 0.12, env: { a: 0.02, d: 1.3 } });
+  shimmerSwell(v, { at: 0.02, gain: 0.3, rise: 0.04, decay: 1.4 });
   v.done();
 };
 
@@ -655,7 +696,8 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   resolveBaseRaidRam: { play: resolveBaseRaidRam, length: 0.5 },
   resolveBaseRaidShatter: { play: resolveBaseRaidShatter, length: 1.6 },
   resolveBaseRaidHold: { play: resolveBaseRaidHold, length: 1.8 },
-  upgradeCard: { play: upgradeCard, length: 1.3 },
+  upgradeCharge: { play: upgradeCharge, length: 1.55 },
+  upgradeCard: { play: upgradeCard, length: 1.9 },
   beginJingle: { play: beginJingle, length: 1.6 },
   hoverTick: { play: hoverTick, length: 0.06 },
   coinSpend: { play: coinSpend, length: 0.35 },

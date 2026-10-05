@@ -199,6 +199,9 @@ export const ConfirmButton = forwardRef<ConfirmButtonHandle, Omit<React.ButtonHT
   ...buttonProps
 }, ref) {
   const [armed, setArmed] = useState(false);
+  /** Gone ahead: the button disappears at once (its parent drops it when
+   *  the new state arrives) — not back to its first label in the meantime. */
+  const [gone, setGone] = useState(false);
   const [hover, setHover] = useState(false);
   const [showTip, setShowTip] = useState(false);
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -213,18 +216,23 @@ export const ConfirmButton = forwardRef<ConfirmButtonHandle, Omit<React.ButtonHT
   };
 
   const press = useCallback(() => {
-    if (!needsConfirm) {
-      onConfirmRef.current();
-      return;
-    }
-    if (!armed) {
+    if (gone) return;
+    if (needsConfirm && !armed) {
       place();
       setArmed(true);
       return;
     }
     setArmed(false);
+    setGone(true);
     onConfirmRef.current();
-  }, [needsConfirm, armed]);
+  }, [needsConfirm, armed, gone]);
+
+  // Still here a while later (the action didn't go through): come back.
+  useEffect(() => {
+    if (!gone) return;
+    const t = setTimeout(() => setGone(false), 5000);
+    return () => clearTimeout(t);
+  }, [gone]);
 
   useImperativeHandle(ref, () => ({ press }), [press]);
 
@@ -264,6 +272,7 @@ export const ConfirmButton = forwardRef<ConfirmButtonHandle, Omit<React.ButtonHT
     buttonProps.onPointerLeave?.(e);
   };
 
+  if (gone) return null;
   const bubble = armed || (hover && needsConfirm) ? warning : showTip ? tooltip : null;
 
   return (
