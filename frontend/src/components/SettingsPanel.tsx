@@ -156,7 +156,7 @@ export default function SettingsPanel({ isMultiplayer, isHost, mapSeed, gameId, 
               style={{
                 width: '100%',
                 color: 'var(--cc-text-dim)',
-                cursor: downloading ? 'var(--cc-cursor-arrow)' : 'pointer',
+                cursor: downloading ? 'var(--cc-cursor-arrow)' : 'var(--cc-cursor-pointer)',
               }}
               title="Download the full structured game log as JSON"
             >

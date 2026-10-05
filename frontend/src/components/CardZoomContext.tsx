@@ -280,7 +280,7 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 50000,
-            cursor: 'pointer',
+            cursor: 'var(--cc-cursor-pointer)',
           }}
         >
           {/* Left arrow */}
@@ -294,7 +294,7 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
                 transform: 'translateY(-50%)',
                 fontSize: 36,
                 color: '#888',
-                cursor: 'pointer',
+                cursor: 'var(--cc-cursor-pointer)',
                 userSelect: 'none',
                 padding: '16px',
                 lineHeight: 1,
@@ -319,7 +319,7 @@ export function CardZoomProvider({ children }: { children: ReactNode }) {
                 transform: 'translateY(-50%)',
                 fontSize: 36,
                 color: '#888',
-                cursor: 'pointer',
+                cursor: 'var(--cc-cursor-pointer)',
                 userSelect: 'none',
                 padding: '16px',
                 lineHeight: 1,

@@ -8,7 +8,6 @@ import { waitForImages } from '../utils/appReady';
 import type { Card } from '../types/game';
 import CardFull, { CARD_FULL_HEIGHT, CARD_FULL_WIDTH } from './CardFull';
 import { useCardCatalog } from '../cardCatalog';
-import { soundEngine } from '../audio/SoundEngine';
 
 // Generate all hex coords for a radius-r grid
 function generateHexCoords(radius: number): { q: number; r: number }[] {
@@ -286,9 +285,8 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
 
     let filledBlue = 0;
     let filledRed = 0;
-    // A rebuild has nothing left to introduce: no whoosh, clash or build.
+    // A rebuild has nothing left to introduce: no clash or build.
     let collided = rebuild;
-    let whooshed = rebuild;
     let built = rebuild;
     let nextBorder = TOTAL_ANIM + 1200;
     let startTime = 0;
@@ -335,11 +333,6 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       }
 
       // Card entry (accelerating in) → collision → elastic rebound → idle breathing.
-      if (!whooshed && elapsed >= CARD_ENTER_START) {
-        whooshed = true;
-        // (Skipped if the tab stalled past the moment.)
-        if (elapsed < CARD_ENTER_START + 150) soundEngine.heroWhoosh();
-      }
       if (elapsed >= CARD_ENTER_START && elapsed < COLLISION_TIME) {
         const t = easeInCubic((elapsed - CARD_ENTER_START) / CARD_ENTER_DUR);
         const enterTilt = 0.15;
@@ -354,7 +347,6 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
       } else if (elapsed >= COLLISION_TIME && elapsed < TOTAL_ANIM) {
         if (!collided) {
           collided = true;
-          if (elapsed < COLLISION_TIME + 150) soundEngine.swordClash();
           const fx = engine.fx;
           fx?.shockwave(0, 0, 0xffe2a0, 3.4, 900);
           fx?.sparks(0, 0, 0xffd27a, 46, 1.4);

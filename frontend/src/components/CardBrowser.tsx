@@ -126,7 +126,7 @@ function BrowserCardFull({ card, shiftHeld, onShiftClick, cardList }: { card: Ca
       }}
       style={{
         flexShrink: 0,
-        cursor: 'pointer',
+        cursor: 'var(--cc-cursor-pointer)',
         borderRadius: 8,
         outline: flashAdded ? '2px solid #4a4' : 'none',
         transition: 'outline 0.2s',

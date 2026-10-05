@@ -216,7 +216,7 @@
   color: var(--cc-text-dim);
   font-size: 15px;
   line-height: 1;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 140ms var(--cc-ease-out), color 140ms ease, border-color 140ms ease;
 }
 .cc-ov-close:hover { color: var(--cc-gold-bright); border-color: rgba(232, 196, 106, 0.8); transform: scale(1.06); }
@@ -233,7 +233,7 @@
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 999px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   white-space: nowrap;
   transition: color 140ms ease, background 140ms ease, border-color 140ms ease, transform 120ms var(--cc-ease-out);
 }
@@ -290,7 +290,7 @@
   color: #ff8b97;
   background: linear-gradient(180deg, rgba(255, 92, 108, 0.12), rgba(255, 92, 108, 0.03)), var(--cc-panel-solid);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 2px 6px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 140ms var(--cc-ease-out), border-color 140ms ease, background 140ms ease;
 }
 .cc-ov-btn-danger:hover:not(:disabled) { border-color: rgba(255, 92, 108, 0.85); transform: translateY(-1px); }
@@ -462,7 +462,7 @@
 /* A shop tile's card (CompactCardFace) — hover lift and purchase flash. */
 .cc-ov-shop-card {
   overflow: hidden;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 160ms var(--cc-ease-out), filter 160ms ease;
 }
 @media (hover: hover) {
@@ -526,7 +526,7 @@
   border-radius: 7px;
   background: linear-gradient(180deg, #ffe39a 0%, #e8c46a 52%, #c79a3c 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), inset 0 -2px 0 rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.4);
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 120ms var(--cc-ease-out), filter 120ms ease;
 }
 .cc-ov-buy:hover:not(:disabled) { transform: translateY(-1px); filter: brightness(1.08); }
@@ -630,7 +630,7 @@
   border-radius: var(--cc-radius);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02)), #1e1d3e;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 3px 8px rgba(0, 0, 0, 0.35);
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 140ms var(--cc-ease-out), border-color 140ms ease, background 140ms ease;
 }
 .cc-ov-action:hover:not(:disabled) {
@@ -1273,7 +1273,7 @@
   border-radius: 6px;
   background: transparent;
   color: var(--cc-text-faint);
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: color 150ms ease;
 }
 .cc-ov-lb-code-cancel:hover { color: var(--cc-text); }
@@ -1463,7 +1463,7 @@
   background: transparent;
   border: 0;
   border-radius: 6px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: background 140ms ease, color 140ms ease;
 }
 .cc-ov-seg-btn:hover { color: var(--cc-text); background: rgba(255, 255, 255, 0.06); }
@@ -1480,7 +1480,7 @@
   appearance: none;
   height: 18px;
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
 }
 .cc-ov-range::-webkit-slider-runnable-track {
   height: 4px;
@@ -1521,7 +1521,7 @@
   background: rgba(0, 0, 0, 0.36);
   border: 1px solid rgba(232, 196, 106, 0.22);
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   user-select: all;
   transition: border-color 140ms ease;
 }
@@ -1608,7 +1608,7 @@
   white-space: nowrap;
   flex-shrink: 0;
   border-radius: 999px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.45);
   transition: transform 120ms var(--cc-ease-out);
 }

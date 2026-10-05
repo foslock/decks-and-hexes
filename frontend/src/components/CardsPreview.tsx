@@ -141,7 +141,7 @@ export function HandPreview() {
   const pick = () => (selected !== null && hand[selected] ? selected : hand.length - 1);
 
   const subtitleContext = useMemo(() => ({ tileCount: tiles, handSize: hand.length, claimsWonLastRound: 2, playedCardNames: inPlay.map(c => c.name), hasPlayedClaimThisRound: inPlay.some(c => c.card_type === 'claim') }), [tiles, hand.length, inPlay]);
-  const btn: React.CSSProperties = { padding: '5px 10px', background: '#24244a', color: '#fff', border: '1px solid #555', borderRadius: 6, cursor: 'pointer', fontSize: 12 };
+  const btn: React.CSSProperties = { padding: '5px 10px', background: '#24244a', color: '#fff', border: '1px solid #555', borderRadius: 6, cursor: 'var(--cc-cursor-pointer)', fontSize: 12 };
 
   return (
     <div style={{ height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#0e0e22', color: '#fff' }}>

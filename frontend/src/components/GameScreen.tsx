@@ -802,7 +802,7 @@ const HUD_BUTTON_STYLE: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 'bold',
   letterSpacing: 0.3,
-  cursor: 'pointer',
+  cursor: 'var(--cc-cursor-pointer)',
   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07), 0 4px 12px rgba(0,0,0,0.4)',
 };
 
@@ -5693,7 +5693,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                         }}
                         onPointerEnter={reviewing ? () => setReviewHoveredPlayer(pid) : undefined}
                         onPointerLeave={reviewing ? () => setReviewHoveredPlayer(null) : undefined}
-                        style={{ cursor: reviewing ? 'pointer' : 'var(--cc-cursor-arrow)', marginBottom: i < gameState.player_order.length - 1 ? 4 : 0, opacity: isCpu ? 0.8 : 1, position: 'relative' }}
+                        style={{ cursor: reviewing ? 'var(--cc-cursor-pointer)' : 'var(--cc-cursor-arrow)', marginBottom: i < gameState.player_order.length - 1 ? 4 : 0, opacity: isCpu ? 0.8 : 1, position: 'relative' }}
                       >
                         <PlayerHud
                           player={p}
@@ -5886,7 +5886,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     <div style={{ borderTop: '1px solid #ffaa4a44', marginTop: 8, paddingTop: 8 }}>
                       <div
                         onClick={() => setShowTestPanel(p => !p)}
-                        style={{ fontSize: 12, color: '#ffaa4a', cursor: 'pointer', fontWeight: 'bold', marginBottom: 4 }}
+                        style={{ fontSize: 12, color: '#ffaa4a', cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold', marginBottom: 4 }}
                       >
                         <Icon name="chevron" size={9} decorative style={{ transform: showTestPanel ? 'rotate(90deg)' : undefined, transition: 'transform 0.15s', marginRight: 4 }} />Test Mode
                       </div>
@@ -5898,7 +5898,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               <input value={testCardId} onChange={e => setTestCardId(e.target.value)} placeholder="card_id"
                                 style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
                               <button onClick={() => { if (testCardId) handleTestGiveCard(testCardId); }}
-                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Give</button>
+                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold', whiteSpace: 'nowrap' }}>Give</button>
                             </div>
                           </div>
                           <div>
@@ -5907,7 +5907,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               <input type="number" value={testVp} onChange={e => setTestVp(e.target.value)} placeholder={String(activePlayer?.vp ?? 0)}
                                 style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
                               <button onClick={() => { if (testVp !== '') handleTestSetStats(Number(testVp), undefined); }}
-                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
+                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>
                           <div>
@@ -5916,7 +5916,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               <input type="number" value={testResources} onChange={e => setTestResources(e.target.value)} placeholder={String(activePlayer?.resources ?? 0)}
                                 style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
                               <button onClick={() => { if (testResources !== '') handleTestSetStats(undefined, Number(testResources)); }}
-                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
+                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>
                           <div>
@@ -5925,7 +5925,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               <input type="number" value={testActions} onChange={e => setTestActions(e.target.value)} placeholder={String(activePlayer?.actions_available ?? 0)}
                                 style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
                               <button onClick={() => { if (testActions !== '') handleTestSetStats(undefined, undefined, Number(testActions)); }}
-                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
+                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>
                           <div>
@@ -5934,7 +5934,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               <input type="number" value={testRound} onChange={e => setTestRound(e.target.value)} placeholder={String(gameState.current_round ?? 1)}
                                 style={{ flex: 1, padding: '3px 6px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, minWidth: 0 }} />
                               <button onClick={() => { if (testRound !== '') handleTestSetRound(Number(testRound)); }}
-                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}>Set</button>
+                                style={{ padding: '3px 8px', background: '#ffaa4a', border: 'none', borderRadius: 4, color: '#000', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}>Set</button>
                             </div>
                           </div>
                           <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'center' }}>
@@ -5943,7 +5943,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               style={{ width: 36, padding: '3px 4px', background: '#2a2a3e', border: '1px solid #444', borderRadius: 4, color: '#fff', fontSize: 11, textAlign: 'center' }} />
                             <button
                               onClick={() => handleTestDrawCard(Math.max(1, Number(testDrawCount) || 1))}
-                              style={{ flex: 1, padding: '4px 8px', background: '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold' }}
+                              style={{ flex: 1, padding: '4px 8px', background: '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}
                             >
                               Draw Cards
                             </button>
@@ -5951,14 +5951,14 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button
                               onClick={handleTestDiscardHand}
-                              style={{ flex: 1, padding: '4px 8px', background: '#aa6633', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', marginTop: 4 }}
+                              style={{ flex: 1, padding: '4px 8px', background: '#aa6633', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold', marginTop: 4 }}
                             >
                               Discard Hand
                             </button>
                           </div>
                           <button
                             onClick={() => setShowGameOver(true)}
-                            style={{ padding: '4px 8px', background: '#8844aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 'bold', marginTop: 4 }}
+                            style={{ padding: '4px 8px', background: '#8844aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: 'var(--cc-cursor-pointer)', fontWeight: 'bold', marginTop: 4 }}
                           >
                             Trigger Game Over
                           </button>
@@ -5968,7 +5968,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               setTimeout(() => setTestShuffleAnim(false), 2500);
                             }}
                             disabled={testShuffleAnim}
-                            style={{ padding: '4px 8px', background: testShuffleAnim ? '#555' : '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: testShuffleAnim ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                            style={{ padding: '4px 8px', background: testShuffleAnim ? '#555' : '#4488aa', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: testShuffleAnim ? 'not-allowed' : 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}
                           >
                             {testShuffleAnim ? 'Shuffling...' : 'Play Shuffling'}
                           </button>
@@ -5984,7 +5984,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               setInteractionBlocked(true);
                             }}
                             disabled={showIntro || animationOff}
-                            style={{ padding: '4px 8px', background: (showIntro || animationOff) ? '#555' : '#44aa88', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: (showIntro || animationOff) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                            style={{ padding: '4px 8px', background: (showIntro || animationOff) ? '#555' : '#44aa88', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: (showIntro || animationOff) ? 'not-allowed' : 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}
                           >
                             Replay Intro
                           </button>
@@ -6006,7 +6006,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                               setInteractionBlocked(true);
                             }}
                             disabled={animationOff || !!phaseBanner}
-                            style={{ padding: '4px 8px', background: (animationOff || phaseBanner) ? '#555' : '#cc6622', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: (animationOff || phaseBanner) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}
+                            style={{ padding: '4px 8px', background: (animationOff || phaseBanner) ? '#555' : '#cc6622', border: 'none', borderRadius: 4, color: '#fff', fontSize: 11, cursor: (animationOff || phaseBanner) ? 'not-allowed' : 'var(--cc-cursor-pointer)', fontWeight: 'bold' }}
                           >
                             Give Debt
                           </button>
@@ -6282,7 +6282,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     borderRadius: 6,
                     color: '#fff',
                     fontWeight: 'bold',
-                    cursor: 'pointer',
+                    cursor: 'var(--cc-cursor-pointer)',
                     fontSize: 13,
                     lineHeight: '1.2',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
@@ -6301,7 +6301,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     borderRadius: 6,
                     color: '#fff',
                     fontWeight: 'bold',
-                    cursor: 'pointer',
+                    cursor: 'var(--cc-cursor-pointer)',
                     fontSize: 13,
                     lineHeight: '1.2',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
@@ -6338,7 +6338,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     style={{
                       ...actionButtonStyle('muted', 'sm'),
                       color: '#fff',
-                      cursor: 'pointer',
+                      cursor: 'var(--cc-cursor-pointer)',
                     }}
                   >
                     Cancel
@@ -6379,7 +6379,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     style={{
                       ...actionButtonStyle('muted', 'sm'),
                       color: '#fff',
-                      cursor: 'pointer',
+                      cursor: 'var(--cc-cursor-pointer)',
                     }}
                   >
                     Cancel
@@ -6391,7 +6391,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                     tooltip={`Confirm ${trashMode.label.toLowerCase()} selection for ${card?.name ?? 'card'}.`}
                     style={{
                       ...actionButtonStyle(canConfirm ? (trashMode.label === 'Discard' ? 'slate' : 'danger') : 'muted'),
-                      cursor: canConfirm ? 'pointer' : 'not-allowed',
+                      cursor: canConfirm ? 'var(--cc-cursor-pointer)' : 'not-allowed',
                       opacity: canConfirm ? 1 : 0.5,
                       animation: atMaxSelection ? 'pulseGlowConfirmTrash 1.4s ease-in-out infinite' : undefined,
                     }}

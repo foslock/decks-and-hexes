@@ -234,7 +234,9 @@ export default function LobbyScreen({
   const { lastMessage, status } = useWebSocket(lobbyCode, playerId, token, onTokenRefresh);
   const sound = useSound();
 
-  // The music falls silent for the countdown (the game starts it over).
+  // The music starts in the lobby, and falls silent for the countdown (the
+  // game starts it over).
+  useEffect(() => { soundEngine.setMusicActive(true); }, []);
   const counting = countdown !== null;
   useEffect(() => { soundEngine.holdMusic(counting); }, [counting]);
   useEffect(() => () => { if (!gameStartRef.current) soundEngine.holdMusic(false); }, []);

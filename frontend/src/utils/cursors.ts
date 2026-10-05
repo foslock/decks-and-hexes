@@ -9,6 +9,8 @@
 export const CURSORS = {
   /** The everyday pointer. */
   arrow: { hot: [3, 2], system: 'default' },
+  /** Over a button or anything else you can click: a pointing gauntlet. */
+  pointer: { hot: [12, 2], system: 'pointer' },
   /** Over a tile with details to show. */
   inspect: { hot: [3, 2], system: 'pointer' },
   /** Aiming a card at a tile it can be played on. */

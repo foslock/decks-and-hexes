@@ -1357,7 +1357,7 @@ export default function CardHand({
                   opacity: 1,
                   visibility: hidden ? 'hidden' : undefined,
                   filter: dimmed ? 'brightness(0.5) saturate(0.65)' : undefined,
-                  cursor: trashMode ? (isTrashPlayed ? cursor('arrow') : 'pointer') : disabled ? 'not-allowed' : cursor(drag ? 'grabbing' : 'grab'),
+                  cursor: trashMode ? (isTrashPlayed ? cursor('arrow') : 'var(--cc-cursor-pointer)') : disabled ? 'not-allowed' : cursor(drag ? 'grabbing' : 'grab'),
                   pointerEvents: enter || hidden ? 'none' : 'auto',
                   userSelect: 'none',
                   WebkitUserSelect: 'none',

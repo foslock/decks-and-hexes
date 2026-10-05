@@ -196,7 +196,7 @@ export default function TerritoryPreview() {
   };
 
   const btn = (on: boolean): React.CSSProperties => ({
-    padding: '4px 10px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+    padding: '4px 10px', fontSize: 12, borderRadius: 6, cursor: 'var(--cc-cursor-pointer)',
     border: `1px solid ${on ? '#d8b25a' : '#3a3a55'}`, background: on ? '#3a3220' : '#23233a', color: on ? '#f3e3b5' : '#c9c9d9',
   });
 
@@ -229,7 +229,7 @@ export default function TerritoryPreview() {
                     aria-label={`Seat ${i + 1} color ${c}`}
                     onClick={() => setColors(v => v.map((x, j) => (j === i ? c : x)))}
                     style={{
-                      width: 18, height: 18, borderRadius: 9, background: c, cursor: 'pointer', padding: 0,
+                      width: 18, height: 18, borderRadius: 9, background: c, cursor: 'var(--cc-cursor-pointer)', padding: 0,
                       border: colors[i] === c ? '2px solid #fff' : '2px solid transparent',
                     }}
                   />

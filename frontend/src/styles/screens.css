@@ -175,7 +175,7 @@
   appearance: none;
   -webkit-appearance: none;
   padding-right: 28px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   max-width: 100%;
   min-width: 0;
   background-image:
@@ -212,7 +212,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: background 150ms ease, color 150ms ease, border-color 150ms ease, transform 120ms var(--cc-ease-out);
 }
 .cc-scr-seg-btn:hover:not(:disabled) { color: var(--cc-text); background: rgba(255, 255, 255, 0.06); }
@@ -248,7 +248,7 @@
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02));
   border: 1px solid rgba(232, 196, 106, 0.25);
   border-radius: 7px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: color 150ms ease, border-color 150ms ease, transform 120ms var(--cc-ease-out), background 150ms ease;
 }
 .cc-scr-chip-btn:hover { color: var(--cc-text); border-color: rgba(232, 196, 106, 0.6); transform: translateY(-1px); }
@@ -269,7 +269,7 @@
   color: var(--cc-text-dim);
   font-size: 14px;
   line-height: 1;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: color 150ms ease, border-color 150ms ease, transform 150ms var(--cc-ease-out), background 150ms ease;
 }
 .cc-scr-close:hover { color: var(--cc-text); border-color: rgba(232, 196, 106, 0.75); transform: rotate(90deg); }
@@ -532,7 +532,7 @@
   position: relative;
   display: flex;
   gap: 8px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 150ms var(--cc-ease-out);
 }
 .cc-scr-joincode:hover { transform: translateY(-1px); }
@@ -702,7 +702,7 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 10px color-mix(in srgb, var(--seat-color) 55%, transparent);
   transition: transform 150ms var(--cc-ease-spring);
 }
-.cc-scr-color-chip.is-editable { cursor: pointer; }
+.cc-scr-color-chip.is-editable { cursor: var(--cc-cursor-pointer); }
 .cc-scr-color-chip.is-editable:hover,
 .cc-scr-color-chip.is-open { transform: scale(1.2); }
 .cc-scr-color-pop {
@@ -724,7 +724,7 @@
   border: 2px solid transparent;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 120ms var(--cc-ease-spring);
 }
 .cc-scr-swatch:hover:not(.is-taken) { transform: scale(1.18); }
@@ -770,7 +770,7 @@
   border-radius: 50%;
   border: 1px solid transparent;
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   opacity: 0.5;
   transition: opacity 150ms ease, transform 150ms var(--cc-ease-out), border-color 150ms ease;
 }
@@ -832,7 +832,7 @@
   background: transparent;
   color: rgba(255, 120, 132, 0.85);
   font-size: 12px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 .cc-scr-remove:hover { background: rgba(255, 92, 108, 0.14); color: #ffb3bb; border-color: rgba(255, 92, 108, 0.7); }
@@ -849,7 +849,7 @@
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: border-color 150ms ease, color 150ms ease, background 150ms ease, transform 120ms var(--cc-ease-out);
 }
 .cc-scr-add-seat:hover { border-color: rgba(232, 196, 106, 0.8); color: var(--cc-gold-bright); background: rgba(232, 196, 106, 0.07); }
@@ -919,7 +919,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   text-align: left;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: color 150ms ease, border-color 150ms ease;
 }
 .cc-scr-advanced-toggle:hover { color: var(--cc-text); border-color: rgba(232, 196, 106, 0.35); }
@@ -954,7 +954,7 @@
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 12px;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: background 120ms ease;
 }
 .cc-scr-dropdown-item:hover { background: var(--cc-scr-gold-soft); }
@@ -1379,7 +1379,7 @@
   border: none;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.18);
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: width 250ms var(--cc-ease-out), background 200ms ease;
 }
 .cc-scr-htp-dot:hover { background: rgba(232, 196, 106, 0.55); }
@@ -1441,7 +1441,7 @@
   border: none;
   border-bottom: 1px solid var(--cc-scr-hairline);
   background: none;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   text-align: left;
   font-family: var(--cc-font-body);
 }
@@ -1463,7 +1463,7 @@
   width: 154px;
   border-radius: 10px;
   flex-shrink: 0;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: transform 150ms var(--cc-ease-out), box-shadow 200ms ease;
   animation: cc-fade-in 250ms ease-out both;
 }

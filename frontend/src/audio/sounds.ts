@@ -21,7 +21,7 @@ export const CORE_SOUND_NAMES = [
   'countdownTick', 'countdownGo', 'buttonClick', 'deckShuffle', 'victoryJingle', 'defeatJingle',
   'resolveDefenseFortify', 'resolveTileOccupied', 'resolveContested', 'resolveBaseRaidFortify',
   'resolveBaseRaidRam', 'resolveBaseRaidShatter', 'resolveBaseRaidHold', 'upgradeCharge', 'upgradeCard', 'beginJingle',
-  'heroWhoosh', 'swordClash', 'tilePop', 'phaseCall3', 'phaseCall4', 'phaseCall5',
+  'tilePop', 'phaseCall3', 'phaseCall4', 'phaseCall5',
 ] as const;
 
 /** Optional extras (available on the engine + hook, not yet wired into components). */
@@ -72,8 +72,6 @@ const LEVELS: Record<SoundName, number> = {
   upgradeCharge: -13,
   upgradeCard: -12.5,
   beginJingle: -9.7,
-  heroWhoosh: -10,
-  swordClash: -14,
   tilePop: -6,
   phaseCall3: -11.1,
   phaseCall4: -11.2,
@@ -371,49 +369,7 @@ const resolveContested: Recipe = (bus, when) => {
   v.done();
 };
 
-// ── Title screen & board build ────────────────────────────────────
-
-/**
- * The title cards rushing in from both sides: two air rushes swelling toward
- * the middle over a rising rumble, cut off at the collision (t = 1.0).
- */
-const heroWhoosh: Recipe = (bus, when) => {
-  const v = voice(bus, when, 'heroWhoosh', { reverb: 0.2 });
-  const T = 1.0;
-  const rush = { a: T - 0.02, d: 0.02, s: 1, hold: 0, r: 0.06, attackCurve: 'exp' as const };
-  for (const side of [-1, 1]) {
-    v.noise({
-      color: 'pink', gain: 0.75, env: rush, dest: v.bus(1, side * 0.6),
-      filters: [
-        { type: 'highpass', f: 250, q: 0.7 },
-        { type: 'bandpass', f: 350, f2: 2800, sweep: T, q: 1.1 },
-        { type: 'lowpass', f: 7000, q: 0.5 },
-      ],
-    });
-  }
-  v.tone({ f: 70, f2: 190, glide: T, gain: 0.35, env: rush, drive: 1.6 });
-  shimmerSwell(v, { gain: 0.18, rise: T - 0.05, decay: 0.12 });
-  v.done();
-};
-
-/**
- * Steel on steel: a sharp strike, two blades ringing against each other, the
- * "shing" of the edges sliding apart, and a heavy thump under it all.
- */
-const swordClash: Recipe = (bus, when) => {
-  const v = voice(bus, when, 'swordClash', { vary: 0.3, reverb: 0.35 });
-  v.noise({ color: 'white', gain: 0.5, env: { a: 0.0004, d: 0.025 }, filters: [{ type: 'highpass', f: 2200, q: 0.7 }, { type: 'lowpass', f: 12000, q: 0.5 }] });
-  thump(v, { f: 140, f2: 48, drop: 0.09, gain: 0.6, decay: 0.42, drive: 2.2 });
-  drum(v, { f: 66, gain: 0.35, decay: 0.4, skin: 0.4 });
-  const f = pick([1580, 1660, 1740]);
-  clang(v, { f, gain: 0.42, decay: 1.1, bright: 1.2, strike: 0.5, dest: v.bus(1, -0.25) });
-  clang(v, { f: f * 1.34, at: 0.006, gain: 0.32, decay: 0.9, bright: 1.1, strike: 0.4, dest: v.bus(1, 0.25) });
-  v.noise({
-    color: 'white', at: 0.012, gain: 0.22, env: { a: 0.01, d: 0.32 },
-    filters: [{ type: 'bandpass', f: 6500, f2: 3200, sweep: 0.3, q: 3 }, { type: 'lowpass', f: 9000, q: 0.5 }],
-  });
-  v.done();
-};
+// ── Board build ───────────────────────────────────────────────────
 
 /** A tile popping up out of the water as the board builds. */
 const tilePop: Recipe = (bus, when) => {
@@ -768,8 +724,6 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   upgradeCharge: { play: upgradeCharge, length: 1.55 },
   upgradeCard: { play: upgradeCard, length: 1.9 },
   beginJingle: { play: beginJingle, length: 1.6 },
-  heroWhoosh: { play: heroWhoosh, length: 1.1 },
-  swordClash: { play: swordClash, length: 1.6 },
   tilePop: { play: tilePop, length: 0.12 },
   phaseCall3: { play: phaseCall3, length: 0.9 },
   phaseCall4: { play: phaseCall4, length: 0.9 },

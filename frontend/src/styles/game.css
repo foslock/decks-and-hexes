@@ -94,7 +94,7 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.04);
   color: #e8e2cf;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   padding: 0;
   transition: transform 140ms var(--cc-ease-out), border-color 160ms ease, background 160ms ease;
 }

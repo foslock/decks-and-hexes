@@ -19,7 +19,7 @@ export default function CardDetail({ card, onClose }: CardDetailProps) {
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 10000,
-        cursor: 'pointer',
+        cursor: 'var(--cc-cursor-pointer)',
       }}
     >
       <div onClick={(e) => e.stopPropagation()} style={{ cursor: 'var(--cc-cursor-arrow)' }}>
