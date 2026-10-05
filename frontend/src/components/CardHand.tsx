@@ -208,6 +208,14 @@ function UpgradeHoldBadge({
   const FILL_MS = UPGRADE_HOLD_MS - 150;
   const [pressing, setPressing] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The fill is a pill whose width grows (an explicit animation started on
+  // the press): Safari doesn't reliably repaint an animating clip-path, and a
+  // CSS transition may not start the first time. Its dark label is pinned to
+  // the badge's width so the text doesn't move as the fill passes.
+  const badgeRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLSpanElement>(null);
+  const fillLabelRef = useRef<HTMLSpanElement>(null);
+  const fillAnimRef = useRef<Animation | null>(null);
 
   const clearTimer = useCallback(() => {
     if (timerRef.current) {
@@ -216,7 +224,13 @@ function UpgradeHoldBadge({
     }
   }, []);
 
-  useEffect(() => () => clearTimer(), [clearTimer]);
+  useEffect(() => () => { clearTimer(); fillAnimRef.current?.cancel(); }, [clearTimer]);
+
+  const runFill = (from: number, to: number, duration: number, easing: string) => {
+    const el = fillRef.current;
+    fillAnimRef.current?.cancel();
+    fillAnimRef.current = el?.animate?.([{ width: `${from}px` }, { width: `${to}px` }], { duration, easing, fill: 'forwards' }) ?? null;
+  };
 
   const startPress = useCallback((e: ReactPointerEvent) => {
     e.stopPropagation();
@@ -224,11 +238,15 @@ function UpgradeHoldBadge({
     if (timerRef.current) return;
     setPressing(true);
     onChargeChange(true);
+    const w = badgeRef.current?.clientWidth ?? 0;
+    if (fillLabelRef.current) fillLabelRef.current.style.width = `${w}px`;
+    runFill(0, w, animated ? FILL_MS : 0, 'linear');
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
       setPressing(false);
       onComplete();
     }, animated ? UPGRADE_HOLD_MS : 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [animated, onComplete, onChargeChange]);
 
   const cancelPress = useCallback(() => {
@@ -236,7 +254,10 @@ function UpgradeHoldBadge({
     clearTimer();
     setPressing(false);
     onChargeChange(false);
-  }, [clearTimer, onChargeChange]);
+    // Drain back from wherever the fill got to.
+    runFill(fillRef.current?.getBoundingClientRect().width ?? 0, 0, animated ? 140 : 0, 'ease-out');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clearTimer, onChargeChange, animated]);
 
   const content = (
     <>
@@ -246,6 +267,7 @@ function UpgradeHoldBadge({
   );
   return (
     <div
+      ref={badgeRef}
       data-upgrade-badge
       className={`cc-upgrade-badge${pressing ? ' is-pressing' : ''}`}
       onPointerEnter={() => onHoverChange(true)}
@@ -253,12 +275,13 @@ function UpgradeHoldBadge({
       onPointerDown={startPress}
       onPointerUp={cancelPress}
       onPointerCancel={cancelPress}
-      style={{ ['--fill-ms' as string]: `${animated ? FILL_MS : 0}ms` }}
     >
       <span className="cc-upgrade-badge-label">{content}</span>
       {/* The gold fill, carrying a dark copy of the label so the text stays
           readable as the fill passes under it. */}
-      <span className="cc-upgrade-badge-fill" aria-hidden>{content}</span>
+      <span ref={fillRef} className="cc-upgrade-badge-fill" aria-hidden>
+        <span ref={fillLabelRef} className="cc-upgrade-badge-fill-label">{content}</span>
+      </span>
       {/* Transparent bridge over the gap to the card top, so the card+badge
           hover survives slow mouse transits. */}
       <div style={{ position: 'absolute', left: 0, right: 0, top: '100%', height: 10 }} />

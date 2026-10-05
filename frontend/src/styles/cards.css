@@ -157,22 +157,29 @@
 .cc-upgrade-badge.is-pressing { animation: none; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 14px rgba(255, 210, 100, 0.6), 0 4px 12px rgba(0, 0, 0, 0.5); }
 .cc-upgrade-badge-label { position: relative; display: flex; align-items: center; }
 .cc-upgrade-badge-fill {
+  /* Empty until held; the badge grows it to full width (and back if let go). */
   position: absolute;
-  inset: 0;
-  padding: inherit;
-  border-radius: inherit;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  pointer-events: none;
+}
+.cc-upgrade-badge-fill-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  padding: 4px 13px 4px 10px;
   display: flex;
   align-items: center;
+  white-space: nowrap;
   color: #2a1d05;
   background: linear-gradient(180deg, #ffe39a 0%, #e8c46a 45%, #c79a3c 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  clip-path: inset(0 100% 0 0 round 999px);
-  transition: clip-path 140ms ease-out;
-  pointer-events: none;
-}
-.cc-upgrade-badge.is-pressing .cc-upgrade-badge-fill {
-  clip-path: inset(0 0 0 0 round 999px);
-  transition: clip-path var(--fill-ms, 1350ms) cubic-bezier(0.4, 0, 0.9, 0.7);
 }
 @keyframes cc-upgrade-badge-breathe {
   0%, 100% { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 4px rgba(255, 210, 100, 0.25), 0 4px 12px rgba(0, 0, 0, 0.5); }
@@ -181,6 +188,7 @@
 
 /* Charging: the card gathers a golden glow and trembles as the hold fills. */
 .cc-hand-charging {
+  transform-origin: 50% 50%;
   animation: cc-upgrade-tremble var(--charge-ms, 1500ms) linear forwards;
 }
 .cc-hand-charging::before {
@@ -196,15 +204,17 @@
   from { box-shadow: 0 0 4px 1px rgba(255, 214, 90, 0.15), 0 0 10px 2px rgba(255, 170, 40, 0.08); }
   to { box-shadow: 0 0 22px 8px rgba(255, 224, 120, 0.95), 0 0 52px 20px rgba(255, 170, 40, 0.55), inset 0 0 14px 4px rgba(255, 236, 170, 0.7); }
 }
+/* A jiggle about the card's center, growing as the hold fills. */
 @keyframes cc-upgrade-tremble {
-  0%, 55% { transform: none; filter: brightness(1); }
-  62% { transform: translate(0.5px, -0.3px) rotate(-0.25deg); }
-  69% { transform: translate(-0.8px, 0.4px) rotate(0.35deg); }
-  76% { transform: translate(1px, -0.5px) rotate(-0.45deg); filter: brightness(1.08); }
-  83% { transform: translate(-1.3px, 0.5px) rotate(0.55deg); }
-  90% { transform: translate(1.6px, -0.6px) rotate(-0.65deg); filter: brightness(1.16); }
-  96% { transform: translate(-1.8px, 0.6px) rotate(0.7deg); }
-  100% { transform: none; filter: brightness(1.25); }
+  0%, 52% { transform: rotate(0deg); filter: brightness(1); }
+  58% { transform: rotate(-0.5deg); }
+  64% { transform: rotate(0.6deg); }
+  70% { transform: rotate(-0.8deg); filter: brightness(1.06); }
+  76% { transform: rotate(0.9deg); }
+  82% { transform: rotate(-1.1deg); filter: brightness(1.12); }
+  88% { transform: rotate(1.2deg); }
+  94% { transform: rotate(-1.3deg) scale(1.01); filter: brightness(1.2); }
+  100% { transform: rotate(0deg) scale(1.02); filter: brightness(1.25); }
 }
 
 /* Upgraded: the card pops, a white-gold flash, rays wheeling out from behind
