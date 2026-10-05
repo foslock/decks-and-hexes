@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { Card } from '../types/game';
 import Tooltip from './Tooltip';
 import { extractKeywordsFromText, KEYWORDS } from './Keywords';
@@ -127,8 +127,33 @@ for (let size = TEXT_MAX; size >= TEXT_MIN; size -= 0.5) {
   FIT_STEPS.push({ split: true, size });
   if (size <= 12) FIT_STEPS.push({ split: false, size });
 }
+// Last resort, smaller than we'd like but never clipped.
+FIT_STEPS.push({ split: false, size: 8.5 }, { split: false, size: 8 });
 /** Every card shares the same box, so a fit depends only on its content. */
 const fitCache = new Map<string, number>();
+
+/** Fits are measured in the card's fonts. When a web font finishes loading,
+ *  every ability box measures again — a fit taken in the fallback font
+ *  (Safari often lays a card out before its fonts arrive) may not hold. */
+let fontEpoch = 0;
+const fontListeners = new Set<() => void>();
+const fontsLoaded = () => typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded';
+if (typeof document !== 'undefined' && document.fonts) {
+  const refit = () => {
+    fontEpoch++;
+    fitCache.clear();
+    fontListeners.forEach(f => f());
+  };
+  document.fonts.addEventListener?.('loadingdone', refit);
+  document.fonts.ready.then(refit).catch(() => {});
+}
+function useFontEpoch(): number {
+  return useSyncExternalStore(
+    (cb) => { fontListeners.add(cb); return () => { fontListeners.delete(cb); }; },
+    () => fontEpoch,
+    () => 0,
+  );
+}
 
 /** The ability box: centered text that picks the roomiest layout that fits. */
 function AbilityText({ text, notes, fitKey, catalogRender }: {
@@ -139,21 +164,22 @@ function AbilityText({ text, notes, fitKey, catalogRender }: {
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // Re-measured whenever the fonts finish loading.
+  const epoch = useFontEpoch();
+  const cacheKey = `${fitKey}|${epoch}`;
   // Binary search for the first (roomiest) step that fits: [lo, hi] narrows
-  // to a single step, measuring the midpoint each pass.
-  const initial = (key: string) => {
+  // to a single step, measuring the midpoint each pass. The search belongs to
+  // the content and fonts it measured (`key`); a search for anything else is
+  // stale and starts over — derived during render, so no state is reset
+  // mid-render (unsafe with StrictMode's double render).
+  type Search = { key: string; lo: number; hi: number };
+  const fresh = (key: string): Search => {
     const cached = fitCache.get(key);
-    return cached !== undefined ? { lo: cached, hi: cached } : { lo: 0, hi: FIT_STEPS.length - 1 };
+    return cached !== undefined ? { key, lo: cached, hi: cached } : { key, lo: 0, hi: FIT_STEPS.length - 1 };
   };
-  const [search, setSearch] = useState(() => initial(fitKey));
+  const [state, setState] = useState<Search>(() => fresh(cacheKey));
+  const search = state.key === cacheKey ? state : fresh(cacheKey);
   const sentences = useMemo(() => splitSentences(text), [text]);
-
-  // Re-fit from scratch when the content changes (e.g. the card is upgraded).
-  const lastKey = useRef(fitKey);
-  if (lastKey.current !== fitKey) {
-    lastKey.current = fitKey;
-    setSearch(initial(fitKey));
-  }
   const step = Math.floor((search.lo + search.hi) / 2);
 
   useLayoutEffect(() => {
@@ -161,18 +187,21 @@ function AbilityText({ text, notes, fitKey, catalogRender }: {
     const content = contentRef.current;
     if (!box || !content || box.clientHeight === 0) return;
     if (search.lo === search.hi) {
-      fitCache.set(fitKey, search.lo);
+      // Only remember a fit taken in the real fonts.
+      if (fontsLoaded()) fitCache.set(cacheKey, search.lo);
+      if (state !== search) setState(search);
       return;
     }
     const fits = content.scrollHeight <= box.clientHeight + 0.5;
-    setSearch(fits ? { lo: search.lo, hi: step } : { lo: step + 1, hi: search.hi });
-  }, [search, step, fitKey]);
+    setState(fits ? { key: cacheKey, lo: search.lo, hi: step } : { key: cacheKey, lo: step + 1, hi: search.hi });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.lo, search.hi, step, cacheKey]);
 
   const { split, size } = FIT_STEPS[step];
   const lines = split && sentences.length > 1 ? sentences : [text];
   return (
-    <div ref={boxRef} style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <div ref={contentRef} style={{ fontSize: size, lineHeight: 1.38, textAlign: 'center', textWrap: 'balance' } as React.CSSProperties}>
+    <div ref={boxRef} data-ability-box style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <div ref={contentRef} data-ability-text style={{ fontSize: size, lineHeight: 1.38, textAlign: 'center', textWrap: 'balance' } as React.CSSProperties}>
         {text && lines.map((line, i) => (
           <div key={i} style={{ marginTop: i > 0 ? 2 : 0 }}>{catalogRender(line)}</div>
         ))}
