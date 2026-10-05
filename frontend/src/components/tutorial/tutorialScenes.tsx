@@ -185,11 +185,12 @@ export const SCENES: Scene[] = [
     run: async (ctx) => {
       await ctx.fly({ keys: [FRONT, '2,1', '2,-1'], zoom: 2.3, tilt: 0.62, rotation: -0.35, seconds: 2.4, arc: 0.2, lower: 1.3 });
       ctx.set({ highlight: [FRONT] });
+      await ctx.wait(500);
       await ctx.play(levy.id, FRONT, { from: '2,1' });
       ctx.set({ highlight: [] });
-      await ctx.wait(300);
+      await ctx.wait(800);
       await ctx.rivalPlay(copy(EXPLORE, 'r1'), FRONT, '2,-1');
-      await ctx.wait(BEAT);
+      await ctx.wait(1100);
       await ctx.reveal();
       await ctx.resolve([
         claimStep(FRONT, [{ pid: YOU, power: 1, from: '2,1' }, { pid: RIVAL, power: 0, from: '2,-1' }], { winner: YOU }),
