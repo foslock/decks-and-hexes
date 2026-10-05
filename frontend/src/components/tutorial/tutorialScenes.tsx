@@ -45,7 +45,7 @@ export interface TutorialCtx {
   flyStar(from: Anchor, to: Anchor): Promise<void>;
   fx(): BoardFx | null;
   /** Play one of the game's sound effects. */
-  sfx(name: keyof SoundApi): void;
+  sfx(name: Exclude<keyof SoundApi, 'claimSmash'>): void;
 }
 
 export interface Scene {

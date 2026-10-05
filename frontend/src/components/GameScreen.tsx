@@ -1,9 +1,9 @@
 import { useState, useMemo, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { GameState, Card, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
-import GameBoard, { type BoardControls, type BoardFx, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors, computeStackingPowerBonus } from './GameBoard';
+import type { GameState, Card, HexTile, ResolutionStep, PlayerEffect, CursorPosition, SharedPurchaseEvent, PendingSearch, SearchSelection, SearchZoneTarget } from '../types/game';
+import GameBoard, { type BoardControls, type BoardFx, type PlannedActionIcon, type ClaimChevron, type VpPath, PLAYER_COLORS, syncPlayerColors } from './GameBoard';
 import PlayerHud from './PlayerHud';
-import ResourceCounter, { type ResourceCounterHandle, type ResourceSource } from './ResourceCounter';
+import ResourceCounter, { CoinFlight, setShownResources, splitCoins, type Coin, type ResourceCounterHandle, type ResourceSource } from './ResourceCounter';
 import CardHand, { CardViewPopup, type PlayTarget, type DragTargetInfo, type UndoReturn, type IncomingDiscard } from './CardHand';
 import CardBrowser from './CardBrowser';
 import ShopOverlay, { PurchaseFlyAnimation } from './ShopOverlay';
@@ -12,7 +12,9 @@ import PileSearchFlyAnimation, { type SearchFlight } from './PileSearchFlyAnimat
 import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import PhaseBanner from './PhaseBanner';
-import ResolveOverlay from './ResolveOverlay';
+import TileResolver, { resolveCamera, type ResolverApi } from './TileResolver';
+import { buildResolvePlans, type PlanCard, type TilePlan } from '../utils/resolvePlan';
+import type { CameraView } from '../board3d/engine';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
@@ -94,94 +96,6 @@ function withEffectivePower(
 }
 
 /**
- * Compute the effective claim power for a card targeting a specific tile.
- * Handles all dynamic power sources used by the validation paths:
- *   - power_per_tiles_owned (Mob Rule, Power in Numbers)
- *   - power_modifier with condition cards_in_hand (Strength in Numbers)
- *   - power_modifier with condition if_target_neutral (Pioneer, etc.)
- *   - power_modifier with condition if_adjacent_owned_gte (Encirclement, etc.)
- * Mirrors the backend `effects.compute_effective_power` for the conditions
- * the frontend can determine before play.  Pass the player's current hand
- * size and owned-tile count to drive scaling effects.
- */
-function computeClaimPowerOnTile(
-  card: Card,
-  tile: import('../types/game').HexTile,
-  tiles: Record<string, import('../types/game').HexTile>,
-  activePlayerId: string,
-  handSize: number,
-  ownedTileCount: number,
-  claimBuffBonus: number = 0,
-  hasPlayedClaim: boolean = false,
-): number {
-  // Start from base power, then apply tile-count / hand-size scaling that
-  // doesn't depend on the target tile (and Strike Team's played-claim bonus).
-  let power = withEffectivePower(card, handSize, ownedTileCount, hasPlayedClaim).power;
-  // War Banner: preview the +power bonus the next Claim will consume.
-  power += claimBuffBonus;
-  if (!card.effects) return power;
-  const isUpgraded = card.is_upgraded;
-  for (const eff of card.effects) {
-    if (eff.type !== 'power_modifier') continue;
-    const mod = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : (eff.value ?? 0);
-    if (eff.condition === 'if_target_neutral' && !tile.owner) power += mod;
-    // Road Builder: bonus when the tile joins two of your disconnected groups
-    if (eff.condition === 'if_bridges_territory' && tileBridgesTerritory(tile, tiles, activePlayerId)) power += mod;
-    if (eff.condition === 'if_adjacent_owned_gte') {
-      const threshold = eff.condition_threshold ?? 3;
-      let adjOwned = 0;
-      for (const [dq, dr] of HEX_DIRS) {
-        const nk = `${tile.q + dq},${tile.r + dr}`;
-        if (tiles[nk]?.owner === activePlayerId) adjOwned++;
-      }
-      if (eff.metadata?.per_tile) {
-        power += mod * adjOwned;
-      } else if (adjOwned >= threshold) {
-        power += mod;
-      }
-    }
-  }
-  return power;
-}
-
-/**
- * True if claiming `tile` would connect two or more currently disconnected
- * groups of `playerId`'s tiles (mirrors backend `tile_bridges_territory`).
- */
-function tileBridgesTerritory(
-  tile: import('../types/game').HexTile,
-  tiles: Record<string, import('../types/game').HexTile>,
-  playerId: string,
-): boolean {
-  const owned = new Set(Object.keys(tiles).filter(k => tiles[k].owner === playerId));
-  const starts: string[] = [];
-  for (const [dq, dr] of HEX_DIRS) {
-    const nk = `${tile.q + dq},${tile.r + dr}`;
-    if (owned.has(nk)) starts.push(nk);
-  }
-  if (starts.length < 2) return false;
-  const visited = new Set<string>();
-  let groups = 0;
-  for (const start of starts) {
-    if (visited.has(start)) continue;
-    if (++groups >= 2) return true;
-    const queue = [start];
-    visited.add(start);
-    while (queue.length > 0) {
-      const [cq, cr] = queue.pop()!.split(',').map(Number);
-      for (const [dq, dr] of HEX_DIRS) {
-        const nk = `${cq + dq},${cr + dr}`;
-        if (!visited.has(nk) && owned.has(nk)) {
-          visited.add(nk);
-          queue.push(nk);
-        }
-      }
-    }
-  }
-  return false;
-}
-
-/**
  * Returns true if a claim card with the given effective power can capture the
  * target tile under the validation rules:
  *   - Siege Engine / Conqueror (`ignore_defense` effect): only strips temporary
@@ -209,6 +123,7 @@ function canClaimCaptureTile(
 // GameScreen dependency tree. Re-exported here for existing callers.
 import { HEX_SIZE, axialToPixel, localToScreen, screenToLocal, type GridTransform } from '../utils/hexGeometry';
 import { chevronSource, findNearestOwnedTile } from '../utils/resolveChevrons';
+import { intrinsicClaimPower, stackingBonus, type ClaimPowerContext } from '../utils/claimPower';
 import { roundEndDiscardsHand } from '../utils/endOfRound';
 export { HEX_SIZE, axialToPixel, localToScreen };
 
@@ -233,6 +148,8 @@ interface RevealCard extends BoardCardEntry {
   /** A multi-target card shows on each tile; only its primary copy flies home. */
   primary: boolean;
   trash: boolean;
+  /** Resources it earned its player (an opponent's fly in as coins). */
+  gain: number;
 }
 
 type BoardFlightKind = 'toDiscard' | 'toPlayer' | 'fade';
@@ -1024,6 +941,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   // Reveal: every player's played cards over their tiles, flying home as each tile resolves
   const [revealCards, setRevealCards] = useState<RevealCard[] | null>(null);
   const revealCardsRef = useRef<RevealCard[] | null>(null);
+  /** The reveal's cards per tile and the board going into it — what the
+   *  tile-by-tile resolve (TileResolver) is planned from. */
+  const revealPlanCardsRef = useRef<Map<string, PlanCard[]>>(new Map());
+  const preResolveTilesRef = useRef<Record<string, HexTile>>({});
   revealCardsRef.current = revealCards;
   const [revealFocusTile, setRevealFocusTile] = useState<string | null>(null);
   const [boardFlights, setBoardFlights] = useState<Flight<BoardFlightKind>[]>([]);
@@ -1178,6 +1099,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const [chevronAlpha, setChevronAlpha] = useState(0);
   // Chevron fade-out during resolution (per-step)
   const [resolvedUpToStep, setResolvedUpToStep] = useState(-1);
+  /** Claim steps whose arrows have faded (tiles resolve in plan order). */
+  const [chevronDone, setChevronDone] = useState<Set<number>>(() => new Set());
   const [currentStepFade, setCurrentStepFade] = useState(1);
   // Cache resolve chevron sources so they don't shift as tiles change owners
   const resolveChevronCacheRef = useRef<{ targetQ: number; targetR: number; sourceQ: number; sourceR: number; color: number; stepIndex: number }[]>([]);
@@ -1631,6 +1554,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         }));
       // Immediately freeze the grid AND player stats at pre-resolve state so
       // players can't see updated VP/resources until animations have played out.
+      preResolveTilesRef.current = oldTiles;
       const preResolveState: GameState = {
         ...gameState,
         grid: { ...gameState.grid, tiles: { ...oldTiles } },
@@ -3872,6 +3796,13 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     // opponent's tile) go home now.
     flyRevealCardsRef.current(() => true, 80);
     setRevealFocusTile(null);
+    setResolveActiveTile(null);
+    setResolveCloseUp(null);
+    setChevronDone(new Set());
+    if (savedViewRef.current) {
+      boardControlsRef.current?.setView(savedViewRef.current, 0.6);
+      savedViewRef.current = null;
+    }
     setResolving(false);
     setResolutionSteps([]);
     setResolveDisplayState(null);
@@ -3915,13 +3846,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     }
   }, [animationOff, vpPaths, enterReviewMode, gameState]);
 
-  // Called by ResolveOverlay as each step begins — update the displayed tile state & fade chevrons
+  // Apply a resolution step to the displayed board (TileResolver calls it as each tile settles)
   const applyResolveStep = useCallback((stepIdx: number) => {
     const step = resolutionSteps[stepIdx];
     if (!step) return;
-    // Start fading chevrons for this step's tile
-    setResolvedUpToStep(stepIdx);
-    setCurrentStepFade(1);
     setResolveDisplayState(prev => {
       if (!prev?.grid) return prev;
       const newTiles = { ...prev.grid.tiles };
@@ -4303,7 +4231,15 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       ? new Set<string>(Object.keys(tiles).filter(k => tiles[k].owner === activePlayerId))
       : null;
 
-    const handSize = activePlayer?.hand.length ?? 0;
+    const powerCtx: ClaimPowerContext = {
+      tiles,
+      playerId: activePlayerId,
+      handSize: activePlayer?.hand.length ?? 0,
+      played: (activePlayer?.planned_actions ?? []).map(a => a.card),
+      actionsLeftAfter: activePlayer
+        ? activePlayer.actions_available - activePlayer.actions_used - (card.action_cost ?? 1) + (card.action_return ?? 0)
+        : undefined,
+    };
 
     for (const key of candidates) {
       const tile = tiles[key];
@@ -4364,23 +4300,20 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
             return total;
           })()
         : 0;
-      // Strike Team: bonus power if the active player already played another Claim this round.
-      const hasPlayedClaim = (activePlayer?.planned_actions ?? [])
-        .some(a => a.card.card_type === 'claim' && a.card.id !== card.id);
-      let effectivePower = computeClaimPowerOnTile(card, tile, tiles, activePlayerId, handSize, playerTileCount, claimBuffBonus, hasPlayedClaim);
+      let effectivePower = intrinsicClaimPower(card, key, powerCtx) + claimBuffBonus;
       // For stackable cards, add power from existing planned claims on this tile
       if (card.stackable && activePlayer?.planned_actions) {
         const combinedClaims: Card[] = [card];
         for (const action of activePlayer.planned_actions) {
           if (action.card.card_type !== 'claim') continue;
           if (`${action.target_q},${action.target_r}` === key) {
-            effectivePower += computeClaimPowerOnTile(action.card, tile, tiles, activePlayerId, handSize, playerTileCount);
+            effectivePower += action.effective_power ?? intrinsicClaimPower(action.card, key, powerCtx);
             combinedClaims.push(action.card);
           }
         }
         // Add stacking power bonus (e.g. Dog Pile) — each claim with
         // stacking_power_bonus grants its value to every other claim in the stack.
-        effectivePower += computeStackingPowerBonus(combinedClaims);
+        effectivePower += stackingBonus(combinedClaims);
       }
       if (canClaimCaptureTile(card, tile, effectivePower)) {
         strong.add(key);
@@ -4563,10 +4496,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     for (const entry of cached) {
       // Per-step alpha: already resolved → 0, currently resolving → fading, pending → full
       let stepAlpha: number;
-      if (entry.stepIndex < resolvedUpToStep) {
-        stepAlpha = 0;
-      } else if (entry.stepIndex === resolvedUpToStep) {
+      if (entry.stepIndex === resolvedUpToStep) {
         stepAlpha = chevronAlpha * currentStepFade;
+      } else if (chevronDone.has(entry.stepIndex)) {
+        stepAlpha = 0;
       } else {
         stepAlpha = chevronAlpha;
       }
@@ -4579,7 +4512,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       });
     }
     return chevrons;
-  }, [resolving, resolutionSteps, chevronAlpha, resolvedUpToStep, currentStepFade]);
+  }, [resolving, resolutionSteps, chevronAlpha, resolvedUpToStep, currentStepFade, chevronDone]);
 
   // Active chevrons: play phase or resolve reveal
   const activeChevrons = resolving ? resolveChevrons : planChevrons;
@@ -4763,6 +4696,19 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     return total;
   }, [phase, activePlayer?.claim_buffs]);
 
+  // The hover preview's claim power: the card's own effects against this
+  // tile and the round so far (hand size, tiles owned, cards played…).
+  const claimPowerOn = useCallback((card: Card, tileKey: string) => {
+    if (!activePlayer) return card.power;
+    return intrinsicClaimPower(card, tileKey, {
+      tiles: gameState.grid.tiles,
+      playerId: activePlayerId,
+      handSize: activePlayer.hand.length,
+      played: activePlayer.planned_actions.map(a => a.card),
+      actionsLeftAfter: activePlayer.actions_available - activePlayer.actions_used - (card.action_cost ?? 1) + (card.action_return ?? 0),
+    });
+  }, [activePlayer, activePlayerId, gameState.grid.tiles]);
+
   const handleTileLongPress = useCallback(async (q: number, r: number) => {
     if (phase !== 'play' || !activePlayer || !undoableTiles) return;
     const key = `${q},${r}`;
@@ -4848,6 +4794,64 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
    * sits on the board (or in the engine queue). Returns how long (ms) until
    * the last of them has landed.
    */
+  // ── Rivals' banks ──
+  // What a rival earns from the cards they play stays hidden until the
+  // reveal; then coins fly from those cards into their bank, which counts up
+  // as each lands.
+  const latestPlayersRef = useRef(gameState.players);
+  latestPlayersRef.current = gameState.players;
+  const rivalPendingRef = useRef<Record<string, number>>({});
+  const [rivalCoins, setRivalCoins] = useState<Coin[]>([]);
+  const rivalCoinOwner = useRef(new Map<number, string>());
+  const rivalCoinSeq = useRef(0);
+  const publishRival = useCallback((pid: string) => {
+    const actual = latestPlayersRef.current[pid]?.resources ?? 0;
+    setShownResources(pid, Math.max(0, actual - (rivalPendingRef.current[pid] ?? 0)));
+  }, []);
+  const launchRivalCoins = useCallback((pid: string, amount: number, from: { x: number; y: number }, delay: number) => {
+    if (amount <= 0) return;
+    const icon = document.querySelector(`[data-hud-resources="${CSS.escape(pid)}"] svg`)?.getBoundingClientRect();
+    if (!icon || icon.width === 0) {
+      rivalPendingRef.current[pid] = Math.max(0, (rivalPendingRef.current[pid] ?? 0) - amount);
+      publishRival(pid);
+      return;
+    }
+    const to = { x: icon.left + icon.width / 2, y: icon.top + icon.height / 2 };
+    const speed = resolveSpeed || 1;
+    const coins = splitCoins(amount).map((value, i): Coin => {
+      const id = ++rivalCoinSeq.current;
+      rivalCoinOwner.current.set(id, pid);
+      return { id, from, to, value, batch: 0, delay: delay + Math.round(i * 85 * speed), duration: Math.max(320, Math.round(680 * speed)) };
+    });
+    setRivalCoins(cs => [...cs, ...coins]);
+  }, [resolveSpeed, publishRival]);
+  const onRivalCoinLand = useCallback((c: Coin) => {
+    setRivalCoins(cs => cs.filter(x => x.id !== c.id));
+    const pid = rivalCoinOwner.current.get(c.id);
+    rivalCoinOwner.current.delete(c.id);
+    if (!pid) return;
+    rivalPendingRef.current[pid] = Math.max(0, (rivalPendingRef.current[pid] ?? 0) - c.value);
+    publishRival(pid);
+  }, [publishRival]);
+  useEffect(() => {
+    const rivals = gameState.player_order.filter(pid => pid !== activePlayerId);
+    if (phase === 'play' && !animationOff) {
+      // Their bank as the round began, whatever they play.
+      for (const pid of rivals) {
+        rivalPendingRef.current[pid] = 0;
+        setShownResources(pid, latestPlayersRef.current[pid]?.resources ?? 0);
+      }
+    } else if (phase !== 'reveal') {
+      for (const pid of rivals) {
+        rivalPendingRef.current[pid] = 0;
+        setShownResources(pid, null);
+      }
+      setRivalCoins([]);
+    }
+  // Phase changes only.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, animationOff]);
+
   const flyRevealCards = useCallback((pick: (rc: RevealCard) => boolean, stagger = 90): number => {
     const current = revealCardsRef.current;
     if (!current) return 0;
@@ -4893,6 +4897,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       const row = playerRowRefs.current.get(rc.playerId)?.getBoundingClientRect();
       if (!row) return;
       const to: Pose = { x: row.left + row.width / 2, y: row.top + row.height / 2, rot: 0, scale: 0.06, opacity: 0 };
+      if (rc.gain > 0) {
+        const pop = { x: row.right + 14 + CARD_W * 0.17, y: row.top + row.height / 2 };
+        launchRivalCoins(rc.playerId, rc.gain, from ?? pop, delay + Math.round((from ? 120 : 420) * speed));
+      }
       if (from) {
         launchHome({ kind: 'toPlayer', card: rc.card, frames: flightKeyframes(from, to, {
           arc: 50, ease: easeInOut, opacity: t => (t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3),
@@ -4911,7 +4919,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       }
     });
     return doneAt;
-  }, [resolveSpeed, activePlayerId, discardPilePose, launchBoardFlight, sound]);
+  }, [resolveSpeed, activePlayerId, discardPilePose, launchBoardFlight, sound, launchRivalCoins]);
   const flyRevealCardsRef = useRef(flyRevealCards);
   flyRevealCardsRef.current = flyRevealCards;
 
@@ -4966,7 +4974,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           playerName: name,
           revealed: pid !== activePlayerId,
           faceDown: pid !== activePlayerId,
+          stacked: pid !== activePlayerId,
           trash: !!a.card.trash_on_use,
+          gain: Math.max(0, a.effective_resource_gain ?? a.card.resource_gain ?? 0),
         };
         if (a.target_q != null && a.target_r != null) {
           const tileKey = `${a.target_q},${a.target_r}`;
@@ -4982,6 +4992,20 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     }
     revealCardsRef.current = cards;
     setRevealCards(cards);
+    const byTile = new Map<string, PlanCard[]>();
+    for (const rc of cards) {
+      if (!rc.tileKey) continue;
+      const list = byTile.get(rc.tileKey) ?? [];
+      list.push({ key: rc.key, playerId: rc.playerId, cardType: rc.card.card_type, power: rc.card.power, defense: rc.card.defense_bonus ?? 0, faceDown: !!rc.faceDown });
+      byTile.set(rc.tileKey, list);
+    }
+    revealPlanCardsRef.current = byTile;
+    // Rivals' earnings this round wait for their coins.
+    for (const pid of state.player_order) {
+      if (pid === activePlayerId) continue;
+      rivalPendingRef.current[pid] = cards.filter(c => c.playerId === pid && c.primary).reduce((n, c) => n + c.gain, 0);
+      publishRival(pid);
+    }
     setRevealFocusTile(null);
     const mine = cards.filter(c => c.playerId === activePlayerId && c.primary && !c.trash).length;
     setDiscardCountOverride(Math.max(0, (state.players[activePlayerId]?.discard_count ?? 0) - mine));
@@ -4993,23 +5017,24 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     resolutionSteps.forEach((st, i) => m.set(st.tile_key, i));
     return m;
   }, [resolutionSteps]);
-  /** Turn over the face-down cards on these tiles. Returns whether any did. */
-  const turnOverRevealCards = useCallback((onTile: (tileKey: string) => boolean): boolean => {
+  /** Spread these face-down board cards out of their pile. */
+  const spreadRevealCards = useCallback((pick: (rc: RevealCard) => boolean) => {
     const cur = revealCardsRef.current;
-    if (!cur?.some(rc => rc.faceDown && rc.tileKey && onTile(rc.tileKey))) return false;
-    const next = cur.map(rc => (rc.faceDown && rc.tileKey && onTile(rc.tileKey) ? { ...rc, faceDown: false } : rc));
+    if (!cur?.some(rc => rc.stacked && pick(rc))) return;
+    const next = cur.map(rc => (rc.stacked && pick(rc) ? { ...rc, stacked: false } : rc));
+    revealCardsRef.current = next;
+    setRevealCards(next);
+  }, []);
+  /** Turn over these face-down board cards. Returns whether any did. */
+  const turnOverRevealCards = useCallback((pick: (rc: RevealCard) => boolean): boolean => {
+    const cur = revealCardsRef.current;
+    if (!cur?.some(rc => rc.faceDown && pick(rc))) return false;
+    const next = cur.map(rc => (rc.faceDown && pick(rc) ? { ...rc, faceDown: false } : rc));
     revealCardsRef.current = next;
     setRevealCards(next);
     sound.cardDraw();
     return true;
   }, [sound]);
-  const handleResolveStepStart = useCallback((idx: number) => {
-    const step = resolutionSteps[idx];
-    if (!step) return;
-    setRevealFocusTile(step.tile_key);
-    // The tile's face-down cards turn over as it resolves.
-    turnOverRevealCards(k => k === step.tile_key);
-  }, [resolutionSteps, turnOverRevealCards]);
 
   // Before the board resolves tile by tile, every card that has nothing to
   // resolve on the board — engine cards, and cards on tiles with no
@@ -5022,7 +5047,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     const offBoard = (rc: RevealCard) => rc.tileKey === null || !lastStepByTile.has(rc.tileKey);
     // Face-down cards on tiles with nothing to resolve turn over first, so
     // everyone still sees them before they go.
-    const flipMs = turnOverRevealCards(k => !lastStepByTile.has(k)) ? Math.round((BOARD_FLIP_MS + 350) * resolveSpeed) : 0;
+    const flipMs = turnOverRevealCards(rc => !!rc.tileKey && !lastStepByTile.has(rc.tileKey)) ? Math.round((BOARD_FLIP_MS + 350) * resolveSpeed) : 0;
     let t: ReturnType<typeof setTimeout> | undefined;
     const goHome = () => {
       const ms = animationOff ? 0 : flyRevealCards(offBoard, 120);
@@ -5035,12 +5060,45 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   // Runs once per resolution: flying cards home is not repeatable.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolveReady]);
-  const handleResolveStepEnd = useCallback((idx: number) => {
-    const step = resolutionSteps[idx];
-    if (!step || lastStepByTile.get(step.tile_key) !== idx) return;
-    setRevealFocusTile(null);
-    flyRevealCards(rc => rc.tileKey === step.tile_key, 90);
-  }, [resolutionSteps, lastStepByTile, flyRevealCards]);
+
+  // ── Tile by tile (TileResolver) ──
+  const resolvePlans = useMemo<TilePlan[]>(
+    () => (resolutionSteps.length ? buildResolvePlans(resolutionSteps, revealPlanCardsRef.current, preResolveTilesRef.current, activePlayerId) : []),
+    [resolutionSteps, activePlayerId],
+  );
+  /** The tile the camera has closed in on (ringed), and the one resolving. */
+  const [resolveCloseUp, setResolveCloseUp] = useState<string | null>(null);
+  const [resolveActiveTile, setResolveActiveTile] = useState<string | null>(null);
+  /** The player's own framing, to come back to after close-ups. */
+  const savedViewRef = useRef<CameraView | null>(null);
+  const projectTile = useCallback((q: number, r: number) => {
+    const t = gridTransformRef.current;
+    const rect = (gridContainerRef.current?.querySelector('canvas') ?? gridContainerRef.current)?.getBoundingClientRect();
+    if (!t?.project || !rect) return null;
+    const p = axialToPixel(q, r);
+    const s = t.project(p.x, p.y, 0.15);
+    return { x: s.x + rect.left, y: s.y + rect.top };
+  }, []);
+  const resolverApi = useMemo<ResolverApi>(() => ({
+    focus: (key, shot) => {
+      const ms = resolveCamera(boardControlsRef.current, savedViewRef, key, resolveSpeed, shot);
+      setResolveCloseUp(key);
+      return new Promise(res => setTimeout(res, ms));
+    },
+    setActive: (plan) => {
+      setRevealFocusTile(plan?.tileKey ?? null);
+      setResolveActiveTile(plan && plan.kind !== 'effect' ? plan.tileKey : null);
+      if (plan?.mainStep != null) {
+        const idx = plan.mainStep;
+        setChevronDone(prev => new Set(prev).add(idx));
+        setResolvedUpToStep(idx);
+      }
+    },
+    spread: (keys) => { const set = new Set(keys); spreadRevealCards(rc => set.has(rc.key)); },
+    flip: (keys) => { const set = new Set(keys); turnOverRevealCards(rc => set.has(rc.key)); },
+    sendHome: (keys) => { const set = new Set(keys); flyRevealCards(rc => set.has(rc.key), 90); },
+    applyStep: (idx) => applyResolveStep(idx),
+  }), [resolveSpeed, spreadRevealCards, turnOverRevealCards, flyRevealCards, applyResolveStep]);
 
   // Once every revealed card is home, hand the discard count back to the state.
   useEffect(() => {
@@ -5058,6 +5116,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         setDiscardCountOverride(null);
       }
       setRevealFocusTile(null);
+      setResolveCloseUp(null);
+      setResolveActiveTile(null);
+      savedViewRef.current = null;
     }
   }, [phase]);
 
@@ -5145,6 +5206,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         open={openCardsTile === tileKey && (detailCards != null || zoomedCard != null)}
         faded={draggingCardIndex !== null}
         passThrough={aimingAtTiles}
+        still={resolving}
         onOpen={(list, i) => { setOpenCardsTile(tileKey); openBoardCards(list, i); }}
         onUndo={undoable ? () => {
           const [q, r] = tileKey.split(',').map(Number);
@@ -5320,6 +5382,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
               tileCardKeys={tileCardKeys}
               renderTileCards={renderTileCards}
               raisedTileKey={revealFocusTile}
+              focusTileKey={resolveCloseUp}
+              hideDefenseLabelKey={resolveActiveTile}
               previewCard={phase === 'play' ? (() => {
                 // Strike Team: preview gets +2/+3 power if the active player has
                 // already played another Claim this round (mirrors backend
@@ -5354,6 +5418,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                 return card ? getAllValidPlayTiles(card) : undefined;
               })()}
               previewClaimBuffBonus={claimBuffBonus}
+              claimPowerOn={claimPowerOn}
               claimChevrons={activeChevrons.length > 0 ? activeChevrons : undefined}
               vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
@@ -5536,7 +5601,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                 pointerEvents: draggingCardIndex !== null ? 'none' : 'auto',
                 transition: 'opacity 0.15s ease-out',
               }}>
-                <EngineQueue entries={boardCards.engines} onOpen={openBoardCards} containerRef={inPlayContainerRef} />
+                <EngineQueue entries={boardCards.engines} onOpen={openBoardCards} containerRef={inPlayContainerRef} still={resolving} />
               </div>
             )}
           </div>
@@ -6406,18 +6471,21 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       })()}
 
       {/* Resolve overlay — power numbers over grid */}
+      {/* Rivals' earnings flying into their banks */}
+      {rivalCoins.length > 0 && (
+        <div className="cc-res-coins">
+          {rivalCoins.map(c => <CoinFlight key={c.id} coin={c} onLand={onRivalCoinLand} />)}
+        </div>
+      )}
+
       {resolveReady && offBoardHome && (
-        <ResolveOverlay
-          steps={resolutionSteps}
-          gridTransform={gridTransformSnapshot}
-          gridTransformRef={gridTransformRef}
-          gridRect={gridRectSnapshot ?? gridRect}
-          gridContainerRef={gridContainerRef}
+        <TileResolver
+          plans={resolvePlans}
+          speed={resolveSpeed || 1}
           fxRef={boardFxRef}
-          onStepApply={applyResolveStep}
+          project={projectTile}
+          api={resolverApi}
           onComplete={handleResolveComplete}
-          onStepStart={handleResolveStepStart}
-          onStepEnd={handleResolveStepEnd}
         />
       )}
 

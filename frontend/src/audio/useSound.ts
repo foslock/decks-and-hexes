@@ -26,6 +26,7 @@ const NO_OP_SOUNDS = {
   resolveBaseRaidHold: NO_OP,
   upgradeCard: NO_OP,
   beginJingle: NO_OP,
+  claimSmash: NO_OP as (power: number) => void,
   // Optional extras (not yet wired into components)
   hoverTick: NO_OP,
   coinSpend: NO_OP,
@@ -69,6 +70,7 @@ export function useSound(): SoundApi {
       resolveBaseRaidHold: () => soundEngine.resolveBaseRaidHold(),
       upgradeCard: () => soundEngine.upgradeCard(),
       beginJingle: () => soundEngine.beginJingle(),
+      claimSmash: (power: number) => soundEngine.claimSmash(power),
       hoverTick: () => soundEngine.hoverTick(),
       coinSpend: () => soundEngine.coinSpend(),
       vpGain: () => soundEngine.vpGain(),

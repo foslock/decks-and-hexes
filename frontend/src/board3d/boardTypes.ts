@@ -91,17 +91,6 @@ export function computeStackingPowerBonus(claimCards: Card[]): number {
 /** A 2D point in hex-local pixel space (see utils/hexGeometry). */
 export interface LocalPoint { x: number; y: number }
 
-/** A colored, draped polygon on the board (a resolve "wedge"). */
-export interface FxWedge {
-  /** Polygon in hex-local pixel space. The last point is treated as the
-   *  advancing front (sparks trail it while it moves). */
-  setPoints(points: LocalPoint[]): void;
-  setAlpha(alpha: number): void;
-  /** Draw order among wedges on the same tile (higher draws on top). */
-  setOrder(order: number): void;
-  destroy(): void;
-}
-
 /** Hex-shaped fortification ring that rises around a raided base. */
 export interface FxFortifyRing {
   /** 0 → 1 rise-in progress. */
@@ -115,11 +104,10 @@ export interface FxFortifyRing {
 }
 
 /**
- * Board effects the resolve choreography (ResolveOverlay) drives. All
+ * Board effects the resolve choreography (TileResolver) drives. All
  * positions are in hex-local pixel space so callers never touch the camera.
  */
 export interface BoardFx {
-  createWedge(playerId: string, q: number, r: number): FxWedge;
   createFortifyRing(q: number, r: number): FxFortifyRing;
   /** Bright spark burst (contest clash, wedge collision). */
   sparks(x: number, y: number, color: number, count?: number, power?: number): void;
@@ -133,6 +121,8 @@ export interface BoardFx {
   shake(strength: number, durationMs?: number): void;
   /** Jolt the structure (castle / walls) standing on a tile. */
   jolt(q: number, r: number, strength?: number): void;
+  /** A tile changes hands: a flash, sparks and a ring in the new owner's color. */
+  captureBurst(q: number, r: number, color: number, big?: boolean): void;
   /** Duration multiplier for board-driven transitions (0 = instant). */
   setSpeed(mult: number): void;
 }

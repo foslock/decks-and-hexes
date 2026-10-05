@@ -1,14 +1,21 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { HexTile, PlayerEffect, ResolutionStep, ResolutionClaimant } from '../types/game';
-import GameBoard, { type GridTransform, type BoardFx, PLAYER_COLORS } from './GameBoard';
-import ResolveOverlay from './ResolveOverlay';
+import GameBoard, { type GridTransform, type BoardFx, type BoardControls, PLAYER_COLORS } from './GameBoard';
+import TileResolver, { resolveCamera, type ResolverApi } from './TileResolver';
+import { buildResolvePlans, type PlanCard } from '../utils/resolvePlan';
+import { TileCardStack, boardCardScale, type BoardCardEntry } from './BoardCards';
+import FlightCard, { type Flight } from './hand/FlightCard';
+import { CARD_W, easeInOut, flightKeyframes, type Pose } from './hand/cardMotion';
+import { useCardCatalog } from '../cardCatalog';
+import { axialToPixel } from '../utils/hexGeometry';
+import type { CameraView } from '../board3d/engine';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import { useSettings, useAnimationSpeed, type AnimationMode } from './SettingsContext';
 
 /**
  * Iteration sandbox for tile-battle resolution animations.
  *
- * Reuses the production `GameBoard` + `ResolveOverlay` components so any tweaks
+ * Reuses the production `GameBoard` + `TileResolver` components so any tweaks
  * to the animation code paths are reflected here AND in the real game. Buttons
  * trigger scripted `ResolutionStep` payloads that match the backend shape.
  *
@@ -107,6 +114,10 @@ interface Scenario {
   isBaseRaid?: boolean;
   /** Force the base-raid outcome: 'defended' = base holds, 'captured' = raid succeeds. */
   baseRaidOutcome?: 'defended' | 'captured';
+  /** The defender plays a Defense card (+2 this round) and a Claim (+1) on the tile. */
+  fortified?: boolean;
+  /** Attack powers (default 2, 3, 4, 5 by seat). */
+  powers?: number[];
   description: string;
 }
 
@@ -125,6 +136,9 @@ const SCENARIOS: Scenario[] = [
   { id: 'battle-6-o',     label: '6-way Owned',     numAttackers: 5, hasDefender: true,  description: '6 players (5 attackers + defender) battling over an owned tile' },
   { id: 'base-raid-def',  label: 'Base Raid: Defended', numAttackers: 1, hasDefender: true, isBaseRaid: true, baseRaidOutcome: 'defended', description: 'Base raid on an enemy base — defender holds' },
   { id: 'base-raid-cap',  label: 'Base Raid: Captured', numAttackers: 1, hasDefender: true, isBaseRaid: true, baseRaidOutcome: 'captured', description: 'Base raid on an enemy base — raid succeeds' },
+  { id: 'fortified',      label: 'Fortified Owned', numAttackers: 3, hasDefender: true, fortified: true, description: 'The owner fortifies (Defense card + their own Claim); three attackers climb from weakest to strongest' },
+  { id: 'stalemate',      label: 'Stalemate',       numAttackers: 2, hasDefender: true, powers: [3, 3], description: 'Two attackers tie above the owner — nobody takes the tile' },
+  { id: 'power-ramp',     label: 'Power Ramp',      numAttackers: 4, hasDefender: false, powers: [1, 3, 5, 9], description: 'Claims of 1, 3, 5 and 9 on a neutral tile — each smash hits harder than the last' },
 ];
 
 /** Build a ResolutionStep + the defender_id (for grid pre-setup) for a scenario.
@@ -137,7 +151,7 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
     const pid = PLAYERS[i];
     const [dq, dr] = APPROACH_DIRS[i];
     // Deterministic but varied powers so you can tell numbers apart visually
-    const power = 2 + (i % 4);
+    const power = s.powers?.[i] ?? 2 + (i % 4);
     claimants.push({
       player_id: pid,
       power,
@@ -163,7 +177,7 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
       // Normal mode: nominal 1 so there's a visible defense number. Forced-defended: 9 so the
       // defender wins outright against any attacker (max attacker power in demo is 5), while
       // staying a single digit so the centered number renders identically to normal play.
-      defenderPower = forceDefended ? 9 : 1;
+      defenderPower = forceDefended ? 9 : s.fortified ? 3 : 1;
     }
     // Defender's nearest owned tile — used by the overlay to anchor the
     // defense number to the edge closest to the defender's territory.
@@ -191,8 +205,12 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
     winnerId = null;
   }
 
+  // Attackers tying on top of the defense: nobody takes it.
+  const tie = topCount > 1 && topPower > defenderPower;
+  if (tie) winnerId = null;
   const outcome: ResolutionStep['outcome'] =
-    winnerId && winnerId !== defenderId ? 'claimed' : 'defended';
+    tie ? 'tie' : winnerId && winnerId !== defenderId ? 'claimed' : 'defended';
+  if (s.fortified && defenderId) claimants.push({ player_id: defenderId, power: defenderPower, source_q: null, source_r: null });
 
   return {
     step: {
@@ -346,6 +364,22 @@ export default function ResolveAnimationPreview() {
   const transformRef = useRef<GridTransform | null>(null);
   const gridContainerRef = useRef<HTMLDivElement | null>(null);
   const fxRef = useRef<BoardFx | null>(null);
+  const controlsRef = useRef<BoardControls | null>(null);
+  const savedViewRef = useRef<CameraView | null>(null);
+  const [closeUp, setCloseUp] = useState<string | null>(null);
+  const [activeTile, setActiveTile] = useState<string | null>(null);
+  /** The cards played on the contested tile (rivals' face down). */
+  const [tileCards, setTileCards] = useState<BoardCardEntry[]>([]);
+  const planCardsRef = useRef<Map<string, PlanCard[]>>(new Map());
+  /** Preview a tile that doesn't involve you (quick, no close-up). */
+  const [quick, setQuick] = useState(false);
+  /** Cards on their way home (here: to their player's base — the game sends
+   *  them to your discard pile or a rival's player card). */
+  const [flights, setFlights] = useState<Flight<'home'>[]>([]);
+  const flightSeq = useRef(0);
+  const tileCardsRef = useRef<BoardCardEntry[]>([]);
+  tileCardsRef.current = tileCards;
+  const catalog = useCardCatalog();
 
   const { settings, setAnimationMode } = useSettings();
   const animSpeed = useAnimationSpeed();
@@ -355,14 +389,55 @@ export default function ResolveAnimationPreview() {
     // Reset the grid so the central tile matches this scenario's pre-battle state.
     // For base-raid scenarios the central tile is the defender's base (not a VP tile).
     setTiles(buildDemoTiles(defenderId, s.isBaseRaid === true));
-    setSteps([step]);
+    const steps: ResolutionStep[] = [];
+    if (s.fortified && defenderId) {
+      steps.push({
+        tile_key: CONTESTED_KEY, q: 0, r: 0, contested: false,
+        claimants: [{ player_id: defenderId, power: 0, source_q: null, source_r: null }],
+        defender_id: defenderId, defender_power: 2, winner_id: defenderId, previous_owner: defenderId,
+        outcome: 'defense_applied', defense_permanent: 0, defense_temporary: 2,
+      });
+    }
+    steps.push(step);
+    // The cards on the tile: each attacker's power over two Claims (three
+    // for a big one, one for a tiny one); the
+    // fortified defender's Defense card and Claim. "You" (Blue) are face up.
+    const claimCard = catalog.getCardByName('Blitz');
+    const defenseCard = catalog.getCardByName('Fortify');
+    const entries: BoardCardEntry[] = [];
+    const add = (pid: string, n: number, base: typeof claimCard, over: Partial<NonNullable<typeof claimCard>>) => {
+      if (!base) return;
+      const key = `${pid}-${n}@${CONTESTED_KEY}`;
+      entries.push({
+        key, playerId: pid, playerName: PLAYER_LABELS[PLAYERS.indexOf(pid)],
+        card: { ...base, id: key, ...over },
+        faceDown: pid !== PLAYERS[0], stacked: pid !== PLAYERS[0], revealed: pid !== PLAYERS[0],
+      });
+    };
+    for (const c of step.claimants) {
+      if (c.player_id === defenderId) {
+        add(c.player_id, 0, defenseCard, { defense_bonus: 2 });
+        add(c.player_id, 1, claimCard, { power: 1 });
+        continue;
+      }
+      const n = c.power >= 6 ? 3 : c.power >= 2 ? 2 : 1;
+      for (let j = 0; j < n; j++) {
+        const share = Math.floor(c.power / n) + (j < c.power % n ? 1 : 0);
+        add(c.player_id, j, claimCard, { power: share });
+      }
+    }
+    setTileCards(entries);
+    planCardsRef.current = new Map([[CONTESTED_KEY, entries.map(e => ({
+      key: e.key, playerId: e.playerId, cardType: e.card.card_type, power: e.card.power, defense: e.card.defense_bonus ?? 0, faceDown: !!e.faceDown,
+    }))]]);
+    setSteps(steps);
     setLastScenario(s);
     setRunId(x => x + 1);
-    // Snapshot transform — ResolveOverlay needs these to convert hex→screen coords
+    // Snapshot transform for the effect popups' hex→screen conversion
     setSnapshotTransform(transformRef.current);
     setSnapshotRect(gridContainerRef.current?.getBoundingClientRect() ?? null);
     setResolving(true);
-  }, [forceDefended]);
+  }, [forceDefended, catalog]);
 
   /** Keep snapshotted transform fresh if the user resizes while idle. */
   useEffect(() => {
@@ -391,7 +466,7 @@ export default function ResolveAnimationPreview() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [resolving]);
 
-  /** Called by ResolveOverlay when each step begins — apply ownership change. */
+  /** Apply a step's ownership change (the resolver calls it as the tile settles). */
   const applyStep = useCallback((idx: number) => {
     const step = steps[idx];
     if (!step) return;
@@ -408,10 +483,60 @@ export default function ResolveAnimationPreview() {
   const handleComplete = useCallback(() => {
     setResolving(false);
     setSteps([]);
+    setTileCards([]);
   }, []);
+
+  // The tile-by-tile plan, from the scenario's steps and the cards on the
+  // tile. Blue is "you", so the camera closes in — unless Quick is on.
+  const plans = useMemo(() => (steps.length
+    ? buildResolvePlans(steps, planCardsRef.current, tiles, PLAYERS[0]).map(p => (quick ? { ...p, focus: false } : p))
+    : []),
+  // Planned once per run, from the board as it was going in.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [steps]);
+  const project = useCallback((q: number, r: number) => {
+    const t = transformRef.current;
+    const rect = (gridContainerRef.current?.querySelector('canvas') ?? gridContainerRef.current)?.getBoundingClientRect();
+    if (!t?.project || !rect) return null;
+    const p = axialToPixel(q, r);
+    const s = t.project(p.x, p.y, 0.15);
+    return { x: s.x + rect.left, y: s.y + rect.top };
+  }, []);
+  const api = useMemo<ResolverApi>(() => ({
+    focus: (key, shot) => {
+      const ms = resolveCamera(controlsRef.current, savedViewRef, key, 1, shot);
+      setCloseUp(key);
+      return new Promise(res => setTimeout(res, ms));
+    },
+    setActive: (plan) => setActiveTile(plan?.tileKey ?? null),
+    spread: (keys) => setTileCards(cs => cs.map(c => (keys.includes(c.key) ? { ...c, stacked: false } : c))),
+    flip: (keys) => setTileCards(cs => cs.map(c => (keys.includes(c.key) ? { ...c, faceDown: false } : c))),
+    sendHome: (keys) => {
+      const leaving = tileCardsRef.current.filter(c => keys.includes(c.key));
+      const launched: Flight<'home'>[] = [];
+      leaving.forEach((c, i) => {
+        const r = document.querySelector(`[data-board-card="${CSS.escape(c.key)}"]`)?.getBoundingClientRect();
+        const seat = PLAYERS.indexOf(c.playerId);
+        const [dq, dr] = APPROACH_DIRS[seat] ?? [0, 0];
+        const base = project(dq * BASE_STEP, dr * BASE_STEP);
+        if (!r || r.width === 0 || !base) return;
+        const from: Pose = { x: r.left + r.width / 2, y: r.top + r.height / 2, rot: 0, scale: r.width / CARD_W };
+        const to: Pose = { x: base.x, y: base.y, rot: 0, scale: 0.06, opacity: 0 };
+        launched.push({
+          key: `home${++flightSeq.current}`, kind: 'home', card: c.card,
+          frames: flightKeyframes(from, to, { arc: 50, ease: easeInOut, opacity: t => (t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3) }),
+          delay: i * 90, duration: 600,
+        });
+      });
+      setTileCards(cs => cs.filter(c => !keys.includes(c.key)));
+      if (launched.length) setFlights(fs => [...fs, ...launched]);
+    },
+    applyStep: (idx) => applyStep(idx),
+  }), [applyStep, project]);
 
   const handleReset = useCallback(() => {
     setTiles(buildDemoTiles(null));
+    setTileCards([]);
     setSteps([]);
     setResolving(false);
     setLastScenario(null);
@@ -553,6 +678,21 @@ export default function ResolveAnimationPreview() {
           >
             Defended: {forceDefended ? 'ON' : 'off'}
           </button>
+          <button
+            onClick={() => setQuick(v => !v)}
+            disabled={resolving}
+            style={{
+              ...btnStyle,
+              background: quick ? '#ff9a3c' : '#2a2a3e',
+              border: '1px solid #555',
+              color: quick ? '#1a1a2e' : '#aaa',
+              opacity: resolving ? 0.5 : 1,
+              cursor: resolving ? 'not-allowed' : 'pointer',
+            }}
+            title="Resolve as a tile that doesn't involve you: no close-up, no count-up"
+          >
+            Quick: {quick ? 'ON' : 'off'}
+          </button>
 
           {/* Status text: min-width: 0 + overflow: hidden + whiteSpace: nowrap so the
               bar height never changes when text grows/shrinks. */}
@@ -570,12 +710,20 @@ export default function ResolveAnimationPreview() {
           fxRef={fxRef}
           activePlayerId={lastScenario ? PLAYERS[0] : undefined}
           gridRotation={gridRotation}
+          controlsRef={controlsRef}
+          focusTileKey={closeUp}
+          hideDefenseLabelKey={activeTile}
+          raisedTileKey={activeTile}
+          tileCardKeys={tileCards.length ? [CONTESTED_KEY] : []}
+          renderTileCards={(key, zoom) => (
+            <TileCardStack entries={tileCards} scale={boardCardScale(zoom)} focus={activeTile === key} still={resolving} onOpen={() => {}} />
+          )}
         />
       </div>
 
       <div style={{ padding: '10px 20px', borderTop: '1px solid #333', fontSize: 12, color: '#aaa', lineHeight: 1.6 }}>
         Each player sits in one hex-direction from the central (0,0) tile. Attackers fly their power numbers in from their frontier tile;
-        the defender (if any) appears at the target. Animation code is the production <code>ResolveOverlay</code> + <code>GameBoard</code> — tweaks here flow through to the real game.{' '}
+        the defense builds on the target, then each attacker (weakest first) counts up and smashes into it. Animation code is the production <code>TileResolver</code> + <code>GameBoard</code> — tweaks here flow through to the real game.{' '}
         <span style={{ marginLeft: 8 }}>
           Players:{' '}
           {PLAYERS.map((p, i) => (
@@ -587,17 +735,19 @@ export default function ResolveAnimationPreview() {
       </div>
 
       {resolving && steps.length > 0 && (
-        <ResolveOverlay
+        <TileResolver
           key={runId}
-          steps={steps}
-          gridTransform={snapshotTransform}
-          gridRect={snapshotRect}
-          gridContainerRef={gridContainerRef}
+          plans={plans}
+          speed={1}
           fxRef={fxRef}
-          onStepApply={applyStep}
+          project={project}
+          api={api}
           onComplete={handleComplete}
         />
       )}
+      {flights.map(f => (
+        <FlightCard key={f.key} flight={f} onDone={(done) => setFlights(fs => fs.filter(x => x.key !== done.key))} />
+      ))}
 
       {/* Keep the component mounted once a scenario has played so clearing
           popups triggers the built-in fade-out instead of instantly unmounting.

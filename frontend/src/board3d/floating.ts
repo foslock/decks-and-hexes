@@ -41,7 +41,7 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-type SetName = 'hover' | 'highlight' | 'weak' | 'multi' | 'review';
+type SetName = 'hover' | 'highlight' | 'weak' | 'multi' | 'review' | 'focus';
 
 const COLORS: Record<SetName, number> = {
   hover: 0xfff3d6,
@@ -49,9 +49,10 @@ const COLORS: Record<SetName, number> = {
   weak: 0xff8c1a,
   multi: 0xffe08a,
   review: 0xffffff,
+  focus: 0xffe7a8,
 };
 
-const PULSE: Record<SetName, number> = { hover: 0, highlight: 1, weak: 1, multi: 0, review: 1 };
+const PULSE: Record<SetName, number> = { hover: 0, highlight: 1, weak: 1, multi: 0, review: 1, focus: 0 };
 
 interface Layer { mesh: Mesh; mat: ShaderMaterial; sig: string }
 
@@ -59,6 +60,10 @@ export class FloatingOverlay {
   readonly group = new Group();
   private layers = new Map<SetName, Layer>();
   private fade = 0;
+  /** The tile being resolved fades its ring in and out on its own, whatever
+   *  the tilt. */
+  private focusAlpha = 0;
+  private focusTarget = 0;
 
   constructor(private layout: BoardLayout) {
     for (const name of Object.keys(COLORS) as SetName[]) {
@@ -101,7 +106,7 @@ export class FloatingOverlay {
       if (sig === layer.sig) continue;
       layer.sig = sig;
       layer.mesh.geometry.dispose();
-      layer.mesh.geometry = this.build(keys, tiles, name === 'hover' || name === 'multi');
+      layer.mesh.geometry = this.build(keys, tiles, name === 'hover' || name === 'multi' || name === 'focus');
     }
   }
 
@@ -137,11 +142,22 @@ export class FloatingOverlay {
     return g;
   }
 
+  /** Fade the focus ring in (true) or out. */
+  setFocusOn(on: boolean): void {
+    this.focusTarget = on ? 1 : 0;
+  }
+
+  /** The focus ring is still fading. */
+  get focusMoving(): boolean {
+    return Math.abs(this.focusAlpha - this.focusTarget) > 0.01;
+  }
+
   /** `tiltFactor` 0 = flat view (hidden) → 1 = steep (fully shown). */
   update(dt: number, now: number, tiltFactor: number, hoverStrength: number): void {
     this.fade += (tiltFactor - this.fade) * Math.min(1, dt * 8);
+    this.focusAlpha += (this.focusTarget - this.focusAlpha) * Math.min(1, dt * 5);
     for (const [name, layer] of this.layers) {
-      const a = this.fade * (name === 'hover' ? hoverStrength : 1);
+      const a = name === 'focus' ? this.focusAlpha * 1.4 : this.fade * (name === 'hover' ? hoverStrength : 1);
       layer.mat.uniforms.uAlpha.value = a;
       layer.mat.uniforms.uTime.value = now;
       layer.mesh.visible = a > 0.01 && layer.sig !== '';

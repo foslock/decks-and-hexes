@@ -3,7 +3,8 @@ import type { Card, ResolutionStep } from '../../types/game';
 import GameBoard, {
   type BoardControls, type BoardFx, type ClaimChevron, type GridTransform, type PlannedActionIcon, type VpPath,
 } from '../GameBoard';
-import ResolveOverlay from '../ResolveOverlay';
+import TileResolver, { type ResolverApi } from '../TileResolver';
+import { buildResolvePlans, type PlanCard, type TilePlan } from '../../utils/resolvePlan';
 import CardFull from '../CardFull';
 import CardBack from '../CardBack';
 import FlightCard, { turnOver, type Flight } from '../hand/FlightCard';
@@ -203,7 +204,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
   const [arrow, setArrow] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
   const [banner, setBanner] = useState<{ key: number; text: string; sub?: string; big?: boolean } | null>(null);
   const [pops, setPops] = useState<Pop[]>([]);
-  const [resolving, setResolving] = useState<{ key: number; steps: ResolutionStep[] } | null>(null);
+  const [resolving, setResolving] = useState<{ key: number; plans: TilePlan[] } | null>(null);
   const [lifted, setLifted] = useState<string | null>(null);
   const [arriving, setArriving] = useState<Set<string>>(() => new Set());
   const [coins, setCoins] = useState<Coin[]>([]);
@@ -226,7 +227,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
   const soundRef = useRef(sound);
   soundRef.current = sound;
   const landings = useRef(new Map<string, () => void>());
-  const resolveHooks = useRef<{ apply(i: number): void; start(i: number): void; end(i: number): void; complete(): void } | null>(null);
+  const resolveHooks = useRef<{ api: ResolverApi; complete(): void } | null>(null);
   const seq = useRef(0);
 
   // The island rises out of the sea once, on open.
@@ -247,7 +248,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
   // ── Script context ──
   const makeCtx = useCallback((run: Run): TutorialCtx => {
     const wait = (ms: number) => run.guard(new Promise<void>(r => setTimeout(r, ms * paceRef.current)));
-    const sfx = (name: keyof typeof soundRef.current) => { if (!run.cancelled) soundRef.current[name](); };
+    const sfx = (name: Exclude<keyof typeof soundRef.current, 'claimSmash'>) => { if (!run.cancelled) soundRef.current[name](); };
     const get = () => worldRef.current;
     const set = (patch: Partial<World> | ((w: World) => Partial<World>)) => {
       if (run.cancelled) return;
@@ -358,8 +359,10 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
 
     /** A resolved tile's cards head home: yours to your discard pile, the
      *  rival's off toward their name. */
-    const sendHome = (tile: string) => {
-      const entries = worldRef.current.cards[tile] ?? [];
+    const sendHome = (tile: string, only?: Set<string>) => {
+      const all = worldRef.current.cards[tile] ?? [];
+      const entries = only ? all.filter(e => only.has(e.key)) : all;
+      if (!entries.length) return;
       const starts = entries.map(e => {
         const el = rootRef.current?.querySelector(`[data-board-card="${e.key}"]`);
         if (!el) return null;
@@ -368,7 +371,8 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
       });
       set(w => {
         const cards = { ...w.cards };
-        delete cards[tile];
+        const left = (cards[tile] ?? []).filter(e => !entries.includes(e));
+        if (left.length) cards[tile] = left; else delete cards[tile];
         return { cards };
       });
       if (entries.length) sfx('cardDiscard');
@@ -506,34 +510,55 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
 
       resolve: (steps) => {
         set({ planned: {}, chevrons: [] });
-        const lastFor = new Map<string, number>();
-        steps.forEach((s, i) => lastFor.set(s.tile_key, i));
+        const w0 = worldRef.current;
+        const cards = new Map<string, PlanCard[]>();
+        for (const [tile, entries] of Object.entries(w0.cards)) {
+          cards.set(tile, entries.map(e => ({ key: e.key, playerId: e.playerId, cardType: e.card.card_type, power: e.card.power, defense: e.card.defense_bonus ?? 0 })));
+        }
+        // The tutorial is teaching the rules: every tile counts up in full,
+        // and the narration keeps the camera.
+        const plans = buildResolvePlans(steps, cards, w0.tiles, YOU).map(p => ({ ...p, focus: p.kind !== 'effect' }));
         const finished = new Promise<void>(res => {
           resolveHooks.current = {
-            apply: (i) => {
-              const step = steps[i];
-              set(w => {
-                const t = w.tiles[step.tile_key];
-                if (!t) return {};
-                if ((step.outcome === 'claimed' || step.outcome === 'auto_claim') && step.winner_id && !t.is_base) {
-                  return { tiles: { ...w.tiles, [step.tile_key]: { ...t, owner: step.winner_id, held_since_turn: w.round } } };
+            api: {
+              focus: () => Promise.resolve(),
+              setActive: (plan) => set({ focus: plan?.tileKey ?? null }),
+              spread: () => {},
+              flip: () => {},
+              sendHome: (keys) => {
+                const byTile = new Map<string, Set<string>>();
+                for (const k of keys) {
+                  const tile = k.slice(k.indexOf('@') + 1);
+                  byTile.set(tile, (byTile.get(tile) ?? new Set()).add(k));
                 }
-                if (step.outcome === 'defense_applied') {
-                  const perm = step.defense_permanent ?? 0;
-                  const temp = step.defense_temporary ?? 0;
-                  return { tiles: { ...w.tiles, [step.tile_key]: { ...t, permanent_defense_bonus: Math.max(0, perm - t.base_defense), defense_power: perm + temp } } };
-                }
-                return {};
-              });
+                for (const [tile, only] of byTile) sendHome(tile, only);
+              },
+              applyStep: (i) => {
+                const step = steps[i];
+                set(w => {
+                  const t = w.tiles[step.tile_key];
+                  if (!t) return {};
+                  if ((step.outcome === 'claimed' || step.outcome === 'auto_claim') && step.winner_id && !t.is_base) {
+                    return { tiles: { ...w.tiles, [step.tile_key]: { ...t, owner: step.winner_id, held_since_turn: w.round } } };
+                  }
+                  if (step.outcome === 'defense_applied') {
+                    const perm = step.defense_permanent ?? 0;
+                    const temp = step.defense_temporary ?? 0;
+                    return { tiles: { ...w.tiles, [step.tile_key]: { ...t, permanent_defense_bonus: Math.max(0, perm - t.base_defense), defense_power: perm + temp } } };
+                  }
+                  return {};
+                });
+              },
             },
-            start: (i) => set({ focus: steps[i].tile_key }),
-            end: (i) => {
-              set({ focus: null });
-              if (lastFor.get(steps[i].tile_key) === i) sendHome(steps[i].tile_key);
+            complete: () => {
+              // Anything still on a resolved tile goes home.
+              for (const tile of new Set(steps.map(st => st.tile_key))) sendHome(tile);
+              resolveHooks.current = null;
+              setResolving(null);
+              res();
             },
-            complete: () => { resolveHooks.current = null; setResolving(null); res(); },
           };
-          setResolving({ key: ++seq.current, steps });
+          setResolving({ key: ++seq.current, plans });
         });
         return run.guard(finished);
       },
@@ -641,7 +666,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
     return (
       <div className="cc-tut-tilecards">
         {entries.length > 0 && (
-          <TileCardStack entries={entries} scale={s} focus={world.focus === key} open onOpen={(es) => setDetail(es)} />
+          <TileCardStack entries={entries} scale={s} focus={world.focus === key} open still={!!resolving} onOpen={(es) => setDetail(es)} />
         )}
         {down.map(d => (
           <div key={d.entry.key} className="cc-tut-facedown" style={{ width: CARD_W * s, height: CARD_H * s, borderRadius: 14 * s }}>
@@ -650,7 +675,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
         ))}
       </div>
     );
-  }, [world.cards, world.focus, facedown]);
+  }, [world.cards, world.focus, facedown, resolving]);
 
   const youVp = scoreVp(world.tiles, YOU, world.bonusVp).total;
   const rivalVp = scoreVp(world.tiles, RIVAL).total;
@@ -660,6 +685,24 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
     landings.current.delete(f.key);
     setFlights(fs => fs.filter(x => x.key !== f.key));
   }, []);
+  // The tile-by-tile resolve reads the current run's hooks.
+  const projectTile = useCallback((q: number, r: number) => {
+    const t = transformRef.current;
+    const rect = boardWrapRef.current?.getBoundingClientRect();
+    if (!t?.project || !rect) return null;
+    const p = axialToPixel(q, r);
+    const s = t.project(p.x, p.y, 0.15);
+    return { x: s.x + rect.left, y: s.y + rect.top };
+  }, []);
+  const resolveApi = useMemo<ResolverApi>(() => ({
+    focus: (k, shot) => resolveHooks.current?.api.focus(k, shot) ?? Promise.resolve(),
+    setActive: (p) => resolveHooks.current?.api.setActive(p),
+    spread: (k) => resolveHooks.current?.api.spread(k),
+    flip: (k) => resolveHooks.current?.api.flip(k),
+    sendHome: (k) => resolveHooks.current?.api.sendHome(k),
+    applyStep: (i) => resolveHooks.current?.api.applyStep(i),
+  }), []);
+
   const onCoinLand = useCallback((c: Coin) => {
     landings.current.get(`c${c.id}`)?.();
     landings.current.delete(`c${c.id}`);
@@ -689,6 +732,8 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           tileCardKeys={tileKeys}
           renderTileCards={renderTileCards}
           raisedTileKey={world.focus}
+          focusTileKey={resolving ? world.focus : null}
+          hideDefenseLabelKey={resolving ? world.focus : null}
           transformRef={transformRef}
           fxRef={fxRef}
           controlsRef={controlsRef}
@@ -850,17 +895,13 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
       {arrow && <TargetArrow from={arrow.from} to={arrow.to} state="valid" />}
 
       {resolving && (
-        <ResolveOverlay
+        <TileResolver
           key={resolving.key}
-          steps={resolving.steps}
-          gridTransform={transformRef.current}
-          gridRect={boardWrapRef.current?.getBoundingClientRect() ?? null}
-          gridContainerRef={boardWrapRef}
-          gridTransformRef={transformRef}
+          plans={resolving.plans}
+          speed={paceRef.current || 1}
           fxRef={fxRef}
-          onStepApply={(i) => resolveHooks.current?.apply(i)}
-          onStepStart={(i) => resolveHooks.current?.start(i)}
-          onStepEnd={(i) => resolveHooks.current?.end(i)}
+          project={projectTile}
+          api={resolveApi}
           onComplete={() => resolveHooks.current?.complete()}
         />
       )}

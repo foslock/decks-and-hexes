@@ -4,7 +4,7 @@ import {
   ShaderMaterial, TetrahedronGeometry, Vector2, Vector3,
 } from 'three';
 import { HEX_SIZE } from '../utils/hexGeometry';
-import type { BoardFx, FxFortifyRing, FxWedge, LocalPoint } from './boardTypes';
+import type { BoardFx, FxFortifyRing, LocalPoint } from './boardTypes';
 import { PLAYER_COLORS } from './boardTypes';
 import type { BoardLayout } from './layout';
 import { axialToWorld, hexCorner } from './layout';
@@ -119,35 +119,6 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-// ── Wedge energy shader: the attacker's color surging toward the target ──
-const WEDGE_VERT = /* glsl */ `
-varying vec2 vXZ;
-void main() {
-  vec4 wp = modelMatrix * vec4(position, 1.0);
-  vXZ = wp.xz;
-  gl_Position = projectionMatrix * viewMatrix * wp;
-}`;
-const WEDGE_FRAG = /* glsl */ `
-uniform vec3 uColor;
-uniform float uAlpha;
-uniform float uTime;
-uniform vec2 uOrigin;
-uniform vec2 uDir;
-varying vec2 vXZ;
-void main() {
-  vec2 rel = vXZ - uOrigin;
-  float s = dot(rel, uDir);
-  float across = dot(rel, vec2(-uDir.y, uDir.x));
-  float chev = s - abs(across) * 0.55;
-  float stripes = fract(chev * 4.5 - uTime * 2.4);
-  float band = smoothstep(0.0, 0.12, stripes) * (1.0 - smoothstep(0.3, 0.46, stripes));
-  vec3 col = uColor * (0.8 + 0.55 * band);
-  float a = uAlpha * (0.66 + 0.24 * band);
-  gl_FragColor = vec4(col, a);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
-}`;
-
 interface Timed { update(now: number): boolean; dispose(): void }
 
 interface Shard {
@@ -157,7 +128,7 @@ interface Shard {
 
 /**
  * Resolve / play effects drawn into the 3D scene. Implements the BoardFx
- * contract ResolveOverlay drives, plus a few helpers the board uses itself
+ * contract the resolve (TileResolver) drives, plus a few helpers the board uses itself
  * (ownership capture bursts, structure appear dust).
  */
 export class FxLayer implements BoardFx {
@@ -204,108 +175,6 @@ export class FxLayer implements BoardFx {
   }
 
   // ── BoardFx ────────────────────────────────────────────────────────────
-
-  createWedge(playerId: string, q: number, r: number): FxWedge {
-    const color = new Color(PLAYER_COLORS[playerId] ?? 0xffffff);
-    const fillMat = new ShaderMaterial({
-      vertexShader: WEDGE_VERT,
-      fragmentShader: WEDGE_FRAG,
-      uniforms: {
-        uColor: { value: brighten(color, 0.08) },
-        uAlpha: { value: 1 },
-        uTime: { value: 0 },
-        uOrigin: { value: new Vector2() },
-        uDir: { value: new Vector2(1, 0) },
-      },
-      transparent: true, depthWrite: false, side: DoubleSide,
-      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
-    });
-    const rimMat = new MeshBasicMaterial({
-      color: brighten(color, 0.4), transparent: true, opacity: 0.9, depthWrite: false, side: DoubleSide,
-      blending: AdditiveBlending, premultipliedAlpha: true,
-    });
-    const tick: Timed = { update: (now) => { fillMat.uniforms.uTime.value = now; return !destroyedFlag.v; }, dispose: () => {} };
-    const destroyedFlag = { v: false };
-    this.timed.push(tick);
-    const fill = new Mesh(new BufferGeometry(), fillMat);
-    const rim = new Mesh(new BufferGeometry(), rimMat);
-    fill.renderOrder = 5;
-    rim.renderOrder = 6;
-    const g = new Group();
-    g.add(fill, rim);
-    this.group.add(g);
-    let lastFront: { x: number; z: number } | null = null;
-    let alpha = 1;
-    const sparkColor = brighten(color, 0.55);
-    const center = axialToWorld(q, r);
-    let destroyed = false;
-    return {
-      setPoints: (pts) => {
-        if (destroyed || pts.length < 3) return;
-        const w = pts.map(toWorld);
-        // Surge direction: from the attack edge toward the tile center.
-        const mx = (w[0].x + w[1].x) / 2, mz = (w[0].z + w[1].z) / 2;
-        const dx = center.x - mx, dz = center.z - mz;
-        const len = Math.hypot(dx, dz) || 1;
-        fillMat.uniforms.uOrigin.value.set(mx, mz);
-        fillMat.uniforms.uDir.value.set(dx / len, dz / len);
-        fill.geometry.dispose();
-        const fg = new BufferGeometry();
-        fg.setAttribute('position', new BufferAttribute(drapedPolygon(w, this.layout, 0.035), 3));
-        fill.geometry = fg;
-        rim.geometry.dispose();
-        const ribbon = drapedRibbon(w, 0.035, this.layout, 0.045, true);
-        const rg = new BufferGeometry();
-        rg.setAttribute('position', new BufferAttribute(ribbon.pos, 3));
-        rim.geometry = rg;
-        // Sparks trail the advancing front.
-        const front = w[w.length - 1];
-        if (lastFront) {
-          const moved = Math.hypot(front.x - lastFront.x, front.z - lastFront.z);
-          const n = Math.min(6, Math.floor(moved * 60));
-          for (let i = 0; i < n; i++) {
-            const t = Math.random();
-            const x = lastFront.x + (front.x - lastFront.x) * t;
-            const z = lastFront.z + (front.z - lastFront.z) * t;
-            const dx = x - center.x, dz = z - center.z;
-            this.sparkPool.spawn({
-              x, y: this.ground(x, z) + 0.05, z,
-              vx: dx * 0.6 + (Math.random() - 0.5) * 0.4, vy: 0.35 + Math.random() * 0.4, vz: dz * 0.6 + (Math.random() - 0.5) * 0.4,
-              r: sparkColor.r, g: sparkColor.g, b: sparkColor.b, a: alpha,
-              life: 0.35 + Math.random() * 0.3, size0: 0.05, size1: 0.01, gravity: 1.6, drag: 1.5, shape: 1,
-            });
-          }
-          if (moved > 0.004 && Math.random() < 0.5) {
-            this.dustPool.spawn({
-              x: front.x, y: this.ground(front.x, front.z) + 0.03, z: front.z,
-              vx: (Math.random() - 0.5) * 0.1, vy: 0.08, vz: (Math.random() - 0.5) * 0.1,
-              r: 0.42, g: 0.37, b: 0.3, a: 0.35 * alpha, life: 0.9, size0: 0.06, size1: 0.2, drag: 1.2,
-            });
-          }
-        }
-        lastFront = front;
-      },
-      setAlpha: (a) => {
-        alpha = a;
-        fillMat.uniforms.uAlpha.value = a;
-        rimMat.opacity = 0.9 * a;
-      },
-      setOrder: (o) => {
-        fill.renderOrder = 5 + o * 2;
-        rim.renderOrder = 6 + o * 2;
-      },
-      destroy: () => {
-        if (destroyed) return;
-        destroyed = true;
-        destroyedFlag.v = true;
-        this.group.remove(g);
-        fill.geometry.dispose();
-        rim.geometry.dispose();
-        fillMat.dispose();
-        rimMat.dispose();
-      },
-    };
-  }
 
   createFortifyRing(q: number, r: number): FxFortifyRing {
     const c = axialToWorld(q, r);

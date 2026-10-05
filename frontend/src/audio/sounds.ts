@@ -26,9 +26,22 @@ export const CORE_SOUND_NAMES = [
 /** Optional extras (available on the engine + hook, not yet wired into components). */
 export const EXTRA_SOUND_NAMES = ['hoverTick', 'coinSpend', 'vpGain', 'phaseChange', 'invalidAction'] as const;
 
+/** A claim smashing into a tile's defense, one per power level (0 … 8+). */
+export const SMASH_SOUND_NAMES = [
+  'claimSmash0', 'claimSmash1', 'claimSmash2', 'claimSmash3', 'claimSmash4',
+  'claimSmash5', 'claimSmash6', 'claimSmash7', 'claimSmash8',
+] as const;
+
 export type CoreSoundName = typeof CORE_SOUND_NAMES[number];
 export type ExtraSoundName = typeof EXTRA_SOUND_NAMES[number];
-export type SoundName = CoreSoundName | ExtraSoundName;
+export type SmashSoundName = typeof SMASH_SOUND_NAMES[number];
+export type SoundName = CoreSoundName | ExtraSoundName | SmashSoundName;
+
+/** The smash for a claim of this power (8 and up share the biggest). */
+export function smashSoundName(power: number): SmashSoundName {
+  const i = Math.max(0, Math.min(SMASH_SOUND_NAMES.length - 1, Math.round(power)));
+  return SMASH_SOUND_NAMES[i];
+}
 
 /**
  * Output level per sound (dB). Calibrated so that at volume 1.0 the K-weighted
@@ -62,6 +75,16 @@ const LEVELS: Record<SoundName, number> = {
   vpGain: -9.6,
   phaseChange: -3.2,
   invalidAction: -3.9,
+  // The smashes climb on purpose: ≈ -27 LU for a 0 up to ≈ -16 LU at 8+.
+  claimSmash0: -4.4,
+  claimSmash1: -7.2,
+  claimSmash2: -10.4,
+  claimSmash3: -14.3,
+  claimSmash4: -14.1,
+  claimSmash5: -16.5,
+  claimSmash6: -14.0,
+  claimSmash7: -12.4,
+  claimSmash8: -15.8,
 };
 
 type Recipe = (bus: Bus, when?: number) => void;
@@ -281,6 +304,133 @@ const resolveContested: Recipe = (bus, when) => {
     color: 'white', at: H + 0.01, gain: 0.12, env: { a: 0.004, d: 0.22 },
     filters: [{ type: 'bandpass', f: 3000, f2: 1600, sweep: 0.2, q: 2 }, { type: 'lowpass', f: 6000, q: 0.5 }],
   });
+  v.done();
+};
+
+// ── Claim smash (power 0 → 8+) ─────────────────────────────────────
+// A claim's number smashing into a tile's defense. Each power level is its own
+// sound, a step heavier than the last: a feeble poke, a jab, a blade strike,
+// crossing swords, a war-drum blow, a mace, a war hammer, a siege ram, and at
+// 8+ a cataclysm. The hit lands at t = 0 (it plays on impact).
+
+/** Power 0: a feeble wooden poke. */
+const claimSmash0: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash0', { vary: 0.6, pan: rand(-0.1, 0.1), reverb: 0.1 });
+  woodKnock(v, { f: pick([400, 430, 460]), gain: 0.55, decay: 0.07, click: 0.3 });
+  thump(v, { f: 170, f2: 130, drop: 0.03, gain: 0.25, decay: 0.08, drive: 1.4 });
+  feltTap(v, { at: 0.004, gain: 0.3, f: 1200, body: 0.08, bodyF: 220 });
+  v.done();
+};
+
+/** Power 1: a light jab — a knock and a thin, short ring. */
+const claimSmash1: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash1', { vary: 0.6, pan: rand(-0.1, 0.1), reverb: 0.12 });
+  woodKnock(v, { f: pick([290, 310, 330]), gain: 0.5, decay: 0.08, click: 0.4 });
+  thump(v, { f: 160, f2: 95, drop: 0.04, gain: 0.4, decay: 0.12, drive: 1.8 });
+  clang(v, { f: pick([1240, 1300, 1360]), at: 0.002, gain: 0.2, decay: 0.16, bright: 0.6, strike: 0.4 });
+  v.done();
+};
+
+/** Power 2: a blade strike over a small drum. */
+const claimSmash2: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash2', { vary: 0.6, pan: rand(-0.08, 0.08), reverb: 0.15 });
+  drum(v, { f: 112, gain: 0.45, decay: 0.18, skin: 0.35, drive: 2, snap: 0.25 });
+  clang(v, { f: pick([960, 1000, 1045]), gain: 0.38, decay: 0.28, bright: 0.85, strike: 0.6 });
+  v.noise({ color: 'white', at: 0.006, gain: 0.08, env: { a: 0.003, d: 0.12 }, filters: [{ type: 'bandpass', f: 3200, f2: 1900, sweep: 0.12, q: 2 }] });
+  v.done();
+};
+
+/** Power 3: crossing swords — two blades and a scrape, a firm drum under them. */
+const claimSmash3: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash3', { vary: 0.5, reverb: 0.17 });
+  drum(v, { f: 94, gain: 0.55, decay: 0.26, skin: 0.4, drive: 2.2, snap: 0.3 });
+  const f = pick([830, 880, 935]);
+  clang(v, { f, gain: 0.42, decay: 0.36, bright: 0.9, strike: 0.6, dest: v.bus(1, -0.2) });
+  clang(v, { f: f * 1.19, at: 0.014, gain: 0.34, decay: 0.3, bright: 0.8, strike: 0.5, dest: v.bus(1, 0.2) });
+  v.noise({
+    color: 'white', at: 0.01, gain: 0.12, env: { a: 0.004, d: 0.22 },
+    filters: [{ type: 'bandpass', f: 3000, f2: 1600, sweep: 0.2, q: 2 }, { type: 'lowpass', f: 6000, q: 0.5 }],
+  });
+  v.done();
+};
+
+/** Power 4: a war-drum blow — a low thump through a shield clang. */
+const claimSmash4: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash4', { vary: 0.5, reverb: 0.2 });
+  drum(v, { f: 80, gain: 0.65, decay: 0.34, skin: 0.45, drive: 2.4, snap: 0.35 });
+  thump(v, { f: 130, f2: 60, drop: 0.06, gain: 0.55, decay: 0.3, drive: 2.3 });
+  clang(v, { f: pick([720, 760, 800]), gain: 0.42, decay: 0.45, bright: 0.85, strike: 0.7 });
+  v.noise({ color: 'brown', gain: 0.4, env: { a: 0.001, d: 0.1 }, filters: [{ type: 'lowpass', f: 900, q: 0.7 }] });
+  v.done();
+};
+
+/** Power 5: a mace — a crushing double clang, splinters flying. */
+const claimSmash5: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash5', { vary: 0.5, reverb: 0.23 });
+  thump(v, { f: 110, f2: 48, drop: 0.07, gain: 0.8, decay: 0.42, drive: 2.6 });
+  drum(v, { f: 70, gain: 0.55, decay: 0.38, skin: 0.5, drive: 2.4, snap: 0.45 });
+  const f = pick([590, 620, 650]);
+  clang(v, { f, gain: 0.45, decay: 0.55, bright: 0.9, strike: 0.8, dest: v.bus(1, -0.15) });
+  clang(v, { f: f * 1.33, at: 0.01, gain: 0.32, decay: 0.42, bright: 0.8, strike: 0.6, dest: v.bus(1, 0.15) });
+  crackle(v, {
+    at: 0.006, grains: scatter(16, 0.22, { shape: (u) => 1 - u, durMin: 0.002, durMax: 0.007, ampMin: 0.3 }),
+    total: 0.22, color: 'pink', gain: 0.35, filters: [{ type: 'bandpass', f: 1800, q: 0.7 }, { type: 'lowpass', f: 6000, q: 0.5 }],
+  });
+  v.done();
+};
+
+/** Power 6: a war hammer — a crack, a timpani boom, the plate ringing, stone chips. */
+const claimSmash6: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash6', { vary: 0.4, reverb: 0.27 });
+  v.noise({ color: 'white', gain: 0.45, env: { a: 0.0005, d: 0.035 }, filters: [{ type: 'highpass', f: 800, q: 0.7 }, { type: 'lowpass', f: 8000, q: 0.5 }] });
+  thump(v, { f: 95, f2: 40, drop: 0.09, gain: 0.95, decay: 0.55, drive: 2.8 });
+  timpani(v, { f: note('D2'), gain: 0.55, decay: 0.9 });
+  clang(v, { f: pick([470, 490, 510]), gain: 0.48, decay: 0.8, bright: 0.9, strike: 0.8 });
+  v.noise({ color: 'brown', gain: 0.5, env: { a: 0.002, d: 0.25 }, filters: [{ type: 'lowpass', f: 700, f2: 250, sweep: 0.2, q: 0.7 }] });
+  crackle(v, {
+    at: 0.008, grains: scatter(30, 0.4, { shape: (u) => Math.exp(-u * 3), durMin: 0.003, durMax: 0.009, ampMin: 0.3 }),
+    total: 0.4, color: 'pink', gain: 0.45, filters: [{ type: 'bandpass', f: 1300, q: 0.6 }, { type: 'lowpass', f: 5000, q: 0.5 }],
+  });
+  v.done();
+};
+
+/** Power 7: a siege ram — a sub boom, low brass, a great plate and tumbling stone. */
+const claimSmash7: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash7', { vary: 0.4, reverb: 0.32 });
+  v.noise({ color: 'white', gain: 0.6, env: { a: 0.0004, d: 0.04 }, filters: [{ type: 'highpass', f: 700, q: 0.7 }, { type: 'lowpass', f: 9000, q: 0.5 }] });
+  thump(v, { f: 80, f2: 34, drop: 0.12, gain: 1, decay: 0.75, drive: 3 });
+  timpani(v, { f: note('A1'), gain: 0.65, decay: 1.2 });
+  const f = pick([370, 385, 400]);
+  clang(v, { f, gain: 0.5, decay: 1.0, bright: 0.9, strike: 0.85 });
+  clang(v, { f: f * 1.5, at: 0.012, gain: 0.26, decay: 0.7, bright: 0.8, strike: 0.5 });
+  ['D2', 'A2'].forEach((n) => brass(v, { f: note(n), at: 0.015, dur: 0.28, gain: 0.3, bright: 5, attack: 0.012, release: 0.35, voices: 2 }));
+  const T = 0.7;
+  crackle(v, {
+    at: 0.01, grains: scatter(45, T, { shape: (u) => Math.exp(-u * 3), warp: (u) => Math.pow(u, 1.6), durMin: 0.003, durMax: 0.01, ampMin: 0.3 }),
+    total: T, color: 'pink', gain: 0.6, filters: [{ type: 'bandpass', f: 1100, q: 0.6 }, { type: 'lowpass', f: 5000, q: 0.5 }],
+  });
+  v.noise({ color: 'brown', at: 0.02, gain: 0.35, env: { a: 0.04, d: 0.8 }, filters: [{ type: 'lowpass', f: 240, q: 0.7 }] });
+  v.done();
+};
+
+/** Power 8+: a cataclysm — a thunderclap, a sub drop and an aftershock, a
+ *  brass chord, the plate howling, and stone raining down. */
+const claimSmash8: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'claimSmash8', { vary: 0.3, reverb: 0.38 });
+  v.noise({ color: 'white', gain: 0.8, env: { a: 0.0003, d: 0.05 }, filters: [{ type: 'highpass', f: 600, q: 0.7 }, { type: 'lowpass', f: 10000, q: 0.5 }] });
+  thump(v, { f: 72, f2: 26, drop: 0.2, gain: 1, decay: 1.1, drive: 3.2 });
+  timpani(v, { f: note('D2'), gain: 0.7, decay: 1.4 });
+  timpani(v, { f: note('A1'), at: 0.16, gain: 0.55, decay: 1.2 });
+  thump(v, { f: 60, f2: 30, drop: 0.1, at: 0.16, gain: 0.55, decay: 0.6, drive: 2.6 });
+  const f = pick([290, 300, 312]);
+  clang(v, { f, gain: 0.55, decay: 1.4, bright: 1, strike: 0.9, dest: v.bus(1, -0.15) });
+  clang(v, { f: f * 1.41, at: 0.01, gain: 0.32, decay: 1.0, bright: 0.9, strike: 0.6, dest: v.bus(1, 0.15) });
+  ['D2', 'A2', 'D3', 'F3'].forEach((n, i) => brass(v, { f: note(n), at: 0.02 + i * 0.006, dur: 0.5, gain: 0.3, bright: 6, attack: 0.015, release: 0.6, voices: 2 }));
+  const T = 1.1;
+  const tumble = { shape: (u: number) => Math.exp(-u * 2.6), warp: (u: number) => Math.pow(u, 1.7), durMin: 0.003, durMax: 0.011, ampMin: 0.3 };
+  crackle(v, { at: 0.01, grains: scatter(80, T, tumble), total: T, color: 'pink', gain: 0.75, filters: [{ type: 'bandpass', f: 1100, q: 0.6 }, { type: 'lowpass', f: 5000, q: 0.5 }] });
+  crackle(v, { at: 0.01, grains: scatter(50, T, tumble), total: T, color: 'brown', gain: 0.55, filters: [{ type: 'bandpass', f: 380, q: 0.8 }] });
+  v.noise({ color: 'brown', at: 0.02, gain: 0.45, env: { a: 0.05, d: 1.3 }, filters: [{ type: 'lowpass', f: 200, q: 0.7 }] });
   v.done();
 };
 
@@ -512,4 +662,13 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   vpGain: { play: vpGain, length: 1.4 },
   phaseChange: { play: phaseChange, length: 0.7 },
   invalidAction: { play: invalidAction, length: 0.3 },
+  claimSmash0: { play: claimSmash0, length: 0.2 },
+  claimSmash1: { play: claimSmash1, length: 0.3 },
+  claimSmash2: { play: claimSmash2, length: 0.4 },
+  claimSmash3: { play: claimSmash3, length: 0.5 },
+  claimSmash4: { play: claimSmash4, length: 0.6 },
+  claimSmash5: { play: claimSmash5, length: 0.8 },
+  claimSmash6: { play: claimSmash6, length: 1.0 },
+  claimSmash7: { play: claimSmash7, length: 1.4 },
+  claimSmash8: { play: claimSmash8, length: 1.8 },
 };
