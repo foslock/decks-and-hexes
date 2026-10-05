@@ -1469,11 +1469,25 @@ export class BoardEngine {
     this.clampPan();
   }
 
+  /**
+   * Keep the view's center over the island. At the fitted zoom it stays
+   * where the fit puts it; zooming in, it may travel anywhere over the
+   * island — every edge can be brought on screen, the far (top) one too when
+   * the board is tilted (the fit then centers toward the near side).
+   */
   private clampPan(): void {
-    const lim = (this.layout?.radius ?? 5) * 0.8 * (1 - 1 / this.rig.zoom) + 0.001;
-    const p = this.rig.pan;
-    const len = Math.hypot(p.x, p.y);
-    if (len > lim) p.multiplyScalar(lim / len);
+    const rig = this.rig;
+    const fit = rig.fitCenter();
+    // 0 at the fit → 1 from ~1.8× zoom: the allowed disk slides from the
+    // fitted center to the island's middle and grows to the island's edge.
+    const t = Math.max(0, Math.min(1, (rig.zoom - 1) / 0.8));
+    const reach = Math.max(1, (this.layout?.radius ?? 5) - 0.6) * t + 0.001;
+    const ox = fit.cx * (1 - t), oz = fit.cz * (1 - t);
+    // The view's center (ground) relative to the disk's middle.
+    let dx = fit.cx + rig.pan.x - ox, dz = fit.cz + rig.pan.y - oz;
+    const len = Math.hypot(dx, dz);
+    if (len > reach) { dx *= reach / len; dz *= reach / len; }
+    rig.pan.set(ox + dx - fit.cx, oz + dz - fit.cz);
   }
 
   private beginGesture(): void {

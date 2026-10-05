@@ -126,6 +126,13 @@ export class CameraRig {
     _up.copy(_fwd).multiplyScalar(Math.cos(tilt)).addScaledVector(new Vector3(0, 1, 0), Math.sin(tilt));
   }
 
+  /** Where the fitted view (zoom 1, no pan) centers, for the target
+   *  rotation and tilt. Tilted, it sits toward the island's near side. */
+  fitCenter(): { cx: number; cz: number } {
+    const f = this.fit(this.rotation, this.tilt);
+    return { cx: f.cx, cz: f.cz };
+  }
+
   /** Fit distance + center for a rotation/tilt (cached). */
   private fit(rotation: number, tilt: number): { dist: number; cx: number; cz: number } {
     const vh = this.viewHeight;
