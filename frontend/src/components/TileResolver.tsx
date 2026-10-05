@@ -5,7 +5,6 @@ import { PLAYER_COLORS, type BoardFx, type FxFortifyRing } from '../board3d/boar
 import type { CameraView } from '../board3d/engine';
 import type { BoardControls } from './GameBoard';
 import { axialToPixel } from '../utils/hexGeometry';
-import { TEMP_DEF } from './BoardLabel';
 import { BOARD_FLIP_ID, BOARD_FLIP_MS } from './BoardCards';
 import { useResolveSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
@@ -41,6 +40,9 @@ interface Props {
   project(q: number, r: number): { x: number; y: number } | null;
   api: ResolverApi;
   onComplete(): void;
+  /** Zoom out to the whole board first (default). A single tile's replay
+   *  goes straight to its close-up. */
+  overview?: boolean;
 }
 
 /** How near the camera closes in on a resolving tile than the whole-board
@@ -158,7 +160,7 @@ function animate(el: Element | null, frames: Keyframe[], ms: number, easing = 'e
  * into whatever holds the tile, breaking it or bouncing off. Tiles that
  * don't involve the player resolve quickly at the player's own view.
  */
-export default function TileResolver({ plans, speed, fxRef, project, api, onComplete }: Props) {
+export default function TileResolver({ plans, speed, fxRef, project, api, onComplete, overview = true }: Props) {
   const sound = useSound();
   /** Board cards turn over at the resolve speed from the settings. */
   const flipSpeed = useResolveSpeed();
@@ -367,12 +369,14 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
 
       // A claim that bounces needs something to bounce off: an unseen 0
       // defense (a 0-power claim tying the owner) shows itself first.
-      if (a.clash === 'bounce' && !defRef.current) await popDefense(holderView(plan));
+      if ((a.clash === 'bounce' || a.clash === 'dink') && !defRef.current) await popDefense(holderView(plan));
       // Nothing showing (an empty tile): the claim strikes the ground itself.
       const hadDefense = !!defRef.current;
 
       // The smash — the bigger the claim, the harder it hits (0 → 8+).
-      const k = heft(a.total);
+      // An immune tile turns any claim away with the same light "dink".
+      const dink = a.clash === 'dink';
+      const k = dink ? 0 : heft(a.total);
       const dist = CLAIM_R;
       const hit = { x: -dir.dx * dist * 0.72, y: -dir.dy * dist * 0.72 };
       const hitScale = 1.15 + 0.35 * k;
@@ -393,14 +397,16 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       const c = axialToPixel(plan.q, plan.r);
       const f = fx();
       const pc = PLAYER_COLORS[a.playerId] ?? 0xffffff;
-      f?.sparks(c.x, c.y, pc, Math.round((a.clash === 'bounce' ? 10 + 16 * k : 16 + 44 * k)), 0.8 + 0.9 * k);
+      const bounced = a.clash === 'bounce' || dink;
+      f?.sparks(c.x, c.y, dink ? 0xd8ecff : pc, dink ? 5 : Math.round((bounced ? 10 + 16 * k : 16 + 44 * k)), dink ? 0.45 : 0.8 + 0.9 * k);
       if (k >= 0.5) {
         f?.shockwave(c.x, c.y, pc, 0.7 + 0.9 * k, ms(420 + 200 * k));
         f?.dust(c.x, c.y, Math.round(10 + 22 * k), 0.6 + 0.8 * k);
       }
-      ring?.flash((a.clash === 'bounce' ? 1.2 : 0.8) * (0.8 + 0.5 * k));
-      sfx.claimSmash(a.total);
-      if (plan.baseRaid) sfx.resolveBaseRaidRam();
+      if (!dink) ring?.flash((bounced ? 1.2 : 0.8) * (0.8 + 0.5 * k));
+      // A dink is a light tap whatever the claim's power.
+      sfx.claimSmash(dink ? 1 : a.total);
+      if (plan.baseRaid && !dink) sfx.resolveBaseRaidRam();
       // Hit-stop: a heavy blow holds the moment of impact.
       if (k > 0.25) await wait(Math.round(90 * k));
 
@@ -449,12 +455,22 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
             { transform: 'scale(1)', opacity: 1, filter: 'brightness(1)' },
           ], ms(260), 'cubic-bezier(0.34, 1.56, 0.64, 1)');
         }
+      } else if (dink) {
+        // Dinks off: the immune tile doesn't budge, the claim hops away.
+        pulse(defRef.current, colorOf(holder));
+        const side = dir.dx > 0 ? 1 : -1;
+        await animate(claimRef.current, [
+          { transform: `translate(${hit.x}px, ${hit.y}px) scale(${hitScale})`, opacity: 1 },
+          { transform: `translate(${hit.x * 0.4 + dir.dx * 12}px, ${hit.y * 0.4 + dir.dy * 12 - 14}px) scale(0.92) rotate(${10 * side}deg)`, opacity: 1, offset: 0.45 },
+          { transform: `translate(${dir.dx * 26}px, ${dir.dy * 26 + 4}px) scale(0.8) rotate(${18 * side}deg)`, opacity: 0 },
+        ], ms(380), 'ease-out', 'forwards');
+        setClaim(null);
       } else {
         // Bounces off: the defense holds.
         f?.jolt(plan.q, plan.r, (plan.baseRaid ? 0.7 : 0.35) + 0.6 * k);
         if (k > 0.4) f?.shake(0.35 * k, ms(220));
         if (plan.baseRaid) sfx.resolveBaseRaidHold(); else sfx.resolveDefenseFortify();
-        pulse(defRef.current, '#bfe4ff');
+        pulse(defRef.current, colorOf(holder));
         // A big claim is thrown back further and spins harder.
         const fly = 1 + 0.8 * k, spin = (dir.dx > 0 ? 1 : -1) * (1 + 1.2 * k);
         await animate(claimRef.current, [
@@ -512,7 +528,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
               await popDefense(view());
             } else {
               flushSync(() => setDefense(view()));
-              await guard(pulse(defRef.current, b.temp ? TEMP_DEF : '#fff'));
+              await guard(pulse(defRef.current, colorOf(plan.holder)));
             }
           }
           counting(b.card, false);
@@ -527,7 +543,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           await popDefense(faced);
         } else if (faced) {
           flushSync(() => setDefense(faced));
-          await guard(pulse(defRef.current, plan.immune ? TEMP_DEF : '#fff'));
+          await guard(pulse(defRef.current, colorOf(plan.holder)));
         }
       }
       if (plan.immune) sfx.resolveDefenseFortify();
@@ -617,7 +633,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       plans.forEach((p, i) => { if (isClose(p)) lastClose = i; });
       try {
         // Zoom out first: what resolves between other players stays on screen.
-        await guard(api.focus(null, 'overview'));
+        if (overview) await guard(api.focus(null, 'overview'));
         for (const [i, plan] of plans.entries()) {
           const close = isClose(plan);
           if (close) {
@@ -664,12 +680,14 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
             }}>
               {defense.mode === 'defense' ? (
                 defense.immune ? (
-                  <><Icon name="immune" size={20} color={TEMP_DEF} decorative /><span className="cc-rs-word" style={{ color: TEMP_DEF }}>Immune</span></>
+                  <><Icon name="immune" size={20} color={readable(colorOf(defense.holder))} decorative /><span className="cc-rs-word" style={{ color: readable(colorOf(defense.holder)) }}>Immune</span></>
                 ) : (
+                  // One total that counts up card by card, like a claim's, in
+                  // the holder's color (white when neutral). The grid's blue
+                  // is for previewing this round's Defense cards, not this.
                   <>
-                    <Icon name={defense.perm > 0 || defense.temp === 0 ? 'fortify' : 'defense'} size={20} color={defense.perm > 0 || defense.temp === 0 ? readable(colorOf(defense.holder)) : TEMP_DEF} decorative />
-                    {(defense.perm > 0 || defense.temp === 0) && <Num value={defense.perm} size={21} color={readable(colorOf(defense.holder))} />}
-                    {defense.temp > 0 && <Num value={`+${defense.temp}`} size={21} color={TEMP_DEF} />}
+                    <Icon name={defense.temp > 0 ? 'defense' : 'fortify'} size={20} color={readable(colorOf(defense.holder))} decorative />
+                    <Num value={defense.perm + defense.temp} size={21} color={readable(colorOf(defense.holder))} />
                   </>
                 )
               ) : (

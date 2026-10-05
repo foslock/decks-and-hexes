@@ -154,6 +154,27 @@ interface RevealCard extends BoardCardEntry {
 
 type BoardFlightKind = 'toDiscard' | 'toPlayer' | 'fade';
 
+/** A tile as a resolution step leaves it: its new owner, Consecrate's VP,
+ *  or the defense it was given. Base tiles never change hands on a
+ *  successful claim (the raid deals Rubble / Spoils instead). */
+function tileAfterStep(tile: HexTile, step: ResolutionStep): HexTile {
+  if (step.winner_id && (step.outcome === 'claimed' || step.outcome === 'auto_claim') && !tile.is_base) {
+    return { ...tile, owner: step.winner_id };
+  }
+  if (step.outcome === 'consecrate' && step.vp_value != null) return { ...tile, vp_value: step.vp_value };
+  if (step.outcome === 'defense_applied') {
+    const permDef = step.defense_permanent ?? 0;
+    const tempDef = step.defense_temporary ?? 0;
+    return {
+      ...tile,
+      defense_power: permDef + tempDef,
+      permanent_defense_bonus: permDef - tile.base_defense,
+      ...(step.defense_immunity ? { immune: true } : {}),
+    };
+  }
+  return tile;
+}
+
 function pixelToAxial(px: number, py: number): { q: number; r: number } {
   const q = ((2 / 3) * px) / HEX_SIZE;
   const r = ((-1 / 3) * px + (Math.sqrt(3) / 3) * py) / HEX_SIZE;
@@ -941,6 +962,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   // Reveal: every player's played cards over their tiles, flying home as each tile resolves
   const [revealCards, setRevealCards] = useState<RevealCard[] | null>(null);
   const revealCardsRef = useRef<RevealCard[] | null>(null);
+  /** Every card as the reveal laid it out (rivals' face down), for replays. */
+  const revealStartRef = useRef<RevealCard[]>([]);
   /** The reveal's cards per tile and the board going into it — what the
    *  tile-by-tile resolve (TileResolver) is planned from. */
   const revealPlanCardsRef = useRef<Map<string, PlanCard[]>>(new Map());
@@ -1063,6 +1086,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const [reviewing, setReviewing] = useState(false);
   const [reviewButtonVisible, setReviewButtonVisible] = useState(false);
   const [reviewCountdown, setReviewCountdown] = useState<number | null>(null);
+  /** A tile's resolve playing again (review: click a tile). */
+  const [replay, setReplay] = useState<{ id: number; plans: TilePlan[] } | null>(null);
+  const replayingRef = useRef(false);
+  replayingRef.current = !!replay;
+  /** Starts a tile's replay; false when there's nothing to replay there. */
+  const startReplayRef = useRef<(tileKey: string) => boolean>(() => false);
   const revealedActionsRef = useRef<Record<string, import('../types/game').PlannedAction[]> | null>(null);
   const [reviewHoveredTile, setReviewHoveredTile] = useState<string | null>(null);
   const [reviewTilePopupPos, setReviewTilePopupPos] = useState<{ x: number; y: number } | null>(null);
@@ -2534,9 +2563,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       return;
     }
 
-    // Review mode: clicking a tile with revealed actions opens full-card overlay
+    // Review mode: clicking a tile replays its resolve; a tile with plays but
+    // nothing to replay (e.g. Sabotage) opens the full-card overlay.
     if (reviewing && revealedActionsRef.current) {
       const clickedKey = `${q},${r}`;
+      if (replayingRef.current) return;
+      if (startReplayRef.current(clickedKey)) return;
       const entries: { playerId: string; playerName: string; card: Card }[] = [];
       for (const [pid, playerActions] of Object.entries(revealedActionsRef.current)) {
         const name = gameState.players[pid]?.name ?? pid;
@@ -3557,10 +3589,11 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   }, [reviewButtonActive]);
 
   useEffect(() => {
-    if (reviewCountdown === null || reviewCountdown <= 0) return;
+    // Paused while a tile's resolve replays.
+    if (reviewCountdown === null || reviewCountdown <= 0 || replay) return;
     const timer = setTimeout(() => setReviewCountdown(c => c !== null ? c - 1 : null), 1000);
     return () => clearTimeout(timer);
-  }, [reviewCountdown]);
+  }, [reviewCountdown, replay]);
 
   useEffect(() => {
     if (reviewCountdown === 0) {
@@ -3854,33 +3887,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       if (!prev?.grid) return prev;
       const newTiles = { ...prev.grid.tiles };
       const tile = newTiles[step.tile_key];
-      // Base tiles never change ownership on a successful claim — the raid
-      // generates Rubble/Spoils via player_effect popups instead. Preserve
-      // the base tile's color during the resolve animation.
-      if (tile && step.winner_id && (step.outcome === 'claimed' || step.outcome === 'auto_claim') && !tile.is_base) {
-        newTiles[step.tile_key] = {
-          ...tile,
-          owner: step.winner_id,
-        };
-      }
-      // Consecrate: update tile VP value so stars re-render
-      if (tile && step.outcome === 'consecrate' && step.vp_value != null) {
-        newTiles[step.tile_key] = {
-          ...tile,
-          vp_value: step.vp_value,
-        };
-      }
-      // Defense applied: update tile defense values so labels re-render
-      if (tile && step.outcome === 'defense_applied') {
-        const permDef = step.defense_permanent ?? 0;
-        const tempDef = step.defense_temporary ?? 0;
-        newTiles[step.tile_key] = {
-          ...tile,
-          defense_power: permDef + tempDef,
-          permanent_defense_bonus: permDef - tile.base_defense,
-          ...(step.defense_immunity ? { immune: true } : {}),
-        };
-      }
+      if (tile) newTiles[step.tile_key] = tileAfterStep(tile, step);
 
       // Move resolved claim cards from planned_actions → discard for each claimant
       const newPlayers = { ...prev.players };
@@ -4995,6 +5002,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       });
     }
     revealCardsRef.current = cards;
+    revealStartRef.current = cards;
     setRevealCards(cards);
     const byTile = new Map<string, PlanCard[]>();
     for (const rc of cards) {
@@ -5104,6 +5112,60 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     applyStep: (idx) => applyResolveStep(idx),
   }), [resolveSpeed, spreadRevealCards, turnOverRevealCards, flyRevealCards, applyResolveStep]);
 
+  // ── Replaying a tile's resolve (review: click a tile) ──
+  /** The last resolve — its steps, plans, the board before it and the cards
+   *  as the reveal laid them out — kept for replays until the next round. */
+  const lastResolveRef = useRef<{ steps: ResolutionStep[]; plans: TilePlan[]; tiles: Record<string, HexTile>; cards: RevealCard[] } | null>(null);
+  useEffect(() => {
+    if (resolutionSteps.length && resolvePlans.length) {
+      lastResolveRef.current = { steps: resolutionSteps, plans: resolvePlans, tiles: preResolveTilesRef.current, cards: revealStartRef.current };
+    }
+  }, [resolutionSteps, resolvePlans]);
+  const replaySeqRef = useRef(0);
+  startReplayRef.current = (tileKey: string) => {
+    const last = lastResolveRef.current;
+    const grid = gameState.grid;
+    if (!last || !grid || replay || resolving) return false;
+    const plans = last.plans.filter(p => p.tileKey === tileKey).map(p => ({ ...p, focus: p.kind !== 'effect' }));
+    const before = last.tiles[tileKey];
+    if (!before || !plans.some(p => p.kind !== 'effect')) return false;
+    // The tile as it stood before the resolve, its cards back on it as the
+    // reveal laid them (rivals' face down) — no coins this time.
+    setResolveDisplayState({ ...gameState, grid: { ...grid, tiles: { ...grid.tiles, [tileKey]: before } } });
+    const cards = last.cards.filter(c => c.tileKey === tileKey).map(c => ({ ...c, gain: 0, revealed: false }));
+    revealCardsRef.current = cards;
+    setRevealCards(cards);
+    setReviewHoveredTile(null);
+    setDetailCards(null);
+    setReplay({ id: ++replaySeqRef.current, plans });
+    return true;
+  };
+  const replayApi = useMemo<ResolverApi>(() => ({
+    ...resolverApi,
+    setActive: (plan) => {
+      setRevealFocusTile(plan?.tileKey ?? null);
+      setResolveActiveTile(plan && plan.kind !== 'effect' ? plan.tileKey : null);
+    },
+    // Only the replayed tile changes (players' cards and VP already did).
+    applyStep: (idx) => {
+      const step = lastResolveRef.current?.steps[idx];
+      if (!step) return;
+      setResolveDisplayState(prev => {
+        const tile = prev?.grid?.tiles[step.tile_key];
+        if (!prev?.grid || !tile) return prev;
+        return { ...prev, grid: { ...prev.grid, tiles: { ...prev.grid.tiles, [step.tile_key]: tileAfterStep(tile, step) } } };
+      });
+    },
+  }), [resolverApi]);
+  const endReplay = useCallback(() => {
+    flyRevealCardsRef.current(() => true, 80);
+    setReplay(null);
+    setResolveDisplayState(null);
+    setRevealFocusTile(null);
+    setResolveActiveTile(null);
+    setResolveCloseUp(null);
+  }, []);
+
   // Once every revealed card is home, hand the discard count back to the state.
   useEffect(() => {
     if (revealCards && revealCards.length === 0 && boardFlights.length === 0 && boardBurns.length === 0) {
@@ -5123,6 +5185,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       setResolveCloseUp(null);
       setResolveActiveTile(null);
       savedViewRef.current = null;
+      lastResolveRef.current = null;
     }
   }, [phase]);
 
@@ -5210,7 +5273,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         open={openCardsTile === tileKey && (detailCards != null || zoomedCard != null)}
         faded={draggingCardIndex !== null}
         passThrough={aimingAtTiles}
-        still={resolving}
+        still={resolving || !!replay}
         onOpen={(list, i) => { setOpenCardsTile(tileKey); openBoardCards(list, i); }}
         onUndo={undoable ? () => {
           const [q, r] = tileKey.split(',').map(Number);
@@ -5427,7 +5490,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
               vpPaths={vpPaths.length > 0 ? vpPaths : undefined}
               connectedVpTiles={connectedVpTiles}
               buildProgress={gridBuildProgress}
-              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || prePlaySearchMode || activePlayer?.pending_search || searchAnimating || searchFlights || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
+              disableHover={!!(showIntro || gridBuildProgress !== undefined || showFullLog || showDeckViewer || showCardBrowser || showShopOverlay || showUpgradePreview || (phaseBanner && !reviewing) || resolving || !!replay || prePlaySearchMode || activePlayer?.pending_search || searchAnimating || searchFlights || (draggingCardIndex !== null && (() => { const dc = activePlayer?.hand[draggingCardIndex]; return dc?.card_type === 'engine' && !needsOpponentTarget(dc!) && !dc?.target_own_tile; })()))}
               suppressTileTooltips={draggingCardIndex !== null}
               reviewPulseTiles={reviewPulseTiles}
               onTileHover={reviewing ? (q, r, sx, sy) => {
@@ -6492,9 +6555,21 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           onComplete={handleResolveComplete}
         />
       )}
+      {replay && (
+        <TileResolver
+          key={replay.id}
+          plans={replay.plans}
+          speed={resolveSpeed || 1}
+          fxRef={boardFxRef}
+          project={projectTile}
+          api={replayApi}
+          onComplete={endReplay}
+          overview={false}
+        />
+      )}
 
       {/* Review mode: tile hover popup showing cards played on this tile */}
-      {reviewing && reviewHoveredTile && reviewTilePopupPos && reviewTileCards?.has(reviewHoveredTile) && (() => {
+      {reviewing && !replay && reviewHoveredTile && reviewTilePopupPos && reviewTileCards?.has(reviewHoveredTile) && (() => {
         const cards = reviewTileCards.get(reviewHoveredTile)!;
         const POPUP_W = 180;
         const left = Math.min(reviewTilePopupPos.x + 16, window.innerWidth - POPUP_W - 12);

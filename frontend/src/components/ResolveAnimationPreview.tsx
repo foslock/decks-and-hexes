@@ -116,6 +116,8 @@ interface Scenario {
   baseRaidOutcome?: 'defended' | 'captured';
   /** The defender plays a Defense card (+2 this round) and a Claim (+1) on the tile. */
   fortified?: boolean;
+  /** The defender's tile is immune this round (Iron Wall): every claim dinks off. */
+  immune?: boolean;
   /** Attack powers (default 2, 3, 4, 5 by seat). */
   powers?: number[];
   description: string;
@@ -138,6 +140,7 @@ const SCENARIOS: Scenario[] = [
   { id: 'base-raid-cap',  label: 'Base Raid: Captured', numAttackers: 1, hasDefender: true, isBaseRaid: true, baseRaidOutcome: 'captured', description: 'Base raid on an enemy base — raid succeeds' },
   { id: 'fortified',      label: 'Fortified Owned', numAttackers: 3, hasDefender: true, fortified: true, description: 'The owner fortifies (Defense card + their own Claim); three attackers climb from weakest to strongest' },
   { id: 'stalemate',      label: 'Stalemate',       numAttackers: 2, hasDefender: true, powers: [3, 3], description: 'Two attackers tie above the owner — nobody takes the tile' },
+  { id: 'immune',         label: 'Immune',          numAttackers: 2, hasDefender: true, immune: true, powers: [2, 7], description: 'The owner plays Iron Wall — claims of 2 and 7 both just dink off' },
   { id: 'power-ramp',     label: 'Power Ramp',      numAttackers: 4, hasDefender: false, powers: [1, 3, 5, 9], description: 'Claims of 1, 3, 5 and 9 on a neutral tile — each smash hits harder than the last' },
 ];
 
@@ -398,7 +401,17 @@ export default function ResolveAnimationPreview() {
         outcome: 'defense_applied', defense_permanent: 0, defense_temporary: 2,
       });
     }
-    steps.push(step);
+    if (s.immune && defenderId) {
+      // Immunity: the server drops every other claim — only the defense step.
+      steps.push({
+        tile_key: CONTESTED_KEY, q: 0, r: 0, contested: false,
+        claimants: [{ player_id: defenderId, power: 0, source_q: null, source_r: null }],
+        defender_id: defenderId, defender_power: 0, winner_id: defenderId, previous_owner: defenderId,
+        outcome: 'defense_applied', defense_permanent: 0, defense_temporary: 0, defense_immunity: true,
+      });
+    } else {
+      steps.push(step);
+    }
     // The cards on the tile: each attacker's power over two Claims (three
     // for a big one, one for a tiny one); the
     // fortified defender's Defense card and Claim. "You" (Blue) are face up.
@@ -416,6 +429,10 @@ export default function ResolveAnimationPreview() {
     };
     for (const c of step.claimants) {
       if (c.player_id === defenderId) {
+        if (s.immune) {
+          add(c.player_id, 0, catalog.getCardByName('Iron Wall') ?? defenseCard, { defense_bonus: 0 });
+          continue;
+        }
         add(c.player_id, 0, defenseCard, { defense_bonus: 2 });
         add(c.player_id, 1, claimCard, { power: 1 });
         continue;
