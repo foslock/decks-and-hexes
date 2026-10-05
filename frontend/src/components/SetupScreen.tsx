@@ -7,6 +7,8 @@ import TutorialOverlay from './tutorial/TutorialOverlay';
 import HeroAnimation from './HeroAnimation';
 import LobbyBrowser from './LobbyBrowser';
 import LocalSettingsMenu from './LocalSettingsMenu';
+import { useSettings } from './SettingsContext';
+import { soundEngine } from '../audio/SoundEngine';
 import packageJson from '../../package.json';
 import { appHasBooted, signalAppReady, waitForFonts } from '../utils/appReady';
 
@@ -52,11 +54,14 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
 
   // Boot gate: the whole home intro (title, diorama, buttons) waits until the
-  // fonts, card art and 3D board are ready, then starts in one go as the
-  // loading bar fades out. Coming back home later skips the wait.
+  // fonts, card art, 3D board and audio are ready, then starts in one go as
+  // the loading bar fades out — so the title cards' whoosh and clash land
+  // with them. Coming back home later skips the wait.
   const [ready, setReady] = useState(() => appHasBooted());
   const [fontsReady, setFontsReady] = useState(() => appHasBooted());
   const [heroReady, setHeroReady] = useState(() => appHasBooted());
+  const [audioReady, setAudioReady] = useState(() => appHasBooted());
+  const { settings } = useSettings();
   const handleHeroReady = useCallback(() => setHeroReady(true), []);
   useEffect(() => {
     if (fontsReady) return;
@@ -65,8 +70,19 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
     return () => { live = false; };
   }, [fontsReady]);
   useEffect(() => {
+    if (audioReady) return;
+    if (!settings.soundEnabled && !settings.musicEnabled) { setAudioReady(true); return; }
+    let live = true;
+    // (Resolves either way: where the browser holds audio back until a click,
+    // the intro starts silent rather than its sounds arriving late.)
+    void soundEngine.prepare().then(() => { if (live) setAudioReady(true); });
+    return () => { live = false; };
+  // Once, at boot.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
     if (ready) return;
-    if (fontsReady && heroReady) {
+    if (fontsReady && heroReady && audioReady) {
       // Flip on the next frame so the bar's fade and the intro share a paint.
       const raf = requestAnimationFrame(() => {
         setReady(true);
@@ -77,7 +93,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
     // Never hold the home screen hostage to a slow asset.
     const t = setTimeout(() => { setReady(true); signalAppReady(); }, 8000);
     return () => clearTimeout(t);
-  }, [ready, fontsReady, heroReady]);
+  }, [ready, fontsReady, heroReady, audioReady]);
 
   const closeTutorial = useCallback(() => setShowTutorial(false), []);
 
