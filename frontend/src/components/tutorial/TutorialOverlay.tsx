@@ -18,6 +18,7 @@ import type { CameraShot } from '../../board3d/engine';
 import { axialToPixel } from '../../utils/hexGeometry';
 import { NormalAnimations, useAnimationSpeed } from '../SettingsContext';
 import { useSound } from '../../audio/useSound';
+import { soundEngine } from '../../audio/SoundEngine';
 import Icon from '../../icons/Icon';
 import { SCENES, type Anchor, type TutorialCtx } from './tutorialScenes';
 import {
@@ -229,6 +230,9 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
   /** Rival cards lying face down on tiles until the reveal. */
   const [facedown, setFacedown] = useState<Record<string, { entry: BoardCardEntry; from: string }[]>>({});
   const facedownRef = useRef(facedown);
+  /** Rival plays still out of sight: like a real game, where they go isn't
+   *  shown until the reveal. */
+  const hiddenRef = useRef<{ card: Card; tile: string; from: string }[]>([]);
 
   const controlsRef = useRef<BoardControls | null>(null);
   const fxRef = useRef<BoardFx | null>(null);
@@ -245,6 +249,13 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
   const landings = useRef(new Map<string, () => void>());
   const resolveHooks = useRef<{ api: ResolverApi; complete(): void } | null>(null);
   const seq = useRef(0);
+
+  // The march plays while the tutorial is open (put back as it was after).
+  useEffect(() => {
+    const before = soundEngine.musicOn;
+    soundEngine.setMusicActive(true);
+    return () => soundEngine.setMusicActive(before);
+  }, []);
 
   // The island rises out of the sea once, on open.
   useEffect(() => {
@@ -497,19 +508,44 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
       },
 
       rivalPlay: async (card, tile, from) => {
+        // A card back rises off the rival's land into their chip in the top
+        // bar: you see that they played, not where.
         const src = tileCenter(from);
-        const mine = worldRef.current.cards[tile]?.length ?? 0;
-        const down = facedownRef.current[tile]?.length ?? 0;
-        const to = tileSlot(tile, mine + down, mine + down + 1);
+        const chip = point({ hud: 'rivalVp' });
+        const s = tileSlot(tile)?.scale ?? 0.24;
         sfx('cardPlay');
-        if (src && to) await fly(null, { x: src.x, y: src.y, rot: 0, scale: to.scale * 0.5 }, to, { duration: PLAY.rival, arc: 70 });
-        setDown(d => ({ ...d, [tile]: [...(d[tile] ?? []), { entry: { key: `${card.id}@${tile}`, card, playerId: RIVAL, playerName: 'Rival' }, from }] }));
+        if (src && chip) {
+          await fly(null, { x: src.x, y: src.y, rot: 0, scale: s * 0.6 }, { x: chip.x, y: chip.y, rot: 0, scale: s * 0.35, opacity: 0 }, { duration: PLAY.rival, arc: 50 });
+        }
+        if (!run.cancelled) hiddenRef.current = [...hiddenRef.current, { card, tile, from }];
       },
 
       reveal: async () => {
         set({ phase: 'Reveal' });
         if (!run.cancelled) soundRef.current.phaseCall(4);
         await banner('Reveal');
+        // The rival's hidden plays land face down on their tiles…
+        const hidden = hiddenRef.current;
+        hiddenRef.current = [];
+        if (hidden.length) {
+          const chip = point({ hud: 'rivalVp' });
+          sfx('cardPlay');
+          await Promise.all(hidden.map(({ tile }) => {
+            const mine = worldRef.current.cards[tile]?.length ?? 0;
+            const down = facedownRef.current[tile]?.length ?? 0;
+            const to = tileSlot(tile, mine + down, mine + down + 1);
+            return chip && to ? fly(null, { x: chip.x, y: chip.y, rot: 0, scale: to.scale * 0.35 }, to, { duration: PLAY.rival, arc: 40 }) : Promise.resolve();
+          }));
+          setDown(d => {
+            const next = { ...d };
+            for (const { card, tile, from } of hidden) {
+              next[tile] = [...(next[tile] ?? []), { entry: { key: `${card.id}@${tile}`, card, playerId: RIVAL, playerName: 'Rival' }, from }];
+            }
+            return next;
+          });
+          await wait(450);
+        }
+        // …then everything turns over.
         const down = facedownRef.current;
         setDown(() => ({}));
         set(w => {
@@ -616,6 +652,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     setDetail(null);
     facedownRef.current = {};
     setFacedown({});
+    hiddenRef.current = [];
     landings.current.clear();
     resolveHooks.current = null;
     const start = SCENES[index].start();
