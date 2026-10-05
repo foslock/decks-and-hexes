@@ -251,6 +251,8 @@ export class CameraRig {
   get currentRotation(): number { return this.cur.rotation; }
   get currentTilt(): number { return this.cur.tilt; }
   get currentZoom(): number { return this.cur.zoom; }
+  /** Where the camera is right now (it eases toward the targets). */
+  get currentState(): { rotation: number; tilt: number; zoom: number; panX: number; panZ: number } { return { ...this.cur }; }
 
   /** World → container CSS px. */
   project(world: Vector3, out = { x: 0, y: 0 }): { x: number; y: number } {
