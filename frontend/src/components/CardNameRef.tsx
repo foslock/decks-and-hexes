@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, type CSSProperties } from 're
 import { createPortal } from 'react-dom';
 import type { Card } from '../types/game';
 import CardFull, { CARD_FULL_WIDTH } from './CardFull';
+import { cursor } from '../utils/cursors';
 
 /** Width of the hover preview after scaling (CARD_FULL_WIDTH * scale). */
 const PREVIEW_SCALE = 0.8;
@@ -65,7 +66,7 @@ export default function CardNameRef({ text, card }: CardNameRefProps) {
         onPointerLeave={hide}
         style={{
           borderBottom: '1px dotted #aaa',
-          cursor: 'help',
+          cursor: cursor('inspect'),
         }}
       >
         {text}

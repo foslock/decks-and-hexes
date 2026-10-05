@@ -125,6 +125,7 @@ import { HEX_SIZE, axialToPixel, localToScreen, screenToLocal, type GridTransfor
 import { chevronSource, findNearestOwnedTile } from '../utils/resolveChevrons';
 import { intrinsicClaimPower, stackingBonus, type ClaimPowerContext } from '../utils/claimPower';
 import { roundEndDiscardsHand } from '../utils/endOfRound';
+import { cursor } from '../utils/cursors';
 export { HEX_SIZE, axialToPixel, localToScreen };
 
 interface GameScreenProps {
@@ -446,7 +447,7 @@ function PhaseIndicatorPill({ phase }: { phase: string }) {
           fontSize: 10, padding: '2px 8px', borderRadius: 999,
           background: `linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0) 60%), ${PHASE_PILL_COLORS[phase] ?? '#333'}`,
           boxShadow: `inset 0 1px 0 rgba(255,255,255,0.25), 0 0 10px ${(PHASE_PILL_COLORS[phase] ?? '#333')}55`,
-          color: '#fff', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, cursor: 'help',
+          color: '#fff', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1, cursor: cursor('inspect'),
           textShadow: '0 1px 1px rgba(0,0,0,0.4)',
         }}
       >
@@ -5536,7 +5537,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                 <span>VP to win</span>
                 {gameState.max_rounds && (
                   <Tooltip content={`Game ends after round ${gameState.max_rounds}. Starting on round 5, the leading player will receive a Debt card each round.`} position="below">
-                    <span style={{ marginLeft: 8, cursor: 'help', display: 'inline-flex' }}>
+                    <span style={{ marginLeft: 8, cursor: cursor('inspect'), display: 'inline-flex' }}>
                       <IconValue icon="round" value={`${gameState.current_round}/${gameState.max_rounds}`} size={12} title="Round" />
                     </span>
                   </Tooltip>

@@ -4,6 +4,7 @@ import type { GameState } from '../types/game';
 import { getGameLog, type LogEntry } from '../api/client';
 import Icon from '../icons/Icon';
 import type { IconName } from '../icons/glyphs';
+import { cursor } from '../utils/cursors';
 
 interface RoundBreakdownOverlayProps {
   gameId: string;
@@ -418,7 +419,7 @@ export default function RoundBreakdownOverlay({
                               key={`m-${p.round}`}
                               onMouseEnter={(e) => hoverAt(e, p.round, p.value)}
                               onMouseLeave={() => setHover(null)}
-                              style={{ cursor: 'help' }}
+                              style={{ cursor: cursor('inspect') }}
                             >
                               <line x1={cx - sz} y1={cy - sz} x2={cx + sz} y2={cy + sz} stroke={s.color} strokeWidth={3} strokeLinecap="round" />
                               <line x1={cx - sz} y1={cy + sz} x2={cx + sz} y2={cy - sz} stroke={s.color} strokeWidth={3} strokeLinecap="round" />
@@ -431,7 +432,7 @@ export default function RoundBreakdownOverlay({
                             key={`m-${p.round}`}
                             onMouseEnter={(e) => hoverAt(e, p.round, p.value)}
                             onMouseLeave={() => setHover(null)}
-                            style={{ cursor: 'help' }}
+                            style={{ cursor: cursor('inspect') }}
                           >
                             <circle
                               cx={cx}

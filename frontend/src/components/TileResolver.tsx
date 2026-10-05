@@ -370,8 +370,25 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       // A claim that bounces needs something to bounce off: an unseen 0
       // defense (a 0-power claim tying the owner) shows itself first.
       if ((a.clash === 'bounce' || a.clash === 'dink') && !defRef.current) await popDefense(holderView(plan));
-      // Nothing showing (an empty tile): the claim strikes the ground itself.
       const hadDefense = !!defRef.current;
+      // Nothing defends the tile (an empty tile, no defense to show): no
+      // smash — the claim glides to the middle, unopposed, and holds it.
+      if (!hadDefense && a.clash === 'break') {
+        await animate(claimRef.current, [
+          { transform: 'translate(0, 0) scale(1)' },
+          { transform: `translate(${-dir.dx * CLAIM_R}px, ${-dir.dy * CLAIM_R}px) scale(1.08)` },
+        ], ms(480), 'cubic-bezier(0.45, 0, 0.25, 1)', 'forwards');
+        flushSync(() => {
+          setClaim(null);
+          setDefense({ mode: 'held', value: a.total, playerId: a.playerId });
+        });
+        await animate(defRef.current, [
+          { transform: 'scale(1.08)', filter: 'brightness(1.35)' },
+          { transform: 'scale(1)', filter: 'brightness(1)' },
+        ], ms(260), 'ease-out');
+        await wait(160);
+        return;
+      }
 
       // The smash — the bigger the claim, the harder it hits (0 → 8+).
       // An immune tile turns any claim away with the same light "dink".
