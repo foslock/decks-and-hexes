@@ -203,6 +203,9 @@ export class BoardEngine {
 
   /** Splash-screen mode: no camera input, lighter rendering, idle sway. */
   private hero: boolean;
+  /** Drag to turn / pan and wheel / pinch to zoom (off for the hero board
+   *  and while a guided camera tells the story). */
+  private cameraInput: boolean;
   private sway = 0;
 
   constructor(host: HTMLElement, opts: {
@@ -214,6 +217,7 @@ export class BoardEngine {
   } = {}) {
     this.hostEl = host;
     this.hero = !!opts.hero;
+    this.cameraInput = !this.hero;
     this.quality = opts.quality ?? (this.hero ? 'low' : detectQuality());
     const shared = this.shared;
     const terrain = createTerrainMaterial(shared, this.tex);
@@ -284,7 +288,7 @@ export class BoardEngine {
     this.world.add(this.structureGroup);
     this.scene.add(this.smokePool.points, this.glowPool.points);
 
-    this.attachInput(canvas, opts.interactive !== false, !this.hero);
+    this.attachInput(canvas, opts.interactive !== false);
     if (!this.hero) this.rig.padding = 26;
     this.ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => this.resize()) : null;
     this.ro?.observe(host);
@@ -1164,7 +1168,17 @@ export class BoardEngine {
 
   // ── Input ──────────────────────────────────────────────────────────────
 
-  private attachInput(canvas: HTMLCanvasElement, interactive: boolean, cameraInput: boolean): void {
+  /** Let the player move the camera (drag, wheel, pinch) — or not. */
+  setCameraInput(on: boolean): void {
+    if (this.hero) return;
+    this.cameraInput = on;
+    if (!on) {
+      this.orbit = null;
+      this.gesture = null;
+    }
+  }
+
+  private attachInput(canvas: HTMLCanvasElement, interactive: boolean): void {
     const rel = (e: { clientX: number; clientY: number }) => {
       const rect = canvas.getBoundingClientRect();
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
@@ -1204,7 +1218,7 @@ export class BoardEngine {
         const dist = Math.hypot(e.clientX - pr.x0, e.clientY - pr.y0);
         if (dist > (pr.mouse ? 6 : 10)) {
           pr.moved = true;
-          if (pr.mouse && cameraInput) {
+          if (pr.mouse && this.cameraInput) {
             // Left-drag orbits: hand this pointer over to the camera.
             this.orbit = { id: e.pointerId, x: e.clientX, y: e.clientY, button: 0 };
             canvas.style.cursor = 'var(--cc-cursor-grabbing)';
@@ -1222,7 +1236,7 @@ export class BoardEngine {
     };
     const onDown = (e: PointerEvent) => {
       this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (!cameraInput) return;
+      if (!this.cameraInput) return;
       if (e.button === 2 || e.button === 1) {
         // Orbit / pan: keep the parent from treating this as a deselect click.
         e.stopPropagation();
@@ -1284,13 +1298,13 @@ export class BoardEngine {
       if (this.press?.id === e.pointerId) this.press = null;
     };
     const onWheel = (e: WheelEvent) => {
-      if (!cameraInput) return;
+      if (!this.cameraInput) return;
       e.preventDefault();
       const p = rel(e);
       const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015));
       this.zoomBy(factor, p.x, p.y);
     };
-    const onContext = (e: Event) => { if (cameraInput) e.preventDefault(); };
+    const onContext = (e: Event) => { if (this.cameraInput) e.preventDefault(); };
 
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerdown', onDown);

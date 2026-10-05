@@ -16,7 +16,7 @@ import { CARD_H, CARD_W, flightKeyframes, poseTransform, runAnimation, type Pose
 import { PLAYER_COLORS } from '../../board3d/boardTypes';
 import type { CameraShot } from '../../board3d/engine';
 import { axialToPixel } from '../../utils/hexGeometry';
-import { useAnimationSpeed } from '../SettingsContext';
+import { NormalAnimations, useAnimationSpeed } from '../SettingsContext';
 import { useSound } from '../../audio/useSound';
 import Icon from '../../icons/Icon';
 import { SCENES, type Anchor, type TutorialCtx } from './tutorialScenes';
@@ -190,7 +190,13 @@ const COIN_GAP = 230;
 
 // ── The overlay ─────────────────────────────────────────────────────────
 
-export default function TutorialOverlay({ onClose, onPlay, onRules, covered = false }: Props) {
+/** The tutorial always runs at Normal animation speed — its pacing is part
+ *  of the lesson, so the Fast / Off setting doesn't apply here. */
+export default function TutorialOverlay(props: Props) {
+  return <NormalAnimations><Tutorial {...props} /></NormalAnimations>;
+}
+
+function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
   const speed = useAnimationSpeed();
   const pace = speed === 0 ? 0 : Math.max(0.65, speed);
   const vp = useViewport();
@@ -729,6 +735,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
     <div ref={rootRef} className="cc-tut" role="dialog" aria-modal="true" aria-label="How to play">
       <div ref={boardWrapRef} className="cc-tut-board">
         <GameBoard
+          cameraLocked
           tiles={world.tiles}
           onTileClick={() => {}}
           playerInfo={PLAYER_INFO}
