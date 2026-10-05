@@ -110,13 +110,23 @@ describe('buildResolvePlans', () => {
     expect(plans[1].mainStep).toBe(0);
   });
 
-  it('claims with no say (an immune tile) fizzle', () => {
-    const t = tiles({ '0,0': { owner: 'me' } });
+  it('turns every claim on an immune tile into a dink off it, from the claimer\'s nearest tile', () => {
+    const t = tiles({ '0,0': { owner: 'me' }, '2,0': { owner: 'rival' }, '3,0': { owner: 'rival' } });
     const steps = [step({ outcome: 'defense_applied', claimants: [claimant('me', 0)], previous_owner: 'me', winner_id: 'me', defense_immunity: true })];
-    const cards = new Map([['0,0', [card('iw@0,0', 'me', 'defense'), card('r@0,0', 'rival', 'claim', 3)]]]);
+    const cards = new Map([['0,0', [
+      card('iw@0,0', 'me', 'defense'), card('r1@0,0', 'rival', 'claim', 6), card('r2@0,0', 'rival', 'claim', 3),
+    ]]]);
     const [plan] = buildResolvePlans(steps, cards, t, 'me');
     expect(plan.kind).toBe('defense');
     expect(plan.immune).toBe(true);
-    expect(plan.fizzles.map(c => c.key)).toEqual(['r@0,0']);
+    expect(plan.fizzles).toEqual([]);
+    expect(plan.attacks).toHaveLength(1);
+    const [a] = plan.attacks;
+    expect(a.clash).toBe('dink');
+    expect(a.total).toBe(9);
+    expect(a.beats.map(b => [b.card?.key, b.add])).toEqual([['r1@0,0', 6], ['r2@0,0', 3]]);
+    expect([a.sourceQ, a.sourceR]).toEqual([2, 0]);
+    expect(plan.winner).toBe('me');
+    expect(plan.captured).toBe(false);
   });
 });

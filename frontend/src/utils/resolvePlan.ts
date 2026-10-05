@@ -37,7 +37,21 @@ export interface Beat {
   temp?: boolean;
 }
 
-export type Clash = 'break' | 'bounce' | 'stalemate';
+/** How a claim meets what holds the tile: breaks it, bounces off, ties the
+ *  claim in the lead, or — on an immune tile — just dinks off it. */
+export type Clash = 'break' | 'bounce' | 'stalemate' | 'dink';
+
+/** The tile a player holds nearest to (q, r) — where their claim comes from. */
+function nearestOwned(tiles: Record<string, HexTile>, pid: string, q: number, r: number): [number, number] | null {
+  let best: [number, number] | null = null;
+  let bestD = Infinity;
+  for (const t of Object.values(tiles)) {
+    if (t.owner !== pid) continue;
+    const d = (Math.abs(t.q - q) + Math.abs(t.r - r) + Math.abs(t.q + t.r - q - r)) / 2;
+    if (d < bestD) { bestD = d; best = [t.q, t.r]; }
+  }
+  return best;
+}
 
 export interface AttackPlan {
   playerId: string;
@@ -253,8 +267,24 @@ export function buildResolvePlans(
       ...walk.attacks.flatMap(a => a.beats.flatMap(b => (b.card ? [b.card.key] : []))),
     ]);
     const attackers = new Set(walk.attacks.map(a => a.playerId));
-    const fizzles = onTile.filter(c => !inPlay.has(c.key) && c.cardType === 'claim' && c.playerId !== holder && !attackers.has(c.playerId));
+    let fizzles = onTile.filter(c => !inPlay.has(c.key) && c.cardType === 'claim' && c.playerId !== holder && !attackers.has(c.playerId));
     const others = onTile.filter(c => !inPlay.has(c.key) && !fizzles.includes(c));
+    // An immune tile turns every claim away, whatever its power: each
+    // claimer still counts up — then just dinks off the defense.
+    if (immune && fizzles.length) {
+      const byPlayer = new Map<string, PlanCard[]>();
+      for (const c of fizzles) byPlayer.set(c.playerId, [...(byPlayer.get(c.playerId) ?? []), c]);
+      const dinks = [...byPlayer].map(([playerId, list]): AttackPlan => {
+        const total = list.reduce((n, c) => n + Math.max(0, c.power), 0);
+        const src = nearestOwned(tiles, playerId, first.q, first.r);
+        return {
+          playerId, total, beats: list.map(card => ({ card, add: Math.max(0, card.power) })),
+          sourceQ: src?.[0] ?? null, sourceR: src?.[1] ?? null, clash: 'dink', holder, value: defense,
+        };
+      }).sort((a, b) => a.total - b.total);
+      walk = { ...walk, attacks: [...walk.attacks, ...dinks] };
+      fizzles = [];
+    }
     onTile.forEach(c => used.add(c.key));
 
     plans.push({
