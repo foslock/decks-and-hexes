@@ -178,6 +178,16 @@ function StarMote({ f, onDone }: { f: StarFlight; onDone: (key: string) => void 
   return <div ref={ref} className="cc-tut-star"><Icon name="vp" size={26} decorative /></div>;
 }
 
+/** Card plays take their time here (ms, before the speed setting), so a
+ *  new player can follow each one: the card lifts, aims, flies to its tile or
+ *  the discard pile, and an engine card's coins drift up one by one. */
+const PLAY = { lift: 620, aim: 1050, toTile: 860, toDiscard: 900, settle: 450, rival: 860, revealed: 1600, home: 820 };
+/** The resolve runs slower than in a game: each card's count, every smash
+ *  and each card heading home get time to read. */
+const RESOLVE_PACE = 1.45;
+const COIN_FLIGHT = 1100;
+const COIN_GAP = 230;
+
 // ── The overlay ─────────────────────────────────────────────────────────
 
 export default function TutorialOverlay({ onClose, onPlay, onRules, covered = false }: Props) {
@@ -337,7 +347,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
       await Promise.all(splitCoins(amount).map((value, i) => {
         const id = ++seq.current;
         const landed = new Promise<void>(res => landings.current.set(`c${id}`, res));
-        setCoins(cs => [...cs, { id, from, to, value, batch: 0, delay: i * 85 * pace, duration: Math.max(320, 680 * pace) }]);
+        setCoins(cs => [...cs, { id, from, to, value, batch: 0, delay: i * COIN_GAP * pace, duration: Math.max(480, COIN_FLIGHT * pace) }]);
         return run.guard(landed).then(() => {
           set(w => ({ resources: w.resources + value }));
           if (first) {
@@ -385,7 +395,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           return;
         }
         const to: Pose = { x: dest.x, y: dest.y, rot: mine ? 6 : 0, scale: mine ? 0.26 * layoutRef.current.pileZoom : 0.08, opacity: mine ? 1 : 0 };
-        fly(e.card, from, to, { duration: 620, arc: 70 })
+        fly(e.card, from, to, { duration: PLAY.home, arc: 70 })
           .then(() => { if (mine) set(w => ({ discard: [...w.discard, e.card] })); })
           .catch(() => {});
       });
@@ -426,14 +436,14 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
         if (i < 0) return;
         const card = hand[i];
         setLifted(cardId);
-        await wait(420);
+        await wait(PLAY.lift);
         const from = handPoses(hand.length, layoutRef.current, i)[i];
         if (tile && paceRef.current > 0) {
           const to = tileCenter(tile);
           if (to) {
             sfx('tileSelect');
             setArrow({ from: { x: from.x, y: from.y - (CARD_H * from.scale) / 2 + 8 }, to });
-            await wait(800);
+            await wait(PLAY.aim);
             setArrow(null);
           }
         }
@@ -451,7 +461,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           const down = facedownRef.current[tile]?.length ?? 0;
           const mine = worldRef.current.cards[tile]?.length ?? 0;
           const to = tileSlot(tile, mine, mine + 1 + down) ?? { ...from, opacity: 0 };
-          await fly(card, from, to, { duration: 580, arc: 80 });
+          await fly(card, from, to, { duration: PLAY.toTile, arc: 90 });
           const [tq, tr] = parseKey(tile);
           const p = axialToPixel(tq, tr);
           fxRef.current?.dust(p.x, p.y, 10, 0.5);
@@ -469,7 +479,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           const to: Pose = dest
             ? { x: dest.x, y: dest.y, rot: 6, scale: 0.26 * layoutRef.current.pileZoom }
             : { ...from, opacity: 0 };
-          await fly(card, from, { ...to, y: to.y }, { duration: 620, arc: 120 });
+          await fly(card, from, to, { duration: PLAY.toDiscard, arc: 120 });
           set(w => ({ discard: [...w.discard, card] }));
         }
         if (card.resource_gain) await (gain ?? gainCoins(card.resource_gain, (tile && tileCenter(tile)) || from));
@@ -477,7 +487,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           set(w => ({ actions: w.actions + card.action_return }));
           pop(`+${card.action_return} action`, { hud: 'actions' }, 'blue');
         }
-        await wait(280);
+        await wait(PLAY.settle);
       },
 
       rivalPlay: async (card, tile, from) => {
@@ -486,7 +496,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
         const down = facedownRef.current[tile]?.length ?? 0;
         const to = tileSlot(tile, mine + down, mine + down + 1);
         sfx('cardPlay');
-        if (src && to) await fly(null, { x: src.x, y: src.y, rot: 0, scale: to.scale * 0.5 }, to, { duration: 640, arc: 70 });
+        if (src && to) await fly(null, { x: src.x, y: src.y, rot: 0, scale: to.scale * 0.5 }, to, { duration: PLAY.rival, arc: 70 });
         setDown(d => ({ ...d, [tile]: [...(d[tile] ?? []), { entry: { key: `${card.id}@${tile}`, card, playerId: RIVAL, playerName: 'Rival' }, from }] }));
       },
 
@@ -505,7 +515,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
           }
           return { cards, chevrons };
         });
-        await wait(Object.keys(down).length ? 1100 : 300);
+        await wait(Object.keys(down).length ? PLAY.revealed : 300);
       },
 
       resolve: (steps) => {
@@ -898,7 +908,7 @@ export default function TutorialOverlay({ onClose, onPlay, onRules, covered = fa
         <TileResolver
           key={resolving.key}
           plans={resolving.plans}
-          speed={paceRef.current || 1}
+          speed={(paceRef.current || 1) * RESOLVE_PACE}
           fxRef={fxRef}
           project={projectTile}
           api={resolveApi}

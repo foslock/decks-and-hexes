@@ -130,7 +130,8 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
   const sound = useSound();
   /** Board cards turn over at the resolve speed from the settings. */
   const flipSpeed = useResolveSpeed();
-  const [tile, setTile] = useState<{ q: number; r: number } | null>(null);
+  /** The tile resolving now (`run` counts tiles, so each gets a fresh layer). */
+  const [tile, setTile] = useState<{ q: number; r: number; run: number } | null>(null);
   const [defense, setDefense] = useState<DefenseView | null>(null);
   const [claim, setClaim] = useState<ClaimView | null>(null);
   const [shards, setShards] = useState<Shard[]>([]);
@@ -193,14 +194,15 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
     const reveal = async (cards: (PlanCard | null)[]) => {
       const real = cards.filter((c): c is PlanCard => !!c);
       if (!real.length) return;
-      // As long as a board card takes to turn over (plus a frame for it to start).
-      const beat = Math.round(BOARD_FLIP_MS * (live.current.flipSpeed || 1)) + 50;
+      const down = real.filter(c => c.faceDown);
+      // As long as a board card takes to turn over (plus a frame for it to
+      // start); a face-up card holds the same beat at the resolve's pace.
+      const beat = (down.length ? Math.round(BOARD_FLIP_MS * (live.current.flipSpeed || 1)) : ms(BOARD_FLIP_MS)) + 50;
       api.flip(real.map(c => c.key));
       // The power counts once the card is fully face up: wait for its
       // turn-over to finish (it starts once the board has the new state).
       const start = performance.now();
       const pause = (n: number) => new Promise<void>((res, rej) => setTimeout(() => (cancelled ? rej(CANCELLED) : res()), Math.max(0, n)));
-      const down = real.filter(c => c.faceDown);
       let turns: Animation[] = [];
       for (let i = 0; down.length && !turns.length && i < 15; i++) {
         await pause(16);
@@ -472,7 +474,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
 
     const resolveTile = async (plan: TilePlan, full: boolean) => {
       api.setActive(plan);
-      setTile({ q: plan.q, r: plan.r });
+      setTile({ q: plan.q, r: plan.r, run: ++seq });
 
       if (plan.kind === 'effect') {
         const f = fx();
@@ -584,7 +586,10 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
   if (!tile) return null;
   return (
     <div ref={anchorRef} className="cc-rs-anchor" aria-hidden>
-      <div className="cc-rs-layer">
+      {/* A fresh layer per tile: the last tile's fade-out (held at the end)
+          never carries over — even when the next tile follows in the same
+          render, with no camera move in between. */}
+      <div key={tile.run} className="cc-rs-layer">
         {defense && (
           <div className="cc-rs-slot">
             <div ref={defRef} className={`cc-rs-badge is-defense${defense.mode === 'held' && !defense.settled ? ' is-leading' : ''}`} style={{
