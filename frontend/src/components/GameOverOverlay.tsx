@@ -259,7 +259,7 @@ export default function GameOverOverlay({
                 opacity: visible ? 1 : 0,
                 transform: visible ? 'translateY(0)' : 'translateY(10px)',
                 transition: 'opacity 0.4s ease, transform 0.45s var(--cc-ease-out), background-color 0.15s ease',
-                cursor: visible ? 'pointer' : 'var(--cc-cursor-arrow)',
+                cursor: visible ? 'var(--cc-cursor-pointer)' : 'var(--cc-cursor-arrow)',
               }}
             >
               {/* Crown / rank */}
@@ -329,7 +329,7 @@ export default function GameOverOverlay({
               className={removedFromLobby ? 'cc-btn-secondary is-removed' : 'cc-btn-primary'}
               onClick={() => { if (!disabled) { setReturnedToLobby(true); onReturnToLobby(); } }}
               disabled={disabled}
-              style={{ cursor: disabled ? 'var(--cc-cursor-arrow)' : 'pointer' }}
+              style={{ cursor: disabled ? 'var(--cc-cursor-arrow)' : 'var(--cc-cursor-pointer)' }}
             >
               {label}
             </button>
@@ -356,7 +356,7 @@ export default function GameOverOverlay({
             }
           }}
           disabled={downloadingLog}
-          style={{ cursor: downloadingLog ? 'var(--cc-cursor-arrow)' : 'pointer' }}
+          style={{ cursor: downloadingLog ? 'var(--cc-cursor-arrow)' : 'var(--cc-cursor-pointer)' }}
           title="Download the structured JSON log of this game"
         >
           {downloadingLog ? 'Preparing…' : 'Download Game Log'}

@@ -71,7 +71,7 @@ const CardPile = memo(forwardRef<HTMLButtonElement, CardPileProps>(function Card
         padding: 0,
         border: 'none',
         background: 'none',
-        cursor: 'pointer',
+        cursor: 'var(--cc-cursor-pointer)',
         perspective: PILE_PERSPECTIVE,
         perspectiveOrigin: '50% 10%',
         animation: busy ? 'cc-pile-glow 0.6s ease-in-out infinite' : undefined,

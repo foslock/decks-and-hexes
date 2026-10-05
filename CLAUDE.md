@@ -89,10 +89,13 @@ at high priority, the rest of the catalog during idle time).
   edges facing other land. Walls (`wallEdges` / `buildWallEdge`) and roads
   (`ROAD_STYLES` in `roads.ts`) take the holder's style too; pieces rise and
   sink per piece like walls. Preview: `?preview=territory`.
-- Cursors: gilded PNGs in `frontend/public/cursors/` (arrow, inspect, target,
-  grab, grabbing), drawn as SVG in `frontend/scripts/build_cursors.py`
+- Cursors: gilded PNGs in `frontend/public/cursors/` (arrow, pointer, inspect,
+  target, grab, grabbing), drawn as SVG in `frontend/scripts/build_cursors.py`
   (`python3 frontend/scripts/build_cursors.py`, macOS `sips`). Use them via
   `cursor('target')` from `utils/cursors.ts` (CSS `var(--cc-cursor-target)`).
+  Clickables use the pointing gauntlet: `var(--cc-cursor-pointer)` (never the
+  bare `pointer` keyword); global.css gives it to buttons, links and
+  `[role="button"]` by default.
 
 ### Audio (frontend)
 All sound is synthesized live with Web Audio (no files): recipes in
@@ -101,10 +104,13 @@ All sound is synthesized live with Web Audio (no files): recipes in
 the engine in `SoundEngine.ts`. Phase banners (`PhaseBanner`) sound a bugle
 call that climbs through the round: 1 → 3 Play, 1 → 4 Resolve, 1 → 5 Buy
 (`phaseCall3`–`5`). Background music is `audio/music.ts`: distant march drums
-generated bar by bar on their own bus/volume; it starts at the first gesture, pauses while the tab is hidden,
-holds silent through the lobby countdown (`holdMusic`) and starts over with
-each game (`restartMusic`). Music/Sounds settings reach the engine from
-`SettingsProvider`. Audition page: `?preview=sounds`.
+generated bar by bar on their own bus/volume. It plays where a screen turns
+it on — the lobby (`setMusicActive`) and the game — never on the home screen;
+pauses while the tab is hidden, holds silent through the lobby countdown
+(`holdMusic`) and starts over with each game (`restartMusic`). Nothing makes a
+sound (no AudioContext is even created) until the page has had a click, tap
+or key press. Music/Sounds settings reach the engine from `SettingsProvider`.
+Audition page: `?preview=sounds`.
 
 ### Game Log Analysis
 When the user refers to a "game log" they mean a JSON file produced by

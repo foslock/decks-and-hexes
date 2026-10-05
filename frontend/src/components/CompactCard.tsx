@@ -20,7 +20,7 @@ export default function CompactCard({ card, subtitleContext, effectiveResourceGa
   const ctx: CardSubtitleContext = { ...subtitleContext, effectiveResourceGain, effectiveDrawCards };
   const { showZoom } = useCardZoom();
   return (
-    <div onClick={() => showZoom(card)} style={{ cursor: 'pointer' }}>
+    <div onClick={() => showZoom(card)} style={{ cursor: 'var(--cc-cursor-pointer)' }}>
       <CompactCardFace card={card} width={COL_W} size="sm" subtitleContext={ctx} />
     </div>
   );

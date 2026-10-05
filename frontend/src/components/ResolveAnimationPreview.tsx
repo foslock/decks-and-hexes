@@ -605,7 +605,7 @@ export default function ResolveAnimationPreview() {
                 ...btnStyle,
                 background: resolving ? '#2a2a3e' : (lastScenario?.id === s.id ? '#6a8fff' : '#4a9eff'),
                 opacity: resolving ? 0.5 : 1,
-                cursor: resolving ? 'not-allowed' : 'pointer',
+                cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)',
               }}
             >
               {s.label}
@@ -627,7 +627,7 @@ export default function ResolveAnimationPreview() {
                 ...btnStyle,
                 background: resolving ? '#2a2a3e' : (lastPopupScenario?.id === s.id ? '#c77dff' : '#8a4fff'),
                 opacity: resolving ? 0.5 : 1,
-                cursor: resolving ? 'not-allowed' : 'pointer',
+                cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)',
               }}
               title={s.description}
             >
@@ -641,7 +641,7 @@ export default function ResolveAnimationPreview() {
               ...btnStyle,
               background: popupEffects.length === 0 ? '#2a2a3e' : '#555',
               opacity: popupEffects.length === 0 ? 0.5 : 1,
-              cursor: popupEffects.length === 0 ? 'not-allowed' : 'pointer',
+              cursor: popupEffects.length === 0 ? 'not-allowed' : 'var(--cc-cursor-pointer)',
             }}
           >
             Clear popups
@@ -649,7 +649,7 @@ export default function ResolveAnimationPreview() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 28 }}>
-          <button onClick={handleReset} disabled={resolving} style={{ ...btnStyle, background: '#555', opacity: resolving ? 0.5 : 1, cursor: resolving ? 'not-allowed' : 'pointer' }}>
+          <button onClick={handleReset} disabled={resolving} style={{ ...btnStyle, background: '#555', opacity: resolving ? 0.5 : 1, cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)' }}>
             Reset
           </button>
 
@@ -668,7 +668,7 @@ export default function ResolveAnimationPreview() {
                   color: settings.animationMode === mode ? '#fff' : '#aaa',
                   fontSize: 11,
                   fontWeight: 600,
-                  cursor: resolving ? 'not-allowed' : 'pointer',
+                  cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)',
                   opacity: resolving ? 0.5 : 1,
                   textTransform: 'capitalize',
                 }}
@@ -689,7 +689,7 @@ export default function ResolveAnimationPreview() {
               border: '1px solid #555',
               color: forceDefended ? '#1a1a2e' : '#aaa',
               opacity: resolving ? 0.5 : 1,
-              cursor: resolving ? 'not-allowed' : 'pointer',
+              cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)',
             }}
             title="Force the defender to win on owned-tile scenarios"
           >
@@ -704,7 +704,7 @@ export default function ResolveAnimationPreview() {
               border: '1px solid #555',
               color: quick ? '#1a1a2e' : '#aaa',
               opacity: resolving ? 0.5 : 1,
-              cursor: resolving ? 'not-allowed' : 'pointer',
+              cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)',
             }}
             title="Resolve as a tile that doesn't involve you: no close-up, no count-up"
           >

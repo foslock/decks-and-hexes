@@ -329,6 +329,6 @@ const btnStyle: React.CSSProperties = {
   border: 'none',
   borderRadius: 6,
   color: '#fff',
-  cursor: 'pointer',
+  cursor: 'var(--cc-cursor-pointer)',
   fontSize: 13,
 };

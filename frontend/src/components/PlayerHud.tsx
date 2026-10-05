@@ -177,7 +177,7 @@ function PurchaseChip({ p, onHover, onLeave }: {
         borderRadius: 6,
         background: metalGradient(tier, 145),
         boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.45), 0 0 0 1px rgba(0,0,0,0.55), 0 2px 5px rgba(0,0,0,0.45)',
-        cursor: onHover ? 'pointer' : undefined,
+        cursor: onHover ? 'var(--cc-cursor-pointer)' : undefined,
         maxWidth: '100%',
       }}
     >

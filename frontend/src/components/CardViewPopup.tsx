@@ -30,7 +30,7 @@ function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: b
         onPointerEnter={(e) => setHoverRect((e.currentTarget as HTMLElement).getBoundingClientRect())}
         onPointerLeave={() => setHoverRect(null)}
         onClick={() => showZoom(displayCard, navList)}
-        style={{ flexShrink: 0, cursor: 'pointer' }}
+        style={{ flexShrink: 0, cursor: 'var(--cc-cursor-pointer)' }}
       >
         <CompactCardFace card={displayCard} width={154} />
         {upgradeLabel}
@@ -53,7 +53,7 @@ function CardPopupItem({ card, full, shiftHeld, navList }: { card: Card; full: b
     );
   }
   return (
-    <div style={{ flexShrink: 0, cursor: 'pointer' }} onClick={() => showZoom(displayCard, navList)}>
+    <div style={{ flexShrink: 0, cursor: 'var(--cc-cursor-pointer)' }} onClick={() => showZoom(displayCard, navList)}>
       <CardFull card={displayCard} style={{ flexShrink: 0 }} />
       {upgradeLabel}
     </div>

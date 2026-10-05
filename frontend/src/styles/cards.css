@@ -146,7 +146,7 @@
   white-space: nowrap;
   display: flex;
   align-items: center;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   user-select: none;
   -webkit-user-select: none;
   touch-action: none;

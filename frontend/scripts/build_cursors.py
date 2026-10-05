@@ -58,6 +58,18 @@ HAND_OPEN = """
 <rect x="11" y="24.6" width="12.8" height="4" rx="1.2"/>
 """
 
+# Pointing: the index finger up (its tip is the hotspot), the others curled
+# under, the thumb tucked across.
+HAND_POINT = """
+<rect x="10.4" y="1.6" width="3.8" height="16" rx="1.9"/>
+<rect x="14.1" y="10" width="3.7" height="8.6" rx="1.85"/>
+<rect x="17.8" y="10.9" width="3.7" height="7.9" rx="1.85"/>
+<rect x="21.5" y="12.3" width="3.2" height="6.8" rx="1.6"/>
+<path d="M10.4 17.6 L7.83 13.92 A1.9 1.9 0 0 0 4.57 15.88 L8.3 21.2 Q9.4 22.9 10.6 23.9
+         Q12.6 25.8 15.2 25.8 L20.2 25.8 Q24.7 25.8 24.7 21.4 L24.7 16.2 L10.4 16.2 Z"/>
+<rect x="11" y="24.6" width="12.8" height="4" rx="1.2"/>
+"""
+
 # The thumb is its own layer, drawn first so the curled fingers cover it.
 FIST_THUMB = '<rect x="10.3" y="8.1" width="3.8" height="10.4" rx="1.9" transform="rotate(-41 12.2 16.6)"/>'
 
@@ -105,6 +117,15 @@ CURSORS: dict[str, str] = {
 <circle cx="16" cy="16" r="2.3" fill="{INK}"/>
 <circle cx="16" cy="16" r="1.4" fill="#ffe7a6"/>
 """,
+    # Over a button or anything else you can click: a pointing gauntlet.
+    "pointer": layered(HAND_POINT, extra=f"""
+<g fill="none" stroke="{INK}" stroke-opacity="0.55" stroke-width="0.8" stroke-linecap="round">
+  <line x1="14.15" y1="12.2" x2="14.15" y2="17.4"/>
+  <line x1="17.85" y1="12.8" x2="17.85" y2="17.6"/>
+  <line x1="21.55" y1="14" x2="21.55" y2="17.8"/>
+  <path d="M10.7 19.2 Q10.8 21.6 12.4 23.2"/>
+</g>
+{CUFF}"""),
     # Hovering a card in hand: an open gauntlet.
     "grab": layered(HAND_OPEN, extra=f"""
 <g fill="none" stroke="{INK}" stroke-opacity="0.55" stroke-width="0.8" stroke-linecap="round">

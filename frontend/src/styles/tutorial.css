@@ -103,7 +103,7 @@
   color: var(--cc-text-dim);
   font-size: 13px;
   letter-spacing: 0.04em;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: color 160ms ease, border-color 160ms ease, background 160ms ease;
 }
 .cc-tut-skip:hover { color: var(--cc-text); border-color: rgba(232, 196, 106, 0.5); background: rgba(232, 196, 106, 0.1); }
@@ -207,7 +207,7 @@
   border-radius: 50%;
   border: 1px solid rgba(232, 196, 106, 0.45);
   background: transparent;
-  cursor: pointer;
+  cursor: var(--cc-cursor-pointer);
   transition: all 220ms var(--cc-ease-out);
 }
 .cc-tut-dot.is-past { background: rgba(232, 196, 106, 0.45); }

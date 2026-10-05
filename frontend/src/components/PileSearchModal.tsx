@@ -82,7 +82,7 @@ function SelectableCompactCard({
         // Single-target mode names the destination in the modal subtitle
         // instead, so no per-card pill is rendered.
         paddingBottom: multiTarget ? 40 : 0,
-        cursor: 'pointer',
+        cursor: 'var(--cc-cursor-pointer)',
       }}
       onClick={() => onToggle()}
     >
@@ -440,7 +440,7 @@ export default function PileSearchModal({
             className="cc-btn-secondary"
             onClick={onCancel}
             disabled={!canCancel}
-            style={{ cursor: canCancel ? 'pointer' : 'not-allowed' }}
+            style={{ cursor: canCancel ? 'var(--cc-cursor-pointer)' : 'not-allowed' }}
           >
             Cancel
           </button>
@@ -450,7 +450,7 @@ export default function PileSearchModal({
           onClick={handleConfirm}
           disabled={!canConfirm}
           tooltip="Selected cards will move to their chosen destinations."
-          style={{ cursor: canConfirm ? 'pointer' : 'not-allowed' }}
+          style={{ cursor: canConfirm ? 'var(--cc-cursor-pointer)' : 'not-allowed' }}
         >
           Confirm
         </IrreversibleButton>

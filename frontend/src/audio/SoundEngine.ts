@@ -10,30 +10,16 @@ export interface HeldSound {
 
 const SILENT: HeldSound = { stop: () => {} };
 
-/**
- * Whether the browser will hold a new audio context back until the page has
- * had a gesture: Firefox says so outright; Chromium always does before the
- * first gesture. (Safari can't tell us — prepare() waits and sees.)
- */
-function autoplayBlocked(): boolean {
-  if (typeof navigator === 'undefined') return true;
-  const nav = navigator as Navigator & {
-    getAutoplayPolicy?: (type: string) => string;
-    userActivation?: { hasBeenActive: boolean };
-    userAgentData?: unknown;
-  };
-  if (typeof nav.getAutoplayPolicy === 'function') return nav.getAutoplayPolicy('audiocontext') === 'disallowed';
-  return !!nav.userAgentData && !!nav.userActivation && !nav.userActivation.hasBeenActive;
-}
-
 /** Fanfares the background music dips under. */
 const DUCK_UNDER = new Set<SoundName>(['victoryJingle', 'defeatJingle', 'beginJingle']);
 
 /**
  * Owns the (lazily created) AudioContext and master graph, and exposes one
  * method per sound. Recipes live in sounds.ts; the master bus in graph.ts.
- * Background music (music.ts) has its own bus, volume and on/off, and pauses
- * while the tab is hidden.
+ * Nothing sounds until the page has had a gesture (a click, tap or key) —
+ * browsers would only hold it back and let it out late. Background music
+ * (music.ts) has its own bus, volume and on/off; it plays where a screen
+ * turns it on (the lobby and the game) and pauses while the tab is hidden.
  */
 class SoundEngine {
   private ctx: AudioContext | null = null;
@@ -43,6 +29,10 @@ class SoundEngine {
   private musicEnabled = true;
   private musicVolume = 0.5;
   private musicHeld = false;
+  /** Screens that want music turn it on (the lobby, the game). */
+  private musicActive = false;
+  /** The page has had a click, tap or key press. */
+  private gestured = false;
   private music: DistantMarch | null = null;
   private unavailable = false;
   private unlockBound = false;
@@ -66,6 +56,7 @@ class SoundEngine {
     this.unlockBound = true;
     const events = ['pointerdown', 'keydown', 'touchend'] as const;
     const unlock = () => {
+      this.gestured = true;
       if (!this.enabled && !this.musicEnabled) return;
       const graph = this.ensureContext();
       this.syncMusic();
@@ -79,6 +70,8 @@ class SoundEngine {
   private ensureContext(): AudioGraph | null {
     if (this.unavailable) return null;
     if (!this.graph) {
+      // Before a gesture the browser would only queue it all up.
+      if (!this.gestured) return null;
       const AC: typeof AudioContext | undefined = typeof window !== 'undefined'
         ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
         : undefined;
@@ -130,10 +123,12 @@ class SoundEngine {
 
   setMusicEnabled(on: boolean) {
     this.musicEnabled = on;
-    // Switched on after the page has had a gesture: start the context now
-    // rather than waiting for the next click.
-    const nav = typeof navigator !== 'undefined' ? navigator as Navigator & { userActivation?: { hasBeenActive: boolean } } : null;
-    if (on && !this.graph && nav?.userActivation?.hasBeenActive) this.ensureContext();
+    this.syncMusic();
+  }
+
+  /** A screen that has music (the lobby, the game) turns it on; the home screen turns it off. */
+  setMusicActive(on: boolean) {
+    this.musicActive = on;
     this.syncMusic();
   }
 
@@ -146,16 +141,20 @@ class SoundEngine {
   /** Start the music over from the top (a new game). */
   restartMusic() {
     this.musicHeld = false;
+    this.musicActive = true;
     this.music?.stop(0.4);
     this.syncMusic();
   }
 
-  /** Music plays while it's on (and not held), the context exists and the tab is visible. */
+  /** Music plays where a screen wants it, while it's on (and not held), once
+   *  the page has had a gesture, and while the tab is visible. */
   private syncMusic() {
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    const want = this.musicEnabled && this.musicActive && !hidden && !this.musicHeld;
+    if (want && !this.music) this.ensureContext();
     const music = this.music;
     if (!music) return;
-    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-    if (this.musicEnabled && !hidden && !this.musicHeld) {
+    if (want) {
       if (!music.playing) {
         this.ensureContext();
         music.start();
@@ -188,37 +187,6 @@ class SoundEngine {
     } catch (e) {
       console.warn(`[SoundEngine] failed to play ${name}`, e);
     }
-  }
-
-  /**
-   * Whether sound can be heard right now: the context runs and its clock has
-   * started. A sound with no click behind it (the title animation) only plays
-   * then — otherwise a held-back context would let it all out late, at the
-   * first click or whenever the audio device wakes.
-   */
-  private get audible(): boolean {
-    return this.ctx?.state === 'running' && this.ctx.currentTime > 0.02;
-  }
-
-  /**
-   * Get audio going before the title animation: start the context and resolve
-   * true once it can be heard, or false when the browser holds audio back
-   * until a gesture (known up front where the browser says so) or it hasn't
-   * started within `timeoutMs`.
-   */
-  prepare(timeoutMs = 2500): Promise<boolean> {
-    if (!this.enabled && !this.musicEnabled) return Promise.resolve(false);
-    if (autoplayBlocked()) return Promise.resolve(false);
-    if (!this.ensureContext()) return Promise.resolve(false);
-    const t0 = performance.now();
-    return new Promise((resolve) => {
-      const check = () => {
-        if (this.audible) { this.syncMusic(); resolve(true); return; }
-        if (performance.now() - t0 >= timeoutMs) { resolve(false); return; }
-        setTimeout(check, 50);
-      };
-      check();
-    });
   }
 
   /**
@@ -282,10 +250,6 @@ class SoundEngine {
   /** Power gathering while the upgrade badge is held; stop it on release. */
   upgradeCharge(): HeldSound { return this.playHeld('upgradeCharge'); }
   beginJingle() { this.play('beginJingle'); }
-  /** The title cards rushing in (they collide 1 s later). */
-  heroWhoosh() { if (this.audible) this.play('heroWhoosh'); }
-  /** The title cards colliding. */
-  swordClash() { if (this.audible) this.play('swordClash'); }
   /** A phase banner's bugle call: 1 → 3, 4 or 5. */
   phaseCall(step: 3 | 4 | 5) { this.play(`phaseCall${step}`); }
   /** A ring of tiles popping up as the board builds, `delay` s from now. */

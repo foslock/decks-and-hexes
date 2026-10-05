@@ -99,7 +99,7 @@ export default function FullGameLog({ gameId, playerId, mapSeed, onClose }: Full
             className="cc-btn-secondary cc-ov-btn-sm"
             onClick={handleDownload}
             disabled={entries.length === 0}
-            style={{ cursor: entries.length > 0 ? 'pointer' : 'not-allowed' }}
+            style={{ cursor: entries.length > 0 ? 'var(--cc-cursor-pointer)' : 'not-allowed' }}
           >
             Download
           </button>
