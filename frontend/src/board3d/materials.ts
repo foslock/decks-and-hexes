@@ -26,6 +26,15 @@ export function createSharedUniforms(): SharedUniforms {
 
 /** Sea level (world y) — kept in sync with terrain.ts WATER_Y. */
 const WATER_LEVEL = '-0.3';
+/** How far below the board a tile starts its rise out of the sea. */
+export const BUILD_DEPTH = 1.2;
+/**
+ * The point in a tile's own build-in (0..1) where it breaks the surface:
+ * bh_rise(t) · BUILD_DEPTH clears the 0.3 to sea level at t ≈ 0.34. A tile at
+ * stagger s (ring / maxRing) surfaces at uBuild = s · 0.6 + BUILD_SURFACE.
+ */
+export const BUILD_SURFACE_T = 0.34;
+export const BUILD_SURFACE = 0.4 * BUILD_SURFACE_T;
 
 // ── GLSL snippets ─────────────────────────────────────────────────────────
 
@@ -57,6 +66,19 @@ float bh_easeOutBack(float t) {
 float bh_build(float stagger) {
   return clamp((uBuild - stagger * 0.6) / 0.4, 0.0, 1.0);
 }
+/* Rising out of the sea: up from BH_DEPTH below the board, quick under water,
+   slowing as it breaks the surface, with a small bob at the top. */
+const float BH_DEPTH = ${BUILD_DEPTH.toFixed(2)};
+float bh_rise(float t) {
+  return 1.0 - pow(1.0 - t, 3.0) + 0.1 * sin(3.14159265 * t) * t;
+}
+`;
+
+/* Freshly surfaced land is wet (darker, glossy) and dries as it settles. */
+const WET_GLSL = /* glsl */ `
+float bh_wet(float bt) {
+  return (bt <= 0.0 || bt >= 1.0) ? 0.0 : 1.0 - smoothstep(0.38, 1.0, bt);
+}
 `;
 
 // ── Prop material ─────────────────────────────────────────────────────────
@@ -72,15 +94,18 @@ uniform vec2 uWind;
 varying vec3 vGlow;
 varying float vGlowSeed;
 varying vec3 vPropWorld;
+varying float vPropBuilt;
 ${BUILD_GLSL}
 `;
 
 const PROP_VERTEX_BODY = /* glsl */ `
   {
+    // Props ride up out of the sea with their tile, showing once the ground
+    // under them has broken the surface (see the fragment discard).
     float bt = bh_build(aBuild);
-    float s = bt <= 0.0 ? 0.0001 : bh_easeOutBack(bt);
-    transformed = aAnchor + (transformed - aAnchor) * s;
-    transformed.y += (1.0 - min(bt * 1.4, 1.0)) * 0.6;
+    vPropBuilt = bt;
+    if (bt <= 0.0) transformed = aAnchor + (transformed - aAnchor) * 0.0001;
+    transformed.y -= (1.0 - bh_rise(bt)) * BH_DEPTH;
     float ph = aAnchor.x * 1.31 + aAnchor.z * 0.73 - aWind * 7.0;
     float sway = sin(uTime * 1.6 + ph) * 0.65 + sin(uTime * 2.9 + ph * 1.7) * 0.35;
     transformed.xz += uWind * sway * aWind;
@@ -154,9 +179,17 @@ export function createPropMaterial(shared: SharedUniforms, mask?: RoadMask): { m
         uniform float uTime;
         varying vec3 vGlow;
         varying float vGlowSeed;
-        varying float vCloud;`)
+        varying float vCloud;
+        varying vec3 vPropWorld;
+        varying float vPropBuilt;
+        ${WET_GLSL}`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        if (vPropBuilt < ${BUILD_SURFACE_T.toFixed(2)} || (vPropBuilt < 1.0 && vPropWorld.y < ${WATER_LEVEL})) discard;`)
       .replace('#include <color_fragment>', `#include <color_fragment>
-        diffuseColor.rgb *= 1.0 - 0.2 * vCloud;`)
+        diffuseColor.rgb *= 1.0 - 0.2 * vCloud;
+        diffuseColor.rgb *= mix(1.0, 0.62, bh_wet(vPropBuilt));`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.6, bh_wet(vPropBuilt));`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         {
           float s = vGlowSeed;
@@ -168,7 +201,16 @@ export function createPropMaterial(shared: SharedUniforms, mask?: RoadMask): { m
   material.customProgramCacheKey = () => key;
 
   const depth = new MeshDepthMaterial({ depthPacking: RGBADepthPacking, side: DoubleSide });
-  depth.onBeforeCompile = (shader) => patchPropVertex(shader, shared, mask);
+  depth.onBeforeCompile = (shader) => {
+    patchPropVertex(shader, shared, mask);
+    // (Still under water: no shadow either.)
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vPropWorld;
+        varying float vPropBuilt;`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        if (vPropBuilt < ${BUILD_SURFACE_T.toFixed(2)} || (vPropBuilt < 1.0 && vPropWorld.y < ${WATER_LEVEL})) discard;`);
+  };
   depth.customProgramCacheKey = () => `${key}-depth`;
   return { material, depth };
 }
@@ -277,8 +319,9 @@ bool bh_sameColor(vec4 a, vec4 b) {
 `;
 
 const TERRAIN_FRAGMENT_BODY = /* glsl */ `
-// Build-in: tiles rise out of the sea; nothing shows until it surfaces.
-if (vBuilt <= 0.0 || (vBuilt < 1.0 && vBoardPos.y < ${WATER_LEVEL})) discard;
+// Build-in: tiles rise out of the sea; nothing shows until its ground has
+// surfaced (a mountain's peak doesn't poke up on its own).
+if (vBuilt < ${BUILD_SURFACE_T.toFixed(2)} || (vBuilt < 1.0 && vBoardPos.y < ${WATER_LEVEL})) discard;
 vec3 boardEmissive = vec3(0.0);
 {
   vec2 p = vBoardPos.xz;
@@ -461,13 +504,16 @@ export function createTerrainMaterial(shared: SharedUniforms, tex: TileTextures)
         {
           float bt = bh_build(aBuild);
           vBuilt = bt;
-          transformed.y -= (1.0 - bh_easeOutBack(bt)) * 0.9;
+          transformed.y -= (1.0 - bh_rise(bt)) * BH_DEPTH;
           vBoardPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
           vCloud = bh_cloud(vBoardPos.xz, uCloud);
         }`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `#include <common>\n${TERRAIN_FRAGMENT_HEAD}`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\n${TERRAIN_FRAGMENT_BODY}`)
+      .replace('#include <common>', `#include <common>\n${TERRAIN_FRAGMENT_HEAD}\n${WET_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\n${TERRAIN_FRAGMENT_BODY}
+        diffuseColor.rgb *= mix(1.0, 0.55, bh_wet(vBuilt));`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.6, bh_wet(vBuilt));`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         totalEmissiveRadiance += boardEmissive;`);
   };
@@ -491,15 +537,20 @@ export function createSlabMaterial(shared: SharedUniforms): MeshStandardMaterial
         {
           float bt = bh_build(aBuild);
           vBuilt = bt;
-          transformed.y -= (1.0 - bh_easeOutBack(bt)) * 0.9;
+          transformed.y -= (1.0 - bh_rise(bt)) * BH_DEPTH;
           vSlabY = (modelMatrix * vec4(transformed, 1.0)).y;
         }`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
         varying float vBuilt;
-        varying float vSlabY;`)
+        varying float vSlabY;
+        ${WET_GLSL}`)
       .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
-        if (vBuilt <= 0.0 || (vBuilt < 1.0 && vSlabY < ${WATER_LEVEL})) discard;`);
+        if (vBuilt < ${BUILD_SURFACE_T.toFixed(2)} || (vBuilt < 1.0 && vSlabY < ${WATER_LEVEL})) discard;`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        diffuseColor.rgb *= mix(1.0, 0.58, bh_wet(vBuilt));`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.6, bh_wet(vBuilt));`);
   };
   material.customProgramCacheKey = () => 'bh-slab';
   return material;

@@ -36,6 +36,7 @@ import Icon from '../icons/Icon';
 import { IconValue, Num } from '../icons/Num';
 import { useSound } from '../audio/useSound';
 import { soundEngine } from '../audio/SoundEngine';
+import { BUILD_SURFACE } from '../board3d/materials';
 import { useCardZoom } from './CardZoomContext';
 import { computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
 import { preloadCardImages } from '../utils/cardImagePreload';
@@ -3504,16 +3505,17 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       return () => clearTimeout(timer);
     }
     if (introSequence === 'grid_build') {
-      // Animate grid build from center over ~1.5s, then start card draw
-      const buildDuration = Math.round(1500 * animSpeed) || 600;
-      // Each ring of tiles pops up out of the water (the build shader's
-      // stagger: ring k rises from k / maxRing × 0.6 of the way through).
+      // The island rises out of the sea from the center over ~2.2s, then the
+      // cards are dealt.
+      const buildDuration = Math.round(2200 * animSpeed) || 600;
+      // Each ring of tiles pops up out of the water as it breaks the surface
+      // (the build shader's stagger: ring k surfaces k / maxRing × 0.6 + BUILD_SURFACE in).
       if (!tilePopsRef.current) {
         tilePopsRef.current = true;
         const rings = Object.values(gameState.grid.tiles).map(t => (Math.abs(t.q) + Math.abs(t.r) + Math.abs(t.q + t.r)) / 2);
         const maxRing = Math.max(1, ...rings);
         for (let k = 0; k <= maxRing; k++) {
-          const at = (buildDuration / 1000) * ((k / maxRing) * 0.6 + 0.08);
+          const at = (buildDuration / 1000) * ((k / maxRing) * 0.6 + BUILD_SURFACE);
           const pops = 1 + Math.min(2, Math.floor(k / 2));
           for (let j = 0; j < pops; j++) sound.tilePop(at + j * 0.045 + Math.random() * 0.02);
         }

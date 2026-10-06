@@ -262,7 +262,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
     });
 
     // --- Animation timeline (ms) ---
-    const BUILD_DUR = 900;
+    const BUILD_DUR = 1500;
     const CARD_ENTER_START = 500;
     const CARD_ENTER_DUR = 1000;
     const COLLISION_TIME = CARD_ENTER_START + CARD_ENTER_DUR;
