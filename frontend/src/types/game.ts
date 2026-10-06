@@ -56,12 +56,17 @@ export interface Card {
   unique?: boolean;
   /** Debt cards added to the buyer's discard pile when bought (Warden, Land Grant). */
   buy_debt?: number;
+  /** Can't be played from hand (Land Grant, Spoils, Rubble). */
+  unplayable?: boolean;
   current_vp?: number;
   description: string;
   upgrade_description?: string;
   name_upgraded?: string;
   starter: boolean;
-  effects?: { type: string; condition: string; value: number; upgraded_value?: number; target?: string; condition_threshold?: number; metadata?: Record<string, unknown> }[];
+  effects?: {
+    type: string; condition: string; value: number; upgraded_value?: number; target?: string; timing?: string;
+    condition_threshold?: number; duration?: number; requires_choice?: boolean; metadata?: Record<string, unknown>;
+  }[];
   upgraded_stats?: {
     power?: number;
     resource_gain?: number;
