@@ -5,6 +5,7 @@ import type { HexTile } from '../types/game';
 import { HEX_DIRS } from '../utils/hexGeometry';
 import type { BoardLayout } from './layout';
 import { hexCorner } from './layout';
+import type { SharedUniforms } from './materials';
 import { structureHeight } from './props';
 
 /**
@@ -13,18 +14,30 @@ import { structureHeight } from './props';
  * tilts, so the same hover / target / selection outlines are also drawn as
  * glowing hologram prisms hovering above the tiles: a bright rim at the
  * top and a translucent curtain falling to the ground. They fade in only
- * past a readable angle.
+ * past a readable angle — and, while the board rises from the sea, only on
+ * tiles that have come all the way up (never over open water).
  */
 
 const VERT = /* glsl */ `
 attribute vec2 aUv;
+attribute float aStagger;
+uniform float uBuild;
 varying vec2 vUv2;
-void main() { vUv2 = aUv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+varying float vUp;
+void main() {
+  vUv2 = aUv;
+  // This tile's own build-in (as the ground's): 0 under water → 1 risen.
+  float built = clamp((uBuild - aStagger * 0.6) / 0.4, 0.0, 1.0);
+  vUp = smoothstep(0.8, 1.0, built);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}`;
 
 const FRAG = /* glsl */ `
 uniform vec3 uColor; uniform float uAlpha; uniform float uTime; uniform float uPulse;
 varying vec2 vUv2;
+varying float vUp;
 void main() {
+  if (vUp <= 0.0) discard;
   // vUv2.y: 0 at the ground → 1 at the rim; vUv2.x > 1.5 marks rim ribbons.
   float pulse = mix(1.0, 0.55 + 0.45 * (0.5 + 0.5 * sin(uTime * 4.0)), uPulse);
   float a;
@@ -35,7 +48,7 @@ void main() {
     a = pow(h, 2.2) * 0.32 + (1.0 - smoothstep(0.0, 0.08, 1.0 - h)) * 0.25;
     a *= 0.75 + 0.25 * sin(h * 30.0 - uTime * 3.0);
   }
-  a *= uAlpha * pulse;
+  a *= uAlpha * pulse * vUp;
   gl_FragColor = vec4(uColor * a * 1.5, 0.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -65,7 +78,7 @@ export class FloatingOverlay {
   private focusAlpha = 0;
   private focusTarget = 0;
 
-  constructor(private layout: BoardLayout) {
+  constructor(private layout: BoardLayout, shared: SharedUniforms) {
     for (const name of Object.keys(COLORS) as SetName[]) {
       const mat = new ShaderMaterial({
         vertexShader: VERT,
@@ -75,6 +88,7 @@ export class FloatingOverlay {
           uAlpha: { value: 0 },
           uTime: { value: 0 },
           uPulse: { value: PULSE[name] },
+          uBuild: shared.uBuild,
         },
         transparent: true,
         depthWrite: false,
@@ -113,12 +127,15 @@ export class FloatingOverlay {
   private build(keys: string[], tiles: Record<string, HexTile>, allEdges: boolean): BufferGeometry {
     const pos: number[] = [];
     const uv: number[] = [];
+    const stagger: number[] = [];
     const inSet = new Set(keys);
     const rim = 0.035;
+    const maxRing = Math.max(1, this.layout.maxRing);
     for (const key of keys) {
       const t = tiles[key];
       const tl = this.layout.byKey.get(key);
       if (!t || !tl) continue;
+      const before = pos.length;
       const ground = this.layout.heightAt(tl.x, tl.z);
       const top = ground + 0.32 + structureHeight(t) * 0.55;
       for (let k = 0; k < 6; k++) {
@@ -135,10 +152,13 @@ export class FloatingOverlay {
         pos.push(a.x, top, a.z, b.x, top, b.z, ib.x, top, ib.z, a.x, top, a.z, ib.x, top, ib.z, ia.x, top, ia.z);
         uv.push(2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1);
       }
+      // Every vertex of this tile's prism rises with the tile.
+      for (let i = before; i < pos.length; i += 3) stagger.push(tl.ring / maxRing);
     }
     const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
     g.setAttribute('aUv', new BufferAttribute(new Float32Array(uv), 2));
+    g.setAttribute('aStagger', new BufferAttribute(new Float32Array(stagger), 1));
     return g;
   }
 

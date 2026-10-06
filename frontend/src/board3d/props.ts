@@ -69,10 +69,12 @@ export interface AmbientSpots {
   peaks: Vector3[];
   /** Castle / town window positions for light flicker sparkles. */
   torches: Vector3[];
+  /** Smoldering coals on scorched ground: they glow, spit sparks and smoke. */
+  embers: Vector3[];
 }
 
 export function emptySpots(): AmbientSpots {
-  return { chimneys: [], windmills: [], pastures: [], peaks: [], torches: [] };
+  return { chimneys: [], windmills: [], pastures: [], peaks: [], torches: [], embers: [] };
 }
 
 // ── Small helpers ────────────────────────────────────────────────────────
@@ -293,12 +295,125 @@ export interface Footprint { x: number; z: number; d: number }
  * instead (see buildStructure). `taken` collects each tile's footprints, so
  * later pieces (an occupier's camp) can find open ground.
  */
-export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTile>, spots: AmbientSpots, taken?: Map<string, Footprint[]>): Soup {
+// ── Scorched ground ─────────────────────────────────────────────────────
+
+const CHAR_WOOD = lin(0x2a211c);
+const CHAR_TIP = lin(0x5a544e);
+const ASH_GREY = [lin(0xa29c94), lin(0x8a847d), lin(0xb6b0a7)];
+const CHAR_STONE = [lin(0x4b4541), lin(0x575049), lin(0x3e3935)];
+const COAL = lin(0x2a1a12);
+const EMBER_GLOW: RGB = [1.2, 0.36, 0.06];
+
+/** A burnt, leafless tree: a blackened trunk leaning a little, a few bare limbs. */
+function deadTree(s: Soup, x: number, y: number, z: number, scale: number, r: () => number): void {
+  scale *= DECOR;
+  s.setAnchor(x, y, z);
+  s.place(x, y - 0.005, z, r() * Math.PI * 2, scale);
+  const h = 0.12 + r() * 0.08;
+  const lean = (r() - 0.5) * 0.25;
+  const saved = s.push(0, 0, 0, 0, 1, 1, lean, (r() - 0.5) * 0.25);
+  s.cylinder(0.02, 0.009, h, 5, CHAR_WOOD, { top: CHAR_TIP, wobble: 0.15 });
+  const limbs = 2 + Math.floor(r() * 2);
+  for (let i = 0; i < limbs; i++) {
+    const a = (i / limbs) * Math.PI * 2 + r();
+    const sv = s.push(0, h * (0.45 + r() * 0.4), 0, a, 1, 1, 0, 0.7 + r() * 0.5);
+    s.cylinder(0.008, 0.003, 0.05 + r() * 0.04, 4, CHAR_WOOD, { top: CHAR_TIP });
+    s.pop(sv);
+  }
+  s.pop(saved);
+}
+
+/** A snapped, charred stump with an ash-grey break on top. */
+function stump(s: Soup, x: number, y: number, z: number, scale: number, r: () => number): void {
+  scale *= DECOR;
+  s.setAnchor(x, y, z);
+  s.place(x, y - 0.006, z, r() * Math.PI * 2, scale);
+  s.cylinder(0.026, 0.02, 0.025 + r() * 0.03, 6, CHAR_WOOD, { top: pick(ASH_GREY, r), wobble: 0.2 });
+}
+
+/** A low drift of ash. */
+function ashHeap(s: Soup, x: number, y: number, z: number, scale: number, r: () => number): void {
+  s.setAnchor(x, y, z);
+  s.place(x, y - 0.012, z, r() * 6.28, scale * DECOR);
+  s.blob(0.05 + r() * 0.03, pick(ASH_GREY, r), { sy: 0.22 + r() * 0.12, noise: 0.35, detail: 1 });
+}
+
+/** A coal still glowing in the ash; the ambient layer makes it smolder. */
+function coal(s: Soup, x: number, y: number, z: number, r: () => number, spots: AmbientSpots): void {
+  s.setAnchor(x, y, z);
+  s.place(x, y - 0.004, z, r() * 6.28, DECOR);
+  s.glow = EMBER_GLOW;
+  s.blob(0.012 + r() * 0.01, COAL, { sy: 0.6, noise: 0.4 });
+  s.glow = [0, 0, 0];
+  spots.embers.push(new Vector3(x, y + 0.01, z));
+}
+
+/** What's left of a burnt town: broken walls, fallen beams and a chimney. */
+function burntRuins(s: Soup, tile: TileLayout, layout: BoardLayout, r: () => number): { x: number; z: number }[] {
+  const out: { x: number; z: number }[] = [];
+  const shells = 3 + Math.floor(r() * 2);
+  for (let i = 0; i < shells; i++) {
+    const a = (i / shells) * Math.PI * 2 + r() * 0.5;
+    const d = 0.18 + r() * 0.2;
+    const x = tile.x + Math.cos(a) * d, z = tile.z + Math.sin(a) * d;
+    const y = layout.heightAt(x, z);
+    out.push({ x, z });
+    s.setAnchor(x, y, z);
+    s.place(x, y - 0.01, z, a + r() * 0.6, DECOR * 1.6);
+    // Two broken walls meeting at a corner, and a beam fallen across them.
+    at(s, -0.03, 0, 0, () => s.box(0.012, 0.03 + r() * 0.03, 0.07, pick(CHAR_STONE, r)));
+    at(s, 0, 0, -0.035, () => s.box(0.06, 0.02 + r() * 0.035, 0.012, pick(CHAR_STONE, r)));
+    const sv = s.push(0.005, 0.02, 0.005, r() * 3, 1, 1, 0.35, 0);
+    s.box(0.07, 0.008, 0.01, CHAR_WOOD);
+    s.pop(sv);
+    if (i === 0) at(s, 0.025, 0, 0.02, () => s.box(0.018, 0.08, 0.018, pick(CHAR_STONE, r)));
+  }
+  return out;
+}
+
+/** Scorched ground: dead trees, stumps, ash and coals (and a burnt town's ruins). */
+function buildScorched(s: Soup, tile: TileLayout, layout: BoardLayout, gt: HexTile, r: () => number, spots: AmbientSpots, mark: (pts: { x: number; z: number }[], d: number) => void): void {
+  const h = (x: number, z: number) => layout.heightAt(x, z);
+  const ruins = (gt.scorched_vp ?? 0) > 0 ? burntRuins(s, tile, layout, r) : [];
+  const taken = ruins.map(p => ({ ...p, d: 0.14 }));
+  const trees = scatter(tile, r, (ruins.length ? 1 : 3) + Math.floor(r() * 2), 0.25, 0.8, 0.22, taken);
+  for (const p of trees) deadTree(s, p.x, h(p.x, p.z), p.z, 1.05 + r() * 0.45, r);
+  taken.push(...trees.map(t => ({ ...t, d: 0.12 })));
+  const stumps = scatter(tile, r, 3 + Math.floor(r() * 3), 0.1, 0.82, 0.12, taken);
+  for (const p of stumps) stump(s, p.x, h(p.x, p.z), p.z, 0.7 + r() * 0.5, r);
+  taken.push(...stumps.map(t => ({ ...t, d: 0.07 })));
+  const heaps = scatter(tile, r, 4 + Math.floor(r() * 3), 0.05, 0.8, 0.1, taken);
+  for (const p of heaps) ashHeap(s, p.x, h(p.x, p.z), p.z, 0.8 + r() * 0.6, r);
+  const rocks = scatter(tile, r, 2, 0.3, 0.8, 0.12, taken);
+  for (const p of rocks) {
+    s.setAnchor(p.x, h(p.x, p.z), p.z);
+    s.place(p.x, h(p.x, p.z) - 0.015, p.z, r() * 6.28, (0.6 + r() * 0.4) * DECOR);
+    s.blob(0.06, pick(CHAR_STONE, r), { sy: 0.55, noise: 0.3 });
+  }
+  const coals = scatter(tile, r, 10 + Math.floor(r() * 6), 0.05, 0.8, 0.06, taken);
+  for (const p of coals) coal(s, p.x, h(p.x, p.z), p.z, r, spots);
+  mark(ruins, 0.14);
+  mark(trees, 0.12);
+  mark(stumps, 0.06);
+}
+
+export function buildDecor(
+  layout: BoardLayout, gameTiles: Record<string, HexTile>, spots: AmbientSpots, taken?: Map<string, Footprint[]>,
+  only?: Set<string>, ranges?: Map<string, [number, number]>,
+): Soup {
   const s = new Soup(layout.mapSeed);
   const maxRing = Math.max(1, layout.maxRing);
+  let prevKey: string | null = null;
   for (const tile of layout.tiles) {
+    if (only && !only.has(tile.key)) continue;
+    // Each tile's decor is one run of vertices: [start, end) per tile key.
+    if (ranges) {
+      if (prevKey) ranges.set(prevKey, [ranges.get(prevKey)![0], s.vertexCount]);
+      ranges.set(tile.key, [s.vertexCount, s.vertexCount]);
+      prevKey = tile.key;
+    }
     const gt = gameTiles[tile.key];
-    if (!gt || gt.is_blocked || gt.is_base || gt.is_vp) continue;
+    if (!gt || (gt.is_blocked && !gt.is_scorched) || gt.is_base || gt.is_vp) continue;
     const r = rng(tile.seed);
     s.build = tile.ring / maxRing;
     const h = (x: number, z: number) => layout.heightAt(x, z);
@@ -306,6 +421,10 @@ export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTil
     taken?.set(tile.key, marks);
     const mark = (pts: { x: number; z: number }[], d: number) => { for (const p of pts) marks.push({ x: p.x, z: p.z, d }); };
     switch (tile.biome) {
+      case 'scorched': {
+        buildScorched(s, tile, layout, gt, r, spots, mark);
+        break;
+      }
       case 'forest': {
         const trees = scatter(tile, r, 10 + Math.floor(r() * 4), 0.12, 0.84, 0.19);
         for (const p of trees) {
@@ -424,6 +543,7 @@ export function buildDecor(layout: BoardLayout, gameTiles: Record<string, HexTil
         break;
     }
   }
+  if (ranges && prevKey) ranges.set(prevKey, [ranges.get(prevKey)![0], s.vertexCount]);
   return s;
 }
 
@@ -1148,6 +1268,8 @@ export function buildWallEdge(s: Soup, tile: TileLayout, layout: BoardLayout, e:
 
 /** Decide which structure a tile carries in its current state. */
 export function structureSpec(t: HexTile, archetypeOf: (pid: string) => string, ownerColor: (pid: string) => number, connected: boolean): StructureSpec {
+  // Scorched ground is scenery (decor), not a structure.
+  if (t.is_scorched) return { kind: 'none', signature: 'scorched' };
   if (t.is_blocked) return { kind: 'mountain', signature: 'mtn' };
   if (t.is_base) {
     const pid = t.base_owner ?? t.owner ?? '';
@@ -1168,7 +1290,9 @@ export function buildStructure(
 ): Soup | null {
   const s = new Soup(tile.seed);
   s.build = tile.ring / Math.max(1, layout.maxRing);
-  if (t.is_blocked) {
+  if (t.is_scorched) {
+    return null;
+  } else if (t.is_blocked) {
     buildMountain(s, tile, layout, gameTiles, spots);
   } else if (t.is_base) {
     const pid = t.base_owner ?? t.owner ?? '';
@@ -1183,6 +1307,7 @@ export function buildStructure(
 
 /** Height of the tallest thing standing on a tile (for picking + label lift). */
 export function structureHeight(t: HexTile): number {
+  if (t.is_scorched) return (t.scorched_vp ?? 0) > 0 ? 0.2 : 0.16;
   if (t.is_blocked) return 1.6;
   if (t.is_base) return 1.15;
   if (t.is_vp) return t.vp_value >= 2 ? 0.42 : 0.36;

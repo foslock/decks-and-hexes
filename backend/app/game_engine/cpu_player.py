@@ -30,6 +30,9 @@ from .cards import (
 )
 from .cpu_valuation import (
     ValuationContext,
+    debts_taken,
+    expected_hand_upgrade_gain,
+    expected_plays,
     ValuationTuning,
     active_cards,
     best_upgrade_gain,
@@ -37,7 +40,7 @@ from .cpu_valuation import (
     purchase_value,
     upgrade_gain,
 )
-from .effect_resolver import land_grant_counts, tile_has_defense_bonus
+from .effect_resolver import calculate_effective_power, land_grant_counts, tile_has_defense_bonus
 from .effects import ConditionType, EffectType
 from .game_state import RAID_RUBBLE_CAP
 from .hex_grid import HexGrid, HexTile, tile_bridges_territory
@@ -66,9 +69,11 @@ ARCHETYPE_WEIGHTS: dict[Archetype, StrategyWeights] = {
         aggression=2.0, expansion=1.2, defense=0.5,
         vp_hex_priority=3.0, card_draw_value=1.0, resource_value=0.8,
     ),
+    # Swarm wins by taking VP hexes, not just spreading: retuned by benchmark
+    # (expansion 2 / VP 1.5 was the weakest seat in every matchup).
     Archetype.SWARM: StrategyWeights(
-        aggression=1.0, expansion=2.0, defense=0.3,
-        vp_hex_priority=1.5, card_draw_value=1.5, resource_value=0.8,
+        aggression=2.0, expansion=1.0, defense=0.3,
+        vp_hex_priority=3.0, card_draw_value=1.5, resource_value=0.8,
     ),
     Archetype.FORTRESS: StrategyWeights(
         aggression=0.5, expansion=0.8, defense=2.5,
@@ -359,25 +364,58 @@ def _projected_formula_vp(card: Card, player: Any, game: Any) -> float:
     is_upgraded = getattr(card, "is_upgraded", False)
     growth = 0.0
 
+    from .cpu_valuation import _vp_pace_rounds_left
+    rounds_left = _vp_pace_rounds_left(game)
+    played = max(1.0, game.current_round - 0.5)
+
     if formula == "deck_div_12":
-        # Arsenal. Assume ~6 more buys this game
+        # Arsenal: the deck grows by the buys still to come (and this card).
         from .game_state import arsenal_divisor
         all_cards = player.deck.cards + player.hand + player.deck.discard
         divisor = arsenal_divisor(is_upgraded)
-        projected_total = (len(all_cards) + 6) // divisor
+        bought = sum(1 for c in all_cards if not c.starter)
+        # Buys per round so far (about one a round before there's history).
+        more = min(6.0, (bought + 1) / played * rounds_left)
+        projected_total = int(len(all_cards) + 1 + more) // divisor
         growth = max(0, projected_total - current)
     elif formula == "trash_div_5":
+        # Trophies: cards trashed so far, at the rate we've been trashing.
         divisor = 4 if is_upgraded else 5
-        projected_total = (len(player.trash) + 4) // divisor
+        more = len(player.trash) / played * rounds_left
+        projected_total = int(len(player.trash) + more) // divisor
         growth = max(0, projected_total - current)
-    elif formula == "disconnected_groups_3":
-        # Most relevant for Swarm (lots of small clusters)
-        if player.archetype == Archetype.SWARM:
-            growth = 1.0
-    elif formula == "fortified_tiles_4":
-        # Most relevant for Fortress (permanent defense)
-        if player.archetype == Archetype.FORTRESS:
-            growth = 1.0
+    elif formula == "disconnected_groups_3" and game.grid is not None:
+        # Colony: a group one tile short of counting may grow into one.
+        min_size = 2 if is_upgraded else 3
+        connected = game.grid.get_connected_tiles(player.id)
+        loose = {(t.q, t.r) for t in game.grid.tiles.values() if t.owner == player.id} - connected
+        near = 0
+        while loose:
+            start = loose.pop()
+            group, todo = {start}, [start]
+            while todo:
+                cq, cr = todo.pop()
+                tile = game.grid.get_tile(cq, cr)
+                for n in tile.neighbors() if tile else []:
+                    if n in loose:
+                        loose.discard(n)
+                        group.add(n)
+                        todo.append(n)
+            if len(group) == min_size - 1:
+                near += 1
+        growth = 0.5 * near
+    elif formula == "fortified_tiles_4" and game.grid is not None:
+        # Fortified tiles: ones a step short, if we can still raise defense.
+        threshold = 3 if is_upgraded else 4
+        can_raise = any(
+            any(e.type == EffectType.PERMANENT_DEFENSE for e in c.effects)
+            for c in player.deck.cards + player.hand + player.deck.discard)
+        if can_raise:
+            near_tiles = sum(
+                1 for t in game.grid.tiles.values()
+                if t.owner == player.id and not t.is_base
+                and t.base_defense + t.permanent_defense_bonus == threshold - 1)
+            growth = 0.5 * min(2, near_tiles)
 
     return float(current) + growth
 
@@ -818,7 +856,7 @@ class DifficultyProfile:
     # opponent can close the game this round.
     endgame_awareness: bool = True
     # Valuation weights (see cpu_valuation.ValuationTuning).
-    val_claim_mult: float = 1.0
+    val_claim_mult: float = 1.4
     val_defense_mult: float = 1.0
     val_engine_mult: float = 1.0
     val_draw_mult: float = 1.0
@@ -1414,6 +1452,25 @@ class CPUPlayer:
             return self._fallback_burn_safe_card(game, player, skip_card_ids)
         return None
 
+    @staticmethod
+    def _cannot_afford_actions(player: Any, card: Card) -> bool:
+        """Mirror play_card: a card needs its action_cost free unless its
+        action return covers the cost (Mob Rule, Conqueror, Aegis cost 2–3)."""
+        net = card.action_cost - card.effective_action_return
+        return net > 0 and player.actions_available - player.actions_used < card.action_cost
+
+    @staticmethod
+    def _planned_power(a: Any) -> int:
+        """A planned claim's power as snapshotted when it was played (Strength
+        in Numbers, Garrison on its own tile, …), else its printed power."""
+        return int(a.effective_power if a.effective_power is not None else a.card.effective_power)
+
+    @staticmethod
+    def _claim_locks(a: Any, q: int, r: int) -> bool:
+        """Does planned claim *a* cover tile (q, r) — its target or an extra target?"""
+        return (a.target_q == q and a.target_r == r) or any(
+            (eq, er) == (q, r) for eq, er in (a.extra_targets or []))
+
     def _pick_best_card(self, game: Any, player: Any,
                         weights: StrategyWeights,
                         skip_card_ids: Optional[set[str]] = None) -> Optional[dict[str, Any]]:
@@ -1445,8 +1502,7 @@ class CPUPlayer:
                 continue
 
             # Skip cards we can't afford action-wise
-            net_cost = 1 - card.effective_action_return
-            if net_cost > 0 and player.actions_used >= player.actions_available:
+            if self._cannot_afford_actions(player, card):
                 continue
 
             # Tier classification — order cards so "free" + "option-generating"
@@ -1580,7 +1636,7 @@ class CPUPlayer:
         )
         if enemy_neighbors == 0:
             return False
-        current_defense = tile.defense_power + getattr(tile, "permanent_defense_bonus", 0)
+        current_defense = tile.defense_power  # already includes permanent bonuses
         # Any enemy-bordering VP hex is always treated as urgent — the tile
         # is both a scoring target for us and a prime snipe target for them.
         if tile.is_vp:
@@ -1657,10 +1713,10 @@ class CPUPlayer:
         for a in player.planned_actions:
             if a.card.card_type != CardType.CLAIM:
                 continue
-            tkey = (a.target_q, a.target_r)
-            planned_on_tile.setdefault(tkey, []).append(a)
-            if not a.card.stackable:
-                nonstack_locked.add(tkey)
+            for tkey in [(a.target_q, a.target_r), *[tuple(t) for t in (a.extra_targets or [])]]:
+                planned_on_tile.setdefault(tkey, []).append(a)
+                if not a.card.stackable:
+                    nonstack_locked.add(tkey)
 
         best: tuple[float, dict[str, Any]] | None = None
         for i, card in enumerate(player.hand):
@@ -1671,14 +1727,15 @@ class CPUPlayer:
             if skip_card_ids and card.id in skip_card_ids:
                 continue
             # Only consider "free" actions on cards we can actually afford.
-            net_cost = 1 - card.effective_action_return
-            if net_cost > 0 and player.actions_used >= player.actions_available:
+            if self._cannot_afford_actions(player, card):
                 continue
             # Skip cards with obvious extra requirements that the fallback
             # path shouldn't guess at (flood, own-tile-targeting, mandatory
             # trash, forced_discard target selection handled elsewhere).
             if card.flood or card.target_own_tile:
                 continue
+            if debts_taken(card):
+                continue  # a Debt for a marginal tile isn't worth it
             for key, (tile, adj_count) in frontier.items():
                 if key in nonstack_locked and not card.stackable:
                     continue
@@ -1697,7 +1754,7 @@ class CPUPlayer:
                 # For a neutral tile, our power must at least match defense
                 # (minus combined already-planned power).
                 combined_prior = sum(
-                    a.card.effective_power for a in planned_on_tile.get(key, [])
+                    self._planned_power(a) for a in planned_on_tile.get(key, [])
                 )
                 est_power = self._estimate_effective_power(game, player, tile, card)
                 total_power = est_power + combined_prior
@@ -1789,8 +1846,7 @@ class CPUPlayer:
                 continue
             if skip_card_ids and card.id in skip_card_ids:
                 continue
-            net_cost = 1 - card.effective_action_return
-            if net_cost > 0 and player.actions_used >= player.actions_available:
+            if self._cannot_afford_actions(player, card):
                 continue
 
             # Skip Debt when we can't afford the trash cost (matches _score_engine).
@@ -1832,6 +1888,10 @@ class CPUPlayer:
             # AND the price. Skip.
             if any(e.type in (EffectType.PLAY_RESOURCE_COST, EffectType.GAIN_DEBT) for e in card.effects):
                 continue
+            # No buying this round (Stampede, Grand Strategy) — not for nothing.
+            if (any(e.type == EffectType.BUY_RESTRICTION for e in card.effects)
+                    and not self._drawback_pays(game, player, card, i)):
+                continue
 
             # Cards needing a search / tutor choice — defer to the normal
             # scoring path which handles the selection plumbing.
@@ -1862,10 +1922,8 @@ class CPUPlayer:
                 ]
                 if not opponents:
                     continue
-                chosen_target_pid = max(
-                    opponents,
-                    key=lambda pid: getattr(game.players[pid], "vp", 0),
-                )
+                from .game_state import compute_player_vp
+                chosen_target_pid = max(opponents, key=lambda pid: compute_player_vp(game, pid))
 
             if card.card_type == CardType.ENGINE:
                 # Plain engines (Gather, Tithe, etc.) are always safe to burn:
@@ -2068,8 +2126,7 @@ class CPUPlayer:
             # Check stacking
             existing_claims = [
                 a for a in player.planned_actions
-                if a.target_q == tile.q and a.target_r == tile.r
-                and a.card.card_type == CardType.CLAIM
+                if a.card.card_type == CardType.CLAIM and self._claim_locks(a, tile.q, tile.r)
             ]
             # Stackable new cards can always land on a tile with prior
             # claims. Non-stackable new cards are blocked only if any prior
@@ -2078,6 +2135,9 @@ class CPUPlayer:
                 continue
 
             score = self._score_tile_for_claim(game, player, tile, card, weights)
+            # Mercenary, Garrison, Siege Tower: the Debt costs about what a
+            # plain tile is worth, so they go where a cheaper card can't.
+            score -= self._DEBT_PLAY_PENALTY * debts_taken(card)
 
             action_dict: dict[str, Any] = {
                 "card_index": card_index,
@@ -2093,7 +2153,10 @@ class CPUPlayer:
             if has_contested_bonus and tile.owner is not None and tile.owner != self.player_id:
                 score += 4.0 * weights.aggression  # strongly prefer contested tiles
 
-            # Demon Pact (mandatory_self_trash): require enough trash targets
+            # Demon Pact (mandatory_self_trash): the cards it burns are the
+            # price — worth it only where its power is needed, and never down
+            # to a deck too thin to fill a hand (it used to play every time
+            # and burn the deck to a handful of cards).
             has_mandatory_trash = any(
                 e.type == EffectType.MANDATORY_SELF_TRASH for e in card.effects
             )
@@ -2103,11 +2166,14 @@ class CPUPlayer:
                         trash_count = effect.effective_value(card.is_upgraded)
                         other_cards = [j for j in range(len(player.hand)) if j != card_index]
                         if len(other_cards) < trash_count:
-                            continue  # skip — not enough cards to trash
+                            return []  # not enough cards to trash: the engine would reject it
+                        if len(_iter_all_player_cards(player)) - trash_count < self._MIN_DECK_AFTER_TRASH:
+                            return []
                         trash_indices = self._pick_cards_to_trash(player, trash_count, card_index)
                         action_dict["trash_card_indices"] = trash_indices
-                        # Bonus for very high power card when we can afford the trash cost
-                        score += 3.0
+                        # Post-pop indices back to hand positions.
+                        burned = [player.hand[j + 1 if j >= card_index else j] for j in trash_indices]
+                        score -= sum(self._trash_loss(c, player) for c in burned)
                         break
 
             # For cards with forced_discard, target the leading opponent
@@ -2135,6 +2201,7 @@ class CPUPlayer:
         """Get all tiles this card could legally target."""
         assert game.grid is not None
         candidates: list[HexTile] = []
+        follow_up = self._follow_up_power(player, card)
 
         # Claim cards targeting an already-owned tile are usually wasted
         # (defender-ties favor the owner, so a second claim marker adds nothing
@@ -2164,7 +2231,7 @@ class CPUPlayer:
                         if tile.owner == self.player_id and not _keep_own(tile):
                             continue
                         # Don't target tiles with defense higher than our power (for neutral)
-                        if not tile.owner and tile.defense_power > card.effective_power:
+                        if not tile.owner and tile.defense_power > self._reach_power(game, player, tile, card) + follow_up:
                             continue
                         seen.add(tile.key)
                         candidates.append(tile)
@@ -2177,7 +2244,7 @@ class CPUPlayer:
                     continue
                 if tile.owner == self.player_id and not _keep_own(tile):
                     continue
-                if not tile.owner and tile.defense_power > card.effective_power:
+                if not tile.owner and tile.defense_power > self._reach_power(game, player, tile, card) + follow_up:
                     continue
                 candidates.append(tile)
 
@@ -2185,58 +2252,29 @@ class CPUPlayer:
 
     def _estimate_effective_power(self, game: Any, player: Any, tile: HexTile,
                                   card: Card) -> int:
-        """Estimate effective power for a card on a target tile, accounting for effects."""
-        power = card.effective_power
-        assert game.grid is not None
+        """The power the engine would give *card* on *tile* right now: its own
+        conditional effects (Militia, Mountaineer, Strength in Numbers, …)
+        plus stacking bonuses from claims already planned there (Dog Pile)."""
+        from .game_state import PlannedAction
+        probe = PlannedAction(card=card, target_q=tile.q, target_r=tile.r)
+        return int(calculate_effective_power(game, player, card, probe))
 
-        for effect in card.effects:
-            if effect.type == EffectType.POWER_PER_TILES_OWNED:
-                # Mob Rule / Locust Swarm: power based on tiles owned
-                divisor = effect.effective_value(card.is_upgraded)
-                if divisor <= 0:
-                    divisor = 3
-                tile_count = len(game.grid.get_player_tiles(self.player_id))
-                tile_bonus = tile_count // divisor
-                if effect.metadata.get("replaces_base_power"):
-                    power = tile_bonus
-                else:
-                    power += tile_bonus
+    def _reach_power(self, game: Any, player: Any, tile: HexTile, card: Card) -> int:
+        """Power this card plus our claims already planned on *tile* would have."""
+        return self._estimate_effective_power(game, player, tile, card) + self._combined_prior_power_on(player, tile)
 
-            elif effect.type == EffectType.POWER_MODIFIER:
-                ev = effect.effective_value(card.is_upgraded)
-                if effect.condition.value == "if_adjacent_owned_gte":
-                    if effect.metadata.get("per_tile"):
-                        adj = game.grid.get_adjacent(tile.q, tile.r)
-                        owned_adj = sum(1 for t in adj if t.owner == self.player_id)
-                        power += ev * owned_adj
-                    else:
-                        adj = game.grid.get_adjacent(tile.q, tile.r)
-                        owned_adj = sum(1 for t in adj if t.owner == self.player_id)
-                        if owned_adj >= effect.condition_threshold:
-                            power += ev
-                elif effect.condition.value == "if_played_claim_this_turn":
-                    if any(a.card.card_type == CardType.CLAIM for a in player.planned_actions):
-                        power += ev
-                elif effect.condition.value == "if_defending_owned":
-                    if tile.owner == self.player_id:
-                        power += ev
-                elif effect.condition.value == "if_target_has_defense":
-                    # Battering Ram: only defense *bonuses* count, not
-                    # intrinsic hex/base defense.
-                    if tile_has_defense_bonus(tile):
-                        power += ev
-                elif effect.condition.value == "if_bridges_territory":
-                    # Road Builder: power 5 (6 upgraded) on a bridging tile.
-                    if tile_bridges_territory(game.grid, self.player_id, tile.q, tile.r):
-                        power += ev
-                elif effect.condition.value == "cards_in_hand":
-                    power = max(0, len(player.hand) - 1) + ev
-                elif effect.condition.value == "if_contested":
-                    # Ambush: bonus power when targeting an opponent-owned tile
-                    if tile.owner is not None and tile.owner != self.player_id:
-                        power += ev
-
-        return power
+    def _follow_up_power(self, player: Any, card: Card) -> int:
+        """Claim power still in hand that could stack onto *card*'s tile this
+        turn (a tile takes any number of Stackable claims, plus one
+        non-stackable), limited by the actions left."""
+        others = [c for c in player.hand if c is not card and c.card_type == CardType.CLAIM and not c.unplayable]
+        stack = sorted((c.effective_power for c in others if c.stackable), reverse=True)
+        plain = [c.effective_power for c in others if not c.stackable]
+        if card.stackable and plain:
+            stack.append(max(plain))
+        stack.sort(reverse=True)
+        slots = max(0, player.actions_available - player.actions_used - card.action_cost)
+        return sum(stack[:slots])
 
     def _tile_safety_bonus(self, game: Any, tile: HexTile) -> float:
         """Bonus for a non-VP tile that, once claimed, is unlikely to be
@@ -2409,7 +2447,7 @@ class CPUPlayer:
             if a.card.card_type == CardType.DEFENSE:
                 total += a.card.effective_defense_bonus
             elif a.card.card_type == CardType.CLAIM:
-                total += a.card.effective_power
+                total += self._planned_power(a)
         return total
 
     def _p_win_claim(self, game: Any, tile: HexTile, power: float) -> float:
@@ -2456,8 +2494,8 @@ class CPUPlayer:
         for a in player.planned_actions:
             if a.card.card_type != CardType.CLAIM:
                 continue
-            if a.target_q == tile.q and a.target_r == tile.r:
-                total += a.card.effective_power
+            if self._claim_locks(a, tile.q, tile.r):
+                total += self._planned_power(a)
         return total
 
     def _score_tile_for_claim(self, game: Any, player: Any, tile: HexTile,
@@ -2481,6 +2519,12 @@ class CPUPlayer:
             combined_prior = 0
         combined_total = effective_power + combined_prior
         can_win_combined = _claim_beats_defense(tile, combined_total)
+        # Could we take the tile this turn — alone, with what's already
+        # stacked here, or with stackable power still in hand? VP bonuses on
+        # a tile we can't take are a wasted action.
+        can_reach = can_win_combined or _claim_beats_defense(
+            tile, combined_total + self._follow_up_power(player, card))
+        reach = 1.0 if (can_win or can_win_combined) else 0.6 if can_reach else 0.08
 
         # Threat model: replace the binary "power beats current defense"
         # test with the chance the claim actually lands once the owner's
@@ -2506,7 +2550,7 @@ class CPUPlayer:
 
         if tile.is_vp and tile.owner != self.player_id:
             vp_mult = _vp_mult(tile)
-            score += vp_mult * 12.0 * weights.vp_hex_priority * passive_vp_mult * panic_vp_mult
+            score += vp_mult * 12.0 * weights.vp_hex_priority * passive_vp_mult * panic_vp_mult * reach
             # Massive bonus when we can actually capture this VP tile
             if threat:
                 score += vp_mult * 15.0 * weights.vp_hex_priority * panic_vp_mult * p_win
@@ -2579,7 +2623,7 @@ class CPUPlayer:
             and tile.owner != self.player_id
         ):
             vp_mult = _vp_mult(tile)
-            score += vp_mult * 10.0 * weights.vp_hex_priority * passive_vp_mult * panic_vp_mult
+            score += vp_mult * 10.0 * weights.vp_hex_priority * passive_vp_mult * panic_vp_mult * reach
             # Even higher bonus when we have the power to actually take it
             if threat:
                 score += vp_mult * 20.0 * weights.vp_hex_priority * panic_vp_mult * p_win
@@ -2588,13 +2632,14 @@ class CPUPlayer:
             # Extra bonus when the tile is about to score (held since a prior round).
             held_since = getattr(tile, "held_since_turn", None)
             if held_since is not None and held_since < game.current_round:
-                score += vp_mult * 4.0 * weights.vp_hex_priority
+                score += vp_mult * 4.0 * weights.vp_hex_priority * reach
             # Double-down: if a single claim won't break through but the margin
             # is close, surface the contested VP hex as still the top target so
             # a stackable second claim this turn can tip the balance.
             if (
                 self.profile.vp_hex_double_down
                 and not can_win
+                and can_reach  # only when stackable power in hand can finish it
                 and effective_power - tile.defense_power
                     >= self.profile.double_down_min_margin
             ):
@@ -2676,8 +2721,11 @@ class CPUPlayer:
         # Panic mode demotes this: defending base matters less than racing VP.
         if (
             self.profile.base_raid_defense
+            and tile.owner is not None
             and tile.owner != self.player_id
         ):
+            # Pushing back an enemy foothold next to our base (a neutral tile
+            # there is no threat — filling in the base ring just stalls).
             is_base_threat = any(
                 a.is_base and a.base_owner == self.player_id
                 for a in game.grid.get_adjacent(tile.q, tile.r)
@@ -2873,7 +2921,7 @@ class CPUPlayer:
             # typical enemy claim power and we have at least one enemy
             # neighbor, the tile is actively at risk of being taken next
             # round. Bump the score so the CPU shores it up.
-            current_defense = tile.defense_power + getattr(tile, "permanent_defense_bonus", 0)
+            current_defense = tile.defense_power  # already includes permanent bonuses
             if enemy_neighbors >= 1 and current_defense < ENEMY_CLAIM_BASELINE:
                 shortfall = ENEMY_CLAIM_BASELINE - current_defense
                 risk_bonus = shortfall * 2.0 * weights.defense
@@ -3001,9 +3049,18 @@ class CPUPlayer:
             if not _is_vp_leader(game, self.player_id, strict=True):
                 return None
 
+        # Cards with a price — no buying this round (Stampede, Grand
+        # Strategy), a card discarded (Frenzy), the hand thrown back
+        # (Mulligan) — only when what they buy is worth it. As "free" cards
+        # they'd otherwise be played every time, first thing.
+        if not self._drawback_pays(game, player, card, card_index):
+            return None
+
         # Resource gain
         if card.effective_resource_gain > 0:
             score += card.effective_resource_gain * 1.5 * weights.resource_value
+        # Prospector: the Debt hands back 3 resources and an action later.
+        score -= debts_taken(card) * 3.0 * 1.5 * weights.resource_value
 
         # Card draw
         if card.effective_draw_cards > 0:
@@ -3367,12 +3424,21 @@ class CPUPlayer:
         for effect in card.effects:
             if effect.type == EffectType.TRASH_GAIN_BUY_COST:
                 # Score based on having cards worth trashing for resources
-                best_trash_value = 0
+                # (The engine pays half the trashed card's buy cost; thinning
+                # dead weight is worth more than the coins.)
+                best_trash_value = 0.0
                 for j, c in enumerate(player.hand):
-                    if c.buy_cost is not None and c.starter:
-                        best_trash_value = max(best_trash_value, c.buy_cost)
-                    elif c.buy_cost is not None and c.buy_cost <= 2:
-                        best_trash_value = max(best_trash_value, c.buy_cost)
+                    if j == card_index or c.passive_vp > 0 or c.vp_formula:
+                        continue
+                    if c.definition_id in (DEF_ID_DEBT, DEF_ID_RUBBLE):
+                        v = 4.0
+                    elif c.starter:
+                        v = 1.5
+                    elif c.unplayable:
+                        v = 2.0 + (c.buy_cost or 0) // 2
+                    else:
+                        v = (c.buy_cost or 0) // 2 - (c.buy_cost or 0) * 0.6
+                    best_trash_value = max(best_trash_value, v)
                 if best_trash_value > 0:
                     score += best_trash_value * 1.0 * weights.resource_value + 2.0  # deck thinning bonus
                 else:
@@ -3438,22 +3504,101 @@ class CPUPlayer:
                 discard_indices = self._pick_cards_to_discard(player, effect.value, card_index)
                 action_dict["discard_card_indices"] = discard_indices
             if effect.type == EffectType.SELF_TRASH and effect.requires_choice:
-                trash_indices = self._pick_cards_to_trash(player, effect.value, card_index)
+                trash_indices = self._pick_cards_to_trash(player, effect.value, card_index, junk_only=True)
                 action_dict["trash_card_indices"] = trash_indices
             if effect.type == EffectType.TRASH_GAIN_BUY_COST and effect.requires_choice:
                 trash_indices = self._pick_cards_to_trash_for_value(player, effect.value, card_index)
                 action_dict["trash_card_indices"] = trash_indices
         return (score, action_dict)
 
+    # A card that gets played thanks to an extra action (or drawn into a hand
+    # with actions to spare), in engine-score points.
+    _EXTRA_PLAY_VALUE = 2.5
+
+    def _action_slack(self, player: Any, card_index: int) -> float:
+        """Actions to spare (+) or short (−) if every other card in hand gets
+        played; drawn cards want actions too."""
+        slack = float(player.actions_available - player.actions_used)
+        for j, c in enumerate(player.hand):
+            if j == card_index or c.unplayable:
+                continue
+            if c.definition_id == DEF_ID_DEBT and player.resources < 3:
+                continue
+            slack -= c.action_cost - c.effective_action_return
+            slack -= 0.8 * c.effective_draw_cards
+        return slack
+
+    def _drawback_pays(self, game: Any, player: Any, card: Card, card_index: int) -> bool:
+        """Whether an engine card's drawback is worth what it gives now."""
+        effects = {e.type for e in card.effects}
+        net = card.effective_action_return - card.action_cost
+        slack = self._action_slack(player, card_index)
+
+        if EffectType.BUY_RESTRICTION in effects:
+            # Extra actions only matter if the hand is short of them. Drawn
+            # cards are played if there are actions left — and even if not,
+            # they make for a better pick of what to play.
+            draws = card.effective_draw_cards
+            playable = min(draws, max(0.0, slack + net))
+            plays = min(max(0, net), max(0.0, -slack)) + 0.8 * playable
+            picks = draws - playable
+            # Resources carry over, so a skipped buy is only a round's delay.
+            income = player.resources + sum(
+                max(0, c.effective_resource_gain) for j, c in enumerate(player.hand) if j != card_index)
+            delay = 1.5 if income >= 3 else 0.5 if income >= 1 else 0.0
+            return bool(plays * self._EXTRA_PLAY_VALUE + 1.0 * picks > delay)
+
+        if (EffectType.SELF_DISCARD in effects and card.effective_draw_cards <= 0
+                and card.effective_resource_gain <= 0):
+            # Frenzy: a card for an action. Worth it when cards would go
+            # unplayed anyway (or there's dead weight to throw away).
+            junk = any(c.unplayable and c.passive_vp <= 0 and not c.vp_formula
+                       for j, c in enumerate(player.hand) if j != card_index)
+            short = max(0.0, -slack)
+            return min(max(0, net), short if junk else short - 1) > 0
+
+        gifted = sum(
+            e.effective_value(card.is_upgraded) * (len(game.players) - 1 if e.target == "all_others" else 1)
+            for e in card.effects
+            if e.type == EffectType.GRANT_ACTIONS_NEXT_TURN and e.target in ("all_others", "chosen_player"))
+        if gifted > 0:
+            # Forced March / Battle Cry: actions now, but rivals get some
+            # next round — only worth it for cards that would go unplayed
+            # (or Battle Cry's extra card next round).
+            plays = min(max(0, net), max(0.0, -slack))
+            later = sum(e.effective_value(card.is_upgraded) for e in card.effects
+                        if e.type == EffectType.DRAW_NEXT_TURN and e.condition == ConditionType.ALWAYS)
+            return bool(plays * self._EXTRA_PLAY_VALUE + 1.5 * later > 1.2 * gifted)
+
+        if EffectType.MULLIGAN in effects:
+            # Throw the hand back only for a better one.
+            def worth(c: Card) -> float:
+                if c.unplayable or c.definition_id == DEF_ID_DEBT:
+                    return 0.0
+                return 1.0 if c.starter else 2.0 + 0.3 * (c.buy_cost or 0)
+            hand = [c for j, c in enumerate(player.hand) if j != card_index]
+            if not hand:
+                return False
+            pool = list(player.deck.cards)
+            if len(pool) < len(hand):
+                pool += list(player.deck.discard)
+            if not pool:
+                return False
+            return sum(map(worth, pool)) / len(pool) > sum(map(worth, hand)) / len(hand) + 0.3
+
+        return True
+
     def _pick_forced_discard_target(self, game: Any, player: Any) -> Optional[str]:
         """Pick the opponent to target with forced discard (highest VP)."""
+        from .game_state import compute_player_vp
         best_pid = None
         best_vp = -1
         for pid, p in game.players.items():
-            if pid == self.player_id:
+            if pid == self.player_id or getattr(p, "has_left", False):
                 continue
-            if p.vp > best_vp:
-                best_vp = p.vp
+            vp = compute_player_vp(game, pid)
+            if vp > best_vp:
+                best_vp = vp
                 best_pid = pid
         return best_pid
 
@@ -3493,20 +3638,46 @@ class CPUPlayer:
 
     def _pick_diplomacy_target(self, game: Any, player: Any) -> Optional[str]:
         """Pick the opponent to target with Diplomacy (lowest VP — least threatening)."""
+        from .game_state import compute_player_vp
         best_pid = None
         best_vp = float("inf")
         for pid, p in game.players.items():
-            if pid == self.player_id:
+            if pid == self.player_id or getattr(p, "has_left", False):
                 continue
-            if p.vp < best_vp:
-                best_vp = p.vp
+            vp = compute_player_vp(game, pid)
+            if vp < best_vp:
+                best_vp = vp
                 best_pid = pid
         return best_pid
+
+    # Play-score cost of taking one Debt (Debt-cost cards): roughly what a
+    # plain tile is worth to the claim scorer.
+    _DEBT_PLAY_PENALTY = 6.0
 
     # Minimum number of claim cards the CPU wants to keep in the active deck
     # before it will consider trashing Explore cards. Below this floor, Gather
     # is trashed instead (or nothing) so the CPU still has a way to take tiles.
     _MIN_CLAIMS_TO_KEEP_EXPLORE = 4
+    # A forced trash (Demon Pact) never takes the deck below two hands.
+    _MIN_DECK_AFTER_TRASH = 10
+
+    @staticmethod
+    def _trash_loss(card: Card, player: Any) -> float:
+        """What burning a card from hand costs, in claim-score points: the
+        card's play this round plus its worth for the rest of the game. Dead
+        weight is a gain."""
+        if card.definition_id == DEF_ID_DEBT:
+            return -3.0
+        if card.definition_id == DEF_ID_RUBBLE:
+            return -2.5
+        if card.passive_vp > 0 or card.vp_formula:
+            return 12.0
+        if card.unplayable:
+            return -1.0
+        if card.starter:
+            # Gather is the deck's income; Explore its only claims early on.
+            return 3.0 if card.definition_id == _DEF_ID_GATHER else 2.0
+        return 3.0 + 0.8 * (card.buy_cost or 0)
 
     def _pick_cards_to_trash_for_value(self, player: Any, count: int,
                                        exclude_index: int) -> list[int]:
@@ -3522,8 +3693,8 @@ class CPUPlayer:
         for i, card in enumerate(player.hand):
             if i == exclude_index:
                 continue
-            if card.buy_cost is None:
-                continue  # can't gain resources from cards with no buy cost
+            if card.passive_vp > 0 or card.vp_formula:
+                continue  # never trash VP (Land Grant, Spoils, Warden, …)
             # Prefer trashing: Debt/Rubble > Explore > Gather > starters > cheap > expensive.
             score = 0.0
             is_explore = card.starter and card.definition_id == _DEF_ID_EXPLORE
@@ -3556,7 +3727,7 @@ class CPUPlayer:
                 for _, idx in scored[:count]]
 
     def _pick_cards_to_trash(self, player: Any, count: int,
-                             exclude_index: int) -> list[int]:
+                             exclude_index: int, junk_only: bool = False) -> list[int]:
         """Pick the worst cards in hand to trash (permanent removal).
 
         Debt and Rubble are always top priority for trashing. Then prefers
@@ -3593,9 +3764,14 @@ class CPUPlayer:
                     score += card.buy_cost * 0.5  # expensive cards less trashable
                 else:
                     score -= 1.0  # cards with no buy cost are fine to trash
+                if card.passive_vp > 0 or card.vp_formula:
+                    score += 50.0  # never trash VP (Spoils, Land Grant, Warden, …)
             scored.append((score, i))
 
         scored.sort(key=lambda x: x[0])
+        if junk_only:
+            # "Trash up to N": only dead weight and starters, never a bought card.
+            scored = [(s, i) for s, i in scored if s < 0]
         # Convert pre-pop hand indices to post-pop (see _pick_cards_to_trash_for_value).
         return [idx - 1 if idx > exclude_index else idx
                 for _, idx in scored[:count]]
@@ -3844,6 +4020,12 @@ class CPUPlayer:
         for base_id, copies in game.shared_market.stacks.items():
             if copies and base_id not in already_bought:
                 _add(copies[0], "shared", base_id)
+        # A stack that just sold out still sells this phase to anyone who
+        # hasn't bought it yet.
+        for base_id, buyers in game.shared_market.selling_out.items():
+            template = game.shared_market.card_templates.get(base_id)
+            if template is not None and self.player_id not in buyers and base_id not in already_bought:
+                _add(template, "shared", base_id)
 
         upgrade_cost = _preview_cost_reductions_flat(player, UPGRADE_CREDIT_COST)
         if upgrade_cost <= player.resources or include_unaffordable:
@@ -3851,8 +4033,8 @@ class CPUPlayer:
             # A credit only pays off once a good target is in hand; discount
             # for the wait and for credits already banked.
             pending = player.upgrade_credits
-            gain = best_upgrade_gain(player, game, ctx, cards, weights)
-            pv = gain * 0.8 * (0.6 ** pending)
+            gain = expected_hand_upgrade_gain(player, game, ctx, cards, weights)
+            pv = gain * (0.6 ** pending) if ctx.rounds_left >= 1.5 else 0.0
             options.append((pv, upgrade_cost, {
                 "source": "upgrade", "card_id": None, "definition_id": None,
             }, None))
@@ -3872,9 +4054,11 @@ class CPUPlayer:
         if self.profile.endgame_awareness:
             from .game_state import compute_player_vp
             need = game.vp_target - compute_player_vp(game, self.player_id)
+            from .game_state import _compute_formula_vp
             lethal = [
                 (cost, action) for _pv, cost, action, card in affordable
-                if card is not None and card.passive_vp >= need > 0
+                if card is not None and need > 0 and (
+                    card.passive_vp + (_compute_formula_vp(card, player, game) if card.vp_formula else 0) >= need)
             ]
             if lethal:
                 return min(lethal, key=lambda x: x[0])[1]
@@ -3941,15 +4125,24 @@ class CPUPlayer:
         weights = self._get_weights(player, game)
         ctx = self._valuation_context(game)
         options = self._purchase_options(game, player, ctx, weights, include_unaffordable=True)
+        after = player.resources - (0 if free_reroll else REROLL_COST)
+        floor = self.profile.purchase_value_floor
+        # Paying for the reroll must not price us out of a good buy we can
+        # make right now (a shared card or an upgrade credit).
+        if any(pv > floor and after < cost <= player.resources
+               for pv, cost, a, _c in options if a["source"] != "archetype"):
+            return False
         arch = [pv for pv, cost, a, _c in options
-                if a["source"] == "archetype" and cost <= player.resources + 2]
+                if a["source"] == "archetype" and cost <= after]
         other = [pv for pv, cost, a, _c in options
-                 if a["source"] != "archetype" and cost <= player.resources]
+                 if a["source"] != "archetype" and cost <= after]
         best_arch = max(arch, default=0.0)
         best_other = max(other, default=0.0)
+        if ctx.rounds_left < 2:
+            return False  # a new card would barely be played
         # Re-roll when the private market is weak relative to what the shared
         # market already offers — a fresh 3-card draw is worth the resource.
-        return best_arch < max(2.5, 0.6 * best_other)
+        return best_arch < max(0.8 * expected_plays(ctx), 0.6 * best_other)
 
     def _pick_best_purchase(self, game: Any, player: Any,
                             weights: StrategyWeights) -> Optional[dict[str, Any]]:

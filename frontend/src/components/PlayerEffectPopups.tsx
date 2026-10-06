@@ -99,6 +99,7 @@ const EFFECT_ICONS: Record<string, IconName> = {
   base_raid_spoils: 'vp',
   base_raid_defended: 'fortify',
   global_random_trash: 'trash',
+  trash_card: 'trash',
   create_cards_to_discard: 'cardAdd',
 };
 

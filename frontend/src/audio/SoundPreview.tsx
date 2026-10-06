@@ -104,6 +104,32 @@ export default function SoundPreview() {
   const [levels, setLevels] = useState<Partial<Record<SoundName, Levels>>>({});
   const [measuring, setMeasuring] = useState(false);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  /** How late sounds are heard right now, and how far ahead they start to make up for it. */
+  const [delay, setDelay] = useState<{ now: number | null; lead: number }>({ now: null, lead: 0 });
+  useEffect(() => {
+    const t = setInterval(() => setDelay({ now: soundEngine.outputDelay(), lead: soundEngine.leadMs }), 500);
+    return () => clearInterval(t);
+  }, []);
+  /** The background march (drums, and the horns from the ninth bar). */
+  const [music, setMusic] = useState(false);
+  useEffect(() => () => soundEngine.setMusicActive(false), []);
+  const toggleMusic = () => {
+    const on = !music;
+    setMusic(on);
+    if (on) soundEngine.restartMusic(); else soundEngine.setMusicActive(false);
+  };
+  /** Sync check: a dot flashes on each beat with a tick cued to land on it. */
+  const dotRef = useRef<HTMLSpanElement>(null);
+  const syncCheck = () => {
+    for (let i = 0; i < 8; i++) {
+      const at = 400 + i * 600;
+      soundEngine.cue('tileSelect', at);
+      timers.current.push(setTimeout(() => dotRef.current?.animate(
+        [{ transform: 'scale(1.6)', opacity: 1 }, { transform: 'scale(1)', opacity: 0.25 }],
+        { duration: 300, easing: 'ease-out' },
+      ), at));
+    }
+  };
 
   useEffect(() => {
     soundEngine.setEnabled(true);
@@ -155,6 +181,22 @@ export default function SoundPreview() {
           <button className="cc-btn-secondary" style={{ padding: '6px 14px', fontSize: 13 }} onClick={measureAll} disabled={measuring}>
             {measuring ? 'Measuring…' : 'Measure levels'}
           </button>
+          {/* Output delay: from a sound starting to it being heard. Over
+              ~80 ms it's noticeable; Bluetooth / AirPlay add 150 ms or more. */}
+          <div style={{ flex: '1 1 100%', fontSize: 12, color: 'var(--cc-text-dim)', fontVariantNumeric: 'tabular-nums', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <span>
+              Output delay:{' '}
+              <strong style={{ color: 'var(--cc-text)' }}>{delay.now != null ? `${Math.round(delay.now)} ms` : '— (play a sound)'}</strong>
+              {delay.lead > 0 && <> · sounds tied to the screen start <strong style={{ color: 'var(--cc-gold)' }}>{Math.round(delay.lead)} ms</strong> early</>}
+              <span style={{ color: 'var(--cc-text-faint)' }}> — Bluetooth headphones add ~150–250 ms.</span>
+            </span>
+            <button className="cc-btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={syncCheck}>Sync check</button>
+            <button className="cc-btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={toggleMusic}>
+              {music ? 'Stop the march' : 'Play the march'}
+            </button>
+            <span style={{ color: 'var(--cc-text-faint)' }}>(the horns come in after eight bars, about 20 s)</span>
+            <span ref={dotRef} aria-hidden style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--cc-gold)', opacity: 0.25, display: 'inline-block' }} />
+          </div>
         </div>
 
         {GROUPS.map((group) => (

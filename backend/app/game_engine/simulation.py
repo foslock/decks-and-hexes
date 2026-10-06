@@ -137,9 +137,10 @@ def run_game(config: SimConfig, card_registry: Optional[dict[str, Any]] = None) 
             difficulty: Optional[str] = None
             if config.cpu_difficulties and idx < len(config.cpu_difficulties):
                 difficulty = config.cpu_difficulties[idx]
-            cpus[pid] = CPUPlayer(
-                pid, difficulty=difficulty, noise=config.cpu_noise, rng=game.rng,
-            )
+            # A tier keeps its own noise unless the config sets one; with no
+            # tier, cpu_noise picks it (legacy configs).
+            noise = config.cpu_noise if (config.cpu_noise or difficulty is None) else None
+            cpus[pid] = CPUPlayer(pid, difficulty=difficulty, noise=noise, rng=game.rng)
 
         # Initialize per-player tracking
         tracking: dict[str, PlayerResult] = {}

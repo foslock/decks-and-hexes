@@ -23,6 +23,7 @@ export const CORE_SOUND_NAMES = [
   'resolveBaseRaidRam', 'resolveBaseRaidShatter', 'resolveBaseRaidHold', 'upgradeCharge', 'upgradeCard', 'beginJingle',
   'tilePop', 'phaseCall3', 'phaseCall4', 'phaseCall5',
   'spotlightYou', 'spotlightRival', 'spotlightStar', 'tileGlow',
+  'tileAbandon', 'tileScorch', 'floodWave', 'powerBonus', 'coinGain',
 ] as const;
 
 /** Optional extras (available on the engine + hook, not yet wired into components). */
@@ -78,6 +79,11 @@ const LEVELS: Record<SoundName, number> = {
   spotlightRival: -7.7,
   spotlightStar: -7.2,
   tileGlow: -5,
+  tileAbandon: -10,
+  tileScorch: -12,
+  floodWave: -10,
+  powerBonus: -12,
+  coinGain: -10,
   phaseCall3: -11.1,
   phaseCall4: -11.2,
   phaseCall5: -11.7,
@@ -754,6 +760,86 @@ const invalidAction: Recipe = (bus, when) => {
   v.done();
 };
 
+/** A tile given up (Exodus): a long airy sigh falling away, the soft thud of
+ *  something set down for good, and a low bell dropping a minor third. */
+const tileAbandon: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'tileAbandon', { vary: 0.5, pan: rand(-0.1, 0.1), reverb: 0.35 });
+  swish(v, { from: 1800, to: 480, dur: 0.8, attack: 0.14, q: 0.6, gain: 0.5, hp: 250, lp: 4200 });
+  thump(v, { f: 120, f2: 70, drop: 0.2, at: 0.08, gain: 0.35, decay: 0.32, drive: 1.4 });
+  bell(v, { f: note('E4'), at: 0.06, gain: 0.2, decay: 0.9, ratio: 2, index: 0.6 });
+  bell(v, { f: note('C#4'), at: 0.34, gain: 0.18, decay: 1.3, ratio: 2, index: 0.6 });
+  v.done();
+};
+
+/** Scorched Retreat: a rushing whoosh as the tile catches, a deep boom, then
+ *  a roaring, crackling blaze that dies down to a few last pops. */
+const tileScorch: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'tileScorch', { vary: 0.4, reverb: 0.3 });
+  swish(v, { from: 600, to: 2600, dur: 0.34, attack: 0.3, attackCurve: 'exp', q: 0.6, gain: 0.7, hp: 200, lp: 7000 });
+  thump(v, { f: 95, f2: 38, drop: 0.35, at: 0.3, gain: 0.8, decay: 0.9, drive: 2.4 });
+  // The roar: brown noise whose level swells, flickers and dies away.
+  const T = 2.3, N = 256;
+  const roar = new Float32Array(N);
+  const p1 = rand(0, 6), p2 = rand(0, 6);
+  for (let i = 0; i < N; i++) {
+    const u = i / (N - 1);
+    const swell = u < 0.1 ? u / 0.1 : u < 0.45 ? 1 : Math.pow(Math.max(0, 1 - (u - 0.45) / 0.55), 1.6);
+    roar[i] = swell * (0.78 + 0.22 * Math.sin(u * 57 + p1) * Math.sin(u * 23 + p2));
+  }
+  v.noise({ color: 'brown', at: 0.26, curve: roar, curveDur: T, gain: 0.9, filters: [{ type: 'highpass', f: 60, q: 0.7 }, { type: 'lowpass', f: 950, q: 0.6 }] });
+  // Crackle and pops: dense while it roars, thinning out.
+  const g = scatter(150, T, { shape: (u) => (u < 0.08 ? u / 0.08 : Math.max(0.06, 1 - u * 0.92)), durMin: 0.001, durMax: 0.0045, ampMin: 0.15 });
+  crackle(v, { at: 0.3, grains: g, total: T, color: 'white', gain: 0.55, filters: [{ type: 'highpass', f: 1100, q: 0.7 }, { type: 'lowpass', f: 7000, q: 0.5 }] });
+  v.done();
+};
+
+/** Flood: a surge of water rushing out of the tile, the wash rolling over
+ *  the tiles around it — spray, splashes and a few bubbles as it settles. */
+const floodWave: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'floodWave', { vary: 0.4, pan: rand(-0.1, 0.1), reverb: 0.3 });
+  const T = 1.5, N = 160;
+  const wash = new Float32Array(N);
+  const p = rand(0, 6);
+  for (let i = 0; i < N; i++) {
+    const u = i / (N - 1);
+    const swell = u < 0.16 ? u / 0.16 : Math.pow(Math.max(0, 1 - (u - 0.16) / 0.84), 1.5);
+    wash[i] = swell * (0.82 + 0.18 * Math.sin(u * 29 + p));
+  }
+  v.noise({ color: 'pink', curve: wash, curveDur: T, gain: 0.85, filters: [
+    { type: 'highpass', f: 110, q: 0.7 }, { type: 'bandpass', f: 420, f2: 1500, q: 0.55 }, { type: 'lowpass', f: 3400, q: 0.5 },
+  ] });
+  thump(v, { f: 80, f2: 42, drop: 0.3, at: 0.04, gain: 0.4, decay: 0.55, drive: 1.2 });
+  // Splashes as the water reaches each tile around it.
+  const g = scatter(80, 0.95, { shape: (u) => (u < 0.15 ? u / 0.15 : Math.max(0.1, 1 - u)), durMin: 0.002, durMax: 0.007, ampMin: 0.2 });
+  crackle(v, { at: 0.22, grains: g, total: 0.95, color: 'white', gain: 0.4, filters: [{ type: 'highpass', f: 1800, q: 0.7 }, { type: 'lowpass', f: 7500, q: 0.5 }] });
+  // Bubbles as it settles.
+  for (let i = 0; i < 8; i++) {
+    v.tone({ f: rand(360, 680), f2: rand(900, 1500), glide: 0.045, at: 0.4 + rand(0, 0.9), gain: 0.07, env: { a: 0.003, d: 0.055 } });
+  }
+  v.done();
+};
+
+/** A claim's bonus at the reveal (Ambush, Strike Team, Dog Pile…): a bright
+ *  rising chime with a little lift of air. */
+const powerBonus: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'powerBonus', { vary: 0.4, reverb: 0.25 });
+  bell(v, { f: note('E5'), gain: 0.45, decay: 0.45, ratio: 2, index: 0.8 });
+  bell(v, { f: note('B5'), at: 0.06, gain: 0.5, decay: 0.6, ratio: 2, index: 0.8 });
+  swish(v, { from: 900, to: 3200, dur: 0.16, attack: 0.05, q: 0.8, gain: 0.25, hp: 600 });
+  v.done();
+};
+
+/** Coins tumbling in, each a little higher than the last — a card effect
+ *  paying out at the reveal (Scorched Retreat). */
+const coinGain: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'coinGain', { vary: 0.8, reverb: 0.12 });
+  coin(v, { f: rand(1900, 2200), gain: 0.8, decay: 0.7, dest: v.bus(1, rand(-0.2, 0.2)) });
+  coin(v, { f: rand(2300, 2600), at: 0.07, gain: 0.7, decay: 0.7 });
+  coin(v, { f: rand(2700, 3100), at: 0.14, gain: 0.8, decay: 0.9 });
+  feltTap(v, { at: 0.16, gain: 0.2, f: 900, body: 0.15 });
+  v.done();
+};
+
 export interface SoundDef {
   play: Recipe;
   /** Approximate dry length in seconds (offline renders add the reverb tail). */
@@ -788,6 +874,11 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   spotlightRival: { play: spotlightRival, length: 1.6 },
   spotlightStar: { play: spotlightStar, length: 1.5 },
   tileGlow: { play: tileGlow, length: 1.2 },
+  tileAbandon: { play: tileAbandon, length: 1.4 },
+  tileScorch: { play: tileScorch, length: 2.7 },
+  floodWave: { play: floodWave, length: 1.7 },
+  powerBonus: { play: powerBonus, length: 0.8 },
+  coinGain: { play: coinGain, length: 0.6 },
   phaseCall3: { play: phaseCall3, length: 0.9 },
   phaseCall4: { play: phaseCall4, length: 0.9 },
   phaseCall5: { play: phaseCall5, length: 0.9 },

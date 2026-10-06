@@ -9,7 +9,7 @@ import { CloudLayer } from './clouds';
 import { CameraRig, DEFAULT_TILT, MAX_TILT, MAX_ZOOM } from './camera';
 import { PLAYER_COLORS, type ClaimChevron, type PlayerInfo, type VpPath } from './boardTypes';
 import { FxLayer } from './fx';
-import { BoardLayout, axialToWorld, hexCorner, structureSignature } from './layout';
+import { BoardLayout, axialToWorld, hexCorner, structureSignature, tileSignature, worldToTileKey } from './layout';
 import { MarkerLayer, type TokenSpec } from './markers';
 import {
   createPropMaterial, createSharedUniforms, createSlabMaterial, createTerrainMaterial, createTileTextures,
@@ -21,7 +21,7 @@ import { buildTerritoryPiece, territoryPieces } from './territory';
 import { Soup } from './soup';
 import { FloatingOverlay } from './floating';
 import { RoadLayer } from './roads';
-import { buildSlabGeometry, buildTerrainGeometry, buildWater } from './terrain';
+import { buildSlabGeometry, buildTerrainGeometry, buildWater, patchTerrainGeometry } from './terrain';
 
 export type BoardQuality = 'high' | 'low';
 
@@ -151,11 +151,22 @@ export class BoardEngine {
   private sun: DirectionalLight;
   private layout: BoardLayout | null = null;
   private layoutSig = '';
+  /** Per-tile structural signatures (see tileSignature), to spot a tile
+   *  that was just scorched and patch it in place instead of rebuilding. */
+  private tileSigs = new Map<string, string>();
+  /** Burnt scenery added for tiles scorched since the last full rebuild. */
+  private patchDecor: Mesh[] = [];
+  /** Each tile's run of vertices in the decor mesh ([start, end)). */
+  private decorRanges = new Map<string, [number, number]>();
   private tiles: Record<string, HexTile> = {};
   private prevOwner = new Map<string, string | null>();
   private playerInfo: Record<string, PlayerInfo> = {};
   private connected = new Set<string>();
   private decorSpots: AmbientSpots = emptySpots();
+  /** Walls / territory pieces standing before a structural rebuild (key →
+   *  signature): they come back as they were instead of rising again. */
+  private carryWalls: Map<string, string> | null = null;
+  private carryTerritory: Map<string, string> | null = null;
   private structureSpots = new Map<string, AmbientSpots>();
   private overlay: OverlayState = {};
   private pickMesh: Mesh | null = null;
@@ -538,7 +549,12 @@ export class BoardEngine {
     if (sig !== this.layoutSig) {
       const first = !this.layout;
       this.layoutSig = sig;
-      this.rebuildLayout(first);
+      // A tile burnt by Scorched Retreat is patched in place: rebuilding the
+      // whole island would stall a frame mid-animation.
+      const burnt = first ? null : this.newlyScorched(tiles);
+      if (burnt?.length) this.scorchTiles(burnt);
+      else this.rebuildLayout(first);
+      this.tileSigs = new Map(Object.entries(tiles).map(([k, t]) => [k, tileSignature(t)]));
     }
     this.syncStructures();
     this.syncWalls();
@@ -786,6 +802,81 @@ export class BoardEngine {
     if (this.pickMesh) { this.pickMesh.geometry.dispose(); this.pickMesh = null; }
   }
 
+  /** Keys of tiles that have just been scorched — or null when anything else
+   *  structural changed too (that needs a full rebuild). */
+  private newlyScorched(tiles: Record<string, HexTile>): string[] | null {
+    const out: string[] = [];
+    const keys = new Set([...Object.keys(tiles), ...this.tileSigs.keys()]);
+    for (const k of keys) {
+      const t = tiles[k];
+      const before = this.tileSigs.get(k);
+      if (t && before === tileSignature(t)) continue;
+      if (!t || !t.is_scorched || before === undefined || before.includes('s')) return null;
+      out.push(k);
+    }
+    return out;
+  }
+
+  /** Burn tiles in place: re-sample the ground around them, hide their old
+   *  scenery and add the burnt one. Everything else stays as it is. */
+  private scorchTiles(keys: string[]): void {
+    const layout = new BoardLayout(this.tiles);
+    this.layout = layout;
+    const burnt = new Set(keys);
+    const centers = keys.map(k => layout.byKey.get(k)).filter((tl): tl is NonNullable<typeof tl> => !!tl);
+    // A tile shapes the ground within 1.3 of its center (layout.weights).
+    const near = (x: number, z: number) => centers.some(tl => Math.abs(x - tl.x) < 1.4 && Math.abs(z - tl.z) < 1.4 && Math.hypot(x - tl.x, z - tl.z) < 1.38);
+    if (this.terrainMesh) patchTerrainGeometry(this.terrainMesh.geometry, layout, near);
+    // The island's edge only changes when a coastal tile burns.
+    const coastal = centers.some(tl => HEX_DIRS.some(([dq, dr]) => !this.tiles[`${tl.q + dq},${tl.r + dr}`]));
+    if (this.slabMesh && coastal) {
+      this.slabMesh.geometry.dispose();
+      this.slabMesh.geometry = buildSlabGeometry(layout, this.tiles);
+    }
+    // The old trees, fields and flowers sink out of sight…
+    // (Each tile's decor is one run of vertices; only those are touched
+    // and uploaded.)
+    if (this.decorMesh) {
+      const bld = this.decorMesh.geometry.getAttribute('aBuild') as BufferAttribute;
+      const arr = bld.array as Float32Array;
+      for (const k of keys) {
+        const run = this.decorRanges.get(k);
+        if (!run || run[1] <= run[0]) continue;
+        arr.fill(99, run[0], run[1]);
+        bld.addUpdateRange(run[0], run[1] - run[0]);
+      }
+      bld.needsUpdate = true;
+    }
+    const off = (x: number, z: number) => !burnt.has(worldToTileKey(x, z));
+    const spots = this.decorSpots;
+    spots.chimneys = spots.chimneys.filter(p => off(p.x, p.z));
+    spots.torches = spots.torches.filter(p => off(p.x, p.z));
+    spots.peaks = spots.peaks.filter(p => off(p.x, p.z));
+    spots.embers = spots.embers.filter(p => off(p.x, p.z));
+    spots.windmills = spots.windmills.filter(w => off(w.pos.x, w.pos.z));
+    spots.pastures = spots.pastures.filter(p => off(p.x, p.z));
+    for (const k of keys) this.decorTaken.delete(k);
+    // …and the burnt scenery takes their place.
+    const soup = buildDecor(layout, this.tiles, spots, this.decorTaken, burnt);
+    if (soup.vertexCount > 0) {
+      const mat = this.decorMat ?? this.propMat;
+      const mesh = new Mesh(soup.toGeometry(), mat.material);
+      mesh.customDepthMaterial = mat.depth;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.world.add(mesh);
+      this.patchDecor.push(mesh);
+    }
+    this.fxLayer?.setLayout(layout);
+    this.markers?.setLayout(layout);
+    this.floating?.setLayout(layout);
+    this.ambient?.setLayout(layout);
+    this.clouds?.setLayout(layout);
+    this.refreshSpots();
+    this.pickHeights = '';
+    this.shadowDirty = true;
+  }
+
   private rebuildLayout(first: boolean): void {
     // Keep fx/markers/ambient objects across structural changes when possible.
     const layout = new BoardLayout(this.tiles);
@@ -795,6 +886,8 @@ export class BoardEngine {
     disposeMesh(this.terrainMesh);
     disposeMesh(this.slabMesh);
     disposeMesh(this.decorMesh);
+    for (const m of this.patchDecor) disposeMesh(m);
+    this.patchDecor = [];
     if (this.waterMesh) { this.world.remove(this.waterMesh); this.waterDispose?.(); }
 
     this.terrainMesh = new Mesh(buildTerrainGeometry(layout), this.terrainMat);
@@ -816,7 +909,8 @@ export class BoardEngine {
 
     this.decorSpots = emptySpots();
     this.decorTaken = new Map();
-    const decor = buildDecor(layout, this.tiles, this.decorSpots, this.decorTaken);
+    this.decorRanges = new Map();
+    const decor = buildDecor(layout, this.tiles, this.decorSpots, this.decorTaken, undefined, this.decorRanges);
     const decorMat = this.decorMat ?? this.propMat;
     this.decorMesh = new Mesh(decor.toGeometry(), decorMat.material);
     this.decorMesh.customDepthMaterial = decorMat.depth;
@@ -824,10 +918,17 @@ export class BoardEngine {
     this.decorMesh.receiveShadow = true;
     this.world.add(this.decorMesh);
 
-    // Structures depend on terrain heights → rebuild them all.
+    // Structures depend on terrain heights → rebuild them all. Walls and
+    // camps that were standing come back as they were (a Consecrate or a
+    // scorched tile shouldn't make every wall on the board rise again).
     for (const [, s] of this.structures) if (s.mesh) { this.structureGroup.remove(s.mesh); s.mesh.geometry.dispose(); }
     this.structures.clear();
     this.structureSpots.clear();
+    if (!first) {
+      const standing = (m: Map<string, WallEntry>) => new Map([...m].filter(([, w]) => w.mode !== 'sink').map(([k, w]) => [k, w.signature]));
+      this.carryWalls = standing(this.walls);
+      this.carryTerritory = standing(this.territory);
+    }
     this.clearWalls();
     this.clearTerritory();
 
@@ -863,7 +964,7 @@ export class BoardEngine {
     }
     if (this.paths) this.roads.setPaths(this.paths, this.tiles);
     if (!this.floating) {
-      this.floating = new FloatingOverlay(layout);
+      this.floating = new FloatingOverlay(layout, this.shared);
       this.world.add(this.floating.group);
     } else {
       this.floating.setLayout(layout);
@@ -978,6 +1079,7 @@ export class BoardEngine {
       merged.pastures.push(...s.pastures);
       merged.peaks.push(...s.peaks);
       merged.torches.push(...s.torches);
+      merged.embers.push(...s.embers);
     };
     append(this.decorSpots);
     for (const s of this.structureSpots.values()) append(s);
@@ -1091,8 +1193,10 @@ export class BoardEngine {
       mesh.receiveShadow = true;
       this.structureGroup.add(mesh);
       // A new edge, or a stronger / weaker wall, rises in; an edge that only
-      // changed where it meets its neighbours swaps in place.
-      const rise = animate && (!cur || cur.mode === 'sink' || cur.level !== e.level);
+      // changed where it meets its neighbours swaps in place (as does one
+      // that stood before a rebuild).
+      const carried = !cur && this.carryWalls?.get(e.key) === e.signature;
+      const rise = animate && !carried && (!cur || cur.mode === 'sink' || cur.level !== e.level);
       if (cur) this.disposeWall(cur);
       const base = new Vector3(tl.x, layout.heightAt(tl.x, tl.z), tl.z);
       if (rise) {
@@ -1106,6 +1210,7 @@ export class BoardEngine {
       });
       changed = true;
     }
+    this.carryWalls = null;
     for (const [key, w] of this.walls) {
       if (want.has(key) || w.mode === 'sink') continue;
       if (animate) {
@@ -1132,7 +1237,9 @@ export class BoardEngine {
     if (!layout) return;
     // A board arriving with its territory (a game loading) just shows it;
     // changes after that rise and sink.
-    const animate = this.speed > 0 && this.build >= 1 && this.territory.size > 0;
+    const carry = this.carryTerritory;
+    this.carryTerritory = null;
+    const animate = this.speed > 0 && this.build >= 1 && (this.territory.size > 0 || !!carry);
     const now = this.time;
     const pieces = territoryPieces(layout, this.tiles, this.decorTaken, this.archetypeOf, this.ownerColor);
     const want = new Set<string>();
@@ -1157,7 +1264,8 @@ export class BoardEngine {
       this.structureGroup.add(mesh);
       if (cur) this.disposeWall(cur);
       const base = new Vector3(tl.x, layout.heightAt(tl.x, tl.z), tl.z);
-      if (animate) {
+      const rise = animate && !(!cur && carry?.get(p.key) === p.signature);
+      if (rise) {
         mesh.scale.set(1, 0.001, 1);
         mesh.position.y = base.y * 0.999;
         if (p.spot) this.fxLayer?.dust(p.spot.x * HEX_SIZE, p.spot.z * HEX_SIZE, 8, 0.6);
@@ -1165,7 +1273,7 @@ export class BoardEngine {
       }
       this.territory.set(p.key, {
         tileKey: p.tileKey, k: p.k, signature: p.signature, level: 0, mesh,
-        born: now, mode: animate ? 'rise' : 'idle', jolt: 0, joltAt: 0, base,
+        born: now, mode: rise ? 'rise' : 'idle', jolt: 0, joltAt: 0, base,
       });
       this.territorySpots.set(p.key, spots);
       spotsChanged = true;
@@ -1302,7 +1410,7 @@ export class BoardEngine {
       const t = this.tiles[tl.key];
       if (!t) continue;
       const h = structureHeight(t) * 0.85 + 0.05;
-      const topR = t.is_blocked ? 0.38 : t.is_base ? 0.72 : 1;
+      const topR = t.is_blocked && !t.is_scorched ? 0.38 : t.is_base ? 0.72 : 1;
       const bottomY = -0.2;
       const bottom = Array.from({ length: 6 }, (_, k) => hexCorner(tl.x, tl.z, k, 1));
       const top = Array.from({ length: 6 }, (_, k) => hexCorner(tl.x, tl.z, k, topR));

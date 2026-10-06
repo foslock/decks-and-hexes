@@ -123,6 +123,14 @@ export interface BoardFx {
   jolt(q: number, r: number, strength?: number): void;
   /** A tile changes hands: a flash, sparks and a ring in the new owner's color. */
   captureBurst(q: number, r: number, color: number, big?: boolean): void;
+  /** A tile given up (Exodus): its holder's color lifts off and fades, a puff of dust. */
+  abandon(q: number, r: number, color: number): void;
+  /** Scorched Retreat: the tile goes up in flames — a roaring fire, embers
+   *  and a column of smoke that lingers (the ground under it turns to ash). */
+  scorch(q: number, r: number, durationMs?: number): void;
+  /** Flood: water bursts out of the tile and surges into `targets` (axial
+   *  q, r), landing with a splash and a ring in `color`. */
+  flood(q: number, r: number, targets: [number, number][], color: number): void;
   /** Duration multiplier for board-driven transitions (0 = instant). */
   setSpeed(mult: number): void;
 }

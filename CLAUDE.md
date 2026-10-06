@@ -74,7 +74,29 @@ at high priority, the rest of the catalog during idle time).
   hits harder with the claim's power (`heft` and the `claimSmash0`–`8` sounds,
   0–8+), and cards flying home (your discard pile, an opponent's ID card, or a
   burn if trashed). Rivals' earnings fly in as coins (`setShownResources`).
-  Preview: `?preview=resolve-animations`.
+  Tiles given up resolve first (`abandon` / `scorch` steps → 'effect' plans):
+  Exodus lifts the holder's color away (`fx.abandon`); Scorched Retreat sets
+  the tile on fire (`fx.scorch`) and leaves a permanent burnt wasteland
+  (`is_scorched` → the `scorched` biome: char ground, dead trees, ruins of a
+  burnt town via `scorched_vp`, smoldering `embers` spots). The engine burns
+  a tile in place (`scorchTiles`: terrain patch + per-tile decor ranges), not
+  with a full rebuild. Claims that ignore temporary defense (Siege Engine,
+  Conqueror) skip it for their own player only — every other claim faces it in
+  full (a claim must beat the defense it faces; the strongest that gets
+  through wins). Steps carry `defense_ignored` / `ignored_by`; those claims
+  attack last and the badge cracks down for them just before they land.
+  What card effects do at the reveal is recorded server-side on the tile it
+  happened on (`GameState.resolution_effects`, via `_EffectWatch` in
+  game_state.py: bank changes, card VP, cards gained, Spoils of War's trash,
+  Flood's targets); resolvePlan attaches each to that tile's plan (`after`,
+  played once it settles through the resolver api's `bank` / `vp` /
+  `giveCard` / `burn`, with a chip naming the card), plays Flood's spread
+  (`fx.flood`: hex-shaped water filling its tile, then each tile around from
+  the shared edge) right before the tiles it reaches, and plays tile-less ones
+  (Diplomat, Battle Glory) last from the player's base ('round' plans).
+  Claimants carry `cards` (printed power + named reveal bonuses), so the count
+  shows each bonus as its own beat ("+2 · Ambush").
+  Preview: `?preview=resolve-animations` (the "Card effects" row too).
 - The board canvas runs on under the hand panel (`GameBoard` `extendBelow`);
   `viewInsetBottom` → `CameraRig.insetBottom` frames the island above the
   resting hand via a camera view offset.
@@ -104,13 +126,24 @@ All sound is synthesized live with Web Audio (no files): recipes in
 the engine in `SoundEngine.ts`. Phase banners (`PhaseBanner`) sound a bugle
 call that climbs through the round: 1 → 3 Play, 1 → 4 Resolve, 1 → 5 Buy
 (`phaseCall3`–`5`). Background music is `audio/music.ts`: distant march drums
-generated bar by bar on their own bus/volume. It plays where a screen turns
+generated bar by bar on their own bus/volume, with quiet horn chords in G (the
+bugle's key) from the ninth bar — two bars a chord through a few march
+progressions (`PROGRESSIONS`), resting after two in a row, ending a run on G,
+≈ 6–9 dB under the drums (`LEVELS.horn`). It plays where a screen turns
 it on — the lobby (`setMusicActive`) and the game — never on the home screen;
 pauses while the tab is hidden, holds silent through the lobby countdown
 (`holdMusic`) and starts over with each game (`restartMusic`). Nothing makes a
 sound (no AudioContext is even created) until the page has had a click, tap
 or key press. Music/Sounds settings reach the engine from `SettingsProvider`.
-Audition page: `?preview=sounds`.
+Bluetooth output (AirPods ≈ 170 ms) hears every sound late by a fixed amount;
+`audio/outputDelay.ts` measures the output's delay (`outputLatency` /
+`getOutputTimestamp`), and sounds that belong to a moment on screen we can see
+coming are *cued* for it — `sfx.cue(name, inMs)` / `claimSmashIn` /
+`soundEngine.playIn` start early by the delay beyond the usual (claim smashes
+at the end of their wind-up, staggered draws, cards landing on the discard
+pile, the board's tile pops). Sounds that start with what you just did can't
+be early. Audition page: `?preview=sounds` (shows the output delay and has a
+Sync check: a dot flashing with a cued tick).
 
 ### Game Log Analysis
 When the user refers to a "game log" they mean a JSON file produced by
@@ -311,7 +344,7 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Round limit: **20** (configurable)
 - Debt start round: **5**
 - Debt trash cost: **3 resources**
-- Debt-cost cards: Mercenary, Garrison, Siege Tower (on resolve), Prospector (on play) — `gain_debt` effect; Warden, Land Grant (on buy) — `buy_debt` field
+- Debt-cost cards: Mercenary, Garrison, Siege Tower (on resolve — even when an immune or scorched tile cancels the claim), Prospector (on play) — `gain_debt` effect; Warden, Land Grant (on buy) — `buy_debt` field
 - Re-roll cost: **1 resource**
 - Retain cost: **2 resources** (constant only — no Retain action exists)
 - Upgrade credit cost: **5 resources**

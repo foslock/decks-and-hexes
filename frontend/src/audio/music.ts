@@ -1,9 +1,10 @@
 /**
  * Background music: a march heard from far off. Field drums keep a gentle
  * cadence over a bass drum on the strong beats, tenor drums join when it
- * swells, and rolls lead into new phrases. It is generated bar by bar, so it
- * never repeats the same way twice. (The bugle sounds with the phase banners,
- * not here.)
+ * swells, and rolls lead into new phrases. Now and then the band's horns
+ * hold long, quiet chords under it — in G, the key of the bugle calls that
+ * sound with the phase banners. It is generated bar by bar, so it never
+ * repeats the same way twice.
  *
  * Distance is the sound: everything runs into a long dark hall with only a
  * little dry signal, through a low-pass whose cutoff wanders with the level
@@ -16,8 +17,8 @@
  * Each start() opens a new session (its own dry/wet faders), so notes
  * already scheduled by a stopped session never sound when music restarts.
  */
-import { createImpulseResponse, createNoiseBank, dbToGain, grainCurve, mulberry32, rand, setRandomSource, Voice, type Bus, type Ctx, type NoiseBank } from './synth';
-import { drum } from './instruments';
+import { applyEnv, createImpulseResponse, createNoiseBank, dbToGain, grainCurve, mulberry32, rand, setRandomSource, Voice, type Bus, type Ctx, type NoiseBank } from './synth';
+import { drum, note } from './instruments';
 
 const BPM = 92;
 const BEAT = 60 / BPM;
@@ -29,7 +30,7 @@ const BAR = BEAT * 4;
  *  effects' ≈ -20 per hit. */
 const MUSIC_TRIM_DB = 3;
 /** Per-instrument levels (dB), mutable for audition and calibration. */
-export const LEVELS = { bass: -21, snare: -14, roll: -8, tenor: -22 };
+export const LEVELS = { bass: -21, snare: -14, roll: -8, tenor: -22, horn: -47 };
 
 // ── Graph ──────────────────────────────────────────────────────────
 
@@ -151,6 +152,100 @@ function tenor(bus: Bus, when: number, vel: number, f: number, pan: number) {
   v.done();
 }
 
+/**
+ * A horn of the far-off band holding one note of a chord: two players a
+ * hair apart, the breath swelling slowly in (no attack to speak of), the
+ * tone opening a little as it does, a slow waver while held, then fading
+ * out as the next chord swells in.
+ */
+function horn(v: Voice, o: { f: number; at: number; dur: number; gain: number; release: number }) {
+  const ctx = v.ctx;
+  const t = v.at(o.at);
+  const swell = 1.2;
+  const lp = v.reg(ctx.createBiquadFilter());
+  lp.type = 'lowpass';
+  lp.Q.value = 0.6;
+  const open = Math.min(1300, o.f * 5);
+  lp.frequency.setValueAtTime(o.f * 1.6, t);
+  lp.frequency.linearRampToValueAtTime(open, t + swell);
+  lp.frequency.setValueAtTime(open, t + o.dur);
+  lp.frequency.exponentialRampToValueAtTime(o.f * 1.4, t + o.dur + o.release);
+  // The horn's warm, round middle.
+  const body = v.reg(ctx.createBiquadFilter());
+  body.type = 'peaking';
+  body.frequency.value = 420;
+  body.Q.value = 0.9;
+  body.gain.value = 3;
+  const amp = v.gain(0);
+  const len = applyEnv(amp.gain, t, { a: swell, d: 0.5, s: 0.85, hold: Math.max(0, o.dur - swell - 0.5), r: o.release, peak: o.gain });
+  lp.connect(body).connect(amp).connect(v.out);
+  // Breath: the level wavers a little, slowly — not a vibrato.
+  const breath = ctx.createOscillator();
+  breath.frequency.value = rand(0.15, 0.3);
+  const depth = v.gain(o.gain * 0.06);
+  breath.connect(depth).connect(amp.gain);
+  v.run(breath, o.at, o.at + len);
+  for (const cents of [-5, 4]) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = o.f;
+    osc.detune.value = cents + rand(-2, 2);
+    osc.connect(lp);
+    v.run(osc, o.at + rand(0, 0.05), o.at + len);
+  }
+}
+
+/** Horns sit further back in the hall than the drums. */
+const HORN_REVERB = 0.9;
+
+/** Chords in G, voiced low and close (G2–C4) so each moves as little as it can. */
+export const CHORDS: Record<string, string[]> = {
+  G: ['G2', 'D3', 'G3', 'B3'],
+  C: ['C3', 'E3', 'G3', 'C4'],
+  D: ['A2', 'D3', 'F#3', 'A3'],
+  Em: ['G2', 'E3', 'G3', 'B3'],
+  Am: ['A2', 'E3', 'A3', 'C4'],
+};
+/** Two bars a chord, eight to a progression: plain march harmony. */
+export const PROGRESSIONS = [
+  ['G', 'C', 'G', 'D'],
+  ['G', 'Em', 'C', 'D'],
+  ['G', 'C', 'D', 'G'],
+  ['G', 'Am', 'D', 'G'],
+];
+/** How likely the horns play the next eight bars, by how full the band is. */
+const HORN_ODDS = [0.45, 0.65, 0.8];
+/** Progressions in a row before the horns rest (eight bars at least). */
+const HORN_RUN = 2;
+
+/** One chord, `dur` s long, fading out as the next swells in. */
+function hornChord(bus: Bus, when: number, dur: number, chord: string, vel: number, last: boolean) {
+  const v = new Voice(bus, { when, gain: dbToGain(LEVELS.horn) * vel, pan: 0.06, reverb: HORN_REVERB });
+  // The low note leads; the upper ones lean back a little.
+  const weights = [1, 0.78, 0.72, 0.6];
+  CHORDS[chord].forEach((n, i) => horn(v, {
+    f: note(n), at: rand(0, 0.06) + i * 0.035, dur, gain: weights[i] ?? 0.6, release: last ? 2.8 : 1.5,
+  }));
+  v.done();
+}
+
+/** Every eight bars: do the horns play, and what? They rest after two
+ *  progressions running, never play the same one twice in a row, and a run
+ *  that's about to rest ends home on G. */
+export function nextHorns(st: MarchState) {
+  const h = st.horns;
+  const play = h.next;
+  h.run = play ? h.run + 1 : 0;
+  h.next = h.run < HORN_RUN && rand() < HORN_ODDS[st.intensity];
+  if (!play) {
+    h.prog = -1;
+    return;
+  }
+  const pool = PROGRESSIONS.map((_, i) => i)
+    .filter(i => i !== h.last && (h.next || PROGRESSIONS[i][3] === 'G'));
+  h.prog = h.last = pickOf(pool);
+}
+
 // ── Patterns ───────────────────────────────────────────────────────
 
 /** 16 steps a bar. Snare: S accent, s stroke, g ghost, f flam, R roll from here to the bar's end. */
@@ -179,10 +274,14 @@ export interface MarchState {
   intensity: number;
   /** Whether the next bar's downbeat ends a roll (lands accented). */
   afterRoll: boolean;
+  /** The horns: the progression playing (-1: resting), the last one played,
+   *  progressions in a row, and whether they play the next eight bars. */
+  horns: { prog: number; last: number; run: number; next: boolean };
 }
 
 export function newMarchState(): MarchState {
-  return { bar: 0, intensity: 0, afterRoll: false };
+  // The drums set the scene alone; the horns come in on the ninth bar.
+  return { bar: 0, intensity: 0, afterRoll: false, horns: { prog: -1, last: -1, run: 0, next: true } };
 }
 
 /** Schedule one bar starting at `t0` (absolute) and advance the state. */
@@ -196,6 +295,16 @@ export function scheduleBar(bus: Bus, t0: number, st: MarchState): void {
   }
   const lvl = st.intensity;
   const lastOfPhrase = phraseBar === 3;
+
+  // Horns: a chord every two bars of a progression, overlapping the next a
+  // little so one swells in as the last fades. Fuller when the band is.
+  if (st.bar % 8 === 0 && st.bar > 0) nextHorns(st);
+  if (st.horns.prog >= 0 && st.bar % 2 === 0) {
+    const prog = PROGRESSIONS[st.horns.prog];
+    const i = (st.bar % 8) / 2;
+    hornChord(bus, t0, 2 * BAR + 0.3, prog[i], 0.85 + 0.1 * lvl, i === 3 && !st.horns.next);
+  }
+
   // An occasional bar with only the bass drum, when it's quiet.
   const hush = lvl === 0 && !lastOfPhrase && rand() < 0.15;
   const snarePat = lastOfPhrase && lvl >= 1 && rand() < 0.55 ? pickOf(FILLS) : pickOf(SNARE[lvl]);

@@ -275,7 +275,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
   // ── Script context ──
   const makeCtx = useCallback((run: Run): TutorialCtx => {
     const wait = (ms: number) => run.guard(new Promise<void>(r => setTimeout(r, ms * paceRef.current)));
-    const sfx = (name: Exclude<keyof typeof soundRef.current, 'claimSmash' | 'phaseCall'>) => { if (!run.cancelled) soundRef.current[name](); };
+    const sfx = (name: Exclude<keyof typeof soundRef.current, 'claimSmash' | 'phaseCall' | 'cue' | 'claimSmashIn'>) => { if (!run.cancelled) soundRef.current[name](); };
     const get = () => worldRef.current;
     const set = (patch: Partial<World> | ((w: World) => Partial<World>)) => {
       if (run.cancelled) return;
@@ -577,6 +577,11 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
               setActive: (plan) => set({ focus: plan?.tileKey ?? null }),
               spread: () => {},
               flip: () => {},
+              // The tutorial's rounds have no card effects to pay out.
+              bank: () => {},
+              vp: () => {},
+              giveCard: () => {},
+              burn: () => {},
               sendHome: (keys) => {
                 const byTile = new Map<string, Set<string>>();
                 for (const k of keys) {
@@ -754,6 +759,10 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     flip: (k) => resolveHooks.current?.api.flip(k),
     sendHome: (k) => resolveHooks.current?.api.sendHome(k),
     applyStep: (i) => resolveHooks.current?.api.applyStep(i),
+    bank: (...a) => resolveHooks.current?.api.bank(...a),
+    vp: (...a) => resolveHooks.current?.api.vp(...a),
+    giveCard: (...a) => resolveHooks.current?.api.giveCard(...a),
+    burn: (k) => resolveHooks.current?.api.burn(k),
   }), []);
 
   const onCoinLand = useCallback((c: Coin) => {

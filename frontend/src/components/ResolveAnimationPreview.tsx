@@ -1,12 +1,14 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import type { HexTile, PlayerEffect, ResolutionStep, ResolutionClaimant } from '../types/game';
+import type { Card, HexTile, PlayerEffect, ResolutionClaimCard, ResolutionEffect, ResolutionStep, ResolutionClaimant } from '../types/game';
 import GameBoard, { type GridTransform, type BoardFx, type BoardControls, PLAYER_COLORS } from './GameBoard';
 import TileResolver, { resolveCamera, type ResolverApi } from './TileResolver';
-import { buildResolvePlans, type PlanCard } from '../utils/resolvePlan';
+import { buildResolvePlans, tileAfterStep, type PlanCard } from '../utils/resolvePlan';
 import { TileCardStack, boardCardScale, type BoardCardEntry } from './BoardCards';
 import FlightCard, { type Flight } from './hand/FlightCard';
-import { CARD_W, easeInOut, flightKeyframes, type Pose } from './hand/cardMotion';
-import { useCardCatalog } from '../cardCatalog';
+import TrashBurn from './hand/TrashBurn';
+import { CARD_W, easeInOut, flightKeyframes, poseTransform, type Pose } from './hand/cardMotion';
+import { CoinFlight, splitCoins, type Coin } from './ResourceCounter';
+import { useCardCatalog, type CardCatalog } from '../cardCatalog';
 import { axialToPixel } from '../utils/hexGeometry';
 import type { CameraView } from '../board3d/engine';
 import PlayerEffectPopups from './PlayerEffectPopups';
@@ -120,6 +122,14 @@ interface Scenario {
   immune?: boolean;
   /** Attack powers (default 2, 3, 4, 5 by seat). */
   powers?: number[];
+  /** Blue attacks with Siege Engine: the defender's temporary bonus is ignored. */
+  siege?: boolean;
+  /** Exodus / Scorched Retreat: the center tile's holder gives it up. */
+  giveUp?: 'abandon' | 'scorch';
+  /** …and it's a VP town (scorched: its ruins are left). */
+  giveUpVp?: boolean;
+  /** Seat giving it up (default 0 — you, face up). */
+  giveUpSeat?: number;
   description: string;
 }
 
@@ -142,6 +152,10 @@ const SCENARIOS: Scenario[] = [
   { id: 'stalemate',      label: 'Stalemate',       numAttackers: 2, hasDefender: true, powers: [3, 3], description: 'Two attackers tie above the owner — nobody takes the tile' },
   { id: 'immune',         label: 'Immune',          numAttackers: 2, hasDefender: true, immune: true, powers: [2, 7], description: 'The owner plays Iron Wall — claims of 2 and 7 both just dink off' },
   { id: 'power-ramp',     label: 'Power Ramp',      numAttackers: 4, hasDefender: false, powers: [1, 3, 5, 9], description: 'Claims of 1, 3, 5 and 9 on a neutral tile — each smash hits harder than the last' },
+  { id: 'siege',          label: 'Siege Engine',    numAttackers: 2, hasDefender: true, fortified: true, siege: true, powers: [2, 3], description: 'The owner fortifies (+2 Defense card, +1 Claim). Green\'s 3 bounces off the full 3; then the +2 cracks for your Siege Engine alone, and its 2 breaks through the 1 left' },
+  { id: 'abandon',        label: 'Abandon (Exodus)', numAttackers: 0, hasDefender: false, giveUp: 'abandon', description: 'You play Exodus on your walled tile — your color lifts away and the camp and walls sink' },
+  { id: 'scorch',         label: 'Scorched Retreat', numAttackers: 0, hasDefender: false, giveUp: 'scorch', description: 'You scorch your walled tile — it burns to a smoldering wasteland for the rest of the match' },
+  { id: 'scorch-vp',      label: 'Scorch a VP Town', numAttackers: 0, hasDefender: false, giveUp: 'scorch', giveUpVp: true, giveUpSeat: 1, description: 'A rival scorches the VP town they hold — the town burns, leaving charred ruins' },
 ];
 
 /** Build a ResolutionStep + the defender_id (for grid pre-setup) for a scenario.
@@ -209,8 +223,16 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
   }
 
   // Attackers tying on top of the defense: nobody takes it.
-  const tie = topCount > 1 && topPower > defenderPower;
+  let tie = topCount > 1 && topPower > defenderPower;
   if (tie) winnerId = null;
+  if (s.siege && !forceDefended) {
+    // Your Siege Engine faces the defense less its +2; everyone else, all of it.
+    const through = claimants.filter(c => c.power > defenderPower - (c.player_id === PLAYERS[0] ? 2 : 0));
+    const best = Math.max(...through.map(c => c.power));
+    const top = through.filter(c => c.power === best);
+    tie = top.length > 1;
+    winnerId = top.length === 1 ? top[0].player_id : defenderId;
+  }
   const outcome: ResolutionStep['outcome'] =
     tie ? 'tie' : winnerId && winnerId !== defenderId ? 'claimed' : 'defended';
   if (s.fortified && defenderId) claimants.push({ player_id: defenderId, power: defenderPower, source_q: null, source_r: null });
@@ -229,10 +251,242 @@ function buildScenarioStep(s: Scenario, forceDefended: boolean): { step: Resolut
       previous_owner: defenderId,
       outcome,
       is_base_raid: s.isBaseRaid === true,
+      ...(s.siege ? { defense_ignored: 2, ignored_by: [PLAYERS[0]] } : {}),
     },
     defenderId,
   };
 }
+
+// ── Card-effect scenarios ───────────────────────────────────────────────────
+// Scripted reveals for what card effects do as a tile resolves: Flood's
+// spread, reveal-time power bonuses, coins and VP, cards gained or burnt,
+// Breakthrough's bonus tile. Each builds the board, the cards on it, the
+// server's steps and its `resolution_effects` (the shapes the backend sends).
+
+interface Scripted {
+  tiles: Record<string, HexTile>;
+  cards: BoardCardEntry[];
+  steps: ResolutionStep[];
+  effects: ResolutionEffect[];
+}
+
+interface EffectScenario {
+  id: string;
+  label: string;
+  description: string;
+  build: (catalog: CardCatalog) => Scripted;
+}
+
+/** The tile a board card sits on (its key ends "@q,r"). */
+const tileOfCard = (key: string) => key.slice(key.lastIndexOf('@') + 1);
+
+function scriptKit(catalog: CardCatalog) {
+  const cards: BoardCardEntry[] = [];
+  /** A card `name` played by seat `seat` on `tile` (yours face up). */
+  const card = (seat: number, n: number, tile: string, name: string, over: Partial<Card> = {}): string => {
+    const pid = PLAYERS[seat];
+    const base = catalog.getCardByName(name) ?? catalog.getCardByName('Blitz');
+    const key = `${pid}-${n}@${tile}`;
+    if (base) {
+      cards.push({
+        key, playerId: pid, playerName: PLAYER_LABELS[seat],
+        card: { ...base, id: key, ...over },
+        faceDown: seat !== 0, stacked: seat !== 0, revealed: seat !== 0,
+      });
+    }
+    return key;
+  };
+  const claimCard = (key: string, name: string, power: number, bonuses: ResolutionClaimCard['bonuses'] = []): ResolutionClaimCard =>
+    ({ card_id: key, name, power, bonuses });
+  /** Seat `seat` claiming with `power`, coming from its frontier (or `from`). */
+  const claimant = (seat: number, power: number, list: ResolutionClaimCard[] = [], from?: [number, number]): ResolutionClaimant => {
+    const [dq, dr] = APPROACH_DIRS[seat];
+    return {
+      player_id: PLAYERS[seat], power, cards: list,
+      source_q: from ? from[0] : dq * TERRITORY_FIRST_STEP, source_r: from ? from[1] : dr * TERRITORY_FIRST_STEP,
+    };
+  };
+  const step = (tile: string, s: Partial<ResolutionStep>): ResolutionStep => {
+    const [q, r] = tile.split(',').map(Number);
+    return {
+      tile_key: tile, q, r, contested: false, claimants: [], defender_id: null, defender_power: 0,
+      winner_id: null, previous_owner: null, outcome: 'claimed', ...s,
+    };
+  };
+  const gift = (name: string): Card | undefined => catalog.getCardByName(name);
+  return { cards, card, claimCard, claimant, step, gift };
+}
+
+const EFFECT_SCENARIOS: EffectScenario[] = [
+  {
+    id: 'flood', label: 'Flood',
+    description: 'You flood from the middle tile: the water surges into all six tiles around it — four neutral and a Yellow tile are taken at power 1; Red\'s walled tile (2) holds',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const tiles = buildDemoTiles(PLAYERS[0]);
+      tiles[CONTESTED_KEY].is_vp = false;
+      tiles[CONTESTED_KEY].vp_value = 0;
+      tiles['0,-1'].owner = PLAYERS[2];
+      Object.assign(tiles['-1,0'], { owner: PLAYERS[3], defense_power: 2 });
+      const flood = k.card(0, 0, CONTESTED_KEY, 'Flood');
+      const around = ['1,0', '1,-1', '0,-1', '-1,0', '-1,1', '0,1'];
+      const steps = around.map(t => {
+        const owner = tiles[t].owner;
+        const held = tiles[t].defense_power > 1;
+        return k.step(t, {
+          contested: !!owner, previous_owner: owner, defender_id: owner, defender_power: tiles[t].defense_power,
+          claimants: [k.claimant(0, 1, [k.claimCard(flood, 'Flood', 1)], [0, 0])],
+          winner_id: held ? owner : PLAYERS[0], outcome: held ? 'defended' : 'claimed',
+        });
+      });
+      return {
+        tiles, cards: k.cards, steps,
+        effects: [{ type: 'flood', player_id: PLAYERS[0], by_player_id: PLAYERS[0], tile_key: CONTESTED_KEY, targets: around, card_id: flood, card_name: 'Flood' }],
+      };
+    },
+  },
+  {
+    id: 'bonuses', label: 'Power Bonuses',
+    description: 'Green fortifies (+2). You play Dog Pile, Ambush (+2 contested) and Strike Team (+2 with another Claim), Dog Pile giving +1 to each other claim: 13. Yellow\'s Battering Ram gets +2 against the defense: 7',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const tiles = buildDemoTiles(PLAYERS[1]);
+      k.card(1, 0, CONTESTED_KEY, 'Fortify', { defense_bonus: 2 });
+      const dog = k.card(0, 0, CONTESTED_KEY, 'Dog Pile');
+      const amb = k.card(0, 1, CONTESTED_KEY, 'Ambush');
+      const st = k.card(0, 2, CONTESTED_KEY, 'Strike Team');
+      const ram = k.card(2, 0, CONTESTED_KEY, 'Battering Ram');
+      return {
+        tiles, cards: k.cards, effects: [],
+        steps: [
+          k.step(CONTESTED_KEY, {
+            claimants: [{ player_id: PLAYERS[1], power: 0, source_q: null, source_r: null }],
+            defender_id: PLAYERS[1], defender_power: 2, winner_id: PLAYERS[1], previous_owner: PLAYERS[1],
+            outcome: 'defense_applied', defense_permanent: 0, defense_temporary: 2,
+          }),
+          k.step(CONTESTED_KEY, {
+            contested: true, defender_id: PLAYERS[1], defender_power: 2, previous_owner: PLAYERS[1], winner_id: PLAYERS[0],
+            claimants: [
+              k.claimant(0, 13, [
+                k.claimCard(dog, 'Dog Pile', 2),
+                k.claimCard(amb, 'Ambush', 2, [{ source: 'Ambush', amount: 2 }, { source: 'Dog Pile', amount: 1 }]),
+                k.claimCard(st, 'Strike Team', 3, [{ source: 'Strike Team', amount: 2 }, { source: 'Dog Pile', amount: 1 }]),
+              ]),
+              k.claimant(2, 7, [k.claimCard(ram, 'Battering Ram', 5, [{ source: 'Battering Ram', amount: 2 }])]),
+            ],
+          }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'rapid-assault', label: 'Rapid Assault',
+    description: 'Your Rapid Assault takes Green\'s tile — and drains a resource from Green\'s bank',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const tiles = buildDemoTiles(PLAYERS[1]);
+      const ra = k.card(0, 0, CONTESTED_KEY, 'Rapid Assault');
+      return {
+        tiles, cards: k.cards,
+        steps: [k.step(CONTESTED_KEY, {
+          contested: true, defender_id: PLAYERS[1], defender_power: 0, previous_owner: PLAYERS[1], winner_id: PLAYERS[0],
+          claimants: [k.claimant(0, 3, [k.claimCard(ra, 'Rapid Assault', 3)])],
+        })],
+        effects: [{ type: 'resources', player_id: PLAYERS[1], by_player_id: PLAYERS[0], amount: -1, tile_key: CONTESTED_KEY, card_name: 'Rapid Assault' }],
+      };
+    },
+  },
+  {
+    id: 'spoils-of-war', label: 'Spoils of War',
+    description: 'Your Spoils of War (3) beats Green\'s Blitz (2) to the tile — and Green\'s Blitz is trashed: it burns on the tile',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const tiles = buildDemoTiles(null);
+      const sw = k.card(0, 0, CONTESTED_KEY, 'Spoils of War');
+      const bz = k.card(1, 0, CONTESTED_KEY, 'Blitz');
+      return {
+        tiles, cards: k.cards,
+        steps: [k.step(CONTESTED_KEY, {
+          contested: true, winner_id: PLAYERS[0],
+          claimants: [k.claimant(0, 3, [k.claimCard(sw, 'Spoils of War', 3)]), k.claimant(1, 2, [k.claimCard(bz, 'Blitz', 2)])],
+        })],
+        effects: [{ type: 'trash', player_id: PLAYERS[1], by_player_id: PLAYERS[0], tile_key: CONTESTED_KEY, card_id: bz, card_name: 'Blitz', source_card: 'Spoils of War' }],
+      };
+    },
+  },
+  {
+    id: 'mercenary', label: 'Mercenary vs Iron Wall',
+    description: 'Green\'s Iron Wall makes the tile immune: your Mercenary dinks off — and you still take its Debt',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const tiles = buildDemoTiles(PLAYERS[1]);
+      k.card(1, 0, CONTESTED_KEY, 'Iron Wall', { defense_bonus: 0 });
+      k.card(0, 0, CONTESTED_KEY, 'Mercenary');
+      const debt = k.gift('Debt');
+      return {
+        tiles, cards: k.cards,
+        steps: [k.step(CONTESTED_KEY, {
+          claimants: [{ player_id: PLAYERS[1], power: 0, source_q: null, source_r: null }],
+          defender_id: PLAYERS[1], winner_id: PLAYERS[1], previous_owner: PLAYERS[1],
+          outcome: 'defense_applied', defense_permanent: 0, defense_temporary: 0, defense_immunity: true,
+        })],
+        effects: debt ? [{
+          type: 'card', player_id: PLAYERS[0], by_player_id: PLAYERS[0], tile_key: CONTESTED_KEY,
+          card_name: 'Debt', count: 1, card: debt, vp_each: 0, source_card: 'Mercenary',
+        }] : [],
+      };
+    },
+  },
+  {
+    id: 'breakthrough', label: 'Breakthrough',
+    description: 'Your Breakthrough takes the middle tile, then breaks through into a neutral tile beside it — the camera follows it there',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const tiles = buildDemoTiles(null);
+      const bt = k.card(0, 0, CONTESTED_KEY, 'Breakthrough');
+      return {
+        tiles, cards: k.cards, effects: [],
+        steps: [
+          k.step(CONTESTED_KEY, { winner_id: PLAYERS[0], claimants: [k.claimant(0, 3, [k.claimCard(bt, 'Breakthrough', 3)])] }),
+          k.step('-1,1', {
+            winner_id: PLAYERS[0], outcome: 'auto_claim', card_name: 'Breakthrough',
+            claimants: [{ player_id: PLAYERS[0], power: 0, source_q: 0, source_r: 0 }],
+          }),
+        ],
+      };
+    },
+  },
+  {
+    id: 'battle-glory', label: 'Battle Glory',
+    description: 'You take Green\'s tile; at the end of the reveal your Battle Glory gains +1 VP (two Claims beat opponents\' tiles this round)',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const tiles = buildDemoTiles(PLAYERS[1]);
+      const bz = k.card(0, 0, CONTESTED_KEY, 'Blitz');
+      return {
+        tiles, cards: k.cards,
+        steps: [k.step(CONTESTED_KEY, {
+          contested: true, defender_id: PLAYERS[1], previous_owner: PLAYERS[1], winner_id: PLAYERS[0],
+          claimants: [k.claimant(0, 2, [k.claimCard(bz, 'Blitz', 2)])],
+        })],
+        effects: [{ type: 'vp', player_id: PLAYERS[0], by_player_id: PLAYERS[0], amount: 1, tile_key: null, card_name: 'Battle Glory' }],
+      };
+    },
+  },
+  {
+    id: 'diplomat', label: 'Diplomat',
+    description: 'Your Diplomat: two Land Grants fly to you and one to every rival, from your base — each worth 1 VP as it lands',
+    build: (catalog) => {
+      const k = scriptKit(catalog);
+      const grant = k.gift('Land Grant');
+      const effects: ResolutionEffect[] = grant ? PLAYERS.map((pid, i) => ({
+        type: 'card' as const, player_id: pid, by_player_id: PLAYERS[0], tile_key: null,
+        card_name: 'Land Grant', count: i === 0 ? 2 : 1, card: grant, vp_each: 1, source_card: 'Diplomat',
+      })) : [];
+      return { tiles: buildDemoTiles(null), cards: k.cards, steps: [], effects };
+    },
+  },
+];
 
 // ── Popup simulation scenarios ──────────────────────────────────────────────
 // These build sample `PlayerEffect[]` payloads so you can iterate on the
@@ -383,11 +637,62 @@ export default function ResolveAnimationPreview() {
   const tileCardsRef = useRef<BoardCardEntry[]>([]);
   tileCardsRef.current = tileCards;
   const catalog = useCardCatalog();
+  /** The scenario's card effects (the server's resolution_effects). */
+  const [effects, setEffects] = useState<ResolutionEffect[]>([]);
+  const [lastEffectScenario, setLastEffectScenario] = useState<EffectScenario | null>(null);
+  /** Coins and VP stars in flight (here: to and from each player's base). */
+  const [coins, setCoins] = useState<Coin[]>([]);
+  const coinSeq = useRef(0);
+  /** "+8", "−1", "+1 VP" rising off a player's base as things land there. */
+  const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string; color: string }[]>([]);
+  const [burns, setBurns] = useState<{ key: string; card: Card; pose: Pose }[]>([]);
+  const landings = useRef(new Map<number, () => void>());
 
   const { settings, setAnimationMode } = useSettings();
   const animSpeed = useAnimationSpeed();
 
   const playScenario = useCallback((s: Scenario) => {
+    if (s.giveUp) {
+      // The center tile is held (walled, with a camp); its holder gives it up.
+      const seat = s.giveUpSeat ?? 0;
+      const pid = PLAYERS[seat];
+      const demo = buildDemoTiles(pid);
+      const center = demo[CONTESTED_KEY];
+      center.is_vp = !!s.giveUpVp;
+      center.vp_value = s.giveUpVp ? 2 : 0;
+      center.base_defense = s.giveUpVp ? 3 : 0;
+      center.permanent_defense_bonus = 2;
+      center.defense_power = center.base_defense + 2;
+      setTiles(demo);
+      const card = catalog.getCardByName(s.giveUp === 'scorch' ? 'Scorched Retreat' : 'Exodus');
+      const key = `${pid}-0@${CONTESTED_KEY}`;
+      const entries: BoardCardEntry[] = card ? [{
+        key, playerId: pid, playerName: PLAYER_LABELS[seat],
+        card: { ...card, id: key },
+        faceDown: seat !== 0, stacked: seat !== 0, revealed: seat !== 0,
+      }] : [];
+      setTileCards(entries);
+      planCardsRef.current = new Map([[CONTESTED_KEY, entries.map(e => ({
+        key: e.key, playerId: e.playerId, cardType: e.card.card_type, power: e.card.power, defense: e.card.defense_bonus ?? 0, faceDown: !!e.faceDown,
+      }))]]);
+      setSteps([{
+        tile_key: CONTESTED_KEY, q: 0, r: 0, contested: false,
+        claimants: [{ player_id: pid, power: 0, source_q: null, source_r: null }],
+        defender_id: null, defender_power: 0, winner_id: null, previous_owner: pid,
+        outcome: s.giveUp, vp_value: s.giveUpVp ? 2 : 0,
+      }]);
+      // Scorched Retreat pays its holder 8 resources off the burning tile.
+      setEffects(s.giveUp === 'scorch'
+        ? [{ type: 'resources', player_id: pid, by_player_id: pid, amount: 8, tile_key: CONTESTED_KEY, card_name: 'Scorched Retreat' }]
+        : []);
+      setLastEffectScenario(null);
+      setLastScenario(s);
+      setRunId(x => x + 1);
+      setSnapshotTransform(transformRef.current);
+      setSnapshotRect(gridContainerRef.current?.getBoundingClientRect() ?? null);
+      setResolving(true);
+      return;
+    }
     const { step, defenderId } = buildScenarioStep(s, forceDefended);
     // Reset the grid so the central tile matches this scenario's pre-battle state.
     // For base-raid scenarios the central tile is the defender's base (not a VP tile).
@@ -437,6 +742,10 @@ export default function ResolveAnimationPreview() {
         add(c.player_id, 1, claimCard, { power: 1 });
         continue;
       }
+      if (s.siege && c.player_id === PLAYERS[0]) {
+        add(c.player_id, 0, catalog.getCardByName('Siege Engine') ?? claimCard, { power: c.power });
+        continue;
+      }
       const n = c.power >= 6 ? 3 : c.power >= 2 ? 2 : 1;
       for (let j = 0; j < n; j++) {
         const share = Math.floor(c.power / n) + (j < c.power % n ? 1 : 0);
@@ -447,6 +756,13 @@ export default function ResolveAnimationPreview() {
     planCardsRef.current = new Map([[CONTESTED_KEY, entries.map(e => ({
       key: e.key, playerId: e.playerId, cardType: e.card.card_type, power: e.card.power, defense: e.card.defense_bonus ?? 0, faceDown: !!e.faceDown,
     }))]]);
+    // A raid that breaks through: Spoils (+1 VP) to the raider, Rubble to the base's owner.
+    const spoils = catalog.getCardByName('Spoils'), rubble = catalog.getCardByName('Rubble');
+    setEffects(s.isBaseRaid && step.outcome === 'claimed' && step.winner_id && defenderId && spoils && rubble ? [
+      { type: 'card', player_id: step.winner_id, by_player_id: step.winner_id, tile_key: CONTESTED_KEY, card_name: 'Spoils', count: 1, card: spoils, vp_each: 1, source_card: 'Base Raid' },
+      { type: 'card', player_id: defenderId, by_player_id: step.winner_id, tile_key: CONTESTED_KEY, card_name: 'Rubble', count: 1, card: rubble, vp_each: 0, source_card: 'Base Raid' },
+    ] : []);
+    setLastEffectScenario(null);
     setSteps(steps);
     setLastScenario(s);
     setRunId(x => x + 1);
@@ -490,27 +806,26 @@ export default function ResolveAnimationPreview() {
     setTiles(prev => {
       const tile = prev[step.tile_key];
       if (!tile) return prev;
-      if ((step.outcome === 'claimed' || step.outcome === 'auto_claim') && step.winner_id && !tile.is_base) {
-        return { ...prev, [step.tile_key]: { ...tile, owner: step.winner_id } };
-      }
-      return prev;
+      const next = tileAfterStep(tile, step);
+      return next === tile ? prev : { ...prev, [step.tile_key]: next };
     });
   }, [steps]);
 
   const handleComplete = useCallback(() => {
     setResolving(false);
     setSteps([]);
+    setEffects([]);
     setTileCards([]);
   }, []);
 
   // The tile-by-tile plan, from the scenario's steps and the cards on the
   // tile. Blue is "you", so the camera closes in — unless Quick is on.
-  const plans = useMemo(() => (steps.length
-    ? buildResolvePlans(steps, planCardsRef.current, tiles, PLAYERS[0]).map(p => (quick ? { ...p, focus: false } : p))
+  const plans = useMemo(() => (steps.length || effects.length
+    ? buildResolvePlans(steps, planCardsRef.current, tiles, PLAYERS[0], effects).map(p => (quick ? { ...p, focus: false } : p))
     : []),
   // Planned once per run, from the board as it was going in.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [steps]);
+  [steps, effects]);
   const project = useCallback((q: number, r: number) => {
     const t = transformRef.current;
     const rect = (gridContainerRef.current?.querySelector('canvas') ?? gridContainerRef.current)?.getBoundingClientRect();
@@ -519,6 +834,31 @@ export default function ResolveAnimationPreview() {
     const s = t.project(p.x, p.y, 0.15);
     return { x: s.x + rect.left, y: s.y + rect.top };
   }, []);
+  /** A player's base on screen (where the preview sends what's theirs). */
+  const baseOf = useCallback((pid: string) => {
+    const seat = PLAYERS.indexOf(pid);
+    const [dq, dr] = APPROACH_DIRS[seat] ?? [0, 0];
+    return project(dq * BASE_STEP, dr * BASE_STEP);
+  }, [project]);
+  const addFloat = useCallback((at: { x: number; y: number }, text: string, color: string) => {
+    const id = ++coinSeq.current;
+    setFloats(f => [...f, { id, x: at.x, y: at.y, text, color }]);
+    setTimeout(() => setFloats(f => f.filter(x => x.id !== id)), 1300);
+  }, []);
+  /** Coins (or VP stars) flying from → to; `done` once the last has landed. */
+  const flyCoins = useCallback((amount: number, from: { x: number; y: number }, to: { x: number; y: number }, icon: 'resource' | 'vp', done?: () => void) => {
+    const list = splitCoins(amount).map((value, i): Coin => ({
+      id: ++coinSeq.current, from, to, value, batch: 0, icon, delay: i * 90, duration: icon === 'vp' ? 820 : 680,
+    }));
+    if (done && list.length) landings.current.set(list[list.length - 1].id, done);
+    setCoins(cs => [...cs, ...list]);
+  }, []);
+  const onCoinLand = useCallback((c: Coin) => {
+    setCoins(cs => cs.filter(x => x.id !== c.id));
+    landings.current.get(c.id)?.();
+    landings.current.delete(c.id);
+  }, []);
+
   const api = useMemo<ResolverApi>(() => ({
     focus: (key, shot) => {
       const ms = resolveCamera(controlsRef.current, savedViewRef, key, 1, shot);
@@ -549,14 +889,84 @@ export default function ResolveAnimationPreview() {
       if (launched.length) setFlights(fs => [...fs, ...launched]);
     },
     applyStep: (idx) => applyStep(idx),
-  }), [applyStep, project]);
+    // No bank, score or deck here: what goes to a player flies to their base.
+    bank: (pid, amount, at) => {
+      const base = baseOf(pid);
+      if (!base || !amount) return;
+      const [from, to] = amount > 0 ? [at, base] : [base, at];
+      const float = () => addFloat(amount > 0 ? base : at, `${amount > 0 ? '+' : '−'}${Math.abs(amount)}`, amount > 0 ? '#8ff0a4' : '#ff8f8f');
+      flyCoins(Math.abs(amount), from, to, 'resource', float);
+    },
+    vp: (pid, amount, at) => {
+      const base = baseOf(pid);
+      if (base) flyCoins(amount, at, base, 'vp', () => addFloat(base, `+${amount} VP`, '#ffd24a'));
+    },
+    giveCard: (pid, card, count, at, vpEach) => {
+      const base = baseOf(pid);
+      if (!base) return;
+      const start: Pose = { x: at.x, y: at.y, rot: 0, scale: 0.1 };
+      const lift: Pose = { x: at.x, y: at.y - 70, rot: 0, scale: 0.36 };
+      const to: Pose = { x: base.x, y: base.y, rot: 0, scale: 0.06, opacity: 0 };
+      const launched: Flight<'home'>[] = [];
+      for (let i = 0; i < count; i++) {
+        const key = `gift${++flightSeq.current}`;
+        if (vpEach) landings.current.set(-flightSeq.current, () => addFloat(base, `+${vpEach} VP`, '#ffd24a'));
+        launched.push({
+          key, kind: 'home', card: { ...card, id: key }, delay: i * 220, duration: 1300,
+          frames: [
+            { offset: 0, transform: poseTransform(start), opacity: 0 },
+            { offset: 0.2, transform: poseTransform(lift), opacity: 1 },
+            { offset: 0.45, transform: poseTransform(lift), opacity: 1 },
+            ...flightKeyframes(lift, to, { arc: 60, ease: easeInOut, samples: 6, opacity: t => (t < 0.6 ? 1 : 1 - (t - 0.6) / 0.4) })
+              .slice(1).map(f => ({ ...f, offset: 0.45 + (f.offset as number) * 0.55 })),
+          ],
+        });
+      }
+      setFlights(fs => [...fs, ...launched]);
+    },
+    burn: (keys) => {
+      const leaving = tileCardsRef.current.filter(c => keys.includes(c.key));
+      for (const c of leaving) {
+        const r = document.querySelector(`[data-board-card="${CSS.escape(c.key)}"]`)?.getBoundingClientRect();
+        if (r && r.width > 0) {
+          setBurns(b => [...b, { key: `burn-${c.key}`, card: c.card, pose: { x: r.left + r.width / 2, y: r.top + r.height / 2, rot: 0, scale: r.width / CARD_W } }]);
+        }
+      }
+      setTileCards(cs => cs.filter(c => !keys.includes(c.key)));
+    },
+  }), [applyStep, project, baseOf, flyCoins, addFloat]);
+
+  const playEffectScenario = useCallback((s: EffectScenario) => {
+    const built = s.build(catalog);
+    setTiles(built.tiles);
+    setTileCards(built.cards);
+    const byTile = new Map<string, PlanCard[]>();
+    for (const e of built.cards) {
+      const t = tileOfCard(e.key);
+      byTile.set(t, [...(byTile.get(t) ?? []), {
+        key: e.key, playerId: e.playerId, cardType: e.card.card_type, power: e.card.power,
+        defense: e.card.defense_bonus ?? 0, faceDown: !!e.faceDown, cardId: e.card.id,
+      }]);
+    }
+    planCardsRef.current = byTile;
+    setEffects(built.effects);
+    setSteps(built.steps);
+    setLastScenario(null);
+    setLastEffectScenario(s);
+    setRunId(x => x + 1);
+    setSnapshotTransform(transformRef.current);
+    setSnapshotRect(gridContainerRef.current?.getBoundingClientRect() ?? null);
+    setResolving(true);
+  }, [catalog]);
 
   const handleReset = useCallback(() => {
     setTiles(buildDemoTiles(null));
     setTileCards([]);
     setSteps([]);
+    setEffects([]);
     setResolving(false);
     setLastScenario(null);
+    setLastEffectScenario(null);
   }, []);
 
   const handleTileClick = useCallback(() => {/* no-op */}, []);
@@ -579,6 +989,7 @@ export default function ResolveAnimationPreview() {
   }, []);
 
   const desc = lastScenario?.description
+    ?? lastEffectScenario?.description
     ?? lastPopupScenario?.description
     ?? 'Click a scenario to play an animation';
 
@@ -607,6 +1018,27 @@ export default function ResolveAnimationPreview() {
                 opacity: resolving ? 0.5 : 1,
                 cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)',
               }}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Card effects as a tile resolves (Flood, bonuses, coins, VP, cards). */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: '#aaa', marginRight: 4 }}>Card effects:</span>
+          {EFFECT_SCENARIOS.map(s => (
+            <button
+              key={s.id}
+              onClick={() => playEffectScenario(s)}
+              disabled={resolving}
+              style={{
+                ...btnStyle,
+                background: resolving ? '#2a2a3e' : (lastEffectScenario?.id === s.id ? '#3fd0a0' : '#21a67a'),
+                opacity: resolving ? 0.5 : 1,
+                cursor: resolving ? 'not-allowed' : 'var(--cc-cursor-pointer)',
+              }}
+              title={s.description}
             >
               {s.label}
             </button>
@@ -731,9 +1163,9 @@ export default function ResolveAnimationPreview() {
           focusTileKey={closeUp}
           hideDefenseLabelKey={activeTile}
           raisedTileKey={activeTile}
-          tileCardKeys={tileCards.length ? [CONTESTED_KEY] : []}
+          tileCardKeys={[...new Set(tileCards.map(c => tileOfCard(c.key)))]}
           renderTileCards={(key, zoom) => (
-            <TileCardStack entries={tileCards} scale={boardCardScale(zoom)} focus={activeTile === key} still={resolving} onOpen={() => {}} />
+            <TileCardStack entries={tileCards.filter(c => tileOfCard(c.key) === key)} scale={boardCardScale(zoom)} focus={activeTile === key} still={resolving} onOpen={() => {}} />
           )}
         />
       </div>
@@ -751,7 +1183,7 @@ export default function ResolveAnimationPreview() {
         </span>
       </div>
 
-      {resolving && steps.length > 0 && (
+      {resolving && plans.length > 0 && (
         <TileResolver
           key={runId}
           plans={plans}
@@ -763,7 +1195,27 @@ export default function ResolveAnimationPreview() {
         />
       )}
       {flights.map(f => (
-        <FlightCard key={f.key} flight={f} onDone={(done) => setFlights(fs => fs.filter(x => x.key !== done.key))} />
+        <FlightCard key={f.key} flight={f} onDone={(done) => {
+          setFlights(fs => fs.filter(x => x.key !== done.key));
+          const n = Number(done.key.replace('gift', ''));
+          if (done.key.startsWith('gift')) { landings.current.get(-n)?.(); landings.current.delete(-n); }
+        }} />
+      ))}
+      {coins.length > 0 && (
+        <div className="cc-res-coins">
+          {coins.map(c => <CoinFlight key={c.id} coin={c} onLand={onCoinLand} />)}
+        </div>
+      )}
+      {floats.map(f => (
+        <div key={f.id} style={{
+          position: 'fixed', left: f.x, top: f.y - 28, transform: 'translateX(-50%)', zIndex: 9600, pointerEvents: 'none',
+          color: f.color, fontWeight: 800, fontSize: 18, textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+          animation: 'cc-res-float 1.2s ease-out forwards',
+        }}>{f.text}</div>
+      ))}
+      {burns.map(b => (
+        <TrashBurn key={b.key} card={b.card} pose={b.pose} speed={1} maxScale={0.5}
+          onDone={() => setBurns(prev => prev.filter(x => x.key !== b.key))} />
       ))}
 
       {/* Keep the component mounted once a scenario has played so clearing

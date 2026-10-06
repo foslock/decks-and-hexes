@@ -917,8 +917,9 @@ export default function CardHand({
     drawn.forEach((card, i) => {
       const delay = i * stagger;
       specs.set(card.id, { start, delay, duration: Math.round(560 * speed), flip: true, arc: 70, fadeIn: false });
-      if (delay <= 0) soundRef.current.cardDraw();
-      else setTimeout(() => soundRef.current.cardDraw(), delay);
+      // Each card's draw is heard as it leaves the pile (cued, so it can
+      // start early through slow headphones).
+      soundRef.current.cue('cardDraw', delay);
       setTimeout(() => setDrawBonus(b => Math.max(0, b - 1)), delay);
     });
     setDrawBonus(b => b + drawn.length);

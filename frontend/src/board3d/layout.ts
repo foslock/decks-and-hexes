@@ -13,7 +13,9 @@ import { fbm2, hash2, hash2i, smoothstep, valueNoise2 } from './noise';
 
 export type Biome =
   | 'meadow' | 'forest' | 'farm' | 'pasture' | 'hills'
-  | 'mountain' | 'town' | 'castle';
+  | 'mountain' | 'town' | 'castle'
+  /** Scorched Retreat: burnt to ash for the rest of the match. */
+  | 'scorched';
 
 export interface TileLayout {
   key: string;
@@ -78,6 +80,7 @@ const GROUND_HEX: Record<Biome, number> = {
   mountain: 0x5f5a52,
   town: 0x76684e,
   castle: 0x6a6354,
+  scorched: 0x2d2620,
 };
 
 const BASE_HEIGHT: Record<Biome, number> = {
@@ -89,6 +92,7 @@ const BASE_HEIGHT: Record<Biome, number> = {
   mountain: 0.2,
   town: 0.06,
   castle: 0.08,
+  scorched: 0.012,
 };
 
 const linear = (hex: number): [number, number, number] => {
@@ -102,14 +106,19 @@ const DIRT = linear(0x5f5238);
 const DRY = linear(0x8a7c48);
 const LUSH = linear(0x4a6a28);
 const ROCK = linear(0x6c6862);
+const CHAR = linear(0x15110e);
+const ASH = linear(0x6f6a63);
+
+/** What about a tile shapes the terrain and decor (a town's VP value
+ *  doesn't — its structure updates on its own). */
+export function tileSignature(t: HexTile): string {
+  return `${t.is_blocked ? 'b' : ''}${t.is_scorched ? 's' : ''}${t.is_vp ? 'v' : ''}${t.is_base ? `c${t.base_owner}` : ''}`;
+}
 
 /** Structural signature — when this changes, terrain and decor rebuild. */
 export function structureSignature(tiles: Record<string, HexTile>): string {
   const parts: string[] = [];
-  for (const key of Object.keys(tiles).sort()) {
-    const t = tiles[key];
-    parts.push(`${key}${t.is_blocked ? 'b' : ''}${t.is_vp ? `v${t.vp_value}` : ''}${t.is_base ? `c${t.base_owner}` : ''}`);
-  }
+  for (const key of Object.keys(tiles).sort()) parts.push(`${key}${tileSignature(tiles[key])}`);
   return parts.join('|');
 }
 
@@ -123,9 +132,12 @@ export class BoardLayout {
 
   constructor(gameTiles: Record<string, HexTile>) {
     // Map seed from the fixed features so different maps look different.
+    // A scorched tile counts as what it was (a plain tile, or a VP town), so
+    // burning one never reshuffles the rest of the island's scenery.
     let seed = 7;
     for (const t of Object.values(gameTiles)) {
-      if (t.is_blocked || t.is_vp || t.is_base) seed = (seed * 31 + hash2i(t.q, t.r, 3)) >>> 0;
+      const town = t.is_vp || (t.scorched_vp ?? 0) > 0;
+      if ((t.is_blocked && !t.is_scorched) || town || t.is_base) seed = (seed * 31 + hash2i(t.q, t.r, 3)) >>> 0;
     }
     this.mapSeed = seed;
 
@@ -153,6 +165,7 @@ export class BoardLayout {
   }
 
   private pickBiome(t: HexTile, tl: TileLayout, all: Record<string, HexTile>): Biome {
+    if (t.is_scorched) return 'scorched';
     if (t.is_blocked) return 'mountain';
     if (t.is_base) return 'castle';
     if (t.is_vp) return 'town';
@@ -162,9 +175,11 @@ export class BoardLayout {
     for (const [dq, dr] of HEX_DIRS) {
       const n = all[`${t.q + dq},${t.r + dr}`];
       if (!n) continue;
-      if (n.is_blocked) nearMountain++;
+      // A scorched neighbour counts as what it was, so the land around it
+      // keeps its look.
+      if (n.is_blocked && !n.is_scorched) nearMountain++;
       if (n.is_base) nearCastle++;
-      if (n.is_vp) nearTown++;
+      if (n.is_vp || (n.scorched_vp ?? 0) > 0) nearTown++;
     }
     const s = this.mapSeed % 997;
     const moisture = fbm2(tl.x * 0.32 + s, tl.z * 0.32, 11, 3);
@@ -230,10 +245,17 @@ export class BoardLayout {
     const ws = this.scratch;
     const total = this.weights(x, z, ws);
     let r = 0, g = 0, b = 0;
+    let burnt = 0;
     if (total > 0) {
       for (const { tile, w } of ws) {
         const c = GROUND_LIN[tile.biome];
         r += c[0] * w; g += c[1] * w; b += c[2] * w;
+        if (tile.biome === 'scorched') {
+          // Burnt right out to the hex's edge, with a ragged rim of scorch
+          // licking a little way past it.
+          const rag = (fbm2(x * 4.1, z * 4.1, 83, 2) - 0.5) * 0.28;
+          burnt = Math.max(burnt, 1 - smoothstep(-0.16, 0.09, hexSdf(x - tile.x, z - tile.z) + rag));
+        }
       }
       r /= total; g /= total; b /= total;
     } else {
@@ -256,6 +278,15 @@ export class BoardLayout {
     r += (ROCK[0] - r) * rocky * 0.5;
     g += (ROCK[1] - g) * rocky * 0.5;
     b += (ROCK[2] - b) * rocky * 0.5;
+    if (burnt > 0) {
+      // Burnt ground: black char drifted with grey ash, the grass gone.
+      const k = burnt;
+      const drift = smoothstep(0.42, 0.7, fbm2(x * 2.3 + 11, z * 2.3, 71, 3));
+      const cr = CHAR[0] + (ASH[0] - CHAR[0]) * drift;
+      const cg = CHAR[1] + (ASH[1] - CHAR[1]) * drift;
+      const cb = CHAR[2] + (ASH[2] - CHAR[2]) * drift;
+      r += (cr - r) * k; g += (cg - g) * k; b += (cb - b) * k;
+    }
     return [r * (1 + fleck), g * (1 + fleck), b * (1 + fleck)];
   }
 

@@ -203,3 +203,69 @@ def test_cpu_knows_ties_win_against_neutral_defense():
     assert not _claim_beats_defense(neutral_vp, 1)
     assert not _claim_beats_defense(owned, 2)
     assert _claim_beats_defense(owned, 3)
+
+
+# ── Cards with a price ──────────────────────────────────────────────
+
+def _hand(card_registry, game, pid, ids):
+    from app.game_engine.cards import _copy_card
+    player = game.players[pid]
+    player.hand = [_copy_card(card_registry[cid], f"h{i}") for i, cid in enumerate(ids)]
+    return player
+
+
+def test_stampede_waits_for_a_hand_short_of_actions(card_registry):
+    game = _game(card_registry, archetypes=("swarm", "vanguard"))
+    cpu = CPUPlayer("p0", difficulty=HARD)
+    player = _hand(card_registry, game, "p0", ["swarm_blitz_rush", "neutral_gather", "neutral_explore"])
+    player.resources = 4
+    # Two other cards and five actions: three more actions buy nothing, and
+    # it would cost the Buy Phase.
+    assert not cpu._drawback_pays(game, player, player.hand[0], 0)
+    # Seven cards to play on five actions: now the actions are worth it.
+    player = _hand(card_registry, game, "p0", ["swarm_blitz_rush"] + ["neutral_explore"] * 7)
+    player.resources = 0
+    assert cpu._drawback_pays(game, player, player.hand[0], 0)
+
+
+def test_frenzy_only_discards_a_card_that_would_go_unplayed(card_registry):
+    game = _game(card_registry, archetypes=("swarm", "vanguard"))
+    cpu = CPUPlayer("p0", difficulty=HARD)
+    player = _hand(card_registry, game, "p0", ["swarm_frenzy"] + ["neutral_explore"] * 4)
+    assert not cpu._drawback_pays(game, player, player.hand[0], 0)
+    player = _hand(card_registry, game, "p0", ["swarm_frenzy"] + ["neutral_explore"] * 7)
+    assert cpu._drawback_pays(game, player, player.hand[0], 0)
+
+
+def test_mulligan_keeps_a_good_hand(card_registry):
+    game = _game(card_registry, archetypes=("fortress", "vanguard"))
+    cpu = CPUPlayer("p0", difficulty=HARD)
+    player = _hand(card_registry, game, "p0", ["fortress_mulligan"] + ["neutral_militia"] * 4)
+    # The draw pile is all starters: a worse hand.
+    assert not cpu._drawback_pays(game, player, player.hand[0], 0)
+
+
+def test_demon_pact_never_thins_the_deck_below_two_hands(card_registry):
+    from app.game_engine.cards import _copy_card
+    game = _game(card_registry, archetypes=("vanguard", "swarm"))
+    cpu = CPUPlayer("p0", difficulty=HARD)
+    player = _hand(card_registry, game, "p0", ["vanguard_demon_pact"] + ["neutral_explore"] * 4)
+    weights = cpu._get_weights(player, game)
+    # A starting-size deck: burning 3 would leave too few cards.
+    player.deck.cards = [_copy_card(card_registry["neutral_gather"], f"d{i}") for i in range(5)]
+    player.deck.discard = []
+    assert cpu._score_claim_targets(game, player, player.hand[0], 0, weights) == []
+    # A big deck can afford it, and the cards it burns are priced in.
+    player.deck.cards = [_copy_card(card_registry["neutral_gather"], f"d{i}") for i in range(12)]
+    scored = cpu._score_claim_targets(game, player, player.hand[0], 0, weights)
+    assert scored and len(scored[0][1]["trash_card_indices"]) == 3
+
+
+def test_forced_march_waits_until_the_actions_are_needed(card_registry):
+    game = _game(card_registry)
+    cpu = CPUPlayer("p0", difficulty=HARD)
+    player = _hand(card_registry, game, "p0", ["neutral_forced_march"] + ["neutral_explore"] * 3)
+    # Rivals' extra action next round, for nothing.
+    assert not cpu._drawback_pays(game, player, player.hand[0], 0)
+    player = _hand(card_registry, game, "p0", ["neutral_forced_march"] + ["neutral_explore"] * 7)
+    assert cpu._drawback_pays(game, player, player.hand[0], 0)

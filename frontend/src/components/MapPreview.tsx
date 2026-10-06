@@ -90,7 +90,7 @@ export default function MapPreview({ lobbyCode, playerId, token, lobby, onClose 
       tiles: tiles.length,
       premium: tiles.filter(t => t.is_vp && t.vp_value === 2).length,
       standard: tiles.filter(t => t.is_vp && t.vp_value !== 2).length,
-      mountains: tiles.filter(t => t.is_blocked).length,
+      mountains: tiles.filter(t => t.is_blocked && !t.is_scorched).length,
     };
   }, [map]);
 

@@ -111,6 +111,7 @@ export class AmbientLayer {
   private snowAcc = 0;
   private flyAcc = 0;
   private emberAcc = 0;
+  private coalAcc = 0;
   private rand = rng(4242);
   private forests: { x: number; z: number }[] = [];
   private castles: { x: number; y: number; z: number }[] = [];
@@ -343,6 +344,38 @@ export class AmbientLayer {
         r: 0.85, g: 1.0, b: 0.45, a: 0.9, life: 2.5 + this.rand() * 2, size0: 0.022, size1: 0.012,
         drag: 0.1, shape: 1,
       });
+    }
+
+    // ── Scorched ground smoldering: coals flare, spit a spark, breathe smoke ──
+    const coals = this.spots.embers;
+    this.coalAcc += dt * dens;
+    while (this.coalAcc > 0.09 && coals.length) {
+      this.coalAcc -= 0.09;
+      const c = coals[Math.floor(this.rand() * coals.length)];
+      // A glow that swells and fades on the coal.
+      this.glow.spawn({
+        x: c.x, y: c.y + 0.004, z: c.z, vx: 0, vy: 0.005, vz: 0,
+        r: 1.0, g: 0.38 + this.rand() * 0.2, b: 0.06, a: 0.75,
+        life: 0.7 + this.rand() * 0.8, size0: 0.05 + this.rand() * 0.03, size1: 0.02, drag: 1, shape: 0,
+      });
+      if (this.rand() < 0.35) {
+        this.glow.spawn({
+          x: c.x, y: c.y + 0.01, z: c.z,
+          vx: (this.rand() - 0.5) * 0.05, vy: 0.12 + this.rand() * 0.12, vz: (this.rand() - 0.5) * 0.05,
+          r: 1.0, g: 0.6, b: 0.2, a: 0.9, life: 1.2 + this.rand() * 0.9, size0: 0.014, size1: 0.004,
+          drag: 0.4, wind: 0.35, shape: 1,
+        });
+      }
+      if (this.rand() < 0.3) {
+        const shade = 0.2 + this.rand() * 0.12;
+        this.smoke.spawn({
+          x: c.x, y: c.y + 0.02, z: c.z,
+          vx: (this.rand() - 0.5) * 0.01, vy: 0.07 + this.rand() * 0.04, vz: (this.rand() - 0.5) * 0.01,
+          r: shade, g: shade * 0.97, b: shade * 0.95, a: 0.22,
+          life: 3 + this.rand() * 1.5, size0: 0.04, size1: 0.22 + this.rand() * 0.1,
+          drag: 0.25, wind: 0.3, gravity: -0.004,
+        });
+      }
     }
 
     // ── Embers drifting up from castles ──

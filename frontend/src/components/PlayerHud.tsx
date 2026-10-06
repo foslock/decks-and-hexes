@@ -414,6 +414,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
 
       {/* Stats row */}
       <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, color: 'var(--cc-text-dim)', fontVariantNumeric: 'tabular-nums' }}>
+        <span data-hud-vp={player.id} style={{ display: 'contents' }}>
         {vpBreakdown ? (
           <VpStatTip breakdown={vpBreakdown}>
             <IconValue icon="vp" value={player.vp} size={12} decorative style={hasReachedVpTarget ? {
@@ -429,6 +430,7 @@ export default function PlayerHud({ player, isActive, isCurrent, isFirstPlayer, 
             } : undefined} />
           </StatTip>
         )}
+        </span>
         <StatTip label="Resources"><span data-hud-resources={player.id}><IconValue icon="resource" value={resources} size={12} decorative /></span></StatTip>
         <StatTip label="Tiles Occupied"><IconValue icon="tile" value={tileCount} size={12} decorative /></StatTip>
         <StatTip label="Total Deck Size"><IconValue icon="drawPile" value={totalCards} size={12} decorative /></StatTip>

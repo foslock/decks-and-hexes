@@ -100,17 +100,9 @@ export const SCENES: Scene[] = [
     title: 'Welcome to Card Clash',
     body: <>Card Clash is a race for territory. Each round, everyone plays cards <b>at the same time</b> to claim land, defend it and earn <b>Victory Points</b> (VP). Here's how a game works.</>,
     start: () => makeWorld({ tiles: boardStart() }),
+    // A slow sweep across the island; the bases are pointed out next.
     run: async (ctx) => {
       await ctx.fly({ zoom: 0.94, tilt: 0.64, rotation: 0.5, seconds: 4.2 });
-      const fx = ctx.fx();
-      const b = px(BASE_YOU), r = px(BASE_RIVAL);
-      fx?.pillar(b.x, b.y, YOU_COLOR, 1600);
-      fx?.shockwave(b.x, b.y, YOU_COLOR, 1.2, 900);
-      ctx.sfx('spotlightYou');
-      await ctx.wait(500);
-      fx?.pillar(r.x, r.y, RIVAL_COLOR, 1600);
-      fx?.shockwave(r.x, r.y, RIVAL_COLOR, 1.2, 900);
-      ctx.sfx('spotlightRival');
       await ctx.fly({ zoom: 0.96, tilt: 0.58, rotation: 0.2, seconds: 4 });
     },
   },
