@@ -451,15 +451,20 @@ export default function LobbyScreen({
       <LocalSettingsMenu />
 
       <div className="cc-scr-lobby-inner">
-        {/* Header with lobby code */}
+        {/* Header: the title (and connection) on one side, the join code on the other */}
         <header className="cc-scr-lobby-header cc-rise-in">
-          <div className="cc-scr-eyebrow">Card Clash</div>
-          <h1 className="cc-title cc-scr-lobby-title">Lobby</h1>
+          <div className="cc-scr-lobby-titles">
+            <div className="cc-scr-eyebrow">Card Clash</div>
+            <h1 className="cc-title cc-scr-lobby-title">Lobby</h1>
+            <div className={`cc-scr-status ${statusClass}`}>
+              {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected'}
+            </div>
+          </div>
           <div className="cc-scr-joincode-wrap">
             <div className="cc-scr-joincode-label">Join Code</div>
             <div
               className="cc-scr-joincode"
-              title="Click to copy"
+              title="Click to copy — share it with friends to join"
               onClick={() => {
                 navigator.clipboard.writeText(lobbyCode);
                 setShowCopied(true);
@@ -473,15 +478,12 @@ export default function LobbyScreen({
                 <span className="cc-scr-copied">Copied!</span>
               )}
             </div>
-            <div className="cc-scr-joincode-hint">
-              Click code to copy &middot; Share with friends to join
-            </div>
-            <div className={`cc-scr-status ${statusClass}`}>
-              {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected'}
-            </div>
+            <div className="cc-scr-joincode-hint">Click to copy</div>
           </div>
         </header>
 
+        {/* Players and settings: side by side on wide screens */}
+        <div className="cc-scr-lobby-grid">
         {/* Players list */}
         <section className="cc-panel cc-scr-section" style={{ animationDelay: '60ms' }}>
           <div className="cc-scr-section-head">
@@ -789,43 +791,6 @@ export default function LobbyScreen({
               </div>
             </div>
 
-            {/* VP Target */}
-            <div className="cc-scr-row">
-              <div>
-                <Tooltip content="The number of Victory Points a player needs to win.">
-                  <span className="cc-scr-row-label" style={{ display: 'block' }}>VP Target</span>
-                </Tooltip>
-              </div>
-              {isHost ? (
-                <div className="cc-scr-row-controls">
-                  <input
-                    type="number"
-                    min={1}
-                    className="cc-scr-input cc-scr-input-num"
-                    value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      if (!isNaN(val) && val > 0) {
-                        handleConfigChange('vp_target', val);
-                      }
-                    }}
-                  />
-                  {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size, players.length) && (
-                    <button
-                      onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size, players.length))}
-                      className="cc-scr-chip-btn"
-                    >
-                      Reset ({computeRecommendedVp(lobby.config.grid_size, players.length)})
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <strong className="cc-scr-row-value">
-                  {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
-                </strong>
-              )}
-            </div>
-
             {/* Player Limit — seats open, bots included */}
             <div className="cc-scr-row">
               <div>
@@ -883,6 +848,43 @@ export default function LobbyScreen({
           </button>
           {showAdvanced && (
           <div className="cc-scr-rows is-advanced">
+            {/* VP Target */}
+            <div className="cc-scr-row">
+              <div>
+                <Tooltip content="The number of Victory Points a player needs to win.">
+                  <span className="cc-scr-row-label" style={{ display: 'block' }}>VP Target</span>
+                </Tooltip>
+              </div>
+              {isHost ? (
+                <div className="cc-scr-row-controls">
+                  <input
+                    type="number"
+                    min={1}
+                    className="cc-scr-input cc-scr-input-num"
+                    value={lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!isNaN(val) && val > 0) {
+                        handleConfigChange('vp_target', val);
+                      }
+                    }}
+                  />
+                  {lobby.config.vp_target !== null && lobby.config.vp_target !== computeRecommendedVp(lobby.config.grid_size, players.length) && (
+                    <button
+                      onClick={() => handleConfigChange('vp_target', computeRecommendedVp(lobby.config.grid_size, players.length))}
+                      className="cc-scr-chip-btn"
+                    >
+                      Reset ({computeRecommendedVp(lobby.config.grid_size, players.length)})
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <strong className="cc-scr-row-value">
+                  {lobby.config.vp_target ?? computeRecommendedVp(lobby.config.grid_size, players.length)}
+                </strong>
+              )}
+            </div>
+
             {/* Map Seed */}
             <div ref={seedHistoryRef} className="cc-scr-row">
               <div>
@@ -1087,6 +1089,7 @@ export default function LobbyScreen({
           </div>
           )}
         </section>
+        </div>
 
         {/* Error display */}
         {error && (
