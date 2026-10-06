@@ -3505,9 +3505,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       return () => clearTimeout(timer);
     }
     if (introSequence === 'grid_build') {
-      // The island rises out of the sea from the center over ~2.2s, then the
+      // The island rises out of the sea from the center over ~2.5s, then the
       // cards are dealt.
-      const buildDuration = Math.round(2200 * animSpeed) || 600;
+      const buildDuration = Math.round(2500 * animSpeed) || 600;
       // Each ring of tiles pops up out of the water as it breaks the surface
       // (the build shader's stagger: ring k surfaces k / maxRing × 0.6 + BUILD_SURFACE in).
       if (!tilePopsRef.current) {

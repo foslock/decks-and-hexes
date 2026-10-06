@@ -308,6 +308,19 @@ export class FxLayer implements BoardFx {
         gravity: 4.2, drag: 1.2, shape: 2,
       });
     }
+    // Water pouring off its edges for a moment after.
+    for (let k = 0; k < 6; k++) {
+      const a = (Math.PI / 3) * k + Math.PI / 6 + (Math.random() - 0.5) * 0.5;
+      for (let j = 0; j < 2; j++) {
+        const out = 0.3 + Math.random() * 0.35;
+        this.sparkPool.spawn({
+          x: w.x + Math.cos(a) * 0.82, y: wy + 0.12, z: w.z + Math.sin(a) * 0.82,
+          vx: Math.cos(a) * out, vy: 0.05 + Math.random() * 0.25, vz: Math.sin(a) * out,
+          r: 0.72, g: 0.86, b: 1.0, life: 0.45 + Math.random() * 0.3, size0: 0.035, size1: 0.012,
+          gravity: 3.4, drag: 1.0, shape: 2, delay: 0.08 + Math.random() * 0.35,
+        });
+      }
+    }
     for (let i = 0; i < 4; i++) {
       const a = Math.random() * Math.PI * 2;
       const rr = Math.random() * 0.45;
