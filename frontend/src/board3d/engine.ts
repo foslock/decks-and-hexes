@@ -370,9 +370,20 @@ export class BoardEngine {
     const from = v < this.build ? -1 : this.build;
     if (v > from && this.layout && this.fxLayer && this.speed > 0) {
       const maxRing = Math.max(1, this.layout.maxRing);
+      // Full spray up to a small board's 61 tiles, thinner beyond.
+      const density = Math.max(0.3, Math.min(1, 61 / this.layout.tiles.length));
       for (const tl of this.layout.tiles) {
         const at = (tl.ring / maxRing) * 0.6 + BUILD_SURFACE;
-        if (at > from && at <= v) this.fxLayer.splash(tl.x * HEX_SIZE, tl.z * HEX_SIZE);
+        if (at <= from || at > v) continue;
+        // Spray only off the edges still facing open water: toward the next
+        // ring out, or the open sea.
+        const edges: number[] = [];
+        for (let k = 0; k < 6; k++) {
+          const [dq, dr] = HEX_DIRS[k];
+          const nb = this.layout.byKey.get(`${tl.q + dq},${tl.r + dr}`);
+          if (!nb || nb.ring > tl.ring) edges.push(k);
+        }
+        if (edges.length) this.fxLayer.splash(tl.x * HEX_SIZE, tl.z * HEX_SIZE, 1, density, edges);
       }
     }
     this.build = v;
