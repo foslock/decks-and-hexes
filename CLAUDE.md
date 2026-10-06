@@ -126,7 +126,10 @@ All sound is synthesized live with Web Audio (no files): recipes in
 the engine in `SoundEngine.ts`. Phase banners (`PhaseBanner`) sound a bugle
 call that climbs through the round: 1 → 3 Play, 1 → 4 Resolve, 1 → 5 Buy
 (`phaseCall3`–`5`). Background music is `audio/music.ts`: distant march drums
-generated bar by bar on their own bus/volume. It plays where a screen turns
+generated bar by bar on their own bus/volume, with quiet horn chords in G (the
+bugle's key) from the ninth bar — two bars a chord through a few march
+progressions (`PROGRESSIONS`), resting after two in a row, ending a run on G,
+≈ 6–9 dB under the drums (`LEVELS.horn`). It plays where a screen turns
 it on — the lobby (`setMusicActive`) and the game — never on the home screen;
 pauses while the tab is hidden, holds silent through the lobby countdown
 (`holdMusic`) and starts over with each game (`restartMusic`). Nothing makes a

@@ -110,6 +110,14 @@ export default function SoundPreview() {
     const t = setInterval(() => setDelay({ now: soundEngine.outputDelay(), lead: soundEngine.leadMs }), 500);
     return () => clearInterval(t);
   }, []);
+  /** The background march (drums, and the horns from the ninth bar). */
+  const [music, setMusic] = useState(false);
+  useEffect(() => () => soundEngine.setMusicActive(false), []);
+  const toggleMusic = () => {
+    const on = !music;
+    setMusic(on);
+    if (on) soundEngine.restartMusic(); else soundEngine.setMusicActive(false);
+  };
   /** Sync check: a dot flashes on each beat with a tick cued to land on it. */
   const dotRef = useRef<HTMLSpanElement>(null);
   const syncCheck = () => {
@@ -183,6 +191,10 @@ export default function SoundPreview() {
               <span style={{ color: 'var(--cc-text-faint)' }}> — Bluetooth headphones add ~150–250 ms.</span>
             </span>
             <button className="cc-btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={syncCheck}>Sync check</button>
+            <button className="cc-btn-secondary" style={{ padding: '4px 10px', fontSize: 12 }} onClick={toggleMusic}>
+              {music ? 'Stop the march' : 'Play the march'}
+            </button>
+            <span style={{ color: 'var(--cc-text-faint)' }}>(the horns come in after eight bars, about 20 s)</span>
             <span ref={dotRef} aria-hidden style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--cc-gold)', opacity: 0.25, display: 'inline-block' }} />
           </div>
         </div>
