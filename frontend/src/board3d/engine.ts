@@ -964,7 +964,7 @@ export class BoardEngine {
     }
     if (this.paths) this.roads.setPaths(this.paths, this.tiles);
     if (!this.floating) {
-      this.floating = new FloatingOverlay(layout);
+      this.floating = new FloatingOverlay(layout, this.shared);
       this.world.add(this.floating.group);
     } else {
       this.floating.setLayout(layout);
