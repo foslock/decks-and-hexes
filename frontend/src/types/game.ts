@@ -11,6 +11,10 @@ export interface HexTile {
   held_since_turn: number | null;
   is_base: boolean;
   base_owner: string | null;
+  /** Scorched Retreat: burnt to a wasteland (also blocked) for the rest of the match. */
+  is_scorched?: boolean;
+  /** The VP value a scorched tile had (its town's ruins are drawn). */
+  scorched_vp?: number;
   immune?: boolean;  // tile has claim immunity this round (Iron Wall / Stronghold)
 }
 
@@ -194,6 +198,43 @@ export interface ResolutionClaimant {
   power: number;
   source_q: number | null;
   source_r: number | null;
+  /** Each of the player's claim cards on the tile: its printed power and what
+   *  the reveal adds to it (Ambush, Battering Ram, Strike Team, Dog Pile…). */
+  cards?: ResolutionClaimCard[];
+}
+
+export interface ResolutionClaimCard {
+  card_id: string;
+  name: string;
+  power: number;
+  bonuses: { source: string; amount: number }[];
+}
+
+/**
+ * Something a card effect changed as the reveal resolved, on the tile it
+ * happened on (null: no tile — e.g. Diplomat, Battle Glory):
+ *  - resources: a bank gained (Scorched Retreat) or lost (Rapid Assault) `amount`;
+ *  - vp: a player's card VP went up by `amount` (Battle Glory);
+ *  - card: `count` copies of `card` joined the player's deck (Debt, Land
+ *    Grant, Spoils, Rubble), worth `vp_each` VP apiece;
+ *  - trash: the player's card `card_id` on the tile was trashed (Spoils of War);
+ *  - flood: Flood spread from the tile to `targets` before those claims land.
+ */
+export interface ResolutionEffect {
+  type: 'resources' | 'vp' | 'card' | 'trash' | 'flood';
+  player_id: string;
+  /** Whose card did it. */
+  by_player_id?: string;
+  tile_key: string | null;
+  /** The card that did it (for 'card': the card gained; see source_card). */
+  card_name: string;
+  amount?: number;
+  count?: number;
+  card?: Card;
+  vp_each?: number;
+  source_card?: string;
+  card_id?: string;
+  targets?: string[];
 }
 
 export interface ResolutionStep {
@@ -210,13 +251,16 @@ export interface ResolutionStep {
   defender_source_r?: number;
   winner_id: string | null;
   previous_owner: string | null;
-  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate' | 'defense_applied' | 'auto_claim';
+  outcome: 'claimed' | 'defended' | 'tie' | 'defense_held' | 'consecrate' | 'defense_applied' | 'auto_claim'
+    | 'abandon' | 'scorch';  // abandon / scorch: Exodus / Scorched Retreat give the tile up (before claims)
   card_name?: string;  // auto_claim: name of the card that triggered the auto-claim (e.g. "Breakthrough")
-  vp_value?: number;  // Consecrate: new VP value of the tile after enhancement
+  vp_value?: number;  // Consecrate: new VP value of the tile after enhancement; scorch: the VP it had
   defense_permanent?: number;  // defense_applied: persistent defense after application
   defense_temporary?: number;  // defense_applied: temporary defense after application
   defense_immunity?: boolean;  // defense_applied: tile has immunity (Iron Wall / Stronghold)
   is_base_raid?: boolean;  // claim targets the defender's base tile — uses a distinct resolution animation
+  defense_ignored?: number;  // Siege Engine / Conqueror: temporary defense the tile lost for this round's claims
+  ignored_by?: string[];  // …and who played the claim(s) that ignored it
 }
 
 export interface PlayerEffect {
@@ -263,6 +307,7 @@ export interface GameState {
   log: string[];
   resolution_steps?: ResolutionStep[];
   player_effects?: PlayerEffect[];
+  resolution_effects?: ResolutionEffect[];
   test_mode?: boolean;
   shared_purchases_last_round?: SharedPurchaseRecord[];
   revealed_actions?: Record<string, PlannedAction[]>;

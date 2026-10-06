@@ -61,6 +61,11 @@ class HexTile:
     lost_by: list[str] = field(default_factory=list)
     is_base: bool = False  # True for starting corner tiles (permanently owned)
     base_owner: Optional[str] = None  # player_id of the base's permanent owner
+    # Scorched Retreat: burnt to a wasteland (also is_blocked) for the rest of
+    # the match. scorched_vp keeps the VP value it had, so the board can draw
+    # the ruins of a burnt town.
+    is_scorched: bool = False
+    scorched_vp: int = 0
 
     @property
     def s(self) -> int:
@@ -254,6 +259,8 @@ def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
         "capture_count": tile.capture_count,
         "is_base": tile.is_base,
         "base_owner": tile.base_owner,
+        "is_scorched": tile.is_scorched,
+        "scorched_vp": tile.scorched_vp,
     }
 
 

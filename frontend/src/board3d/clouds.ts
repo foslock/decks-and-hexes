@@ -213,8 +213,11 @@ export class CloudLayer {
   }
 
   setLayout(layout: BoardLayout): void {
+    // Only a new island (another map) scatters the clouds afresh; a tile
+    // changing on the same island leaves them drifting where they are.
+    const reshaped = Math.abs(layout.radius - this.layout.radius) > 1e-6 || layout.tiles.length !== this.layout.tiles.length;
     this.layout = layout;
-    this.sea = this.sea.map(() => this.spawnSea(true));
+    if (reshaped) this.sea = this.sea.map(() => this.spawnSea(true));
   }
 
   private puffs(n: number, spread: number, height: number, size: number): Puff[] {

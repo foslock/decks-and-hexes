@@ -111,10 +111,6 @@ export default function TrashBurn({ card, pose, speed, onDone, maxScale = 0.9 }:
   const leftClip = `polygon(0 -20px, ${seam[0][0]}px -20px, ${pathPts}, ${seam[seam.length - 1][0]}px ${CARD_H + 20}px, 0 ${CARD_H + 20}px)`;
   const rightClip = `polygon(${seam[0][0]}px -20px, ${CARD_W + 20}px -20px, ${CARD_W + 20}px ${CARD_H + 20}px, ${seam[seam.length - 1][0]}px ${CARD_H + 20}px, ${[...seam].reverse().map(([x, y]) => `${x}px ${y}px`).join(', ')})`;
   const pivotX = seam[seam.length - 1][0];
-  // Each half's filter only covers its own side of the seam (plus room for
-  // the ember glow): half the pixels to filter.
-  const seamMin = Math.min(...seam.map(p => p[0])) / CARD_W;
-  const seamMax = Math.max(...seam.map(p => p[0])) / CARD_W;
 
   // Before it rips, the card rises clear of the hand to a readable size.
   const lift = useMemo<Pose>(() => {
@@ -216,11 +212,13 @@ export default function TrashBurn({ card, pose, speed, onDone, maxScale = 0.9 }:
   });
 
   const filter = (side: 'l' | 'r') => {
-    const x = side === 'l' ? -0.1 : seamMin - 0.06;
-    const width = side === 'l' ? seamMax + 0.06 - x : 1.1 - x;
     const refFor = (i: number) => (el: SVGFEFuncAElement | null) => { if (el) funcRefs.current[(side === 'l' ? 0 : 3) + i] = el; };
+    // Both halves filter the whole card. Safari draws a CSS-filtered HTML
+    // element offset by its filter region's corner, so a region starting
+    // partway across (the right half's own side) showed the card's left side
+    // in the right half.
     return (
-      <filter id={`${filterId}-${side}`} x={x} y="-0.1" width={width} height="1.2" colorInterpolationFilters="sRGB">
+      <filter id={`${filterId}-${side}`} x="-0.1" y="-0.1" width="1.2" height="1.2" colorInterpolationFilters="sRGB">
         <feImage href={noise} x="0" y="0" width={CARD_W} height={CARD_H} preserveAspectRatio="none" result="noise" />
         <feColorMatrix in="noise" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  1 0 0 0 0" result="n" />
         <feComponentTransfer in="n" result="keep"><feFuncA ref={refFor(0)} type="linear" slope={BURN_K} intercept="0" /></feComponentTransfer>

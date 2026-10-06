@@ -72,7 +72,11 @@ export function useShownResources(playerId: string, fallback: number): number {
 }
 
 // ── Coins ───────────────────────────────────────────────────────────────────
-export interface Coin { id: number; from: Point; to: Point; value: number; delay: number; duration: number; batch: number }
+export interface Coin {
+  id: number; from: Point; to: Point; value: number; delay: number; duration: number; batch: number;
+  /** What flies: a coin (default) or a VP star. */
+  icon?: 'resource' | 'vp';
+}
 interface Float { id: number; amount: number; offsetX: number }
 
 const MAX_COINS = 10;
@@ -119,7 +123,7 @@ export function CoinFlight({ coin, onLand }: { coin: Coin; onLand: (c: Coin) => 
   }, []);
   return (
     <div ref={ref} className="cc-res-coin" style={{ opacity: 0 }}>
-      <Icon name="resource" size={20} decorative />
+      <Icon name={coin.icon ?? 'resource'} size={20} decorative />
     </div>
   );
 }
@@ -320,7 +324,7 @@ const ResourceCounter = forwardRef<ResourceCounterHandle, Props>(function Resour
           position: 'relative',
         }}>
           <span key={bump} className={bump ? 'cc-res-bump' : undefined} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-            <span ref={iconRef} style={{ display: 'inline-flex' }}><Icon name="resource" size={22} title="Resources" /></span>
+            <span ref={iconRef} data-res-counter-icon style={{ display: 'inline-flex' }}><Icon name="resource" size={22} title="Resources" /></span>
             <Num value={shown} style={{ fontFamily: 'inherit', fontWeight: 900, top: 0 }} />
           </span>
           {floats.map(f => (

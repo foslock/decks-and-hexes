@@ -837,6 +837,12 @@ def _handle_contest_cost(effect: Effect, ctx: EffectContext) -> None:
 
 def _handle_on_defend_forced_discard(effect: Effect, ctx: EffectContext) -> None:
     """War of Attrition: if defender holds, they draw fewer cards next turn."""
+    # "Holds" means the defender still owns the tile after every claim on it
+    # resolved — not just that this claim failed (a third player may have
+    # taken it).
+    tile = ctx.game.grid.tiles.get(ctx.target_tile_key) if ctx.game.grid and ctx.target_tile_key else None
+    if tile is None or tile.owner != ctx.defender_id:
+        return
     if ctx.defender_id:
         defender = ctx.game.players.get(ctx.defender_id)
         if defender:
@@ -980,6 +986,20 @@ def _handle_trash_opponent_card(effect: Effect, ctx: EffectContext) -> None:
                 ctx.game._log(
                     f"{ctx.player.name}'s {ctx.card.name} trashes {other_player.name}'s {action.card.name}!",
                     actor=ctx.player.id)
+                # The reveal burns it on the tile, and a popup says why.
+                ctx.game.resolution_effects.append({
+                    "type": "trash", "player_id": pid, "by_player_id": ctx.player.id,
+                    "tile_key": ctx.target_tile_key, "card_id": action.card.id,
+                    "card_name": action.card.name, "source_card": ctx.card.name,
+                })
+                ctx.game.player_effects.append({
+                    "source_player_id": ctx.player.id,
+                    "target_player_id": pid,
+                    "card_name": ctx.card.name,
+                    "effect": f"{action.card.name} trashed",
+                    "effect_type": "trash_card",
+                    "value": 1,
+                })
                 return  # Only trash one opponent's card
 
 
@@ -1778,6 +1798,8 @@ def _handle_abandon_and_block(effect: Effect, ctx: EffectContext) -> None:
     tile.owner = None
     tile.held_since_turn = None
     tile.is_blocked = True
+    tile.is_scorched = True
+    tile.scorched_vp = tile.vp_value if tile.is_vp else 0
     tile.defense_power = 0
     tile.permanent_defense_bonus = 0
     tile.is_vp = False  # VP hexes lose their status when blocked

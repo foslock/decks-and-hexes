@@ -77,6 +77,35 @@ export function buildTerrainGeometry(layout: BoardLayout): BufferGeometry {
   return g;
 }
 
+/** Re-sample the ground (height, normal, color) wherever `near(x, z)` —
+ *  after a tile's biome changes (scorched), without rebuilding the island. */
+export function patchTerrainGeometry(g: BufferGeometry, layout: BoardLayout, near: (x: number, z: number) => boolean): void {
+  const pos = g.getAttribute('position') as BufferAttribute;
+  const nrm = g.getAttribute('normal') as BufferAttribute;
+  const col = g.getAttribute('color') as BufferAttribute;
+  const eps = 0.03;
+  const n = new Vector3();
+  let touched = false;
+  const arr = pos.array as Float32Array;
+  for (let i = 0; i < pos.count; i++) {
+    const x = arr[i * 3], z = arr[i * 3 + 2];
+    if (!near(x, z)) continue;
+    touched = true;
+    pos.setY(i, layout.heightAt(x, z));
+    const hx = layout.heightAt(x + eps, z) - layout.heightAt(x - eps, z);
+    const hz = layout.heightAt(x, z + eps) - layout.heightAt(x, z - eps);
+    n.set(-hx, 2 * eps, -hz).normalize();
+    nrm.setXYZ(i, n.x, n.y, n.z);
+    const c = layout.colorAt(x, z);
+    col.setXYZ(i, c[0], c[1], c[2]);
+  }
+  if (!touched) return;
+  pos.needsUpdate = true;
+  nrm.needsUpdate = true;
+  col.needsUpdate = true;
+  g.computeBoundingSphere();
+}
+
 const STRATA: RGB[] = [
   lin(0x4a5a2a), // turf lip
   lin(0x5a4630), // topsoil

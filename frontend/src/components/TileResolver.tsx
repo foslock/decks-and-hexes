@@ -9,7 +9,11 @@ import { BOARD_FLIP_ID, BOARD_FLIP_MS } from './BoardCards';
 import { useResolveSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
 import Icon from '../icons/Icon';
+import type { IconName } from '../icons/glyphs';
 import { Num } from '../icons/Num';
+import type { Card, ResolutionEffect } from '../types/game';
+
+export interface ScreenPoint { x: number; y: number }
 
 /** What the resolve asks of the game screen as it goes. */
 export interface ResolverApi {
@@ -29,6 +33,18 @@ export interface ResolverApi {
   sendHome(keys: string[]): void;
   /** Apply a resolution step to the board (ownership, defense, VP). */
   applyStep(index: number): void;
+  /** A player's bank changes by `amount` at `at` (a screen point): a gain
+   *  flies in from there as coins, a loss flies out of their bank to it. */
+  bank(playerId: string, amount: number, at: ScreenPoint): void;
+  /** A player's score goes up by `amount` VP from a card effect: it flies
+   *  from `at` to their VP. */
+  vp(playerId: string, amount: number, at: ScreenPoint): void;
+  /** `count` copies of `card` join a player's deck (Debt, Land Grant,
+   *  Spoils…): they fly from `at` to the player, each worth `vpEach` VP
+   *  as it lands. */
+  giveCard(playerId: string, card: Card, count: number, at: ScreenPoint, vpEach: number): void;
+  /** These board cards are trashed: they burn where they are. */
+  burn(keys: string[]): void;
 }
 
 interface Props {
@@ -128,6 +144,13 @@ type DefenseView =
  *  first card counts — then it shows its power, even a 0. */
 interface ClaimView { playerId: string; value: number | null; dx: number; dy: number }
 interface Shard { id: number; dx: number; dy: number; rot: number; color: string }
+/** A word or number that pops up over the tile and drifts away: a claim's
+ *  bonus ("+2 Ambush") or what a card effect did ("+8", "−1", "+1 Debt"). */
+interface Chip {
+  id: number; x: number; y: number;
+  text: string; icon?: IconName; caption?: string;
+  color: string; tone: 'gain' | 'loss' | 'bonus' | 'name';
+}
 
 const CANCELLED = Symbol('cancelled');
 /** How far from the defense the claim number floats in (px). */
@@ -169,6 +192,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
   const [defense, setDefense] = useState<DefenseView | null>(null);
   const [claim, setClaim] = useState<ClaimView | null>(null);
   const [shards, setShards] = useState<Shard[]>([]);
+  const [chips, setChips] = useState<Chip[]>([]);
   const anchorRef = useRef<HTMLDivElement>(null);
   const defRef = useRef<HTMLDivElement>(null);
   const claimRef = useRef<HTMLDivElement>(null);
@@ -200,10 +224,13 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
     /** A counted card lingers over the tile a moment (time to read it) while
      *  the next one steps up, then heads home. */
     const leaveSoon = (card: PlanCard | null) => {
-      if (!card) return;
+      if (!card || burning.has(card.key)) return;
       setTimeout(() => { if (!cancelled) live.current.api.sendHome([card.key]); }, ms(LINGER_MS));
     };
-    const { api } = live.current;
+    /** Cards that burn on this tile (Spoils of War) stay put until they do. */
+    let burning = new Set<string>();
+    const { api: rawApi } = live.current;
+    const api: ResolverApi = { ...rawApi, sendHome: (keys) => rawApi.sendHome(keys.filter(k => !burning.has(k))) };
     const fx = () => fxRef.current;
     const sfx = live.current.sound;
 
@@ -221,6 +248,14 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
         return { id: id0 + i, dx: Math.cos(a) * d, dy: Math.sin(a) * d - 10, rot: (Math.random() - 0.5) * 220, color };
       })]);
       setTimeout(() => setShards(s => s.filter(x => x.id < id0 || x.id >= id0 + count)), ms(700));
+    };
+
+    /** Pop a chip up over the tile (offset in px from its middle); it drifts
+     *  up and fades on its own. */
+    const chip = (c: Omit<Chip, 'id'>) => {
+      const id = ++seq * 100 + 99;
+      setChips(cs => [...cs, { ...c, id }]);
+      setTimeout(() => setChips(cs => cs.filter(x => x.id !== id)), ms(1700));
     };
 
     /** A card steps up to count: a face-down one turns over; a face-up one
@@ -351,16 +386,32 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       if (countUp) {
         let value = 0;
         await spreadOut(a.beats.map(b => b.card));
-        for (const b of a.beats) {
+        for (const [i, b] of a.beats.entries()) {
+          const more = a.beats.slice(i + 1).some(n => n.card === b.card && n.label);
           counting(b.card, true);
-          await reveal([b.card]);
+          if (!b.label) await reveal([b.card]);
           value += b.add;
           flushSync(() => setClaim(c => (c ? { ...c, value } : c)));
-          sfx.hoverTick();
+          if (b.label) {
+            // A bonus the card gets at the reveal: named, in gold, as it adds.
+            chip({
+              x: dir.dx * CLAIM_R, y: dir.dy * CLAIM_R - 40 - (i % 2) * 6,
+              text: `${b.add > 0 ? '+' : '−'}${Math.abs(b.add)}`, caption: b.label, icon: 'power',
+              color: '#ffd24a', tone: 'bonus',
+            });
+            sfx.powerBonus();
+            await guard(pulse(claimRef.current, '#ffd24a'));
+            await wait(260);
+          } else {
+            sfx.hoverTick();
+            await guard(pulse(claimRef.current, color));
+          }
           bump(b.card);
-          await guard(pulse(claimRef.current, color));
-          counting(b.card, false);
-          leaveSoon(b.card);
+          // A card with a bonus still to come stays to show it.
+          if (!more) {
+            counting(b.card, false);
+            leaveSoon(b.card);
+          }
           await wait(110);
         }
       } else {
@@ -501,6 +552,31 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
     };
 
 
+    /** Siege Engine / Conqueror: just before its claim lands, this round's
+     *  defense bonuses crack off — for that claim alone (everyone else
+     *  attacked first, into the whole defense). */
+    const crackDefense = async (plan: TilePlan, by: string) => {
+      if (!defShown || !defRef.current) await popDefense(holderView(plan));
+      else flushSync(() => setDefense(holderView(plan)));
+      await wait(140);
+      sfx.resolveBaseRaidShatter();
+      burst('#d6cfc0', 9, 1.1);
+      burst(colorOf(by), 6, 0.8);
+      const c = axialToPixel(plan.q, plan.r);
+      fx()?.sparks(c.x, c.y, PLAYER_COLORS[by] ?? 0xffffff, 18, 0.8);
+      await guard(animate(defRef.current, [
+        { transform: 'translateX(0) rotate(0)' }, { transform: 'translateX(-5px) rotate(-5deg)', offset: 0.2 },
+        { transform: 'translateX(5px) rotate(4deg)', offset: 0.45 }, { transform: 'translateX(-3px) rotate(-2deg)', offset: 0.7 },
+        { transform: 'translateX(0) rotate(0)' },
+      ], ms(360), 'ease-out'));
+      // The bonuses come off the temporary part first.
+      const temp = Math.max(0, plan.temp - plan.ignored);
+      const perm = Math.max(0, plan.perm - Math.max(0, plan.ignored - plan.temp));
+      flushSync(() => setDefense(holderView(plan, perm, temp)));
+      await guard(pulse(defRef.current, colorOf(by)));
+      await wait(200);
+    };
+
     const settle = async (plan: TilePlan) => {
       const f = fx();
       const c = axialToPixel(plan.q, plan.r);
@@ -553,7 +629,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           await wait(110);
         }
       }
-      // What the attackers face (immunity, or siege stripping bonuses).
+      // What the attackers face (immunity, or less than the tile showed).
       if (perm !== plan.perm || temp !== plan.temp || plan.immune) {
         const faced = ownerView(plan);
         if (faced && !defShown) {
@@ -568,15 +644,170 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       if (!countUp) api.sendHome(plan.defenseBeats.flatMap(b => (b.card ? [b.card.key] : [])));
     };
 
+    /** What card effects did on this tile, once it has settled: coins in or
+     *  out of a bank, VP, cards joining a deck, a card burnt — each popping
+     *  up over the tile, named for the card that did it. */
+    const playAfter = async (plan: TilePlan, full: boolean) => {
+      setDefense(null);
+      setClaim(null);
+      // A fresh layer: the tile's badges faded out with the last one.
+      setTile({ q: plan.q, r: plan.r, run: ++seq });
+      // Effects with no tile of their own come once a round: full pace.
+      const pace = full || plan.outcome === 'round' ? 1 : 0.75;
+      const c = axialToPixel(plan.q, plan.r);
+      // One card handed to several players (Diplomat's Land Grants) is one
+      // beat: a single chip, the cards flying out together.
+      const beats: ResolutionEffect[][] = [];
+      for (const e of plan.after) {
+        const prev = beats[beats.length - 1]?.[0];
+        if (prev && e.type === 'card' && prev.type === 'card' && prev.card_name === e.card_name && prev.source_card === e.source_card) {
+          beats[beats.length - 1].push(e);
+        } else beats.push([e]);
+      }
+      for (const [i, group] of beats.entries()) {
+        const e = group[0];
+        const at = live.current.project(plan.q, plan.r);
+        // Keep the chips on screen (a base can sit at the very edge).
+        const nudge = (v: number, lo: number, hi: number) => (v < lo ? lo - v : v > hi ? hi - v : 0);
+        const x = at ? nudge(at.x, 130, window.innerWidth - 130) : 0;
+        const y = -46 - (i % 3) * 36 + (at ? nudge(at.y - 46 - (i % 3) * 36, 70, window.innerHeight - 40) : 0);
+        const color = colorOf(e.player_id);
+        if (e.type === 'resources' && e.amount) {
+          const gain = e.amount > 0;
+          chip({ x, y, text: `${gain ? '+' : '−'}${Math.abs(e.amount)}`, icon: 'resource', caption: e.card_name, color, tone: gain ? 'gain' : 'loss' });
+          if (gain) sfx.coinGain(); else sfx.coinSpend();
+          if (at) api.bank(e.player_id, e.amount, at);
+        } else if (e.type === 'vp' && e.amount) {
+          chip({ x, y, text: `+${e.amount}`, icon: 'vp', caption: e.card_name, color: '#ffd24a', tone: 'gain' });
+          fx()?.pillar(c.x, c.y, 0xffd24a, ms(900));
+          sfx.vpGain();
+          if (at) api.vp(e.player_id, e.amount, at);
+        } else if (e.type === 'card' && e.card && e.count) {
+          const bad = e.card_name === 'Debt' || e.card_name === 'Rubble';
+          const total = group.reduce((n, g) => n + (g.count ?? 0), 0);
+          chip({
+            x, y, text: `+${total} ${e.card_name}${group.length > 1 && total > 1 ? 's' : ''}`,
+            icon: e.card_name === 'Debt' ? 'debt' : e.card_name === 'Rubble' ? 'rubble' : 'cardAdd',
+            caption: e.source_card, color: group.length > 1 ? colorOf(e.by_player_id ?? e.player_id) : color, tone: bad ? 'loss' : 'gain',
+          });
+          sfx.cardDraw();
+          if (at) for (const g of group) if (g.card && g.count) api.giveCard(g.player_id, g.card, g.count, at, g.vp_each ?? 0);
+        } else if (e.type === 'trash') {
+          // Below the tile: the burning card floats over it.
+          chip({ x, y: 58, text: `${e.card_name} trashed`, icon: 'trash', caption: e.source_card, color, tone: 'loss' });
+          const keys = plan.burn.filter(k => !!e.card_id && k.includes(e.card_id));
+          for (const k of keys) burning.delete(k);
+          sfx.cardTrash();
+          fx()?.sparks(c.x, c.y, 0xff8a3a, 14, 0.6);
+          rawApi.burn(keys);
+        }
+        await wait(700 * pace);
+      }
+      // Time to read the last of them before the next tile.
+      await wait(800 * pace);
+    };
+
+    /** Breakthrough: the claim breaks through into a tile beside the one it
+     *  took — it sets off from there and takes this one unopposed. */
+    const breakthrough = async (plan: TilePlan, name: string | undefined) => {
+      const win = plan.winner;
+      if (!win) return;
+      const at = live.current.project(plan.q, plan.r);
+      const src = plan.source ? live.current.project(plan.source.q, plan.source.r) : null;
+      let dx = -1, dy = 0;
+      if (at && src && Math.hypot(src.x - at.x, src.y - at.y) > 1) {
+        const len = Math.hypot(src.x - at.x, src.y - at.y);
+        dx = (src.x - at.x) / len;
+        dy = (src.y - at.y) / len;
+      }
+      if (name) chip({ x: 0, y: -52, text: name, icon: 'claim', color: colorOf(win), tone: 'name' });
+      flushSync(() => setClaim({ playerId: win, value: null, dx, dy }));
+      const sx = at && src ? src.x - at.x - dx * CLAIM_R : 0, sy = at && src ? src.y - at.y - dy * CLAIM_R : 0;
+      sfx.cardPlay();
+      await animate(claimRef.current, [
+        { transform: `translate(${sx}px, ${sy}px) scale(0.7)`, opacity: 0 },
+        { transform: `translate(${sx * 0.8}px, ${sy * 0.8}px) scale(0.85)`, opacity: 1, offset: 0.2 },
+        { transform: 'translate(0, 0) scale(1)', opacity: 1, offset: 0.6 },
+        { transform: `translate(${-dx * CLAIM_R}px, ${-dy * CLAIM_R}px) scale(1.15)`, opacity: 1 },
+      ], ms(760), 'cubic-bezier(0.4, 0, 0.3, 1)', 'forwards');
+      await animate(claimRef.current, [
+        { transform: `translate(${-dx * CLAIM_R}px, ${-dy * CLAIM_R}px) scale(1.15)`, opacity: 1 },
+        { transform: `translate(${-dx * CLAIM_R}px, ${-dy * CLAIM_R}px) scale(1.7)`, opacity: 0 },
+      ], ms(220), 'ease-out', 'forwards');
+      setClaim(null);
+    };
+
     const resolveTile = async (plan: TilePlan, full: boolean) => {
+      burning = new Set(plan.burn);
+      try {
+        await resolveBody(plan, full);
+        if (plan.after.length) await playAfter(plan, full);
+      } finally {
+        burning = new Set();
+      }
+    };
+
+    const resolveBody = async (plan: TilePlan, full: boolean) => {
       defShown = false;
       api.setActive(plan);
       setTile({ q: plan.q, r: plan.r, run: ++seq });
+
+      // Effects with no tile of their own (Diplomat, Battle Glory): played
+      // from their player's base, after everything else.
+      if (plan.outcome === 'round') return;
+
+      if (plan.outcome === 'flood') {
+        // Flood: the card turns over, then the water surges out of the tile
+        // into every tile around it — where its claims land next.
+        const by = plan.others[0]?.playerId ?? plan.holder;
+        const color = PLAYER_COLORS[by ?? ''] ?? 0x7fd3ff;
+        await spreadOut(plan.others);
+        await reveal(plan.others);
+        // Read the card, then it goes, so the water is in plain view.
+        await wait(450);
+        api.sendHome(plan.others.map(c => c.key));
+        await wait(300);
+        chip({ x: 0, y: -52, text: 'Flood', icon: 'claim', color: colorOf(by), tone: 'name' });
+        sfx.floodWave();
+        fx()?.flood(plan.q, plan.r, (plan.targets ?? []).map(k => k.split(',').map(Number) as [number, number]), color);
+        await wait(1300);
+        return;
+      }
+
+      if (plan.kind === 'effect' && (plan.outcome === 'abandon' || plan.outcome === 'scorch')) {
+        // Exodus / Scorched Retreat: the card turns over, then the tile is
+        // given up — its holder's color lifts away (the camp and markers
+        // sink), or it goes up in flames and is left a burnt wasteland.
+        const f = fx();
+        await spreadOut(plan.others);
+        await reveal(plan.others);
+        // Read the card, then it goes (Scorched Retreat burns: it's trashed)
+        // so the tile is in plain view.
+        await wait(450);
+        api.sendHome(plan.others.map(c => c.key));
+        await wait(300);
+        if (plan.outcome === 'abandon') {
+          f?.abandon(plan.q, plan.r, PLAYER_COLORS[plan.holder ?? ''] ?? 0xe8e4d8);
+          sfx.tileAbandon();
+          await wait(250);
+          if (plan.mainStep != null) api.applyStep(plan.mainStep);
+          await wait(950);
+        } else {
+          f?.scorch(plan.q, plan.r);
+          sfx.tileScorch();
+          // The ground turns to ash under the roaring flames.
+          await wait(700);
+          if (plan.mainStep != null) api.applyStep(plan.mainStep);
+          await wait(1500);
+        }
+        return;
+      }
 
       if (plan.kind === 'effect') {
         const f = fx();
         const c = axialToPixel(plan.q, plan.r);
         if (plan.outcome === 'consecrate') { f?.pillar(c.x, c.y, 0xffd24a, ms(900)); sfx.vpGain(); }
+        if (plan.outcome === 'auto_claim') await breakthrough(plan, plan.cardName);
         if (plan.mainStep != null) api.applyStep(plan.mainStep);
         if (plan.outcome === 'auto_claim' && plan.winner) {
           f?.captureBurst(plan.q, plan.r, PLAYER_COLORS[plan.winner] ?? 0xffffff, false);
@@ -620,6 +851,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           // Whoever holds the tile as each claim lands (its shards' color).
           let holder = plan.holder;
           for (const [i, a] of plan.attacks.entries()) {
+            if (a.crack) await crackDefense(plan, a.playerId);
             await attack(plan, a, true, ring, holder, i === plan.attacks.length - 1);
             if (a.clash === 'break') holder = a.playerId;
             if (a.clash === 'stalemate') holder = null;
@@ -628,6 +860,9 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           // Quick: only the claim that decides it.
           const decisive = [...plan.attacks].reverse().find(a => a.clash !== 'bounce') ?? plan.attacks[plan.attacks.length - 1];
           const shown: AttackPlan = decisive.clash === 'bounce' ? decisive : { ...decisive, clash: plan.captured ? 'break' : decisive.clash };
+          // It ignores the bonuses, and they cracked before it: show that.
+          const crack = decisive.ignores ? plan.attacks.find(a => a.crack) : undefined;
+          if (crack && plan.attacks.indexOf(crack) <= plan.attacks.indexOf(decisive)) await crackDefense(plan, crack.playerId);
           await attack(plan, shown, false, ring, plan.holder, true);
           api.sendHome(plan.attacks.flatMap(a => a.beats.flatMap(b => (b.card ? [b.card.key] : []))));
         }
@@ -643,7 +878,8 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
 
     (async () => {
       let zoomed = false;
-      const isClose = (p: TilePlan) => p.focus && p.kind !== 'effect';
+      const isClose = (p: TilePlan) => p.focus && (p.kind !== 'effect'
+        || p.outcome === 'abandon' || p.outcome === 'scorch' || p.outcome === 'auto_claim' || p.outcome === 'flood');
       // Stay in close until the last tile that involves the player: tiles
       // between are passed part way out, not with a full pull-back.
       let lastClose = -1;
@@ -666,6 +902,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           setDefense(null);
           setClaim(null);
           setTile(null);
+          setChips([]);
           api.setActive(null);
         }
         // Then back to the player's own view.
@@ -724,6 +961,18 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
             </div>
           </div>
         )}
+        {chips.map(c => (
+          <div key={c.id} className={`cc-rs-chip is-${c.tone}`} style={{
+            left: c.x, top: c.y, ['--ring' as string]: c.color,
+            animationDuration: `${Math.round(1700 * (speed || 1))}ms`,
+          }}>
+            <span className="cc-rs-chip-main">
+              {c.icon && <Icon name={c.icon} size={16} color={c.tone === 'bonus' ? '#ffd24a' : readable(c.color)} decorative />}
+              <span>{c.text}</span>
+            </span>
+            {c.caption && <span className="cc-rs-chip-caption">{c.caption}</span>}
+          </div>
+        ))}
         {shards.map(s => (
           <div key={s.id} className="cc-rs-shard" style={{
             background: s.color,

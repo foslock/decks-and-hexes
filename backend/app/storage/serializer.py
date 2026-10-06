@@ -496,6 +496,10 @@ def _serialize_tile(tile: HexTile) -> dict[str, Any]:
         d["is_base"] = True
     if tile.base_owner is not None:
         d["base_owner"] = tile.base_owner
+    if tile.is_scorched:
+        d["is_scorched"] = True
+    if tile.scorched_vp:
+        d["scorched_vp"] = tile.scorched_vp
     return d
 
 
@@ -515,6 +519,8 @@ def _deserialize_tile(data: dict[str, Any]) -> HexTile:
         lost_by=list(data.get("lost_by", [])),
         is_base=data.get("is_base", False),
         base_owner=data.get("base_owner"),
+        is_scorched=data.get("is_scorched", False),
+        scorched_vp=data.get("scorched_vp", 0),
     )
 
 
@@ -692,6 +698,7 @@ def serialize_game(game: GameState) -> str:
         # Resolution state (ephemeral but needed for mid-reveal saves)
         "resolution_steps": game.resolution_steps,
         "player_effects": game.player_effects,
+        "resolution_effects": game.resolution_effects,
     }
 
     return json.dumps(blob, separators=(",", ":"))
@@ -767,6 +774,7 @@ def deserialize_game(
         winners=blob.get("winners", []),
         resolution_steps=blob.get("resolution_steps", []),
         player_effects=blob.get("player_effects", []),
+        resolution_effects=blob.get("resolution_effects", []),
     )
 
     return game

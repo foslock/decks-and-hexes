@@ -35,7 +35,7 @@ VP_RE = 7.5
 
 # Rough game length (rounds) by grid size used before the VP race gives a
 # measurable pace.
-_ROUND_PRIOR = {"small": 10, "medium": 13, "large": 16, "mega": 18, "ultra": 20}
+_ROUND_PRIOR = {"small": 7.5, "medium": 10.5, "large": 14, "mega": 17, "ultra": 19}
 
 # Static claim value by power (RE per play). Power thresholds track the board
 # (a tie against a neutral tile's intrinsic defense goes to the attacker):
@@ -61,7 +61,10 @@ def active_cards(player: Any) -> list[Card]:
     if deck is not None:
         cards.extend(deck.cards)
         cards.extend(deck.discard)
-    cards.extend(a.card for a in getattr(player, "planned_actions", []) or [])
+    # Cards played this round: during the Play phase they're only in
+    # planned_actions; by the Buy phase they're already in the discard too.
+    seen = {c.id for c in cards}
+    cards.extend(a.card for a in getattr(player, "planned_actions", []) or [] if a.card.id not in seen)
     return cards
 
 
@@ -110,6 +113,8 @@ class ValuationContext:
     tiles_owned: int
     tuning: ValuationTuning = DEFAULT_TUNING
     opponents: int = 1              # active opponents (Diplomat's gifts scale with it)
+    draw_pile: int = 0              # cards still to draw before a new card can come up
+    opp_big_claims_per_hand: float = 1.0  # expected power >= 3 claims in opponents' hands
 
     @property
     def actions_factor(self) -> float:
@@ -134,7 +139,8 @@ def _vp_pace_rounds_left(game: Any) -> float:
     target = getattr(game, "vp_target", 10) or 10
     leader = max((compute_player_vp(game, pid) for pid in game.players), default=0)
     if game.current_round >= 4 and leader > 0:
-        rate = leader / max(1, game.current_round - 1)
+        # VP per round played so far (the Buy phase is the end of a round).
+        rate = leader / max(1.0, game.current_round - 0.5)
         pace_left = max(1.0, (target - leader) / max(rate, 0.4))
         # Blend toward the measured pace as the game matures.
         w = min(1.0, (game.current_round - 3) / 4)
@@ -232,13 +238,17 @@ def build_context(game: Any, player_id: str, board_aware: bool = True,
 
     opp_max = 0.0
     opponents = 0
+    big_per_hand = 0.0
     for pid, p in game.players.items():
         if pid == player_id or getattr(p, "has_left", False):
             continue
         opponents += 1
-        for c in active_cards(p):
+        opp_cards = active_cards(p)
+        for c in opp_cards:
             if c.card_type == CardType.CLAIM:
                 opp_max = max(opp_max, float(c.effective_power))
+        big = sum(1 for c in opp_cards if c.card_type == CardType.CLAIM and c.effective_power >= 3)
+        big_per_hand += big / max(1, len(opp_cards)) * (getattr(p, "hand_size", 5) or 5)
 
     from .cpu_player import _game_progress  # local import: avoid cycle at module load
 
@@ -268,6 +278,8 @@ def build_context(game: Any, player_id: str, board_aware: bool = True,
         tiles_owned=tiles_owned,
         tuning=tuning,
         opponents=max(1, opponents),
+        draw_pile=len(getattr(getattr(player, "deck", None), "cards", []) or []),
+        opp_big_claims_per_hand=big_per_hand if board_aware else 1.0,
     )
 
 
@@ -321,8 +333,6 @@ def _claim_value(card: Card, ctx: ValuationContext) -> float:
         v += card.effective_multi_target_count * 0.55 * claim_curve(power)
     if card.flood:
         v += 2.5 + 0.8 * power
-    if card.action_cost >= 2:
-        v -= max(1.2, ctx.avg_value) * (1.0 - 0.5 * ctx.cards_factor)
 
     for e in card.effects:
         val = e.effective_value(card.is_upgraded)
@@ -347,8 +357,9 @@ def _claim_value(card: Card, ctx: ValuationContext) -> float:
         elif t == EffectType.TRASH_OPPONENT_CARD:
             v += 1.0
         elif t == EffectType.MANDATORY_SELF_TRASH:
-            # Trashing weak starters is partly a benefit; cap the downside.
-            v -= 0.6 * val
+            # Every play burns that many cards from hand, so it's saved for
+            # the targets that need its power (and the deck must stay full).
+            v -= 1.2 * val
         elif t == EffectType.GRANT_ACTIONS_NEXT_TURN and e.target == "self":
             v += 0.6 * val
         elif t == EffectType.GRANT_ACTIONS_IF_STACKED:
@@ -439,7 +450,7 @@ def card_play_value(card: Card, ctx: ValuationContext,
     if card.card_type == CardType.CLAIM:
         v += _claim_value(card, ctx) * tn.claim_mult
     elif card.card_type == CardType.DEFENSE:
-        threat = 0.6 + 0.35 * max(0.0, ctx.opp_max_power - 1)
+        threat = 0.6 + 0.35 * max(0.0, ctx.opp_max_power - 1) * min(1.0, ctx.opp_big_claims_per_hand)
         threat = max(0.6, min(2.2, threat))
         if ctx.owned_vp_hexes:
             threat *= 1.25
@@ -456,7 +467,7 @@ def card_play_value(card: Card, ctx: ValuationContext,
             elif e.type == EffectType.IGNORE_DEFENSE_OVERRIDE:
                 dv += 0.6
         if card.effective_defense_target_count > 1:
-            dv *= 1.0 + 0.5 * (card.effective_defense_target_count - 1)
+            dv *= 1.0 + 0.25 * (card.effective_defense_target_count - 1)
         v += dv * tn.defense_mult
     else:
         for e in card.effects:
@@ -498,6 +509,10 @@ def card_play_value(card: Card, ctx: ValuationContext,
             v *= 0.85 + 0.15 * float(getattr(weights, "resource_value", 1.0))
 
     v -= debts_taken(card) * debt_cost(ctx)
+    # Each extra action a card costs is a card we don't get to play
+    # (Conqueror, Mob Rule, Aegis, El Dorado, Ultimatum …).
+    if card.action_cost > 1:
+        v -= (card.action_cost - 1) * max(1.2, ctx.avg_value) * (1.0 - 0.5 * ctx.cards_factor)
     if card.effective_trash_on_use and card.card_type != CardType.CLAIM:
         v *= 0.9
     return v
@@ -506,9 +521,10 @@ def card_play_value(card: Card, ctx: ValuationContext,
 def expected_plays(ctx: ValuationContext, extra_cards: int = 1) -> float:
     """Expected number of times a newly added card is drawn before game end."""
     deck_after = max(1, ctx.deck_size + extra_cards)
-    # Card goes to the discard first; it needs a reshuffle before being drawn.
-    effective_rounds = max(0.0, ctx.rounds_left - 0.5 * deck_after / ctx.hand_size)
-    return max(0.0, effective_rounds * ctx.hand_size / deck_after)
+    # The card goes to the discard first: it comes up once the draw pile we
+    # know about is used, then once per pass through the deck.
+    per_round = ctx.hand_size + max(0.0, ctx.draw_per_hand)
+    return max(0.0, ctx.rounds_left * per_round - ctx.draw_pile) / deck_after
 
 
 def one_time_vp(card: Card, player: Any, game: Any) -> float:
@@ -530,7 +546,7 @@ def purchase_value(card: Card, player: Any, game: Any, ctx: ValuationContext,
         return vp_value - plays * ctx.avg_value
     pv = card_play_value(card, ctx, weights)
     if card.effective_trash_on_use:
-        return vp_value + min(1.0, plays) * pv - 0.3
+        return vp_value + min(1.0, plays) * (pv - ctx.avg_value)
     return vp_value + plays * (pv - ctx.avg_value)
 
 
@@ -557,3 +573,18 @@ def best_upgrade_gain(player: Any, game: Any, ctx: ValuationContext,
     for c in cards:
         best = max(best, upgrade_gain(c, player, game, ctx, weights))
     return best
+
+
+def expected_hand_upgrade_gain(player: Any, game: Any, ctx: ValuationContext,
+                               cards: Iterable[Card], weights: Optional[Any] = None) -> float:
+    """What a credit is worth when it's spent: on the best upgrade in the next
+    hand we draw, not the best card anywhere in the deck."""
+    from math import comb
+    gains = sorted((upgrade_gain(c, player, game, ctx, weights) for c in cards), reverse=True)
+    n = len(gains)
+    if n == 0:
+        return 0.0
+    h = max(1, min(ctx.hand_size, n))
+    total = comb(n, h)
+    # P(the i-th best card overall is the best one in a random h-card hand).
+    return sum(g * comb(n - 1 - i, h - 1) / total for i, g in enumerate(gains) if n - 1 - i >= h - 1)

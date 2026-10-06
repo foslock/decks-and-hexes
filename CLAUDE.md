@@ -74,7 +74,29 @@ at high priority, the rest of the catalog during idle time).
   hits harder with the claim's power (`heft` and the `claimSmash0`–`8` sounds,
   0–8+), and cards flying home (your discard pile, an opponent's ID card, or a
   burn if trashed). Rivals' earnings fly in as coins (`setShownResources`).
-  Preview: `?preview=resolve-animations`.
+  Tiles given up resolve first (`abandon` / `scorch` steps → 'effect' plans):
+  Exodus lifts the holder's color away (`fx.abandon`); Scorched Retreat sets
+  the tile on fire (`fx.scorch`) and leaves a permanent burnt wasteland
+  (`is_scorched` → the `scorched` biome: char ground, dead trees, ruins of a
+  burnt town via `scorched_vp`, smoldering `embers` spots). The engine burns
+  a tile in place (`scorchTiles`: terrain patch + per-tile decor ranges), not
+  with a full rebuild. Claims that ignore temporary defense (Siege Engine,
+  Conqueror) skip it for their own player only — every other claim faces it in
+  full (a claim must beat the defense it faces; the strongest that gets
+  through wins). Steps carry `defense_ignored` / `ignored_by`; those claims
+  attack last and the badge cracks down for them just before they land.
+  What card effects do at the reveal is recorded server-side on the tile it
+  happened on (`GameState.resolution_effects`, via `_EffectWatch` in
+  game_state.py: bank changes, card VP, cards gained, Spoils of War's trash,
+  Flood's targets); resolvePlan attaches each to that tile's plan (`after`,
+  played once it settles through the resolver api's `bank` / `vp` /
+  `giveCard` / `burn`, with a chip naming the card), plays Flood's spread
+  (`fx.flood`: hex-shaped water filling its tile, then each tile around from
+  the shared edge) right before the tiles it reaches, and plays tile-less ones
+  (Diplomat, Battle Glory) last from the player's base ('round' plans).
+  Claimants carry `cards` (printed power + named reveal bonuses), so the count
+  shows each bonus as its own beat ("+2 · Ambush").
+  Preview: `?preview=resolve-animations` (the "Card effects" row too).
 - The board canvas runs on under the hand panel (`GameBoard` `extendBelow`);
   `viewInsetBottom` → `CameraRig.insetBottom` frames the island above the
   resting hand via a camera view offset.
@@ -311,7 +333,7 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Round limit: **20** (configurable)
 - Debt start round: **5**
 - Debt trash cost: **3 resources**
-- Debt-cost cards: Mercenary, Garrison, Siege Tower (on resolve), Prospector (on play) — `gain_debt` effect; Warden, Land Grant (on buy) — `buy_debt` field
+- Debt-cost cards: Mercenary, Garrison, Siege Tower (on resolve — even when an immune or scorched tile cancels the claim), Prospector (on play) — `gain_debt` effect; Warden, Land Grant (on buy) — `buy_debt` field
 - Re-roll cost: **1 resource**
 - Retain cost: **2 resources** (constant only — no Retain action exists)
 - Upgrade credit cost: **5 resources**

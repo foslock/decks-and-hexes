@@ -577,6 +577,11 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
               setActive: (plan) => set({ focus: plan?.tileKey ?? null }),
               spread: () => {},
               flip: () => {},
+              // The tutorial's rounds have no card effects to pay out.
+              bank: () => {},
+              vp: () => {},
+              giveCard: () => {},
+              burn: () => {},
               sendHome: (keys) => {
                 const byTile = new Map<string, Set<string>>();
                 for (const k of keys) {
@@ -754,6 +759,10 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     flip: (k) => resolveHooks.current?.api.flip(k),
     sendHome: (k) => resolveHooks.current?.api.sendHome(k),
     applyStep: (i) => resolveHooks.current?.api.applyStep(i),
+    bank: (...a) => resolveHooks.current?.api.bank(...a),
+    vp: (...a) => resolveHooks.current?.api.vp(...a),
+    giveCard: (...a) => resolveHooks.current?.api.giveCard(...a),
+    burn: (k) => resolveHooks.current?.api.burn(k),
   }), []);
 
   const onCoinLand = useCallback((c: Coin) => {

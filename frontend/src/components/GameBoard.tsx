@@ -266,6 +266,9 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       shake: (...a) => fx()?.shake(...a),
       jolt: (...a) => fx()?.jolt(...a),
       captureBurst: (...a) => fx()?.captureBurst(...a),
+      abandon: (...a) => fx()?.abandon(...a),
+      scorch: (...a) => fx()?.scorch(...a),
+      flood: (...a) => fx()?.flood(...a),
       setSpeed: (m) => engineRef.current?.setSpeed(m),
     };
   }, []);
@@ -391,7 +394,9 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
     }
     if (!tooltipsRef.current) return null;
     const lines: string[] = [];
-    if (tile.is_blocked) {
+    if (tile.is_scorched) {
+      lines.push('Scorched wasteland — burnt for the rest of the match. It cannot be claimed.');
+    } else if (tile.is_blocked) {
       lines.push('This tile cannot be claimed.');
     } else {
       if (tile.is_base) {

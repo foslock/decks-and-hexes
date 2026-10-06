@@ -39,6 +39,7 @@ from .hex_grid import (
     GRID_CONFIG,
     GridSize,
     HexGrid,
+    HexTile,
     generate_hex_grid,
     mark_tile_lost,
     tile_bridges_territory,
@@ -633,6 +634,10 @@ class GameState:
     resolution_steps: list[dict[str, Any]] = field(default_factory=list)
     # Player-targeting effects resolved during reveal (e.g. Sabotage forced discards)
     player_effects: list[dict[str, Any]] = field(default_factory=list)
+    # What card effects changed as the reveal resolved — banks, VP, cards
+    # gained or trashed, Flood's spread — each on the tile it happened on
+    # (None: no tile), so the reveal can show it there. See _EffectWatch.
+    resolution_effects: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self, for_player_id: Optional[str] = None,
                 visible_player_ids: Optional[set[str]] = None) -> dict[str, Any]:
@@ -698,6 +703,8 @@ class GameState:
             result["resolution_steps"] = self.resolution_steps
         if self.player_effects:
             result["player_effects"] = self.player_effects
+        if self.resolution_effects:
+            result["resolution_effects"] = self.resolution_effects
         # Neutral market purchases from last round (for purchase history indicators)
         result["shared_purchases_last_round"] = [
             entry for entry in self.shared_purchase_log
@@ -1991,11 +1998,85 @@ def _find_closest_owned_tile(
     return best
 
 
+def _player_cards(player: Player) -> list[Card]:
+    return [*player.hand, *player.deck.cards, *player.deck.discard, *player.trash,
+            *(a.card for a in player.planned_actions)]
+
+
+class _EffectWatch:
+    """What card effects can change — every bank, card VP and new cards —
+    read before an effect resolves, so the change can be recorded on the tile
+    where it happened (GameState.resolution_effects) for the reveal to show
+    there: Rapid Assault's drain, Scorched Retreat's resources, a Debt or
+    Land Grant flying in, Battle Glory's VP."""
+
+    def __init__(self, game: GameState) -> None:
+        self.banks = {pid: p.resources for pid, p in game.players.items()}
+        self.held = {pid: {id(c) for c in _player_cards(p)} for pid, p in game.players.items()}
+        self.vp = {pid: self._card_vp(p, self.held[pid]) for pid, p in game.players.items()}
+
+    @staticmethod
+    def _card_vp(player: Player, held: set[int]) -> int:
+        return player.vp + sum(c.passive_vp for c in _player_cards(player) if id(c) in held)
+
+    def record(self, game: GameState, source: str, tile_key: Optional[str], by: str) -> None:
+        for pid, p in game.players.items():
+            base = {"player_id": pid, "tile_key": tile_key, "card_name": source, "by_player_id": by}
+            delta = p.resources - self.banks.get(pid, p.resources)
+            if delta:
+                game.resolution_effects.append({"type": "resources", "amount": delta, **base})
+            held = self.held.get(pid, set())
+            new: dict[str, list[Card]] = {}
+            for c in _player_cards(p):
+                if id(c) not in held:
+                    new.setdefault(c.name, []).append(c)
+            for name, cards in new.items():
+                game.resolution_effects.append({
+                    "type": "card", **base, "card_name": name, "source_card": source, "count": len(cards),
+                    "card": cards[0].to_dict(), "vp_each": cards[0].passive_vp,
+                })
+            vp = self._card_vp(p, held) - self.vp.get(pid, 0)
+            if vp:
+                game.resolution_effects.append({"type": "vp", "amount": vp, **base})
+
+
+def _claim_cards(game: GameState, pid: str, claims: list[tuple[str, PlannedAction]]) -> list[dict[str, Any]]:
+    """A player's claim cards on a tile: each one's printed power and what it
+    gains at the reveal (Ambush, Battering Ram, Strike Team, Dog Pile…), so the
+    count can show each bonus by name."""
+    player = game.players[pid]
+    out: list[dict[str, Any]] = []
+    for cpid, action in claims:
+        if cpid != pid:
+            continue
+        card = action.card
+        printed = card.effective_power
+        own = calculate_effective_power(game, player, card, action, include_stacking_bonus=False)
+        stacked = calculate_effective_power(game, player, card, action) - own
+        bonuses: list[dict[str, Any]] = []
+        if card.flood:
+            own = printed  # Flood's own power on every tile around it
+        elif own != printed:
+            bonuses.append({"source": card.name, "amount": own - printed})
+        if stacked:
+            tr = action.target_r if action.target_r is not None else 0
+            names = sorted({
+                o.card.name for o in player.planned_actions
+                if o is not action and o.target_q == action.target_q
+                and (o.target_r if o.target_r is not None else 0) == tr
+                and any(e.type == EffectType.STACKING_POWER_BONUS for e in o.card.effects)
+            })
+            bonuses.append({"source": " + ".join(names) or "Stacking", "amount": stacked})
+        out.append({"card_id": card.id, "name": card.name, "power": printed, "bonuses": bonuses})
+    return out
+
+
 def execute_reveal(game: GameState) -> GameState:
     """Phase 3: Reveal & Resolve — flip all cards and resolve claims."""
     game.current_phase = Phase.REVEAL
     game.resolution_steps = []
     game.player_effects = []
+    game.resolution_effects = []
     game._log("=== Reveal & Resolve ===")
 
     # Log each player's played cards
@@ -2029,6 +2110,13 @@ def execute_reveal(game: GameState) -> GameState:
                         if not adj_tile.is_blocked:
                             adj_key = f"{adj_tile.q},{adj_tile.r}"
                             claims_by_tile.setdefault(adj_key, []).append((pid, action))
+                    # The reveal shows the water spreading out before those claims land.
+                    game.resolution_effects.append({
+                        "type": "flood", "player_id": pid, "by_player_id": pid,
+                        "tile_key": f"{action.target_q},{_target_r}",
+                        "targets": [t.key for t in adj_tiles if not t.is_blocked],
+                        "card_id": action.card.id, "card_name": action.card.name,
+                    })
                     game._log(
                         f"{player.name} floods from {action.target_q},{_target_r} "
                         f"({len([t for t in adj_tiles if not t.is_blocked])} adjacent tiles)",
@@ -2061,9 +2149,33 @@ def execute_reveal(game: GameState) -> GameState:
 
     for pid, action in abandon_actions:
         player = game.players[pid]
+        scorch = any(e.type == EffectType.ABANDON_AND_BLOCK for e in action.card.effects)
+        given_up: Optional[HexTile] = None
+        if action.target_q is not None:
+            given_up = game.grid.get_tile(action.target_q, action.target_r if action.target_r is not None else 0)
+        held = given_up is not None and given_up.owner == pid and not given_up.is_base
+        vp_before = given_up.vp_value if given_up is not None and given_up.is_vp else 0
+        watch = _EffectWatch(game)
         resolve_on_resolution_effects(game, player, action.card, action)
+        watch.record(game, action.card.name, given_up.key if given_up is not None else None, pid)
+        # A step so the reveal animates the tile being given up (and, for
+        # Scorched Retreat, burnt to a wasteland) before any claims land.
+        if held and given_up is not None and given_up.owner is None:
+            game.resolution_steps.append({
+                "tile_key": given_up.key,
+                "q": given_up.q, "r": given_up.r,
+                "contested": False,
+                "claimants": [{"player_id": pid, "power": 0, "source_q": None, "source_r": None}],
+                "defender_id": None,
+                "defender_power": 0,
+                "winner_id": None,
+                "previous_owner": pid,
+                "outcome": "scorch" if scorch else "abandon",
+                "vp_value": vp_before,
+            })
 
     # Remove claims targeting tiles that are now blocked (from Scorched Retreat)
+    cancelled: list[tuple[str, PlannedAction, str]] = []
     for tile_key in list(claims_by_tile.keys()):
         tile = game.grid.tiles.get(tile_key)
         if tile and tile.is_blocked:
@@ -2071,6 +2183,7 @@ def execute_reveal(game: GameState) -> GameState:
                 game._log(
                     f"{game.players[cpid].name}'s claim on {tile_key} fails — tile is now blocked terrain",
                     actor=cpid)
+                cancelled.append((cpid, _action, tile_key))
             del claims_by_tile[tile_key]
 
     # ── Pre-resolve defense cards BEFORE claims ──────────────────────
@@ -2159,16 +2272,43 @@ def execute_reveal(game: GameState) -> GameState:
         for tile_key, rounds in player.turn_modifiers.immune_tiles.items():
             if tile_key in claims_by_tile:
                 # Remove claims from OTHER players on immune tiles
+                cancelled.extend(
+                    (cpid, action, tile_key) for cpid, action in claims_by_tile[tile_key] if cpid != pid)
                 claims_by_tile[tile_key] = [
                     (cpid, action) for cpid, action in claims_by_tile[tile_key]
                     if cpid == pid  # only owner's claims survive
                 ]
                 game._log(f"Tile {tile_key} is immune to claims this round")
 
-    # Check for ignore_defense — collect affected tiles
-    ignore_defense_tiles: set[str] = set()
-    for pid in game.player_order:
-        ignore_defense_tiles.update(game.players[pid].turn_modifiers.ignore_defense_tiles)
+    # A claim that never lands still cost what it costs to play: Mercenary,
+    # Garrison and Siege Tower take their Debt (once per card — unless it
+    # still lands on another of its tiles and pays there).
+    still_landing = {id(a) for claims in claims_by_tile.values() for _pid, a in claims}
+    paid: set[int] = set()
+    for cpid, action, tile_key in cancelled:
+        if id(action) in still_landing or id(action) in paid:
+            continue
+        paid.add(id(action))
+        debts = sum(e.effective_value(action.card.is_upgraded)
+                    for e in action.card.effects if e.type == EffectType.GAIN_DEBT)
+        if debts:
+            watch = _EffectWatch(game)
+            give_debt(game, game.players[cpid], debts, action.card.name)
+            watch.record(game, action.card.name, tile_key, cpid)
+
+    # Siege Engine / Conqueror: the player whose claim ignores temporary
+    # defense faces the tile without it; every other claim on the tile still
+    # faces it in full. Their effect resolves with the claim (after this), so
+    # read it off the planned claims here. A tile whose defense "can't be
+    # ignored" this round keeps it against everyone.
+    ignore_defense_by: dict[str, list[str]] = {}
+    for tile_key, claims in claims_by_tile.items():
+        for pid, action in claims:
+            if any(e.type == EffectType.IGNORE_DEFENSE for e in action.card.effects) and pid not in ignore_defense_by.get(tile_key, []):
+                ignore_defense_by.setdefault(tile_key, []).append(pid)
+    for p in game.players.values():
+        for tk in p.turn_modifiers.ignore_defense_override_tiles:
+            ignore_defense_by.pop(tk, None)
 
     # Track claim results for on_resolution effects
     claim_results: dict[str, dict[str, bool]] = {}  # tile_key -> {pid -> succeeded}
@@ -2198,25 +2338,37 @@ def execute_reveal(game: GameState) -> GameState:
             power_by_player[pid] = power_by_player.get(pid, 0) + power
             player.cumulative_claim_power_resolved += power
 
-        # Add existing defense (owned tile: credited to owner; unowned tile with intrinsic
-        # defense: modeled as a neutral blocker that real players must beat)
-        # ignore_defense (Siege Engine, Conqueror) only strips temporary round bonuses;
-        # intrinsic terrain defense AND permanent defense (Entrench/Barricade/Twin Cities)
-        # still count.
-        if tile_key not in ignore_defense_tiles:
-            current_defense = tile.defense_power
-        else:
-            current_defense = tile.base_defense + tile.permanent_defense_bonus
+        # What holds the tile: its defense plus the owner's own claims on it
+        # (an unowned tile's intrinsic defense acts as a neutral blocker).
+        # ignore_defense (Siege Engine, Conqueror) only strips temporary round
+        # bonuses, and only for its own player's claim; intrinsic terrain
+        # defense AND permanent defense (Entrench/Barricade/Twin Cities) count.
+        current_defense = tile.defense_power
+        stripped_defense = min(current_defense, tile.base_defense + tile.permanent_defense_bonus)
+        ignorers = ignore_defense_by.get(tile_key, [])
+        # For the reveal: how much defense those claims skip, and whose they are.
+        ignored = current_defense - stripped_defense
+        ignore_info: dict[str, Any] = (
+            {"defense_ignored": ignored, "ignored_by": ignorers} if ignored > 0 and ignorers else {})
+        owner_claims = power_by_player.get(tile.owner, 0) if tile.owner else 0
         if tile.owner:
-            power_by_player.setdefault(tile.owner, 0)
-            power_by_player[tile.owner] += current_defense
-        elif current_defense > 0:
-            power_by_player["_neutral"] = current_defense
+            power_by_player[tile.owner] = owner_claims + current_defense
 
-        # Find winner — filter out the neutral pseudo-player first
-        max_power = max(power_by_player.values())
-        contenders = [pid for pid, pwr in power_by_player.items() if pwr == max_power]
-        real_contenders = [pid for pid in contenders if pid != "_neutral"]
+        # A claim must beat what holds the tile against it: ties go to the
+        # owner, but to the attacker against a neutral tile's own defense. Of
+        # the claims that break through, the strongest takes the tile; a tie
+        # between them leaves it as it was.
+        through = []
+        for pid, pwr in power_by_player.items():
+            if pid == tile.owner:
+                continue
+            bar = owner_claims + (stripped_defense if pid in ignorers else current_defense)
+            if pwr > bar or (pwr == bar and not tile.owner):
+                through.append(pid)
+        max_power = max((power_by_player[pid] for pid in through), default=0)
+        real_contenders = [pid for pid in through if power_by_player[pid] == max_power]
+        if not real_contenders and tile.owner:
+            real_contenders = [tile.owner]  # nobody broke through: the owner holds
 
         if not real_contenders:
             # All attackers were beaten by intrinsic tile defense
@@ -2232,6 +2384,7 @@ def execute_reveal(game: GameState) -> GameState:
                     "power": power_by_player.get(pid, 0),
                     "source_q": src[0] if src else None,
                     "source_r": src[1] if src else None,
+                    "cards": _claim_cards(game, pid, claims),
                 })
             game.resolution_steps.append({
                 "tile_key": tile_key,
@@ -2244,13 +2397,12 @@ def execute_reveal(game: GameState) -> GameState:
                 "previous_owner": tile.owner,
                 "outcome": "defense_held",
                 "is_base_raid": tile.is_base,
+                **ignore_info,
             })
             continue
 
         if len(real_contenders) == 1:
             winner_id = real_contenders[0]
-        elif tile.owner in real_contenders:
-            winner_id = tile.owner  # defender wins ties
         else:
             # Tie between attackers — nobody wins
             game._log(f"Tile {tile_key}: tie between attackers, no change")
@@ -2264,6 +2416,7 @@ def execute_reveal(game: GameState) -> GameState:
                     "power": power_by_player.get(pid, 0),
                     "source_q": src[0] if src else None,
                     "source_r": src[1] if src else None,
+                    "cards": _claim_cards(game, pid, claims),
                 })
             game.resolution_steps.append({
                 "tile_key": tile_key,
@@ -2276,6 +2429,7 @@ def execute_reveal(game: GameState) -> GameState:
                 "previous_owner": tile.owner,
                 "outcome": "tie",
                 "is_base_raid": tile.is_base,
+                **ignore_info,
             })
             continue
 
@@ -2293,6 +2447,7 @@ def execute_reveal(game: GameState) -> GameState:
                 "power": power_by_player.get(pid, 0),
                 "source_q": src[0] if src else None,
                 "source_r": src[1] if src else None,
+                "cards": _claim_cards(game, pid, claims),
             })
         game.resolution_steps.append({
             "tile_key": tile_key,
@@ -2305,6 +2460,7 @@ def execute_reveal(game: GameState) -> GameState:
             "previous_owner": tile.owner,
             "outcome": "claimed" if winner_id != tile.owner else "defended",
             "is_base_raid": tile.is_base,
+            **ignore_info,
         })
 
         if winner_id != tile.owner:
@@ -2314,14 +2470,16 @@ def execute_reveal(game: GameState) -> GameState:
                 defender = game.players[base_owner_id]
                 attacker = game.players[winner_id]
                 attacker_power = power_by_player.get(winner_id, 0)
-                total_defense = power_by_player.get(base_owner_id, 0) if base_owner_id in power_by_player else current_defense
+                total_defense = owner_claims + (stripped_defense if winner_id in ignorers else current_defense)
                 # Capped: a raid inflicts at most RAID_RUBBLE_CAP (1) Rubble,
                 # however far the claim beat the base's defense.
                 rubble_count = min(RAID_RUBBLE_CAP, max(0, attacker_power - total_defense))
                 if rubble_count > 0:
+                    watch = _EffectWatch(game)
                     for _ in range(rubble_count):
                         defender.deck.discard.append(make_rubble_card())
                     attacker.deck.discard.append(make_spoils_card())
+                    watch.record(game, "Base Raid", tile_key, winner_id)
                     game._log(
                         f"{attacker.name} raids {defender.name}'s base! "
                         f"{rubble_count} Rubble added to {defender.name}'s deck, "
@@ -2394,13 +2552,19 @@ def execute_reveal(game: GameState) -> GameState:
             player = game.players[pid]
             succeeded = claim_results.get(tile_key, {}).get(pid, False)
             defender_id = pre_claim_owner if pre_claim_owner and pre_claim_owner != pid else None
-            # Resolve structured effects
+            # Resolve structured effects. A multi-target claim is listed under
+            # each of its tiles; effects that tally all its tiles (Surge+)
+            # read claim_results once, on its primary tile.
+            primary = tile_key == f"{action.target_q},{action.target_r if action.target_r is not None else 0}"
             if action.card.effects:
+                watch = _EffectWatch(game)
                 resolve_on_resolution_effects(
                     game, player, action.card, action,
                     claim_succeeded=succeeded,
                     defender_id=defender_id,
+                    claim_results=claim_results if primary else None,
                 )
+                watch.record(game, action.card.name, tile_key, pid)
             # War Banner: if this Claim consumed a buff and succeeded, apply
             # the queued draw_on_success reward and surface a popup.
             if succeeded and action.consumed_claim_buff is not None:
@@ -2444,12 +2608,14 @@ def execute_reveal(game: GameState) -> GameState:
                 held = True
                 break
         if held:
+            watch = _EffectWatch(game)
             resolve_on_resolution_effects(
                 game, game.players[pid], card, action,
                 claim_succeeded=False,
                 claim_results=claim_results,
                 only_conditions={ConditionType.IF_DEFENDER_HOLDS},
             )
+            watch.record(game, card.name, target_keys[0] if target_keys else None, pid)
 
     # Resolve non-claim, non-defense actions (on_resolution effects)
     # (Defense cards were already resolved before claims above.)
@@ -2479,16 +2645,30 @@ def execute_reveal(game: GameState) -> GameState:
                     "value": card.forced_discard,
                 })
 
+        # Consecrate: the tile's VP before, so the step shows only a real change
+        # (it fizzles if the tile was lost or cut off this round).
+        consecrate_before: Optional[int] = None
+        if card.effects and any(e.type == EffectType.ENHANCE_VP_TILE for e in card.effects) and action.target_q is not None:
+            _ct = game.grid.get_tile(action.target_q, action.target_r if action.target_r is not None else 0)
+            consecrate_before = _ct.vp_value if _ct is not None else None
+
         # Resolve structured on_resolution effects for non-claim cards
         if card.effects:
+            watch = _EffectWatch(game)
             resolve_on_resolution_effects(game, player, card, action,
                                           claim_results=claim_results)
+            watch.record(
+                game, card.name,
+                f"{action.target_q},{action.target_r if action.target_r is not None else 0}"
+                if action.target_q is not None else None,
+                pid)
 
         # Consecrate: add resolution step for VP tile enhancement animation
         if card.effects and any(e.type == EffectType.ENHANCE_VP_TILE for e in card.effects):
-            if action.target_q is not None:
+            _cons_now = game.grid.get_tile(action.target_q, action.target_r if action.target_r is not None else 0) if action.target_q is not None else None
+            if _cons_now is not None and consecrate_before is not None and _cons_now.vp_value > consecrate_before:
                 _tr = action.target_r if action.target_r is not None else 0
-                _cons_tile = game.grid.get_tile(action.target_q, _tr)
+                _cons_tile = _cons_now
                 _vp_bonus = 1
                 if card.is_upgraded:
                     for eff in card.effects:
@@ -2527,7 +2707,9 @@ def execute_reveal(game: GameState) -> GameState:
         def step_sort_key(step: dict[str, Any]) -> tuple[int, int, int, int, int]:
             # Tier: defense_applied (0), regular claims (1), post-claim effects like auto_claim/consecrate (2)
             outcome = step.get("outcome")
-            if outcome == "defense_applied":
+            if outcome in ("abandon", "scorch"):
+                tier = -1  # resolved before defenses and claims
+            elif outcome == "defense_applied":
                 tier = 0
             elif outcome in ("auto_claim", "consecrate"):
                 tier = 2
@@ -2583,12 +2765,14 @@ def execute_reveal(game: GameState) -> GameState:
                     continue
                 # Create a dummy action for the effect context
                 dummy_action = PlannedAction(card=card)
+                watch = _EffectWatch(game)
                 resolve_on_resolution_effects(
                     game, player, card, dummy_action,
                     claim_succeeded=None,
                     defender_id=None,
                     claim_results=claim_results,
                 )
+                watch.record(game, card.name, None, pid)
                 break  # Only trigger once per card
 
     # Track claims won this round (for War Tithe next round)

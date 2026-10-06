@@ -42,6 +42,38 @@ describe('walkClashes', () => {
 });
 
 describe('buildResolvePlans', () => {
+  it('a Siege Engine\'s claim attacks last, and the bonuses crack for it alone', () => {
+    // The owner's +2 Defense card and +1 Claim: 3. The rival's 3 bounces off
+    // it; the Siege Engine (2) faces 1 once the +2 cracks, and takes the tile.
+    const t = tiles({ '0,0': { owner: 'own', base_defense: 0, defense_power: 0 } });
+    const steps = [
+      step({ outcome: 'defense_applied', claimants: [claimant('own', 0)], defender_id: 'own', winner_id: 'own', previous_owner: 'own', defense_permanent: 0, defense_temporary: 2 }),
+      step({
+        claimants: [claimant('me', 2), claimant('rival', 3), claimant('own', 3)], defender_power: 3,
+        winner_id: 'me', previous_owner: 'own', outcome: 'claimed', defense_ignored: 2, ignored_by: ['me'],
+      }),
+    ];
+    const cards = new Map([['0,0', [
+      card('wall@0,0', 'own', 'defense', 0, 2), card('ex@0,0', 'own', 'claim', 1),
+      card('siege@0,0', 'me', 'claim', 2), card('r@0,0', 'rival', 'claim', 3),
+    ]]]);
+    const [plan] = buildResolvePlans(steps, cards, t, 'me');
+    expect(plan.perm + plan.temp).toBe(3);
+    expect(plan.attacks.map(a => [a.playerId, a.clash, !!a.crack, a.value])).toEqual([
+      ['rival', 'bounce', false, 3], ['me', 'break', true, 2],
+    ]);
+    expect(plan.winner).toBe('me');
+  });
+
+  it('no crack once a rival has broken through: the Siege Engine faces their claim', () => {
+    const w = walkClashes([
+      { playerId: 'rival', total: 4, beats: [], sourceQ: null, sourceR: null },
+      { playerId: 'me', total: 3, beats: [], sourceQ: null, sourceR: null, ignores: true },
+    ], 'own', 3, 2);
+    expect(w.attacks.map(a => [a.clash, !!a.crack])).toEqual([['break', false], ['bounce', false]]);
+    expect(w.holder).toBe('rival');
+  });
+
   it('builds the defense from Defense cards and the owner\'s own claims, then the attack', () => {
     const t = tiles({ '0,0': { owner: 'me', base_defense: 0, defense_power: 0 } });
     const steps = [
@@ -129,4 +161,56 @@ describe('buildResolvePlans', () => {
     expect(plan.winner).toBe('me');
     expect(plan.captured).toBe(false);
   });
+
+  it('plays Flood\'s spread first, right before the tiles it reaches', () => {
+    const t = tiles({ '0,0': { owner: 'me' } });
+    const flood = card('flood@0,0', 'me', 'claim', 1);
+    flood.cardId = 'flood';
+    const cl = (key: string) => {
+      const [q, r] = key.split(',').map(Number);
+      return step({ tile_key: key, q, r, winner_id: 'me', claimants: [{ ...claimant('me', 1), cards: [{ card_id: 'flood', name: 'Flood', power: 1, bonuses: [] }] }] });
+    };
+    const steps = [step({ tile_key: '2,2', q: 2, r: 2, winner_id: 'rival', claimants: [claimant('rival', 1)] }), cl('1,0'), cl('0,1')];
+    const plans = buildResolvePlans(steps, new Map([['0,0', [flood]]]), t, 'me', [
+      { type: 'flood', player_id: 'me', tile_key: '0,0', targets: ['1,0', '0,1', '-1,0'], card_id: 'flood', card_name: 'Flood' },
+    ]);
+    expect(plans.map(p => p.outcome === 'flood' ? 'flood' : p.tileKey)).toEqual(['2,2', 'flood', '1,0', '0,1']);
+    const fp = plans[1];
+    expect(fp.others.map(c => c.key)).toEqual(['flood@0,0']);
+    expect(fp.focus).toBe(true);
+    // The claims it lands count Flood's 1 (its card stays on the tile it floods from).
+    expect(plans[2].attacks[0].beats.map(b => [b.card?.key ?? null, b.add])).toEqual([[null, 1]]);
+  });
+
+  it('names each reveal-time bonus as its own beat', () => {
+    const t = tiles({ '0,0': { owner: 'rival' } });
+    const amb = { ...card('amb@0,0', 'me', 'claim', 2), cardId: 'amb' };
+    const dog = { ...card('dog@0,0', 'me', 'claim', 2), cardId: 'dog' };
+    const steps = [step({
+      winner_id: 'me', previous_owner: 'rival', claimants: [{ ...claimant('me', 7), cards: [
+        { card_id: 'dog', name: 'Dog Pile', power: 2, bonuses: [] },
+        { card_id: 'amb', name: 'Ambush', power: 2, bonuses: [{ source: 'Ambush', amount: 2 }, { source: 'Dog Pile', amount: 1 }] },
+      ] }],
+    })];
+    const [plan] = buildResolvePlans(steps, new Map([['0,0', [amb, dog]]]), t, 'me');
+    expect(plan.attacks[0].beats.map(b => [b.card?.key, b.add, b.label ?? null])).toEqual([
+      ['dog@0,0', 2, null], ['amb@0,0', 2, null], ['amb@0,0', 2, 'Ambush'], ['amb@0,0', 1, 'Dog Pile'],
+    ]);
+  });
+
+  it('plays what card effects did after their tile, and the rest from the player\'s base', () => {
+    const t = tiles({ '0,0': { owner: 'rival' }, '3,0': { owner: 'me', is_base: true, base_owner: 'me' } });
+    const sw = { ...card('sw@0,0', 'me', 'claim', 3), cardId: 'sw' };
+    const bz = { ...card('bz@0,0', 'rival', 'claim', 2), cardId: 'bz' };
+    const steps = [step({ winner_id: 'me', claimants: [claimant('me', 3), claimant('rival', 2)] })];
+    const plans = buildResolvePlans(steps, new Map([['0,0', [sw, bz]]]), t, 'me', [
+      { type: 'trash', player_id: 'rival', by_player_id: 'me', tile_key: '0,0', card_id: 'bz', card_name: 'Blitz', source_card: 'Spoils of War' },
+      { type: 'vp', player_id: 'me', by_player_id: 'me', tile_key: null, amount: 1, card_name: 'Battle Glory' },
+    ]);
+    expect(plans).toHaveLength(2);
+    expect(plans[0].after.map(e => e.type)).toEqual(['trash']);
+    expect(plans[0].burn).toEqual(['bz@0,0']);
+    expect([plans[1].outcome, plans[1].tileKey, plans[1].after.map(e => e.card_name)]).toEqual(['round', '3,0', ['Battle Glory']]);
+  });
 });
+

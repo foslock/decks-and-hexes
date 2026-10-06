@@ -102,6 +102,41 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
+// ── Flood water shader: water filling one hex tile ──
+// The front moves out from uOrigin: as a hexagon (uRadial = 1, the tile the
+// flood starts on) or as a straight line along uDir (a tile around it,
+// filling from the edge it shares). The tile's own hex mesh clips it.
+const WATER_VERT = /* glsl */ `
+varying vec2 vWorld;
+void main() {
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorld = wp.xz;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}`;
+const WATER_FRAG = /* glsl */ `
+uniform vec3 uColor;
+uniform vec2 uOrigin;
+uniform vec2 uDir;
+uniform float uRadial;
+uniform float uFront;
+uniform float uAlpha;
+uniform float uTime;
+varying vec2 vWorld;
+void main() {
+  vec2 p = vWorld - uOrigin;
+  float hexd = max(abs(p.y), max(abs(dot(p, vec2(0.8660254, 0.5))), abs(dot(p, vec2(-0.8660254, 0.5)))));
+  float d = uRadial > 0.5 ? hexd : dot(p, uDir);
+  float body = 1.0 - smoothstep(uFront - 0.2, uFront, d);
+  float k = (d - uFront + 0.06) / 0.07;
+  float foam = exp(-k * k) * step(0.02, uFront);
+  float ripple = 0.72 + 0.28 * sin(length(p) * 13.0 - uTime * 8.0);
+  float a = clamp(body * 0.66 * ripple + foam * 0.85, 0.0, 1.0) * uAlpha;
+  vec3 col = mix(uColor * (0.85 + 0.3 * ripple), vec3(0.88, 0.96, 1.0), foam * 0.8);
+  gl_FragColor = vec4(col, a);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}`;
+
 // ── Light pillar shader ──
 const PILLAR_VERT = /* glsl */ `
 varying vec2 vUv;
@@ -385,6 +420,8 @@ export class FxLayer implements BoardFx {
       transparent: true,
       depthWrite: false,
       blending: AdditiveBlending, premultipliedAlpha: true,
+      // The ring winds clockwise seen from above: drawn one-sided, it was culled.
+      side: DoubleSide,
     });
     const mesh = new Mesh(geo, mat);
     mesh.renderOrder = 8;
@@ -488,6 +525,265 @@ export class FxLayer implements BoardFx {
         r: col.r, g: col.g, b: col.b, life: 0.7 + Math.random() * 0.5, size0: 0.04, size1: 0.008, drag: 0.8, shape: 1,
       });
     }
+  }
+
+  /** A tile given up: its holder's color lifts off the ground in slow motes
+   *  and fades, a soft ring sinks into the earth, a puff of dust. */
+  abandon(q: number, r: number, color: number): void {
+    const c = axialToWorld(q, r);
+    const lx = c.x * HEX_SIZE, ly = c.z * HEX_SIZE;
+    const col = brighten(new Color(color), 0.35);
+    const gy = this.ground(c.x, c.z);
+    this.shockwave(lx, ly, color, 0.95, 900);
+    this.dust(lx, ly, 10, 0.6);
+    for (let i = 0; i < 34; i++) {
+      const a = Math.random() * Math.PI * 2, rr = Math.sqrt(Math.random()) * 0.78;
+      this.sparkPool.spawn({
+        x: c.x + Math.cos(a) * rr, y: gy + 0.03, z: c.z + Math.sin(a) * rr,
+        vx: Math.cos(a) * 0.04, vy: 0.16 + Math.random() * 0.28, vz: Math.sin(a) * 0.04,
+        r: col.r, g: col.g, b: col.b, a: 0.85,
+        life: 1.1 + Math.random() * 0.9, size0: 0.035, size1: 0.004, drag: 0.5, wind: 0.25, shape: 1,
+        delay: Math.random() * 0.35,
+      });
+    }
+    this.flashLight(c.x, gy + 0.3, c.z, color, 0.9, 0.5);
+  }
+
+  /** Scorched Retreat: ignition, a roaring fire that throws embers, then a
+   *  thick column of smoke that drifts off as the flames die. Particles are
+   *  emitted over time, so the fire swells and fades on its own. */
+  scorch(q: number, r: number, durationMs = 2600): void {
+    const c = axialToWorld(q, r);
+    const lx = c.x * HEX_SIZE, ly = c.z * HEX_SIZE;
+    const gy = this.ground(c.x, c.z);
+    const dur = Math.max(0.2, (durationMs / 1000) * Math.max(0.35, this.speed));
+    const start = this.now;
+    let last = start;
+    let flicker = 0;
+    // Ignition: a hot flash, a ring of flame racing out, a jolt.
+    this.shockwave(lx, ly, 0xff7a1a, 1.1, 520);
+    this.flashLight(c.x, gy + 0.35, c.z, 0xff8a2a, 3.6, 0.35);
+    this.shake(0.5, 380);
+    // A bed of burning ground across the whole hex, glowing under the flames.
+    const corners = Array.from({ length: 6 }, (_, k) => hexCorner(c.x, c.z, k, 0.97));
+    const bedGeo = new BufferGeometry();
+    bedGeo.setAttribute('position', new BufferAttribute(drapedPolygon(corners, this.layout, 0.03, 4), 3));
+    const bedMat = new MeshBasicMaterial({
+      color: 0xff5a14, transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false,
+    });
+    const bed = new Mesh(bedGeo, bedMat);
+    bed.renderOrder = 7;
+    this.group.add(bed);
+    const inHex = (rad = 0.8) => {
+      for (;;) {
+        const x = (Math.random() * 2 - 1) * rad, z = (Math.random() * 2 - 1) * rad;
+        if (Math.abs(x) * 0.866 + Math.abs(z) * 0.5 <= rad * 0.87 && Math.abs(z) <= rad * 0.87) return { x: c.x + x, z: c.z + z };
+      }
+    };
+    this.timed.push({
+      update: (now) => {
+        const t = (now - start) / dur;
+        const dt = Math.min(0.05, Math.max(0, now - last));
+        last = now;
+        if (t >= 1.6) return false;
+        // Fire strength: catches fast, roars, then dies down to embers.
+        const fire = t < 0.1 ? t / 0.1 : t < 0.55 ? 1 : Math.max(0, 1 - (t - 0.55) / 0.4);
+        bedMat.opacity = Math.min(1, fire * (0.42 + Math.random() * 0.12) + Math.max(0, 0.18 - Math.max(0, t - 0.95) * 0.3));
+        // Tongues of flame: big soft glows that rise, shrink and redden.
+        const flames = fire * 190 * dt;
+        for (let i = 0; i < flames; i++) {
+          const p = inHex();
+          const hot = Math.random();
+          this.sparkPool.spawn({
+            x: p.x, y: this.ground(p.x, p.z) + 0.03, z: p.z,
+            vx: (Math.random() - 0.5) * 0.15, vy: 0.55 + Math.random() * 0.75 * fire, vz: (Math.random() - 0.5) * 0.15,
+            r: 1.0, g: 0.3 + hot * 0.38, b: 0.04 + hot * 0.08, a: 0.5,
+            life: 0.45 + Math.random() * 0.4, size0: 0.16 + Math.random() * 0.14, size1: 0.03,
+            drag: 0.9, wind: 0.2, shape: 0,
+          });
+        }
+        // A white-hot core low in the blaze.
+        const core = fire * 22 * dt;
+        for (let i = 0; i < core; i++) {
+          const p = inHex(0.55);
+          this.sparkPool.spawn({
+            x: p.x, y: this.ground(p.x, p.z) + 0.04, z: p.z,
+            vx: 0, vy: 0.35 + Math.random() * 0.3, vz: 0,
+            r: 1.0, g: 0.75, b: 0.35, a: 0.55, life: 0.3 + Math.random() * 0.2, size0: 0.2, size1: 0.05,
+            drag: 1.2, shape: 0,
+          });
+        }
+        // Embers thrown up out of the blaze.
+        const embers = fire * 55 * dt;
+        for (let i = 0; i < embers; i++) {
+          const p = inHex();
+          const a = Math.random() * Math.PI * 2;
+          this.sparkPool.spawn({
+            x: p.x, y: this.ground(p.x, p.z) + 0.15, z: p.z,
+            vx: Math.cos(a) * 0.3, vy: 1.1 + Math.random() * 1.1, vz: Math.sin(a) * 0.3,
+            r: 1.0, g: 0.62, b: 0.2, life: 1.2 + Math.random() * 0.9, size0: 0.03, size1: 0.008,
+            gravity: 0.55, drag: 0.7, wind: 0.45, shape: 1,
+          });
+        }
+        // Smoke: a thick black column while it burns, greying and thinning
+        // as it dies; it keeps rising for a while after the flames are out.
+        const smoke = (t < 1.15 ? 0.3 + fire * 0.7 : Math.max(0, 1 - (t - 1.15) / 0.45) * 0.3) * 30 * dt;
+        for (let i = 0; i < smoke; i++) {
+          const p = inHex(0.6);
+          const shade = 0.035 + Math.random() * 0.05 + (1 - fire) * 0.12;
+          this.dustPool.spawn({
+            x: p.x, y: this.ground(p.x, p.z) + 0.3 + fire * 0.25, z: p.z,
+            vx: (Math.random() - 0.5) * 0.05, vy: 0.35 + Math.random() * 0.3, vz: (Math.random() - 0.5) * 0.05,
+            r: shade * 1.05, g: shade, b: shade * 0.95, a: 0.62 + fire * 0.2,
+            life: 2.8 + Math.random() * 1.6, size0: 0.2, size1: 0.85 + Math.random() * 0.4,
+            drag: 0.35, wind: 0.55, gravity: -0.02,
+          });
+        }
+        // Firelight flickers on the board while it burns.
+        flicker -= dt;
+        if (fire > 0.05 && flicker <= 0) {
+          flicker = 0.08;
+          this.flashLight(c.x + (Math.random() - 0.5) * 0.3, gy + 0.45, c.z + (Math.random() - 0.5) * 0.3,
+            0xff7020, (1.8 + Math.random() * 1.3) * fire, 0.15);
+        }
+        return true;
+      },
+      dispose: () => { this.group.remove(bed); bedGeo.dispose(); bedMat.dispose(); },
+    });
+  }
+
+  /** Flood: water bursts up out of the tile and surges out in arcs to every
+   *  tile around it — each lands with a splash, a ring of whitewater in the
+   *  flooder's color and a wet sheen that drains away. */
+  flood(q: number, r: number, targets: [number, number][], color: number): void {
+    const c = axialToWorld(q, r);
+    const gy = this.ground(c.x, c.z);
+    const pace = Math.max(0.35, this.speed);
+    const water = new Color(0x8fd8ff);
+    const drop = (x: number, y: number, z: number, vx: number, vy: number, vz: number, life: number, size: number, delay = 0, gravity = 4.2, drag = 1.1) => {
+      const tint = 0.82 + Math.random() * 0.18;
+      this.sparkPool.spawn({
+        x, y, z, vx, vy, vz,
+        r: water.r * tint, g: water.g * tint, b: 1.0, life, size0: size, size1: size * 0.35,
+        gravity, drag, shape: 2, delay,
+      });
+    };
+    // Water filling a tile, clipped to its hex: from the middle out (the
+    // tile it starts on) or across from the edge it comes in by.
+    const fill = (tx: number, tz: number, radial: boolean) => {
+      const corners = Array.from({ length: 6 }, (_, k) => hexCorner(tx, tz, k, 0.97));
+      const geo = new BufferGeometry();
+      geo.setAttribute('position', new BufferAttribute(drapedPolygon(corners, this.layout, 0.04, 5), 3));
+      const dx = tx - c.x, dz = tz - c.z, len = Math.hypot(dx, dz) || 1;
+      const mat = new ShaderMaterial({
+        vertexShader: WATER_VERT,
+        fragmentShader: WATER_FRAG,
+        uniforms: {
+          uColor: { value: new Color(0x1f74c9) },
+          uOrigin: { value: new Vector2(c.x, c.z) },
+          uDir: { value: new Vector2(dx / len, dz / len) },
+          uRadial: { value: radial ? 1 : 0 },
+          uFront: { value: 0 },
+          uAlpha: { value: 1 },
+          uTime: { value: 0 },
+        },
+        transparent: true,
+        depthWrite: false,
+        side: DoubleSide,
+      });
+      const mesh = new Mesh(geo, mat);
+      mesh.renderOrder = 6;
+      this.group.add(mesh);
+      return { mesh, geo, mat };
+    };
+    /** A hex outline in the flooder's color, flashing up as the water arrives. */
+    const outline = (tx: number, tz: number) => {
+      const corners = Array.from({ length: 6 }, (_, k) => hexCorner(tx, tz, k, 0.93));
+      const { pos } = drapedRibbon(corners, 0.07, this.layout, 0.05, true);
+      const geo = new BufferGeometry();
+      geo.setAttribute('position', new BufferAttribute(pos, 3));
+      const mat = new MeshBasicMaterial({
+        color: brighten(new Color(color), 0.35), transparent: true, opacity: 0, blending: AdditiveBlending, depthWrite: false, side: DoubleSide,
+      });
+      const mesh = new Mesh(geo, mat);
+      mesh.renderOrder = 7;
+      this.group.add(mesh);
+      return { mesh, geo, mat };
+    };
+    const ease = (t: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 2.2);
+
+    // 1. The tile it floods from wells up from the middle out to its edges,
+    //    water bursting up out of it.
+    const home = fill(c.x, c.z, true);
+    for (let i = 0; i < 60; i++) {
+      const a = Math.random() * Math.PI * 2, rr = Math.random() * 0.45;
+      drop(c.x + Math.cos(a) * rr, gy + 0.05, c.z + Math.sin(a) * rr,
+        Math.cos(a) * 0.6, 1.8 + Math.random() * 1.6, Math.sin(a) * 0.6, 0.65 + Math.random() * 0.45, 0.08 + Math.random() * 0.05);
+    }
+    this.flashLight(c.x, gy + 0.3, c.z, 0x7fd3ff, 1.4, 0.3);
+    // 2. Then it pours over its edges into every tile around: each fills
+    //    from the edge it shares, across to the far side.
+    const SPILL = 0.3, FILL = 0.55;
+    const around = targets.map(([tq, tr]) => {
+      const t = axialToWorld(tq, tr);
+      return { t, sheet: fill(t.x, t.z, false), ring: outline(t.x, t.z), splashed: false };
+    });
+    for (const { t } of around) {
+      const dx = t.x - c.x, dz = t.z - c.z;
+      const ty = this.ground(t.x, t.z);
+      for (let i = 0; i < 20; i++) {
+        const flight = 0.32 + Math.random() * 0.12;
+        const delay = SPILL * 0.7 + Math.random() * 0.25;
+        const side = (Math.random() - 0.5) * 0.6;
+        const sx = c.x + dx * 0.4 - dz * side * 0.3, sz = c.z + dz * 0.4 + dx * side * 0.3;
+        const reach = 0.45 + Math.random() * 0.4;
+        const vy = (ty - gy) / flight + 0.5 * 4.2 * flight;
+        drop(sx, gy + 0.06, sz, (dx * reach) / flight, vy, (dz * reach) / flight, flight + 0.2, 0.07 + Math.random() * 0.04, delay * pace, 4.2, 0);
+      }
+    }
+    const start = this.now;
+    this.timed.push({
+      update: (now) => {
+        const t = (now - start) / pace;
+        const drain = t < 1.0 ? 1 : Math.max(0, 1 - (t - 1.0) / 1.3);
+        home.mat.uniforms.uTime.value = t;
+        home.mat.uniforms.uFront.value = 0.95 * ease(t / SPILL);
+        home.mat.uniforms.uAlpha.value = drain;
+        const u = (t - SPILL * 0.8) / FILL;
+        for (const a of around) {
+          a.sheet.mat.uniforms.uTime.value = t;
+          // From the shared edge (√3/2 out) to the far one (3√3/2).
+          a.sheet.mat.uniforms.uFront.value = u <= 0 ? 0 : 0.8 + 1.85 * ease(u);
+          a.sheet.mat.uniforms.uAlpha.value = drain;
+          a.ring.mat.opacity = u <= 0 ? 0 : Math.max(0, Math.min(1, u * 3) * (1 - Math.max(0, t - 0.85) / 0.7)) * 0.9;
+          if (!a.splashed && u > 0.45) {
+            a.splashed = true;
+            const ty = this.ground(a.t.x, a.t.z);
+            for (let i = 0; i < 26; i++) {
+              const ang = Math.random() * Math.PI * 2, rr = Math.random() * 0.6;
+              drop(a.t.x + Math.cos(ang) * rr, ty + 0.04, a.t.z + Math.sin(ang) * rr,
+                Math.cos(ang) * (0.3 + Math.random() * 0.5), 0.9 + Math.random() * 1.2, Math.sin(ang) * (0.3 + Math.random() * 0.5),
+                0.5 + Math.random() * 0.4, 0.07 + Math.random() * 0.04);
+            }
+            for (let i = 0; i < 4; i++) {
+              const ang = Math.random() * Math.PI * 2;
+              this.dustPool.spawn({
+                x: a.t.x + Math.cos(ang) * 0.3, y: ty + 0.05, z: a.t.z + Math.sin(ang) * 0.3,
+                vx: Math.cos(ang) * 0.25, vy: 0.15 + Math.random() * 0.2, vz: Math.sin(ang) * 0.25,
+                r: 0.86, g: 0.93, b: 0.99, a: 0.3,
+                life: 0.9 + Math.random() * 0.5, size0: 0.14, size1: 0.45, drag: 1.4, wind: 0.05,
+              });
+            }
+          }
+        }
+        return t < 2.4;
+      },
+      dispose: () => {
+        for (const m of [home, ...around.flatMap(a => [a.sheet, a.ring])]) {
+          this.group.remove(m.mesh); m.geo.dispose(); m.mat.dispose();
+        }
+      },
+    });
   }
 
   update(dt: number, now: number): boolean {

@@ -260,6 +260,11 @@ class SoundEngine {
   spotlightRival() { this.play('spotlightRival'); }
   spotlightStar() { this.play('spotlightStar'); }
   tileGlow() { this.play('tileGlow'); }
+  tileAbandon() { this.play('tileAbandon'); }
+  tileScorch() { this.play('tileScorch'); }
+  floodWave() { this.play('floodWave'); }
+  powerBonus() { this.play('powerBonus'); }
+  coinGain() { this.play('coinGain'); }
   /** A ring of tiles popping up as the board builds, `delay` s from now. */
   tilePop(delay = 0) { this.playIn('tilePop', delay); }
 

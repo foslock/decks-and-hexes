@@ -576,7 +576,9 @@ class TestVPPursuit:
         self._set_progress(game, 0.5)
         first_pid = next(iter(game.players))
         player = game.players[first_pid]
-        player.resources = 5  # >= REROLL_COST + 2
+        # Enough that paying for the reroll doesn't cost an affordable good
+        # buy (it never rerolls away a credit or shared card it could buy now).
+        player.resources = 8
         self._force_market(player, card_registry, [
             "neutral_gather", "neutral_explore", "neutral_explore",
         ])
@@ -645,14 +647,18 @@ class TestVPPursuit:
         assert score_close > score_far
 
     def test_easy_cpu_does_not_double_down(self, card_registry):
-        """Easy CPUs skip the double-down boost entirely."""
+        """Easy CPUs skip the double-down boost entirely. (Hard doubles down
+        only when stackable power still in hand can finish the stack.)"""
         import dataclasses
+        from app.game_engine.cards import _copy_card
         from app.game_engine.cpu_player import CPUPlayer, ARCHETYPE_WEIGHTS, EASY, HARD
         game = self._make_game(card_registry, [Archetype.VANGUARD, Archetype.SWARM])
         first_pid, second_pid = list(game.players.keys())
         player = game.players[first_pid]
         weights = ARCHETYPE_WEIGHTS[player.archetype]
         explore = dataclasses.replace(card_registry["neutral_explore"])
+        player.hand = [explore, _copy_card(card_registry["vanguard_coordinated_push"], "push")]
+        player.actions_available, player.actions_used = 5, 0
 
         vp_tile = next(t for t in game.grid.tiles.values() if t.is_vp)
         vp_tile.owner = second_pid
