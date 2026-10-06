@@ -28,6 +28,7 @@ from .cards import (
 from .effects import ConditionType, EffectType, TurnModifiers
 from .effect_resolver import (
     calculate_effective_power,
+    give_debt,
     resolve_immediate_effects,
     resolve_on_resolution_effects,
     tile_has_defense_bonus,
@@ -847,6 +848,28 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
     return 0
 
 
+def generate_map(grid_size: GridSize, num_players: int, map_seed: str) -> HexGrid:
+    """The map a game with this seed starts on (the seed turns the size's preset)."""
+    return generate_hex_grid(grid_size, num_players, random.Random(_seed_to_int(map_seed)))
+
+
+def claim_starting_tiles(grid: HexGrid, seat: int, player_id: str, archetype: str) -> None:
+    """Give the player in `seat` their starting cluster; its first tile is the base."""
+    if seat >= len(grid.starting_positions):
+        return
+    for j, (q, r) in enumerate(grid.starting_positions[seat]):
+        tile = grid.get_tile(q, r)
+        if tile:
+            tile.owner = player_id
+            tile.held_since_turn = 0
+            if j == 0:
+                tile.is_base = True
+                tile.base_owner = player_id
+                base_def = BASE_DEFENSE.get(archetype, 3)
+                tile.base_defense = base_def
+                tile.defense_power = base_def
+
+
 def create_game(
     grid_size: GridSize,
     player_configs: list[dict[str, Any]],
@@ -870,7 +893,6 @@ def create_game(
             map_seed = "".join(_tmp.choices(_SEED_CHARS, k=_SEED_LENGTH))
         else:
             map_seed = generate_map_seed()
-    grid_rng = random.Random(_seed_to_int(map_seed))
 
     # Game RNG: random each session, controls shuffling/draws/first-player/etc.
     rng = random.Random(seed)
@@ -878,7 +900,7 @@ def create_game(
 
     game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode, card_pack=card_pack, map_seed=map_seed)
     pack = get_pack(card_pack, card_registry)
-    game.grid = generate_hex_grid(grid_size, num_players, grid_rng)
+    game.grid = generate_map(grid_size, num_players, map_seed)
 
     # Set VP target: explicit override > dynamic computation
     if vp_target is not None:
@@ -946,21 +968,7 @@ def create_game(
         game.players[player_id] = player
         game.player_order.append(player_id)
 
-        # Assign starting tiles — first tile in each cluster is the base
-        if i < len(game.grid.starting_positions):
-            cluster = game.grid.starting_positions[i]
-            for j, (q, r) in enumerate(cluster):
-                tile = game.grid.get_tile(q, r)
-                if tile:
-                    tile.owner = player_id
-                    tile.held_since_turn = 0
-                    # First tile in the cluster is the base tile
-                    if j == 0:
-                        tile.is_base = True
-                        tile.base_owner = player_id
-                        base_def = BASE_DEFENSE.get(archetype.value, 3)
-                        tile.base_defense = base_def
-                        tile.defense_power = base_def
+        claim_starting_tiles(game.grid, i, player_id, archetype.value)
 
     # Random first player
     game.first_player_index = rng.randint(0, num_players - 1)
@@ -2757,6 +2765,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str,
         # NOT cleared on purchase — they feed the 3-roll exclusion window,
         # which should span natural rolls, re-rolls, AND purchases.
         player.deck.add_to_discard([target])
+        give_debt(game, player, target.buy_debt, target.name)
         game.buy_phase_purchases.setdefault(player_id, []).append({
             "card_id": target.id,
             "definition_id": target.definition_id,
@@ -2823,6 +2832,7 @@ def buy_card(game: GameState, player_id: str, source: str, card_id: str,
             if effective_cost > 0:
                 player.resources -= effective_cost
         player.deck.add_to_discard([purchased])
+        give_debt(game, player, purchased.buy_debt, purchased.name)
         game.buy_phase_purchases.setdefault(player_id, []).append({
             "card_id": base_card_id,
             "definition_id": purchased.definition_id,

@@ -23,11 +23,14 @@ from app.game_engine.game_state import generate_map_seed
 from app.game_engine.game_state import (
     GameState,
     Phase,
+    claim_starting_tiles,
     compute_player_vp,
     create_game,
     execute_start_of_turn,
+    generate_map,
 )
 from app.game_engine.hex_grid import GridSize
+from app.game_engine.map_presets import PRESETS
 
 logger = logging.getLogger(__name__)
 
@@ -562,6 +565,36 @@ async def get_lobby(code: str, player_id: str, token: str) -> dict[str, Any]:
     return {"lobby": lobby.to_dict()}
 
 
+def _seat_order(lobby: Lobby) -> list[str]:
+    """Players in seat order: the explicit order if the host set one."""
+    return lobby.player_order if lobby.player_order else list(lobby.players.keys())
+
+
+@lobby_router.get("/{code}/map-preview")
+async def map_preview(code: str, player_id: str, token: str) -> dict[str, Any]:
+    """The map this lobby's game will start on — the size's preset turned by
+    the map seed — with each player's starting tiles, seated as at the start."""
+    lobby = _require_lobby(code)
+    _require_token(lobby.code, player_id, token)
+    if player_id not in lobby.players:
+        raise HTTPException(403, "Not a member of this lobby")
+    try:
+        grid_size = GridSize(lobby.config.grid_size)
+    except ValueError:
+        raise HTTPException(400, f"Invalid grid size: {lobby.config.grid_size}")
+
+    seats = _seat_order(lobby)
+    grid = generate_map(grid_size, len(seats), lobby.config.map_seed)
+    for i, pid in enumerate(seats):
+        claim_starting_tiles(grid, i, pid, lobby.players[pid].archetype)
+    return {
+        "grid_size": grid_size.value,
+        "map_name": PRESETS[grid_size.value].name,
+        "tiles": grid.to_dict()["tiles"],
+        "seats": seats,
+    }
+
+
 @lobby_router.patch("/{code}/config")
 async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
     """Update lobby config (host only)."""
@@ -845,7 +878,7 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
 
     # Create the game from lobby config — use explicit player_order if set
     registry = _get_registry()
-    ordered_pids = lobby.player_order if lobby.player_order else list(lobby.players.keys())
+    ordered_pids = _seat_order(lobby)
     player_configs = []
     for pid in ordered_pids:
         p = lobby.players[pid]

@@ -47,14 +47,14 @@ Each archetype is defined by two of three traits: **Fast**, **Cheap**, **Strong*
 
 ## Grid Sizes
 
-| Size | Hex Count | VP Hexes | Recommended Players | Target Length |
-|---|---|---|---|---|
-| Small | 61 | 5 | 2–3 | 20–30 min |
-| Medium | 91 | 6 | 3–4 | 30–45 min |
-| Large | 127 | 9 | 4–6 | 45–60 min |
-| Mega | 169 | 12 | 5–6 | 60–90 min |
-| Ultra | 217 | 15 | 6 | 90–120 min |
+| Size | Hex Count | Map | VP Hexes | Recommended Players | Target Length |
+|---|---|---|---|---|---|
+| Small | 61 | Crown | 7 | 2–3 | 20–30 min |
+| Medium | 91 | Frontiers | 7 | 3–4 | 30–45 min |
+| Large | 127 | Rings | 13 | 4–6 | 45–60 min |
+| Mega | 169 | Six Crowns | 13 | 5–6 | 60–90 min |
+| Ultra | 217 | Twin Rings | 13 | 6 | 90–120 min |
 
-VP hexes are distributed evenly across the board (not clustered at center), similar to double-word-score tiles in Scrabble.
+Each size has one fixed map, built so every seat sees the same board: a premium (2-star) VP hex in the center — on Mega, several spread evenly between the bases instead — and standard VP hexes at the same distance from every base. Every tile next to a base is open (no mountain, VP hex or defense), so nobody starts slow. With five players the bases spread evenly round the coast instead of sitting on five of the six corners, and the map is laid out around them.
 
-A portion of non-VP, non-starting tiles are randomly designated as **Blocked Terrain** at game start, creating impassable obstacles that vary each game. Blocked tiles cannot be claimed unless a player has the **Pathfinder** passive.
+Some tiles are **Blocked Terrain** (mountains): impassable obstacles. Blocked tiles cannot be claimed unless a player has the **Pathfinder** passive.

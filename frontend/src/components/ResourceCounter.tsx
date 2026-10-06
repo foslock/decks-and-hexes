@@ -266,7 +266,7 @@ const ResourceCounter = forwardRef<ResourceCounterHandle, Props>(function Resour
       <div
         role="button"
         tabIndex={0}
-        className="cc-res-counter"
+        className="cc-res-counter cc-hud-counter"
         aria-label={`${shown} resource${shown !== 1 ? 's' : ''}`}
         aria-expanded={labelOpen}
         data-resource-counter

@@ -189,6 +189,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
     unplayable = bool(entry.get("unplayable", False))
     passive_vp = _safe_int(entry.get("passive_vp", 0))
     vp_formula = str(entry.get("vp_formula", ""))
+    buy_debt = _safe_int(entry.get("buy_debt", 0))
     unique = bool(entry.get("unique", False))
 
     # Parse structured effects list from YAML
@@ -278,6 +279,7 @@ def _entry_to_card(entry: dict[str, Any], archetype: Archetype) -> Optional[Card
         unplayable=unplayable,
         passive_vp=passive_vp,
         vp_formula=vp_formula,
+        buy_debt=buy_debt,
         unique=unique,
         description=description,
         upgrade_description=upgrade_description,

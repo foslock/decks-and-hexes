@@ -1,21 +1,17 @@
 # Card Clash – Game Setup
 
 ## Step 1: Choose Grid Size
-Players collectively agree on a grid size (Small / Medium / Large / Mega / Ultra). This determines:
+Players collectively agree on a grid size (Small / Medium / Large / Mega / Ultra). Each size has one fixed map, which sets:
 - Total hex count
-- Number of VP hexes
-- Number of starting tiles per player corner
+- The VP hexes and blocked terrain (mountains)
+- Where the starting bases go
 
-## Step 2: Generate the Board
-1. Place the hex grid.
-2. Assign **starting corner clusters** (2 tiles each) to each active player. Distribute corners evenly around the grid. Empty corners are left unoccupied unless the host has opted to add CPU players.
-3. Randomly place **Blocked Terrain** tiles across non-corner, non-VP hexes. Count used by the digital game:
-   - Small: 5–7 blocked tiles
-   - Medium: 8–10 blocked tiles
-   - Large: 10–14 blocked tiles
-   - Mega: 14–18 blocked tiles
-   - Ultra: 18–22 blocked tiles
-4. Randomly distribute **VP Hex** markers evenly across the remaining tiles.
+## Step 2: Set Up the Board
+1. Lay out the size's map. It is symmetric around the bases: VP hexes sit at the same distance from every base, and every tile next to a base is open (no mountain, VP hex or defense).
+2. Assign **starting clusters** (2 tiles each: the base and the tile toward the center) round the board in seat order:
+   - 2, 3 or 6 players: evenly spaced corners.
+   - 4 players: two opposite pairs of corners, so everyone has one rival beside them and one empty corner.
+   - 5 players: bases spread evenly round the coast (five of six corners would leave the two players beside the empty corner with a big edge); the map is laid out around them.
 
 ## Step 3: Determine Initial Turn Order
 Roll or randomly determine the **first player** for Round 1. Seat order is fixed for the entire game, but the **first player token rotates clockwise each round** — every player will eventually act first.

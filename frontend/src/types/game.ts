@@ -50,6 +50,8 @@ export interface Card {
   passive_vp: number;
   vp_formula?: string;
   unique?: boolean;
+  /** Debt cards added to the buyer's discard pile when bought (Warden, Land Grant). */
+  buy_debt?: number;
   current_vp?: number;
   description: string;
   upgrade_description?: string;

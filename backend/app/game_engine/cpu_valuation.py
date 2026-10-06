@@ -160,9 +160,22 @@ def _base_value(card: Card) -> float:
     elif card.card_type == CardType.ENGINE and v == 0:
         v += 1.4  # typical engine utility
     v += 1.0 * card.effective_draw_cards
+    v -= 2.0 * debts_taken(card)
     if card.definition_id == DEF_ID_DEBT:
         v = -0.5
     return max(0.0, v)
+
+
+def debts_taken(card: Card) -> int:
+    """Debt cards a play of *card* adds to your deck (Mercenary, Garrison, …)."""
+    return sum(e.effective_value(card.is_upgraded) for e in card.effects if e.type == EffectType.GAIN_DEBT)
+
+
+def debt_cost(ctx: "ValuationContext") -> float:
+    """Value (RE) one new Debt costs: when it's drawn it takes a hand slot,
+    and clearing it takes 3 resources and an action. Late in the game it may
+    never come round again."""
+    return min(1.0, expected_plays(ctx)) * (3.0 + ctx.avg_value)
 
 
 def build_context(game: Any, player_id: str, board_aware: bool = True,
@@ -484,6 +497,7 @@ def card_play_value(card: Card, ctx: ValuationContext,
             # Archetype flavor: lean slightly toward the archetype's plan.
             v *= 0.85 + 0.15 * float(getattr(weights, "resource_value", 1.0))
 
+    v -= debts_taken(card) * debt_cost(ctx)
     if card.effective_trash_on_use and card.card_type != CardType.CLAIM:
         v *= 0.9
     return v
@@ -509,6 +523,7 @@ def purchase_value(card: Card, player: Any, game: Any, ctx: ValuationContext,
                    weights: Optional[Any] = None) -> float:
     """Marginal value (RE) of adding *card* to the deck now."""
     vp_value = one_time_vp(card, player, game) * ctx.tuning.vp_re
+    vp_value -= getattr(card, "buy_debt", 0) * debt_cost(ctx)  # Warden, Land Grant
     plays = expected_plays(ctx)
     if card.unplayable:
         # Dead card: every draw displaces an average card.

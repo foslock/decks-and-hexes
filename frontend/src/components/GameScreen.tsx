@@ -760,7 +760,8 @@ const ACTION_BUTTON_FILLS: Record<ActionButtonVariant, { bg: string; border: str
 function progressButton(ready: boolean): { className: string; style: React.CSSProperties } {
   return {
     className: `cc-btn-primary cc-btn-progress${ready ? '' : ' is-waiting'}`,
-    style: { padding: '10px 24px', fontSize: 17, lineHeight: '1.2' },
+    // (nowrap: the label and its arrow stay on one line on phones.)
+    style: { padding: '10px 24px', fontSize: 17, lineHeight: '1.2', whiteSpace: 'nowrap' },
   };
 }
 
@@ -6119,6 +6120,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                 }}>
                 <div
                   role="button"
+                  className="cc-hud-counter"
                   tabIndex={showActions ? 0 : -1}
                   aria-label={`${submitActionsLeft} action${submitActionsLeft !== 1 ? 's' : ''} left`}
                   aria-expanded={actionsLabelOpen}

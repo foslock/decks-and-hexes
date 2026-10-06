@@ -8,7 +8,7 @@ Each round consists of five phases executed by all players simultaneously where 
 
 Performed individually, simultaneously by all players:
 
-1. **Debt distribution:** Starting from round 5, the current VP leader receives a **Debt** card in their discard pile. Debt is a dead ENGINE card that costs 1 action + 3 resources to play, which trashes it. Other trash effects can also remove it. Among tied VP leaders, the one closest in turn order to the first player receives the Debt.
+1. **Debt distribution:** Starting from round 5, the current VP leader receives a **Debt** card in their discard pile. Debt is a dead ENGINE card that costs 1 action + 3 resources to play, which trashes it. Other trash effects can also remove it. Among tied VP leaders, the one closest in turn order to the first player receives the Debt. Some strong cards carry a Debt as part of their price: Mercenary, Garrison and Siege Tower add one to your discard pile when their claim resolves, Prospector when played, and Warden and Land Grant when bought.
 2. **VP is derived, not scored here:** VP is recomputed from the board and your cards at any moment (see `04_objectives_and_vp.md`); the win check happens at the **end** of each round.
 4. **Draw hand:** Draw cards up to your hand size from your personal draw pile.
    - If your draw pile is empty, shuffle your discard pile into a new draw pile, then draw.

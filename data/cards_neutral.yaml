@@ -90,18 +90,19 @@ cards:
     name: Mercenary
     name_upgraded: Mercenary+
     type: Claim
-    buy_cost: 3
+    buy_cost: 5
 
     action_return: 0
+    reversible: true
     power: 3
-    effect: "Claim: Power 3. You must pay 2 resources to play this card."
-    effect_upgraded: "Claim: Power 4. You must pay 2 resources to play this card."
+    effect: "Claim: Power 3. Gain a Debt."
+    effect_upgraded: "Claim: Power 4. Gain a Debt."
     trash_on_use: false
 
     effects:
-      - type: play_resource_cost
-        value: 2
-        timing: immediate
+      - type: gain_debt
+        value: 1
+        timing: on_resolution
 
   - id: neutral_land_grant
     name: Land Grant
@@ -112,9 +113,10 @@ cards:
     power: 0
     unplayable: true
     passive_vp: 1
-    effect: "Worth 1 VP."
+    buy_debt: 1
+    effect: "Worth 1 VP. Gain a Debt when you buy this."
     trash_on_use: false
-    note: "Awards VP on purchase but clogs your deck permanently. Finite stack makes buying multiples a real investment. Not upgradable."
+    note: "Awards VP on purchase but clogs your deck permanently, and the purchase adds a Debt. Finite stack makes buying multiples a real investment. Not upgradable."
 
   - id: neutral_sabotage
     name: Sabotage
@@ -176,9 +178,14 @@ cards:
 
     action_return: 0
     power: 0
-    effect: "Gain 4 resources."
-    effect_upgraded: "Gain 5 resources."
+    effect: "Gain 6 resources. Gain a Debt."
+    effect_upgraded: "Gain 7 resources. Gain a Debt."
     trash_on_use: false
+
+    effects:
+      - type: gain_debt
+        value: 1
+        timing: immediate
 
   - id: neutral_surveyor
     name: Surveyor
@@ -409,14 +416,18 @@ cards:
     buy_cost: 9
 
     action_return: 0
-    action_cost: 2
     reversible: true
     unique: true
     power: 6
     upgraded_power: 8
-    effect: "Claim: Power 6. Costs 2 actions to play."
-    effect_upgraded: "Claim: Power 8. Costs 2 actions to play."
+    effect: "Claim: Power 6. Gain a Debt."
+    effect_upgraded: "Claim: Power 8. Gain a Debt."
     trash_on_use: false
+
+    effects:
+      - type: gain_debt
+        value: 1
+        timing: on_resolution
 
   - id: neutral_conqueror
     name: Conqueror
