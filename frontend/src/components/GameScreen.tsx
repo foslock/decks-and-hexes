@@ -3474,6 +3474,11 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   useEffect(() => { if (introSequence === 'overlay') tilePopsRef.current = false; }, [introSequence]);
   // A new game starts the music over from the top.
   useEffect(() => { soundEngine.restartMusic(); }, [gameState.id]);
+  // The page itself never scrolls during a game (only the game's own areas do).
+  useEffect(() => {
+    document.documentElement.classList.add('cc-page-locked');
+    return () => document.documentElement.classList.remove('cc-page-locked');
+  }, []);
 
   // Intro overlay dismissed — start shuffle → draw → play banner sequence
   const handleIntroReady = useCallback(() => {

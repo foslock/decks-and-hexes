@@ -3,8 +3,8 @@
   "short_name": "Card Clash",
   "display": "fullscreen",
   "orientation": "any",
-  "background_color": "#111111",
-  "theme_color": "#111111",
+  "background_color": "#0b0b1c",
+  "theme_color": "#0b0b1c",
   "start_url": "/",
   "icons": [
     { "src": "/favicon-16x16.png", "sizes": "16x16", "type": "image/png" },
