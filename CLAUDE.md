@@ -132,7 +132,15 @@ pauses while the tab is hidden, holds silent through the lobby countdown
 (`holdMusic`) and starts over with each game (`restartMusic`). Nothing makes a
 sound (no AudioContext is even created) until the page has had a click, tap
 or key press. Music/Sounds settings reach the engine from `SettingsProvider`.
-Audition page: `?preview=sounds`.
+Bluetooth output (AirPods ≈ 170 ms) hears every sound late by a fixed amount;
+`audio/outputDelay.ts` measures the output's delay (`outputLatency` /
+`getOutputTimestamp`), and sounds that belong to a moment on screen we can see
+coming are *cued* for it — `sfx.cue(name, inMs)` / `claimSmashIn` /
+`soundEngine.playIn` start early by the delay beyond the usual (claim smashes
+at the end of their wind-up, staggered draws, cards landing on the discard
+pile, the board's tile pops). Sounds that start with what you just did can't
+be early. Audition page: `?preview=sounds` (shows the output delay and has a
+Sync check: a dot flashing with a cued tick).
 
 ### Game Log Analysis
 When the user refers to a "game log" they mean a JSON file produced by

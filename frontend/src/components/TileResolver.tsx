@@ -456,12 +456,18 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           transform: `translate(${wind.x + (i % 2 ? -1 : 1) * 3 * k}px, ${wind.y + (i % 2 ? 1 : -1) * 2 * k}px) scale(${1.1 + 0.3 * k})`, offset,
         }))
         : [];
+      // The smash is heard as it lands: cued for the end of the wind-up (so it
+      // can start early through slow headphones). A dink is a light tap
+      // whatever the claim's power.
+      const windup = ms(240 + 200 * k);
+      sfx.claimSmashIn(dink ? 1 : a.total, windup);
+      if (plan.baseRaid && !dink) sfx.cue('resolveBaseRaidRam', windup);
       await animate(claimRef.current, [
         { transform: 'translate(0, 0) scale(1)' },
         { transform: `translate(${wind.x}px, ${wind.y}px) scale(${1.1 + 0.3 * k})`, offset: tremble.length ? 0.4 : 0.35 },
         ...tremble,
         { transform: `translate(${hit.x}px, ${hit.y}px) scale(${hitScale})` },
-      ], ms(240 + 200 * k), 'cubic-bezier(0.5, 0, 0.9, 0.6)', 'forwards');
+      ], windup, 'cubic-bezier(0.5, 0, 0.9, 0.6)', 'forwards');
       const c = axialToPixel(plan.q, plan.r);
       const f = fx();
       const pc = PLAYER_COLORS[a.playerId] ?? 0xffffff;
@@ -472,9 +478,6 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
         f?.dust(c.x, c.y, Math.round(10 + 22 * k), 0.6 + 0.8 * k);
       }
       if (!dink) ring?.flash((bounced ? 1.2 : 0.8) * (0.8 + 0.5 * k));
-      // A dink is a light tap whatever the claim's power.
-      sfx.claimSmash(dink ? 1 : a.total);
-      if (plan.baseRaid && !dink) sfx.resolveBaseRaidRam();
       // Hit-stop: a heavy blow holds the moment of impact.
       if (k > 0.25) await wait(Math.round(90 * k));
 
@@ -558,8 +561,8 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
     const crackDefense = async (plan: TilePlan, by: string) => {
       if (!defShown || !defRef.current) await popDefense(holderView(plan));
       else flushSync(() => setDefense(holderView(plan)));
+      sfx.cue('resolveBaseRaidShatter', ms(140));
       await wait(140);
-      sfx.resolveBaseRaidShatter();
       burst('#d6cfc0', 9, 1.1);
       burst(colorOf(by), 6, 0.8);
       const c = axialToPixel(plan.q, plan.r);

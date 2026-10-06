@@ -4821,8 +4821,11 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const launchBoardFlight = useCallback((f: Omit<Flight<BoardFlightKind>, 'key'>, onDone?: () => void) => {
     const key = `bf${++boardFlightSeq.current}`;
     if (onDone) flightLanded.current.set(key, onDone);
+    // A card landing on my discard pile is heard as it lands (cued at launch,
+    // so it can start early through slow headphones).
+    if (f.kind === 'toDiscard') sound.cue('cardDiscard', (f.delay ?? 0) + f.duration);
     setBoardFlights(prev => [...prev, { ...f, key }]);
-  }, []);
+  }, [sound]);
 
   /**
    * Send revealed cards home: mine land on my discard pile, opponents' fly
@@ -5064,11 +5067,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     const landed = flightLanded.current.get(f.key);
     flightLanded.current.delete(f.key);
     landed?.();
-    if (f.kind === 'toDiscard') {
-      setDiscardCountOverride(v => (v == null ? v : v + 1));
-      sound.cardDiscard();
-    }
-  }, [sound]);
+    if (f.kind === 'toDiscard') setDiscardCountOverride(v => (v == null ? v : v + 1));
+  }, []);
 
   // Reveal: every player's plays land over their tiles — opponents' face
   // down, each turning over as its tile resolves.

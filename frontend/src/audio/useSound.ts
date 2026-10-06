@@ -1,6 +1,7 @@
 import { useMemo, useEffect } from 'react';
 import { useSettings } from '../components/SettingsContext';
 import { soundEngine, type HeldSound } from './SoundEngine';
+import { smashSoundName, type SoundName } from './sounds';
 
 const NO_OP = () => {};
 
@@ -39,6 +40,11 @@ const NO_OP_SOUNDS = {
   coinGain: NO_OP,
   phaseCall: NO_OP as (step: 3 | 4 | 5) => void,
   claimSmash: NO_OP as (power: number) => void,
+  /** A sound that belongs to something `inMs` from now on screen: heard
+   *  right on it, even through slow (Bluetooth) headphones. */
+  cue: NO_OP as (name: SoundName, inMs: number) => void,
+  /** A claim smashing into a tile `inMs` from now (the end of its wind-up). */
+  claimSmashIn: NO_OP as (power: number, inMs: number) => void,
   // Optional extras (not yet wired into components)
   hoverTick: NO_OP,
   coinSpend: NO_OP,
@@ -95,6 +101,8 @@ export function useSound(): SoundApi {
       coinGain: () => soundEngine.coinGain(),
       phaseCall: (step: 3 | 4 | 5) => soundEngine.phaseCall(step),
       claimSmash: (power: number) => soundEngine.claimSmash(power),
+      cue: (name: SoundName, inMs: number) => soundEngine.cue(name, inMs),
+      claimSmashIn: (power: number, inMs: number) => soundEngine.cue(smashSoundName(power), inMs),
       hoverTick: () => soundEngine.hoverTick(),
       coinSpend: () => soundEngine.coinSpend(),
       vpGain: () => soundEngine.vpGain(),

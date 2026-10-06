@@ -1,5 +1,6 @@
 import { createAudioGraph, type AudioGraph } from './graph';
 import { createMusicGraph, DistantMarch } from './music';
+import { measureOutputDelay, soundLead } from './outputDelay';
 import { SOUNDS, smashSoundName, type SoundName } from './sounds';
 
 /** A sound that can be cut short (a charge-up while a button is held). */
@@ -36,12 +37,17 @@ class SoundEngine {
   private music: DistantMarch | null = null;
   private unavailable = false;
   private unlockBound = false;
+  /** The output's delay (ms), measured now and then (see outputDelay.ts). */
+  private delay: number | null = null;
+  private delayAt = -Infinity;
 
   constructor() {
     this.bindUnlock();
     if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
       document.addEventListener('visibilitychange', () => this.syncMusic());
     }
+    // Headphones connected or unplugged: measure the output afresh.
+    if (typeof navigator !== 'undefined') navigator.mediaDevices?.addEventListener?.('devicechange', () => { this.delayAt = -Infinity; });
   }
 
   /**
@@ -62,6 +68,7 @@ class SoundEngine {
       this.syncMusic();
       if (!graph || this.ctx?.state === 'running') {
         events.forEach((e) => window.removeEventListener(e, unlock, true));
+        this.unlockBound = false;
       }
     };
     events.forEach((e) => window.addEventListener(e, unlock, { capture: true, passive: true }));
@@ -88,20 +95,44 @@ class SoundEngine {
         this.music = new DistantMarch(musicGraph);
         // Safari may start a context on its own (or only at the first click).
         this.ctx.addEventListener?.('statechange', () => this.syncMusic());
+        // Chrome: the output moved to another device.
+        this.ctx.addEventListener?.('sinkchange', () => { this.delayAt = -Infinity; });
       } catch (e) {
         console.warn('[SoundEngine] audio unavailable', e);
         this.unavailable = true;
         return null;
       }
     }
-    // Resume if suspended (browser autoplay policy)
-    if (this.ctx && this.ctx.state === 'suspended') {
+    // Resume if suspended (browser autoplay policy) or interrupted (Safari).
+    if (this.ctx && this.ctx.state !== 'running' && this.ctx.state !== 'closed') {
       this.ctx.resume().catch(() => { /* needs a user gesture; next play retries */ });
     }
     return this.graph;
   }
 
-  setVolume(v: number) {
+  // ── Keeping sounds in time with the screen ─────────────────────────
+
+  /** How long (ms) a sound started now takes to be heard; null if unknown. */
+  outputDelay(): number | null {
+    return this.ctx ? measureOutputDelay(this.ctx) : null;
+  }
+
+  /**
+   * How far ahead (ms) sounds start so they're heard with what they belong
+   * to: the output's delay beyond the usual (Bluetooth headphones ≈ 150–250
+   * ms). Re-measured every couple of seconds — it changes when headphones
+   * connect or disconnect.
+   */
+  get leadMs(): number {
+    const now = typeof performance !== 'undefined' ? performance.now() : 0;
+    if (now - this.delayAt > 2000) {
+      const d = this.outputDelay();
+      if (d != null) { this.delay = d; this.delayAt = now; }
+    }
+    return soundLead(this.delay);
+  }
+
+    setVolume(v: number) {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.graph && this.ctx) {
       // Smooth the change so dragging the slider never zippers or clicks.
@@ -167,6 +198,9 @@ class SoundEngine {
     }
   }
 
+  /** Debug: the context, for measuring how late sounds are heard. */
+  get context(): AudioContext | null { return this.ctx; }
+
   /** Play any sound by name. Audio failures never propagate into game code. */
   play(name: SoundName) {
     if (!this.enabled) return;
@@ -180,16 +214,23 @@ class SoundEngine {
     }
   }
 
-  /** Play a sound `delay` seconds from now, on the audio clock. */
+  /** Play a sound so it's heard `delay` seconds from now — with whatever
+   *  happens on screen then (it starts early by the output's extra delay). */
   playIn(name: SoundName, delay: number) {
     if (!this.enabled) return;
     const graph = this.ensureContext();
     if (!graph) return;
     try {
-      SOUNDS[name].play(graph, graph.ctx.currentTime + Math.max(0, delay));
+      SOUNDS[name].play(graph, graph.ctx.currentTime + Math.max(0, delay - this.leadMs / 1000));
     } catch (e) {
       console.warn(`[SoundEngine] failed to play ${name}`, e);
     }
+  }
+
+  /** A sound that belongs to something `inMs` from now on screen — a claim
+   *  about to smash into a tile, the next card of a deal — heard right on it. */
+  cue(name: SoundName, inMs: number) {
+    this.playIn(name, Math.max(0, inMs) / 1000);
   }
 
   /**
@@ -280,3 +321,4 @@ class SoundEngine {
 }
 
 export const soundEngine = new SoundEngine();
+if (import.meta.env?.DEV && typeof window !== 'undefined') (window as unknown as { __sound?: unknown }).__sound = soundEngine;
