@@ -23,7 +23,8 @@ export function VolumeControl({ on, volume, onToggle, onVolume, onRelease, label
   segBtnClass: string;
 }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    // Never wider than its row: the slider gives way first.
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flex: '0 1 auto', minWidth: 0 }}>
       <div className={segClass}>
         {([true, false] as const).map((v) => (
           <button
@@ -47,7 +48,7 @@ export function VolumeControl({ on, volume, onToggle, onVolume, onRelease, label
         onChange={(e) => onVolume(parseFloat(e.target.value))}
         onPointerUp={(e) => onRelease?.(parseFloat(e.currentTarget.value))}
         onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End' || e.key.startsWith('Page')) onRelease?.(parseFloat(e.currentTarget.value)); }}
-        style={{ width: 72, opacity: on ? 1 : 0.35, ['--pct' as string]: `${Math.round(volume * 100)}%` }}
+        style={{ width: 72, flex: '0 1 72px', minWidth: 40, opacity: on ? 1 : 0.35, ['--pct' as string]: `${Math.round(volume * 100)}%` }}
       />
     </div>
   );

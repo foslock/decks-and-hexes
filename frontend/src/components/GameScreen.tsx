@@ -5849,7 +5849,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                   ...HUD_PANEL_STYLE,
                   position: 'absolute', top: 42, right: 0,
                   background: 'linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 45%), rgba(20, 20, 44, 0.97)',
-                  padding: 12, minWidth: 240,
+                  // An explicit width: a right-anchored popover sized to its
+                  // content comes out too narrow in Safari (sliders spill out).
+                  padding: 12, width: 300, maxWidth: 'calc(100vw - 24px)', boxSizing: 'border-box',
                 }}>
                   <SettingsPanel
                     isMultiplayer={isMultiplayer}
