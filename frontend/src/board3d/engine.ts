@@ -13,7 +13,7 @@ import { BoardLayout, axialToWorld, hexCorner, structureSignature } from './layo
 import { MarkerLayer, type TokenSpec } from './markers';
 import {
   createPropMaterial, createSharedUniforms, createSlabMaterial, createTerrainMaterial, createTileTextures,
-  tileTexIndex, TF, type SharedUniforms, type TerrainUniforms, type TileTextures,
+  tileTexIndex, TF, BUILD_SURFACE, type SharedUniforms, type TerrainUniforms, type TileTextures,
 } from './materials';
 import { ParticlePool } from './particles';
 import { buildDecor, buildStructure, buildWallEdge, emptySpots, structureHeight, structureSpec, wallEdges, type AmbientSpots, type Footprint } from './props';
@@ -365,6 +365,16 @@ export class BoardEngine {
   setBuildProgress(p: number | undefined): void {
     const v = p === undefined ? 1 : Math.max(0, Math.min(1, p));
     if (v < 1 && this.build >= 1 && v < 0.05) this.rig.snap();
+    // Tiles that broke the sea's surface since the last step throw up spray
+    // (a tile at ring k surfaces at build k / maxRing · 0.6 + BUILD_SURFACE).
+    const from = v < this.build ? -1 : this.build;
+    if (v > from && this.layout && this.fxLayer && this.speed > 0) {
+      const maxRing = Math.max(1, this.layout.maxRing);
+      for (const tl of this.layout.tiles) {
+        const at = (tl.ring / maxRing) * 0.6 + BUILD_SURFACE;
+        if (at > from && at <= v) this.fxLayer.splash(tl.x * HEX_SIZE, tl.z * HEX_SIZE);
+      }
+    }
     this.build = v;
     this.shared.uBuild.value = v;
     this.kick(1.5);
@@ -655,7 +665,9 @@ export class BoardEngine {
     if (!tl || !this.layout) return 0;
     const stagger = tl.ring / Math.max(1, this.layout.maxRing);
     const t = Math.max(0, Math.min(1, (this.build - stagger * 0.6) / 0.4));
-    return t * t;
+    // (Hidden until the tile has broken the surface.)
+    const u = Math.max(0, Math.min(1, (t - BUILD_SURFACE / 0.4) / 0.4));
+    return u * u;
   }
 
   /** Height a label should sit at above a tile's structure. */

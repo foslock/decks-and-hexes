@@ -424,13 +424,19 @@ const tileGlow: Recipe = (bus, when) => {
   v.done();
 };
 
-/** A tile popping up out of the water as the board builds. */
+/** A tile breaking the sea's surface as the board builds: a watery bloop
+ *  and a little splash of spray. */
 const tilePop: Recipe = (bus, when) => {
-  const v = voice(bus, when, 'tilePop', { vary: 1.2, pan: rand(-0.4, 0.4), reverb: 0.12 });
-  const f = rand(620, 980);
-  v.tone({ f, f2: f * 0.42, glide: 0.035, gain: 0.7, env: { a: 0.002, d: 0.06 } });
-  v.tone({ type: 'triangle', f: f * 1.5, f2: f * 0.8, glide: 0.025, gain: 0.15, env: { a: 0.001, d: 0.035 } });
-  v.noise({ color: 'pink', gain: 0.18, env: { a: 0.0005, d: 0.012 }, filters: [{ type: 'bandpass', f: 1800, q: 1 }] });
+  const v = voice(bus, when, 'tilePop', { vary: 1.2, pan: rand(-0.4, 0.4), reverb: 0.14 });
+  const f = rand(380, 620);
+  // The bloop: a bubble's pitch sweeping up as it surfaces.
+  v.tone({ f: f * 0.55, f2: f, glide: 0.05, gain: 0.6, env: { a: 0.004, d: 0.07 } });
+  v.tone({ type: 'triangle', f: f * 1.3, f2: f * 1.9, glide: 0.04, gain: 0.1, env: { a: 0.002, d: 0.04 } });
+  // The splash: bright filtered noise, a touch late.
+  v.noise({
+    color: 'white', at: 0.02, gain: 0.32, env: { a: 0.003, d: 0.09 },
+    filters: [{ type: 'highpass', f: 1800, q: 0.7 }, { type: 'bandpass', f: rand(3200, 4800), f2: 2200, sweep: 0.08, q: 0.9 }],
+  });
   v.done();
 };
 
@@ -777,7 +783,7 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   upgradeCharge: { play: upgradeCharge, length: 1.55 },
   upgradeCard: { play: upgradeCard, length: 1.9 },
   beginJingle: { play: beginJingle, length: 1.6 },
-  tilePop: { play: tilePop, length: 0.12 },
+  tilePop: { play: tilePop, length: 0.2 },
   spotlightYou: { play: spotlightYou, length: 1.6 },
   spotlightRival: { play: spotlightRival, length: 1.6 },
   spotlightStar: { play: spotlightStar, length: 1.5 },

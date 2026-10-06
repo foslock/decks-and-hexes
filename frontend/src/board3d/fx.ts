@@ -10,6 +10,7 @@ import type { BoardLayout } from './layout';
 import { axialToWorld, hexCorner } from './layout';
 import type { ParticlePool } from './particles';
 import { Soup, lin } from './soup';
+import { WATER_Y } from './terrain';
 
 const toWorld = (p: LocalPoint) => ({ x: p.x / HEX_SIZE, z: p.y / HEX_SIZE });
 
@@ -289,6 +290,34 @@ export class FxLayer implements BoardFx {
       });
     }
     this.flashLight(w.x, gy + 0.25, w.z, color, 1.6 * power, 0.22);
+  }
+
+  /** A tile breaking the sea's surface as the board builds: spray thrown up
+   *  around it and a little mist. */
+  splash(x: number, y: number, power = 1): void {
+    const w = toWorld({ x, y });
+    const wy = WATER_Y + 0.02;
+    for (let i = 0; i < 10; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = 0.25 + Math.random() * 0.4;
+      const out = (0.25 + Math.random() * 0.55) * power;
+      this.sparkPool.spawn({
+        x: w.x + Math.cos(a) * rr, y: wy, z: w.z + Math.sin(a) * rr,
+        vx: Math.cos(a) * out, vy: (0.9 + Math.random() * 0.9) * power, vz: Math.sin(a) * out,
+        r: 0.72, g: 0.86, b: 1.0, life: 0.55 + Math.random() * 0.35, size0: 0.045, size1: 0.012,
+        gravity: 4.2, drag: 1.2, shape: 2,
+      });
+    }
+    for (let i = 0; i < 4; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = Math.random() * 0.45;
+      this.dustPool.spawn({
+        x: w.x + Math.cos(a) * rr, y: wy + 0.03, z: w.z + Math.sin(a) * rr,
+        vx: Math.cos(a) * 0.25, vy: 0.15 + Math.random() * 0.15, vz: Math.sin(a) * 0.25,
+        r: 0.86, g: 0.92, b: 0.98, a: 0.26,
+        life: 0.8 + Math.random() * 0.4, size0: 0.1, size1: 0.34 * power, drag: 1.4, wind: 0.05,
+      });
+    }
   }
 
   dust(x: number, y: number, count = 16, power = 1): void {

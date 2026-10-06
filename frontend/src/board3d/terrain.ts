@@ -6,7 +6,7 @@ import type { HexTile } from '../types/game';
 import { HEX_DIRS } from '../utils/hexGeometry';
 import { BoardLayout, hexCorner } from './layout';
 import { fbm2, valueNoise2 } from './noise';
-import type { SharedUniforms } from './materials';
+import { BUILD_SURFACE, type SharedUniforms } from './materials';
 import { lin, mix, type RGB } from './soup';
 
 export const WATER_Y = -0.3;
@@ -175,12 +175,23 @@ uniform float uDistMax;
 uniform float uDistMin;
 uniform float uRadius;
 uniform float uGlowR;
+uniform float uMaxRing;
+uniform float uSurfaceAt;
 varying vec2 vXZ;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+// The hex cell (axial q, r — the board's own) a world point lies in.
+vec2 hexRound(vec2 f) {
+  vec3 c = vec3(f.x, f.y, -f.x - f.y);
+  vec3 rc = floor(c + 0.5);
+  vec3 d = abs(rc - c);
+  if (d.x > d.y && d.x > d.z) rc.x = -rc.y - rc.z;
+  else if (d.y > d.z) rc.y = -rc.x - rc.z;
+  return rc.xy;
 }
 
 void main() {
@@ -210,6 +221,39 @@ void main() {
   // Foam belongs to a coastline — it surfaces with the island.
   float foamOn = smoothstep(0.85, 1.0, uBuild);
   col = mix(col, vec3(0.78, 0.82, 0.8), clamp(lap * 0.85 + band * 0.45, 0.0, 1.0) * foamOn);
+
+  // Land rising: whitewater churns along the hex edges where tiles have just
+  // broken the surface, ripples running out from them. Each water cell foams
+  // on its inner edges (those facing land) once the ring inside it surfaces,
+  // then settles; the coast gets the same as the last ring comes up.
+  if (uBuild > 0.0 && uBuild < 1.0) {
+    const float SQ3 = 1.7320508;
+    vec2 qr = hexRound(vec2(2.0 / 3.0 * vXZ.x, -1.0 / 3.0 * vXZ.x + SQ3 / 3.0 * vXZ.y));
+    vec2 c = vec2(1.5 * qr.x, SQ3 * 0.5 * qr.x + SQ3 * qr.y);
+    vec2 local = vXZ - c;
+    float ring = (abs(qr.x) + abs(qr.y) + abs(qr.x + qr.y)) * 0.5;
+    float age = uBuild - ((ring - 1.0) / uMaxRing * 0.6 + uSurfaceAt);
+    if (ring > 0.5 && ring < uMaxRing + 1.5 && age > 0.0) {
+      vec2 inward = -normalize(c);
+      float edge = 0.0;
+      float stir = 0.0;
+      for (int k = 0; k < 6; k++) {
+        float a = radians(30.0 + 60.0 * float(k));
+        vec2 n = vec2(cos(a), sin(a));
+        float d = max(SQ3 * 0.5 - dot(local, n), 0.0);
+        float facing = smoothstep(0.4, 0.8, dot(n, inward));
+        edge = max(edge, facing * exp(-d / 0.08));
+        stir = max(stir, facing * exp(-d / 0.32));
+      }
+      float life = smoothstep(0.0, 0.025, age) * (1.0 - smoothstep(0.1, 0.32, age))
+        * (1.0 - smoothstep(0.93, 1.0, uBuild));
+      float churn = noise(vXZ * 7.0 + vec2(uTime * 1.9, -uTime * 1.4));
+      float foam = edge * smoothstep(0.2, 0.8, churn);
+      // Whitewater right on the edge, stirred-up lighter water just off it.
+      col = mix(col, col * 1.35 + vec3(0.04, 0.07, 0.08), stir * life * 0.6);
+      col = mix(col, vec3(0.8, 0.88, 0.9), clamp(foam * 0.85, 0.0, 1.0) * life);
+    }
+  }
 
   float alpha = pow(1.0 - smoothstep(uRadius * 0.3, uRadius * 0.98, r), 1.5);
   alpha *= smoothstep(0.0, 0.12, uBuild) * 0.96;
@@ -257,6 +301,8 @@ export function buildWater(layout: BoardLayout, shared: SharedUniforms): { mesh:
       uDistMin: { value: distMin },
       uRadius: { value: extent },
       uGlowR: { value: glowR },
+      uMaxRing: { value: Math.max(1, layout.maxRing) },
+      uSurfaceAt: { value: BUILD_SURFACE },
     },
     transparent: true,
     premultipliedAlpha: true,
