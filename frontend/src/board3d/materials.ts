@@ -30,10 +30,10 @@ const WATER_LEVEL = '-0.3';
 export const BUILD_DEPTH = 1.2;
 /**
  * The point in a tile's own build-in (0..1) where it breaks the surface:
- * bh_rise(t) · BUILD_DEPTH clears the 0.3 to sea level at t ≈ 0.34. A tile at
+ * bh_rise(t) · BUILD_DEPTH clears the 0.3 to sea level at t ≈ 0.18. A tile at
  * stagger s (ring / maxRing) surfaces at uBuild = s · 0.6 + BUILD_SURFACE.
  */
-export const BUILD_SURFACE_T = 0.34;
+export const BUILD_SURFACE_T = 0.18;
 export const BUILD_SURFACE = 0.4 * BUILD_SURFACE_T;
 
 // ── GLSL snippets ─────────────────────────────────────────────────────────
@@ -67,13 +67,17 @@ float bh_build(float stagger) {
   return clamp((uBuild - stagger * 0.6) / 0.4, 0.0, 1.0);
 }
 /* Rising out of the sea: up from BH_DEPTH below the board, quick under water,
-   slowing as it breaks the surface, with a small bob at the top. */
+   then a bob — overshooting its rest, sinking back below it, a last little
+   rebound — settling exactly level at t = 1. */
 const float BH_DEPTH = ${BUILD_DEPTH.toFixed(2)};
 const float BH_SURFACE = ${BUILD_SURFACE.toFixed(4)};
 /* Build time since this piece's tile broke the surface (negative before). */
 float bh_drain(float stagger) { return uBuild - (stagger * 0.6 + BH_SURFACE); }
 float bh_rise(float t) {
-  return 1.0 - pow(1.0 - t, 3.0) + 0.1 * sin(3.14159265 * t) * t;
+  float u = min(t / 0.48, 1.0);
+  float base = 1.0 - pow(1.0 - u, 3.0);
+  float s = max((t - 0.3) / 0.7, 0.0);
+  return base + 0.15 * sin(3.0 * 3.14159265 * s) * pow(1.0 - s, 1.3);
 }
 `;
 

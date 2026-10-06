@@ -292,44 +292,58 @@ export class FxLayer implements BoardFx {
     this.flashLight(w.x, gy + 0.25, w.z, color, 1.6 * power, 0.22);
   }
 
-  /** A tile breaking the sea's surface as the board builds: spray thrown up
-   *  around it and a little mist. */
-  splash(x: number, y: number, power = 1): void {
+  /** A tile breaking the sea's surface as the board builds. The spray comes
+   *  off its outer edges — `edges` (0–5, edge k faces angle 60°·k + 30°) are
+   *  the ones still facing open water: a sheet thrown up and out, a few
+   *  droplets skipping away, water pouring off for a moment after, a little
+   *  mist. `density` thins it out on big boards (the particle pools are shared). */
+  splash(x: number, y: number, power = 1, density = 1, edges: readonly number[] = [0, 1, 2, 3, 4, 5]): void {
     const w = toWorld({ x, y });
     const wy = WATER_Y + 0.02;
-    for (let i = 0; i < 10; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const rr = 0.25 + Math.random() * 0.4;
-      const out = (0.25 + Math.random() * 0.55) * power;
+    const n = (count: number) => Math.max(1, Math.round(count * density));
+    const inr = Math.sqrt(3) / 2;
+    const drop = (px: number, py: number, pz: number, vx: number, vy: number, vz: number, life: number, size: number, delay = 0, gravity = 4.2) => {
+      const tint = 0.85 + Math.random() * 0.15;
       this.sparkPool.spawn({
-        x: w.x + Math.cos(a) * rr, y: wy, z: w.z + Math.sin(a) * rr,
-        vx: Math.cos(a) * out, vy: (0.9 + Math.random() * 0.9) * power, vz: Math.sin(a) * out,
-        r: 0.72, g: 0.86, b: 1.0, life: 0.55 + Math.random() * 0.35, size0: 0.045, size1: 0.012,
-        gravity: 4.2, drag: 1.2, shape: 2,
+        x: px, y: py, z: pz, vx, vy, vz,
+        r: 0.86 * tint, g: 0.95 * tint, b: 1.0, life, size0: size, size1: size * 0.35,
+        gravity, drag: 1.1, shape: 2, delay,
       });
-    }
-    // Water pouring off its edges for a moment after.
-    for (let k = 0; k < 6; k++) {
-      const a = (Math.PI / 3) * k + Math.PI / 6 + (Math.random() - 0.5) * 0.5;
-      for (let j = 0; j < 2; j++) {
-        const out = 0.3 + Math.random() * 0.35;
-        this.sparkPool.spawn({
-          x: w.x + Math.cos(a) * 0.82, y: wy + 0.12, z: w.z + Math.sin(a) * 0.82,
-          vx: Math.cos(a) * out, vy: 0.05 + Math.random() * 0.25, vz: Math.sin(a) * out,
-          r: 0.72, g: 0.86, b: 1.0, life: 0.45 + Math.random() * 0.3, size0: 0.035, size1: 0.012,
-          gravity: 3.4, drag: 1.0, shape: 2, delay: 0.08 + Math.random() * 0.35,
+    };
+    for (const k of edges) {
+      const a = (Math.PI / 3) * k + Math.PI / 6;
+      const nx = Math.cos(a), nz = Math.sin(a);
+      // A point along the edge (u in −0.5..0.5 of its length), just outside it.
+      const at = (u: number, off = 0.02) => ({ x: w.x + nx * (inr + off) - nz * u, z: w.z + nz * (inr + off) + nx * u });
+      // The sheet of spray: up and out along the whole edge.
+      for (let i = 0; i < n(10); i++) {
+        const p = at(Math.random() - 0.5);
+        const out = (0.35 + Math.random() * 0.6) * power;
+        drop(p.x, wy, p.z, nx * out, (1.0 + Math.random() * 1.3) * power, nz * out, 0.6 + Math.random() * 0.45, 0.06 + Math.random() * 0.035);
+      }
+      // Droplets skipping away low and fast.
+      for (let i = 0; i < n(4); i++) {
+        const p = at(Math.random() - 0.5);
+        const out = (0.8 + Math.random() * 0.5) * power;
+        drop(p.x, wy, p.z, nx * out, (0.5 + Math.random() * 0.5) * power, nz * out, 0.45 + Math.random() * 0.3, 0.05, Math.random() * 0.05);
+      }
+      // Water pouring off the edge for a moment after.
+      for (let i = 0; i < n(3); i++) {
+        const p = at(Math.random() - 0.5, -0.04);
+        const out = 0.25 + Math.random() * 0.3;
+        drop(p.x, wy + 0.12, p.z, nx * out, 0.05 + Math.random() * 0.2, nz * out, 0.45 + Math.random() * 0.3, 0.045,
+          0.08 + Math.random() * 0.4, 3.4);
+      }
+      // A little mist.
+      if (Math.random() < 0.8 * density + 0.2) {
+        const p = at(Math.random() - 0.5, 0.1);
+        this.dustPool.spawn({
+          x: p.x, y: wy + 0.03, z: p.z,
+          vx: nx * 0.3, vy: 0.18 + Math.random() * 0.2, vz: nz * 0.3,
+          r: 0.86, g: 0.92, b: 0.98, a: 0.28,
+          life: 0.9 + Math.random() * 0.5, size0: 0.12, size1: 0.4 * power, drag: 1.4, wind: 0.05,
         });
       }
-    }
-    for (let i = 0; i < 4; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const rr = Math.random() * 0.45;
-      this.dustPool.spawn({
-        x: w.x + Math.cos(a) * rr, y: wy + 0.03, z: w.z + Math.sin(a) * rr,
-        vx: Math.cos(a) * 0.25, vy: 0.15 + Math.random() * 0.15, vz: Math.sin(a) * 0.25,
-        r: 0.86, g: 0.92, b: 0.98, a: 0.26,
-        life: 0.8 + Math.random() * 0.4, size0: 0.1, size1: 0.34 * power, drag: 1.4, wind: 0.05,
-      });
     }
   }
 
