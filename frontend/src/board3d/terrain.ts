@@ -232,6 +232,15 @@ void main() {
     vec2 c = vec2(1.5 * qr.x, SQ3 * 0.5 * qr.x + SQ3 * qr.y);
     vec2 local = vXZ - c;
     float ring = (abs(qr.x) + abs(qr.y) + abs(qr.x + qr.y)) * 0.5;
+    // Shoaling: the sea over a tile about to surface turns shallow and
+    // starts to bubble.
+    if (ring < uMaxRing + 0.5) {
+      float tS = ring / uMaxRing * 0.6 + uSurfaceAt;
+      float near = smoothstep(tS - 0.14, tS, uBuild) * (1.0 - step(tS + 0.03, uBuild));
+      float bubbles = smoothstep(0.78, 0.97, noise(vXZ * 11.0 + vec2(uTime * 2.3, uTime * 1.7)));
+      col = mix(col, vec3(0.2, 0.42, 0.4), near * 0.6);
+      col = mix(col, vec3(0.86, 0.92, 0.94), bubbles * near * 0.75);
+    }
     float age = uBuild - ((ring - 1.0) / uMaxRing * 0.6 + uSurfaceAt);
     if (ring > 0.5 && ring < uMaxRing + 1.5 && age > 0.0) {
       vec2 inward = -normalize(c);

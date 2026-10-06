@@ -263,7 +263,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     let raf = 0;
     const t0 = performance.now();
     const tick = (now: number) => {
-      const k = Math.min(1, (now - t0) / 2400);
+      const k = Math.min(1, (now - t0) / 2700);
       setBuild(k);
       if (k < 1) raf = requestAnimationFrame(tick);
     };
