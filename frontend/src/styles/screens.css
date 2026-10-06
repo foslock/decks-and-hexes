@@ -1017,7 +1017,10 @@
   position: absolute;
   top: 50px;
   right: 0;
-  min-width: 240px;
+  /* Explicit width (Safari sizes a right-anchored popover too narrow). */
+  width: 290px;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
   padding: 12px 14px;
   animation: cc-pop-in 200ms var(--cc-ease-out) both;
   transform-origin: top right;
