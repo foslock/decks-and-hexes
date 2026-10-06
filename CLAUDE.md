@@ -103,7 +103,14 @@ narration in `tutorialScenes.tsx` still describes them.
   the shared edge) right before the tiles it reaches, and plays tile-less ones
   (Diplomat, Battle Glory) last from the player's base ('round' plans).
   Claimants carry `cards` (printed power + named reveal bonuses), so the count
-  shows each bonus as its own beat ("+2 · Ambush").
+  shows each bonus as its own beat ("+2 · Ambush"). A tile's cards line up left
+  to right in the order they turn over (`revealOrder` / `sortByReveal`).
+  VP won or lost during the resolve flies to the player's score as stars
+  (`VpStar`, red for a loss), and the score counts as each lands: board VP
+  (`boardVpChanges` in `utils/vpBreakdown.ts` — a VP hex connecting or cut off
+  flies from the hex, the tile count crossing a multiple of 3 from the tile
+  that changed hands) and card VP (Battle Glory, Spoils, Land Grant) from where
+  it happened.
   Preview: `?preview=resolve-animations` (the "Card effects" row too).
 - The board canvas runs on under the hand panel (`GameBoard` `extendBelow`);
   `viewInsetBottom` → `CameraRig.insetBottom` frames the island above the

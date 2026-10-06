@@ -4,11 +4,12 @@ import GameBoard, {
   type BoardControls, type BoardFx, type ClaimChevron, type GridTransform, type PlannedActionIcon, type VpPath,
 } from '../GameBoard';
 import TileResolver, { type ResolverApi } from '../TileResolver';
-import { buildResolvePlans, type PlanCard, type TilePlan } from '../../utils/resolvePlan';
+import { buildResolvePlans, revealOrder, sortByReveal, type PlanCard, type TilePlan } from '../../utils/resolvePlan';
 import CardFull from '../CardFull';
 import FlightCard, { turnOver, type Flight } from '../hand/FlightCard';
 import { CoinFlight, splitCoins, type Coin } from '../ResourceCounter';
 import TargetArrow from '../hand/TargetArrow';
+import { VpStar, type VpStarFlight } from '../VpStar';
 import CardPile from '../hand/CardPile';
 import { TileCardStack, CardDetailOverlay, boardCardScale, type BoardCardEntry } from '../BoardCards';
 import { CARD_H, CARD_W, easeInOut, flightKeyframes, poseTransform, runAnimation, type Pose } from '../hand/cardMotion';
@@ -153,31 +154,6 @@ function HudChip({ hud, icon, color, label, value, dim }: {
 }
 
 interface Pop { id: number; text: string; x: number; y: number; tone: string; down: boolean }
-interface StarFlight { key: string; from: { x: number; y: number }; to: { x: number; y: number }; duration: number }
-
-function StarMote({ f, onDone }: { f: StarFlight; onDone: (key: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const dx = f.to.x - f.from.x, dy = f.to.y - f.from.y;
-    const frames: Keyframe[] = [];
-    for (let i = 0; i <= 12; i++) {
-      const t = i / 12;
-      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      const lift = 90 * 4 * t * (1 - t);
-      frames.push({
-        offset: t,
-        transform: `translate(${f.from.x + dx * e}px, ${f.from.y + dy * e - lift}px) translate(-50%, -50%) scale(${1 + Math.sin(Math.PI * t) * 0.6})`,
-        opacity: t > 0.9 ? 1 - (t - 0.9) * 10 : 1,
-      });
-    }
-    let live = true;
-    void runAnimation(ref.current, frames, { duration: f.duration, easing: 'linear', fill: 'both' }).then(() => { if (live) onDone(f.key); });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  return <div ref={ref} className="cc-tut-star"><Icon name="vp" size={26} decorative /></div>;
-}
-
 /** Card plays take their time here (ms, before the speed setting), so a
  *  new player can follow each one: the card lifts, aims, flies to its tile or
  *  the discard pile, and an engine card's coins drift up one by one. */
@@ -216,7 +192,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
   const [done, setDone] = useState(false);
   const [build, setBuild] = useState(pace > 0 ? 0 : 1);
   const [flights, setFlights] = useState<Flight<'tut'>[]>([]);
-  const [stars, setStars] = useState<StarFlight[]>([]);
+  const [stars, setStars] = useState<VpStarFlight[]>([]);
   const [arrow, setArrow] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
   const [banner, setBanner] = useState<{ key: number; text: string; sub?: string; big?: boolean } | null>(null);
   const [pops, setPops] = useState<Pop[]>([]);
@@ -727,16 +703,18 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     return points ? [{ points, color: PLAYER_COLORS[owner!] ?? 0xffffff, alpha: 1, playerId: owner! }] : [];
   }), [world.paths, world.tiles]);
   const tileKeys = useMemo(() => Object.keys(world.cards), [world.cards]);
+  // While a tile resolves, its cards line up in the order they count.
+  const cardOrder = useMemo(() => (resolving ? revealOrder(resolving.plans) : null), [resolving]);
   const renderTileCards = useCallback((key: string, zoom: number) => (
     <TileCardStack
-      entries={world.cards[key] ?? []}
+      entries={cardOrder ? sortByReveal(world.cards[key] ?? [], cardOrder) : world.cards[key] ?? []}
       scale={boardCardScale(zoom)}
       focus={world.focus === key}
       open
       still={!!resolving}
       onOpen={(es) => setDetail(es)}
     />
-  ), [world.cards, world.focus, resolving]);
+  ), [world.cards, world.focus, resolving, cardOrder]);
 
   const youVp = scoreVp(world.tiles, YOU, world.bonusVp).total;
   const rivalVp = scoreVp(world.tiles, RIVAL).total;
@@ -773,7 +751,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     landings.current.delete(`c${c.id}`);
     setCoins(cs => cs.filter(x => x.id !== c.id));
   }, []);
-  const onStarDone = useCallback((key: string) => {
+  const onStarDone = useCallback(({ key }: VpStarFlight) => {
     landings.current.get(key)?.();
     landings.current.delete(key);
     setStars(s => s.filter(x => x.key !== key));
@@ -952,7 +930,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
       <div className="cc-tut-flights">
         {flights.map(f => <FlightCard key={f.key} flight={f} onDone={onFlightDone} />)}
       </div>
-      {stars.map(f => <StarMote key={f.key} f={f} onDone={onStarDone} />)}
+      {stars.map(f => <VpStar key={f.key} f={f} onDone={onStarDone} />)}
       {coins.length > 0 && (
         <div className="cc-res-coins">
           {coins.map(c => <CoinFlight key={c.id} coin={c} onLand={onCoinLand} />)}

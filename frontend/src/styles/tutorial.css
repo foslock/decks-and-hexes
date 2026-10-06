@@ -434,16 +434,6 @@
 }
 
 /* A gold star flying to the score */
-.cc-tut-star {
-  position: fixed;
-  left: 0;
-  top: 0;
-  z-index: 85;
-  color: var(--cc-gold-bright);
-  pointer-events: none;
-  filter: drop-shadow(0 0 8px rgba(255, 210, 80, 0.95)) drop-shadow(0 0 18px rgba(255, 180, 40, 0.6));
-}
-
 /* Phones */
 @media (max-width: 640px) {
   .cc-tut-top { padding: 10px 10px; gap: 6px; flex-wrap: wrap; }
