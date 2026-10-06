@@ -253,11 +253,13 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
     const fx = () => fxRef.current;
     const sfx = live.current.sound;
 
+    /** A badge's pulse as a number goes in (a card bumps in time with it). */
+    const PULSE_MS = 300, PULSE_PEAK = 0.35;
     const pulse = (el: Element | null, color?: string) => animate(el, [
       { transform: 'scale(1)', filter: 'brightness(1)' },
-      { transform: 'scale(1.32)', filter: `brightness(1.6) drop-shadow(0 0 10px ${color ?? '#fff'})`, offset: 0.35 },
+      { transform: 'scale(1.32)', filter: `brightness(1.6) drop-shadow(0 0 10px ${color ?? '#fff'})`, offset: PULSE_PEAK },
       { transform: 'scale(1)', filter: 'brightness(1)' },
-    ], ms(300), 'ease-out');
+    ], ms(PULSE_MS), 'ease-out');
 
     const burst = (color: string, count = 7, reach = 1) => {
       const id0 = ++seq * 100;
@@ -333,15 +335,16 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       if (on) el.dataset.counting = '';
       else delete el.dataset.counting;
     };
-    /** The card gives a small pulse as its power goes in — the card face
-     *  only, inside its player ring, so the ring's glow stays steady. */
+    /** The card gives a small pulse as its power goes in, with the badge's
+     *  — the card face only, inside its player ring, so the ring's glow
+     *  stays steady. */
     const bump = (card: PlanCard | null) => {
       if (!card) return;
       boardCard(card.key)?.querySelector<HTMLElement>('[data-board-card-face]')?.animate?.([
         { transform: 'scale(1)', filter: 'brightness(1)' },
-        { transform: 'scale(1.04)', filter: 'brightness(1.25)', offset: 0.4 },
+        { transform: 'scale(1.04)', filter: 'brightness(1.25)', offset: PULSE_PEAK },
         { transform: 'scale(1)', filter: 'brightness(1)' },
-      ], { duration: ms(240), easing: 'ease-out' });
+      ], { duration: ms(PULSE_MS), easing: 'ease-out' });
     };
 
     /** The direction (screen unit vector) an attack comes in from. */
@@ -425,13 +428,14 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
               color: '#ffd24a', tone: 'bonus',
             });
             sfx.powerBonus();
+            bump(b.card);
             await guard(pulse(claimRef.current, '#ffd24a'));
             await wait(260);
           } else {
             sfx.hoverTick();
+            bump(b.card);
             await guard(pulse(claimRef.current, color));
           }
-          bump(b.card);
           // A card with a bonus still to come stays to show it.
           if (!more) {
             counting(b.card, false);

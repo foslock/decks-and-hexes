@@ -232,6 +232,30 @@ export function walkClashes(
  * @param tiles   the board going into the reveal
  * @param me      the local player
  */
+/**
+ * Each card's place in the order the resolve turns cards over (and counts
+ * them): per tile, the defense, then claims that fizzle (an immune tile), then
+ * each attack in turn (weakest first, card by card), then the rest. A tile's
+ * cards line up left to right in this order, so the player can follow along.
+ */
+export function revealOrder(plans: TilePlan[]): Map<string, number> {
+  const order = new Map<string, number>();
+  const add = (c: PlanCard | null | undefined) => { if (c && !order.has(c.key)) order.set(c.key, order.size); };
+  for (const p of plans) {
+    p.defenseBeats.forEach(b => add(b.card));
+    p.fizzles.forEach(add);
+    p.attacks.forEach(a => a.beats.forEach(b => add(b.card)));
+    p.others.forEach(add);
+  }
+  return order;
+}
+
+/** Sort a tile's cards into reveal order (cards the plan doesn't name keep their places, last). */
+export function sortByReveal<T extends { key: string }>(cards: T[], order: Map<string, number>): T[] {
+  const rank = (c: T) => order.get(c.key) ?? Number.MAX_SAFE_INTEGER;
+  return [...cards].sort((a, b) => rank(a) - rank(b));
+}
+
 export function buildResolvePlans(
   steps: ResolutionStep[],
   cards: Map<string, PlanCard[]>,

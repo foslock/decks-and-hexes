@@ -397,3 +397,18 @@
   50% { box-shadow: 0 0 12px 3px rgba(255, 215, 0, 0.9); }
 }
 .war-banner-pulse { animation: warBannerPulse 1.8s ease-in-out infinite; }
+
+/* A VP star flying to a score (VpStar): gold for a gain, red for a loss. */
+.cc-vp-star {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 85;
+  color: var(--cc-gold-bright);
+  pointer-events: none;
+  filter: drop-shadow(0 0 8px rgba(255, 210, 80, 0.95)) drop-shadow(0 0 18px rgba(255, 180, 40, 0.6));
+}
+.cc-vp-star.is-loss {
+  color: #ff6a5c;
+  filter: drop-shadow(0 0 8px rgba(255, 70, 60, 0.9)) drop-shadow(0 0 16px rgba(200, 30, 30, 0.55));
+}

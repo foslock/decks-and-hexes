@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { Card, HexTile, PlayerEffect, ResolutionClaimCard, ResolutionEffect, ResolutionStep, ResolutionClaimant } from '../types/game';
 import GameBoard, { type GridTransform, type BoardFx, type BoardControls, PLAYER_COLORS } from './GameBoard';
 import TileResolver, { resolveCamera, type ResolverApi } from './TileResolver';
-import { buildResolvePlans, tileAfterStep, type PlanCard } from '../utils/resolvePlan';
+import { buildResolvePlans, revealOrder, sortByReveal, tileAfterStep, type PlanCard } from '../utils/resolvePlan';
 import { TileCardStack, boardCardScale, type BoardCardEntry } from './BoardCards';
 import FlightCard, { type Flight } from './hand/FlightCard';
 import TrashBurn from './hand/TrashBurn';
@@ -12,6 +12,8 @@ import { useCardCatalog, type CardCatalog } from '../cardCatalog';
 import { axialToPixel } from '../utils/hexGeometry';
 import type { CameraView } from '../board3d/engine';
 import PlayerEffectPopups from './PlayerEffectPopups';
+import { VpStar, type VpStarFlight } from './VpStar';
+import { boardVpChanges } from '../utils/vpBreakdown';
 import { useSettings, useAnimationSpeed, type AnimationMode } from './SettingsContext';
 
 /**
@@ -599,6 +601,9 @@ const POPUP_SCENARIOS: PopupScenario[] = [
 
 export default function ResolveAnimationPreview() {
   const [tiles, setTiles] = useState<Record<string, HexTile>>(() => buildDemoTiles(null));
+  /** The board with every step so far applied (ahead of the next render). */
+  const liveTilesRef = useRef(tiles);
+  liveTilesRef.current = tiles;
   const [resolving, setResolving] = useState(false);
   const [steps, setSteps] = useState<ResolutionStep[]>([]);
   const [snapshotTransform, setSnapshotTransform] = useState<GridTransform | null>(null);
@@ -647,6 +652,13 @@ export default function ResolveAnimationPreview() {
   const [floats, setFloats] = useState<{ id: number; x: number; y: number; text: string; color: string }[]>([]);
   const [burns, setBurns] = useState<{ key: string; card: Card; pose: Pose }[]>([]);
   const landings = useRef(new Map<number, () => void>());
+  /** VP stars won or lost, flying to each player's base. */
+  const [stars, setStars] = useState<VpStarFlight[]>([]);
+  const starLandings = useRef(new Map<string, () => void>());
+  const starSeq = useRef(0);
+  /** |amount| stars from a point (or a tile) to a player's base, each tagged ±1 VP as it lands. */
+  const flyStarsRef = useRef<(pid: string, amount: number, from: { x: number; y: number }) => void>(() => {});
+  const flyTileStarsRef = useRef<(pid: string, amount: number, q: number, r: number) => void>(() => {});
 
   const { settings, setAnimationMode } = useSettings();
   const animSpeed = useAnimationSpeed();
@@ -803,12 +815,21 @@ export default function ResolveAnimationPreview() {
   const applyStep = useCallback((idx: number) => {
     const step = steps[idx];
     if (!step) return;
-    setTiles(prev => {
-      const tile = prev[step.tile_key];
-      if (!tile) return prev;
-      const next = tileAfterStep(tile, step);
-      return next === tile ? prev : { ...prev, [step.tile_key]: next };
-    });
+    const before = liveTilesRef.current;
+    const tile = before[step.tile_key];
+    if (!tile) return;
+    const next = tileAfterStep(tile, step);
+    if (next === tile) return;
+    const after = { ...before, [step.tile_key]: next };
+    liveTilesRef.current = after;
+    setTiles(after);
+    // VP the board change wins or loses flies from its tile (the VP hex, or
+    // the one that changed hands) as stars.
+    const pids = [step.winner_id, step.previous_owner, tile.owner].filter((p): p is string => !!p);
+    for (const c of boardVpChanges(before, after, pids, step.tile_key)) {
+      const t = after[c.tileKey];
+      if (t) flyTileStarsRef.current(c.playerId, c.delta, t.q, t.r);
+    }
   }, [steps]);
 
   const handleComplete = useCallback(() => {
@@ -826,6 +847,7 @@ export default function ResolveAnimationPreview() {
   // Planned once per run, from the board as it was going in.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [steps, effects]);
+  const cardOrder = useMemo(() => revealOrder(plans), [plans]);
   const project = useCallback((q: number, r: number) => {
     const t = transformRef.current;
     const rect = (gridContainerRef.current?.querySelector('canvas') ?? gridContainerRef.current)?.getBoundingClientRect();
@@ -845,6 +867,21 @@ export default function ResolveAnimationPreview() {
     setFloats(f => [...f, { id, x: at.x, y: at.y, text, color }]);
     setTimeout(() => setFloats(f => f.filter(x => x.id !== id)), 1300);
   }, []);
+  flyStarsRef.current = (pid, amount, from) => {
+    const base = baseOf(pid);
+    const sign = Math.sign(amount);
+    if (!base || !sign) return;
+    const flights = Array.from({ length: Math.abs(amount) }, (_, i): VpStarFlight => {
+      const key = `star${++starSeq.current}`;
+      starLandings.current.set(key, () => addFloat(base, sign > 0 ? '+1 VP' : '−1 VP', sign > 0 ? '#ffd24a' : '#ff8f8f'));
+      return { key, from, to: base, loss: sign < 0, delay: i * 160, duration: 900 };
+    });
+    setStars(s => [...s, ...flights]);
+  };
+  flyTileStarsRef.current = (pid, amount, q, r) => {
+    const at = project(q, r);
+    if (at) flyStarsRef.current(pid, amount, at);
+  };
   /** Coins (or VP stars) flying from → to; `done` once the last has landed. */
   const flyCoins = useCallback((amount: number, from: { x: number; y: number }, to: { x: number; y: number }, icon: 'resource' | 'vp', done?: () => void) => {
     const list = splitCoins(amount).map((value, i): Coin => ({
@@ -897,20 +934,17 @@ export default function ResolveAnimationPreview() {
       const float = () => addFloat(amount > 0 ? base : at, `${amount > 0 ? '+' : '−'}${Math.abs(amount)}`, amount > 0 ? '#8ff0a4' : '#ff8f8f');
       flyCoins(Math.abs(amount), from, to, 'resource', float);
     },
-    vp: (pid, amount, at) => {
-      const base = baseOf(pid);
-      if (base) flyCoins(amount, at, base, 'vp', () => addFloat(base, `+${amount} VP`, '#ffd24a'));
-    },
+    vp: (pid, amount, at) => flyStarsRef.current(pid, amount, at),
     giveCard: (pid, card, count, at, vpEach) => {
       const base = baseOf(pid);
       if (!base) return;
+      if (vpEach) flyStarsRef.current(pid, vpEach * count, at);
       const start: Pose = { x: at.x, y: at.y, rot: 0, scale: 0.1 };
       const lift: Pose = { x: at.x, y: at.y - 70, rot: 0, scale: 0.36 };
       const to: Pose = { x: base.x, y: base.y, rot: 0, scale: 0.06, opacity: 0 };
       const launched: Flight<'home'>[] = [];
       for (let i = 0; i < count; i++) {
         const key = `gift${++flightSeq.current}`;
-        if (vpEach) landings.current.set(-flightSeq.current, () => addFloat(base, `+${vpEach} VP`, '#ffd24a'));
         launched.push({
           key, kind: 'home', card: { ...card, id: key }, delay: i * 220, duration: 1300,
           frames: [
@@ -1165,7 +1199,7 @@ export default function ResolveAnimationPreview() {
           raisedTileKey={activeTile}
           tileCardKeys={[...new Set(tileCards.map(c => tileOfCard(c.key)))]}
           renderTileCards={(key, zoom) => (
-            <TileCardStack entries={tileCards.filter(c => tileOfCard(c.key) === key)} scale={boardCardScale(zoom)} focus={activeTile === key} still={resolving} onOpen={() => {}} />
+            <TileCardStack entries={sortByReveal(tileCards.filter(c => tileOfCard(c.key) === key), cardOrder)} scale={boardCardScale(zoom)} focus={activeTile === key} still={resolving} onOpen={() => {}} />
           )}
         />
       </div>
@@ -1206,6 +1240,11 @@ export default function ResolveAnimationPreview() {
           {coins.map(c => <CoinFlight key={c.id} coin={c} onLand={onCoinLand} />)}
         </div>
       )}
+      {stars.map(f => <VpStar key={f.key} f={f} zIndex={9500} onDone={({ key }) => {
+        setStars(s => s.filter(x => x.key !== key));
+        starLandings.current.get(key)?.();
+        starLandings.current.delete(key);
+      }} />)}
       {floats.map(f => (
         <div key={f.id} style={{
           position: 'fixed', left: f.x, top: f.y - 28, transform: 'translateX(-50%)', zIndex: 9600, pointerEvents: 'none',

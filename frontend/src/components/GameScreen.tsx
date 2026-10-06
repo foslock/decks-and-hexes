@@ -14,7 +14,7 @@ import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import PhaseBanner from './PhaseBanner';
 import TileResolver, { resolveCamera, type ResolverApi } from './TileResolver';
-import { buildResolvePlans, tileAfterStep, type PlanCard, type TilePlan } from '../utils/resolvePlan';
+import { buildResolvePlans, revealOrder, sortByReveal, tileAfterStep, type PlanCard, type TilePlan } from '../utils/resolvePlan';
 import type { CameraView } from '../board3d/engine';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
@@ -38,7 +38,8 @@ import { useSound } from '../audio/useSound';
 import { soundEngine } from '../audio/SoundEngine';
 import { BUILD_SURFACE } from '../board3d/materials';
 import { useCardZoom } from './CardZoomContext';
-import { computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
+import { boardVpChanges, computeVpBreakdown, computeTileBasedVp } from '../utils/vpBreakdown';
+import { VpStar, bumpVpIcon, type VpStarFlight } from './VpStar';
 import { preloadCardImages } from '../utils/cardImagePreload';
 import { preloadCatalogArt, useCardCatalog } from '../cardCatalog';
 
@@ -1086,6 +1087,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const prevPlayersRef = useRef(gameState.players);
   // Card-only VP per player captured at resolve start; tile VP recomputed per step
   const preResolveCardVpRef = useRef<Record<string, number>>({});
+  // The board as the resolve has shown it so far (steps applied), kept in step
+  // with applyResolveStep, and board VP still flying in as stars (not shown yet).
+  const vpTilesRef = useRef<Record<string, HexTile> | null>(null);
+  const boardVpInFlightRef = useRef<Record<string, number>>({});
+  /** Board VP won or lost on a tile, as stars (set once the board can be projected). */
+  const flyBoardVpRef = useRef<(pid: string, delta: number, tileKey: string) => void>(() => {});
   // Visual order of the active player's hand (indices into activePlayer.hand), kept in sync via CardHand's onOrderChange
   const handVisualOrderRef = useRef<number[]>([]);
   // Review phase state (between resolve animations and buy phase)
@@ -1610,6 +1617,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         cardVpMap[pid] = Math.max(0, (oldPlayers[pid]?.vp ?? 0) - tileCount - bonusTiles);
       }
       preResolveCardVpRef.current = cardVpMap;
+      vpTilesRef.current = oldTiles;
+      boardVpInFlightRef.current = {};
       setResolveDisplayState(preResolveState);
 
       // Full reveal setup (banner, chevrons, VP paths, resolve overlay)
@@ -3892,6 +3901,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const applyResolveStep = useCallback((stepIdx: number) => {
     const step = resolutionSteps[stepIdx];
     if (!step) return;
+    // VP the board change wins or loses flies in as stars (from the VP hex
+    // or the tile that changed hands): the score counts as each lands.
+    const before = vpTilesRef.current;
+    const changed = before?.[step.tile_key];
+    if (before && changed) {
+      const after = { ...before, [step.tile_key]: tileAfterStep(changed, step) };
+      vpTilesRef.current = after;
+      const pids = [step.winner_id, step.previous_owner, changed.owner].filter((p): p is string => !!p);
+      for (const c of boardVpChanges(before, after, pids, step.tile_key)) flyBoardVpRef.current(c.playerId, c.delta, c.tileKey);
+    }
     setResolveDisplayState(prev => {
       if (!prev?.grid) return prev;
       const newTiles = { ...prev.grid.tiles };
@@ -3921,17 +3940,19 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       }
 
       // Recompute tile-based VP for any player who gained or lost a tile this step
-      if (step.outcome === 'claimed' || step.outcome === 'auto_claim' || step.outcome === 'consecrate'
+      const ownerChanged = !!tile && newTiles[step.tile_key].owner !== tile.owner;
+      if (ownerChanged || step.outcome === 'claimed' || step.outcome === 'auto_claim' || step.outcome === 'consecrate'
         || step.outcome === 'abandon' || step.outcome === 'scorch') {
         const affectedPids = new Set<string>();
         if (step.winner_id) affectedPids.add(step.winner_id);
         if (step.previous_owner) affectedPids.add(step.previous_owner);
+        if (tile?.owner) affectedPids.add(tile.owner);
         for (const pid of affectedPids) {
           const cardVp = preResolveCardVpRef.current[pid] ?? 0;
           const { tileCount, bonusTiles } = computeTileBasedVp(newTiles, pid);
           const player = newPlayers[pid];
           if (player) {
-            newPlayers[pid] = { ...player, vp: tileCount + bonusTiles + cardVp };
+            newPlayers[pid] = { ...player, vp: tileCount + bonusTiles + cardVp - (boardVpInFlightRef.current[pid] ?? 0) };
           }
         }
       }
@@ -4867,30 +4888,51 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     });
     setRivalCoins(cs => [...cs, ...coins]);
   }, [resolveSpeed, publishRival]);
-  // VP from card effects (Battle Glory, Land Grant, Spoils…) counts on the
-  // score shown during the resolve as it lands.
-  const vpCoinOwner = useRef(new Map<number, string>());
-  const addShownVp = useCallback((pid: string, n: number) => {
-    preResolveCardVpRef.current[pid] = (preResolveCardVpRef.current[pid] ?? 0) + n;
+  // VP changes during the resolve fly to each player's score as stars, one
+  // per VP (red for a loss); the score counts as each lands.
+  const [vpStars, setVpStars] = useState<VpStarFlight[]>([]);
+  const vpStarLandings = useRef(new Map<string, () => void>());
+  const vpStarSeq = useRef(0);
+  /** The VP shown during the resolve moves by n (nothing else changes). */
+  const shiftShownVp = useCallback((pid: string, n: number) => {
     setResolveDisplayState(prev => {
       const p = prev?.players[pid];
       return prev && p ? { ...prev, players: { ...prev.players, [pid]: { ...p, vp: p.vp + n } } } : prev;
     });
   }, []);
-  /** Stars fly from `from` to a player's VP; each counts as it lands. */
-  const flyVp = useCallback((pid: string, amount: number, from: { x: number; y: number }) => {
-    if (amount <= 0) return;
-    const icon = document.querySelector(`[data-hud-vp="${CSS.escape(pid)}"] svg`)?.getBoundingClientRect();
-    if (!icon || icon.width === 0) { addShownVp(pid, amount); return; }
-    const to = { x: icon.left + icon.width / 2, y: icon.top + icon.height / 2 };
+  /** VP from card effects (Battle Glory, Land Grant, Spoils…) counts on the score shown during the resolve. */
+  const addShownVp = useCallback((pid: string, n: number) => {
+    preResolveCardVpRef.current[pid] = (preResolveCardVpRef.current[pid] ?? 0) + n;
+    shiftShownVp(pid, n);
+  }, [shiftShownVp]);
+  /** |amount| stars from `from` to a player's score; `land(±1)` as each arrives. */
+  const flyVpStars = useCallback((pid: string, amount: number, from: { x: number; y: number } | null, land: (n: number) => void) => {
+    const sign = Math.sign(amount);
+    const icon = document.querySelector(`[data-hud-vp="${CSS.escape(pid)}"] svg`);
+    const r = icon?.getBoundingClientRect();
+    if (!sign) return;
+    if (!from || !r || r.width === 0 || animationOff) { land(amount); return; }
+    const to = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     const speed = resolveSpeed || 1;
-    const coins = splitCoins(amount).map((value, i): Coin => {
-      const id = ++rivalCoinSeq.current;
-      vpCoinOwner.current.set(id, pid);
-      return { id, from, to, value, batch: 0, icon: 'vp', delay: Math.round(i * 140 * speed), duration: Math.max(380, Math.round(820 * speed)) };
+    const stars = Array.from({ length: Math.abs(amount) }, (_, i): VpStarFlight => {
+      const key = `vp${++vpStarSeq.current}`;
+      vpStarLandings.current.set(key, () => {
+        land(sign);
+        bumpVpIcon(document.querySelector(`[data-hud-vp="${CSS.escape(pid)}"] svg`), sign < 0);
+      });
+      return { key, from, to, loss: sign < 0, delay: Math.round(i * 160 * speed), duration: Math.max(420, Math.round(900 * speed)) };
     });
-    setRivalCoins(cs => [...cs, ...coins]);
-  }, [resolveSpeed, addShownVp]);
+    setVpStars(s => [...s, ...stars]);
+  }, [resolveSpeed, animationOff]);
+  const onVpStarDone = useCallback(({ key }: VpStarFlight) => {
+    setVpStars(s => s.filter(x => x.key !== key));
+    vpStarLandings.current.get(key)?.();
+    vpStarLandings.current.delete(key);
+  }, []);
+  /** Stars for VP a card gives (from where it happened). */
+  const flyVp = useCallback((pid: string, amount: number, from: { x: number; y: number }) => {
+    flyVpStars(pid, amount, from, n => addShownVp(pid, n));
+  }, [flyVpStars, addShownVp]);
   /** Coins with no bank to count into: a loss flying out to where it went. */
   const flyLooseCoins = useCallback((amount: number, from: { x: number; y: number }, to: { x: number; y: number }) => {
     if (amount <= 0) return;
@@ -4901,18 +4943,12 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   }, [resolveSpeed]);
   const onRivalCoinLand = useCallback((c: Coin) => {
     setRivalCoins(cs => cs.filter(x => x.id !== c.id));
-    const vpOwner = vpCoinOwner.current.get(c.id);
-    if (vpOwner) {
-      vpCoinOwner.current.delete(c.id);
-      addShownVp(vpOwner, c.value);
-      return;
-    }
     const pid = rivalCoinOwner.current.get(c.id);
     rivalCoinOwner.current.delete(c.id);
     if (!pid) return;
     rivalPendingRef.current[pid] = Math.max(0, (rivalPendingRef.current[pid] ?? 0) - c.value);
     publishRival(pid);
-  }, [publishRival, addShownVp]);
+  }, [publishRival]);
   useEffect(() => {
     const rivals = gameState.player_order.filter(pid => pid !== activePlayerId);
     if (phase === 'play' && !animationOff) {
@@ -5209,6 +5245,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       : []),
     [resolutionSteps, resolutionEffects, activePlayerId],
   );
+  const resolveCardOrder = useMemo(() => revealOrder(resolvePlans), [resolvePlans]);
   /** The tile the camera has closed in on (ringed), and the one resolving. */
   const [resolveCloseUp, setResolveCloseUp] = useState<string | null>(null);
   const [resolveActiveTile, setResolveActiveTile] = useState<string | null>(null);
@@ -5222,6 +5259,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     const s = t.project(p.x, p.y, 0.15);
     return { x: s.x + rect.left, y: s.y + rect.top };
   }, []);
+  // Board VP (a VP hex connecting or cut off, the tile count crossing a
+  // multiple of 3) flies from its tile; the score holds it back until it lands.
+  flyBoardVpRef.current = (pid, delta, tileKey) => {
+    const t = vpTilesRef.current?.[tileKey];
+    boardVpInFlightRef.current[pid] = (boardVpInFlightRef.current[pid] ?? 0) + delta;
+    flyVpStars(pid, delta, t ? projectTile(t.q, t.r) : null, n => {
+      boardVpInFlightRef.current[pid] = (boardVpInFlightRef.current[pid] ?? 0) - n;
+      shiftShownVp(pid, n);
+    });
+  };
   const resolverApi = useMemo<ResolverApi>(() => ({
     focus: (key, shot) => {
       const ms = resolveCamera(boardControlsRef.current, savedViewRef, key, resolveSpeed, shot);
@@ -5273,9 +5320,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       const mine = pid === activePlayerId;
       const start: Pose = { x: at.x, y: at.y, rot: 0, scale: 0.1 };
       const lift: Pose = { x: at.x, y: at.y - 70, rot: 0, scale: 0.36 };
+      // A card worth VP (Land Grant, Spoils): its VP flies to the score as stars.
+      if (vpEach) flyVp(pid, vpEach * count, at);
       for (let i = 0; i < count; i++) {
         const landed = () => {
-          if (vpEach) addShownVp(pid, vpEach);
           if (mine) setPendingCardGains(n => Math.max(0, n - 1));
         };
         let to: Pose | null = null;
@@ -5309,7 +5357,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       flyRevealCards(rc => set.has(rc.key), 0);
     },
   }), [resolveSpeed, spreadRevealCards, turnOverRevealCards, flyRevealCards, applyResolveStep, activePlayerId,
-    flyLooseCoins, launchRivalCoins, publishRival, flyVp, addShownVp, discardPilePose, launchBoardFlight]);
+    flyLooseCoins, launchRivalCoins, publishRival, flyVp, discardPilePose, launchBoardFlight]);
 
   // ── Replaying a tile's resolve (review: click a tile) ──
   /** The last resolve — its steps, plans, the board before it and the cards
@@ -5436,6 +5484,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         if (rc.tileKey) addTile(rc.tileKey, rc);
         else if (rc.playerId === activePlayerId) engines.push(rc);
       }
+      // Left to right in the order they'll turn over.
+      for (const [key, list] of tiles) tiles.set(key, sortByReveal(list, resolveCardOrder));
       return { tiles, engines };
     }
     // Planned cards show during play only — at the reveal they become revealCards
@@ -5455,7 +5505,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       }
     });
     return { tiles, engines };
-  }, [revealCards, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds, reviewing, replay, reviewHoveredTile, reviewEntries]);
+  }, [revealCards, resolveCardOrder, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds, reviewing, replay, reviewHoveredTile, reviewEntries]);
   const tileCardKeys = useMemo(() => [...boardCards.tiles.keys()], [boardCards]);
   /** Rivals' engine cards at the reveal: a face-down pile beside each one's ID card. */
   const rivalPiles = useMemo(() => {
@@ -6779,6 +6829,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           {rivalCoins.map(c => <CoinFlight key={c.id} coin={c} onLand={onRivalCoinLand} />)}
         </div>
       )}
+      {/* VP won or lost flying to each player's score */}
+      {vpStars.map(f => <VpStar key={f.key} f={f} onDone={onVpStarDone} zIndex={9500} />)}
 
       {resolveReady && offBoardHome && (
         <TileResolver

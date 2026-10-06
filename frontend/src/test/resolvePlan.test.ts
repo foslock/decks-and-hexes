@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HexTile, ResolutionStep } from '../types/game';
-import { buildResolvePlans, walkClashes, type PlanCard } from '../utils/resolvePlan';
+import { buildResolvePlans, revealOrder, sortByReveal, walkClashes, type PlanCard } from '../utils/resolvePlan';
 import { makeTile } from './fixtures';
 
 const tiles = (over: Record<string, Partial<HexTile>> = {}): Record<string, HexTile> => {
@@ -214,3 +214,20 @@ describe('buildResolvePlans', () => {
   });
 });
 
+
+describe('revealOrder', () => {
+  it('lines a tile\'s cards up as they turn over: the defense, then attackers weakest first', () => {
+    const t = tiles({ '0,0': { owner: 'own', base_defense: 0, defense_power: 0 } });
+    const steps = [
+      step({ outcome: 'defense_applied', claimants: [claimant('own', 0)], defender_id: 'own', winner_id: 'own', previous_owner: 'own', defense_permanent: 0, defense_temporary: 2 }),
+      step({ claimants: [claimant('strong', 5), claimant('weak', 3)], defender_power: 2, winner_id: 'strong', previous_owner: 'own', outcome: 'claimed' }),
+    ];
+    // In the order they were played: the strong attacker's two cards, the weak one's, then the wall.
+    const played = [
+      card('s1@0,0', 'strong', 'claim', 3), card('s2@0,0', 'strong', 'claim', 2),
+      card('w@0,0', 'weak', 'claim', 3), card('wall@0,0', 'own', 'defense', 0, 2),
+    ];
+    const order = revealOrder(buildResolvePlans(steps, new Map([['0,0', played]]), t, 'strong'));
+    expect(sortByReveal(played, order).map(c => c.key)).toEqual(['wall@0,0', 'w@0,0', 's1@0,0', 's2@0,0']);
+  });
+});
