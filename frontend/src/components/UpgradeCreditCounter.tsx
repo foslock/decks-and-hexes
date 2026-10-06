@@ -75,6 +75,7 @@ export default function UpgradeCreditCounter({ value, playerId, visible }: Props
     }}>
       <div
         role="button"
+        className="cc-hud-counter"
         tabIndex={out ? 0 : -1}
         aria-label={`${value} upgrade credit${value !== 1 ? 's' : ''}`}
         aria-expanded={labelOpen}

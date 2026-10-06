@@ -93,6 +93,7 @@ class Card:
     passive_vp: int = 0  # VP awarded on purchase (card stays in deck)
     vp_formula: str = ""  # Dynamic VP formula: "trash_div_5", "fortified_tiles_4", "deck_div_12"
     unique: bool = False  # If true, player may only own one copy in their deck (draw + hand + discard)
+    buy_debt: int = 0  # Debt cards added to the buyer's discard pile when bought (Warden, Land Grant)
     description: str = ""
     upgrade_description: str = ""
     # Structured effects list (parsed from YAML)
@@ -223,6 +224,7 @@ class Card:
             "passive_vp": self.passive_vp,
             "vp_formula": self.vp_formula,
             "unique": self.unique,
+            "buy_debt": self.buy_debt,
             "description": self.description,
             "upgrade_description": self.upgrade_description,
             "name_upgraded": self.name_upgraded,
@@ -338,7 +340,7 @@ _debt_counter = 0
 
 
 def make_debt_card() -> Card:
-    """Create a Debt card (given to VP leader each round starting round 5)."""
+    """Create a Debt card (given to the VP leader each round from round 5, and by Debt-cost cards)."""
     from app.game_engine.game_state import DEBT_START_ROUND
     global _debt_counter
     _debt_counter += 1
@@ -351,7 +353,10 @@ def make_debt_card() -> Card:
         resource_gain=-3,
         trash_on_use=True,
         trash_immune=False,
-        description=f"Pay 3 resources to trash this card. One is given to the VP leader at the beginning of each round, starting round {DEBT_START_ROUND}.",
+        description=(
+            "Pay 3 resources to trash this card. One is given to the VP leader at the beginning "
+            f"of each round, starting round {DEBT_START_ROUND}; some cards give you one too."
+        ),
     )
 
 

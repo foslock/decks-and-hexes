@@ -157,6 +157,8 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       }
     }
   }
+  // Warden, Land Grant: buying it adds a Debt.
+  if (card.buy_debt) parts.push(p(`{buy}+${card.buy_debt}{debt}`));
 
   // Defense cards
   if (card.card_type === 'defense') {
@@ -754,6 +756,11 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       if (eff.type === 'play_resource_cost') {
         const cost = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
         parts.push(p(`-${cost}{resource}`));
+      }
+      if (eff.type === 'gain_debt') {
+        // Debt-cost cards (Mercenary, Garrison, Siege Tower, Prospector): take N Debt.
+        const count = isUpgraded && eff.upgraded_value != null ? eff.upgraded_value : eff.value;
+        if (count > 0) parts.push(p(`+${count}{debt}`));
       }
       if (eff.type === 'conditional_draw_next_round') {
         // Commander: "If you played a Claim this round, draw N cards next round."

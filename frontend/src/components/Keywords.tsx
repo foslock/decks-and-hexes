@@ -16,7 +16,7 @@ const KEYWORDS: Record<string, string> = {
   'Power': 'Determines the strength of a claim; highest power wins the contested tile.',
   'Draw': 'Take additional cards from your draw pile into your hand.',
   'Discard': 'Put a card from your hand into your discard pile.',
-  'Debt': 'A dead-weight card given to the VP leader each round (starting round 5). Play it and pay 3 resources to trash it.',
+  'Debt': 'A dead-weight card given to the VP leader each round (starting round 5), and the price of some strong cards. Play it and pay 3 resources to trash it.',
   'Adjacent': 'A hex tile directly neighboring one you already own (6 possible directions).',
   'Stackable': 'This card can be played on a tile where you already have a claim this round. Powers stack additively.',
   'Unique': 'Your deck may contain one copy of this card. Cannot be purchased if already in your draw pile, hand, or discard pile.',

@@ -216,6 +216,12 @@
 /* A round-advancing gold button that isn't ready yet (plays or resources
    left): no sheen until it is. */
 .cc-btn-progress.is-waiting::after { animation: none; opacity: 0; }
+/* Phones: the counters (actions, resources, upgrade credits) and the round's
+   gold button share one row — both tighten up so it all fits on a line. */
+@media (max-width: 440px) {
+  .cc-hud-counter { padding: 0 9px !important; }
+  .cc-btn-progress { padding: 9px 13px !important; font-size: 15px !important; }
+}
 
 .cc-review-bar {
   position: absolute;

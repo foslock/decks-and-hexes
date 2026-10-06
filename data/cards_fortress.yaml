@@ -21,8 +21,9 @@ cards:
     unplayable: true
     unique: true
     vp_formula: uncaptured_tiles_8
-    effect: "+1 VP for every 8 non-base tiles you own that have never changed hands since you claimed them."
-    effect_upgraded: "+1 VP for every 6 non-base tiles you own that have never changed hands since you claimed them."
+    buy_debt: 1
+    effect: "+1 VP for every 8 non-base tiles you own that have never changed hands since you claimed them. Gain a Debt when you buy this."
+    effect_upgraded: "+1 VP for every 6 non-base tiles you own that have never changed hands since you claimed them. Gain a Debt when you buy this."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards holding ground permanently. A tile counts while you've held it continuously since you first claimed it, including tiles you took from an opponent. Tiles you lost (or abandoned) and later retook don't count. Takes up a hand slot when drawn."
@@ -115,8 +116,8 @@ cards:
     action_return: 0
     reversible: true
     power: 4
-    effect: "Claim: Power 4. If defending an owned tile, power is 6 instead."
-    effect_upgraded: "Claim: Power 5. If defending an owned tile, power is 8 instead. If this claim wins, gain 2 resources."
+    effect: "Claim: Power 4. If defending an owned tile, power is 6 instead. Gain a Debt."
+    effect_upgraded: "Claim: Power 5. If defending an owned tile, power is 8 instead. If this claim wins, gain 2 resources. Gain a Debt."
     secondary_effect: null
     secondary_timing: null
 
@@ -131,6 +132,9 @@ cards:
         upgraded_value: 2
         timing: on_resolution
         condition: if_successful
+      - type: gain_debt
+        value: 1
+        timing: on_resolution
 
   - id: fortress_slow_advance
     name: Mountaineer

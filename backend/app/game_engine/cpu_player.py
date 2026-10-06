@@ -1761,7 +1761,7 @@ class CPUPlayer:
           - Diplomat / Diplomacy from behind (would gift opponents VP)
           - Cards that grant opponents bonus actions / draws / resources
           - Cards with negative resource gain beyond Debt
-          - PLAY_RESOURCE_COST cards (Mercenary) — would waste resources
+          - PLAY_RESOURCE_COST / GAIN_DEBT cards — would waste the price
           - Search/tutor cards — too complex to guess selections from here
         """
         if player.actions_used >= player.actions_available:
@@ -1827,9 +1827,10 @@ class CPUPlayer:
             if grants_opponent_help:
                 continue
 
-            # Cards that cost resources to play (Mercenary) — burning them on a
-            # losing target would waste both an action AND resources. Skip.
-            if any(e.type == EffectType.PLAY_RESOURCE_COST for e in card.effects):
+            # Cards that cost resources or a Debt to play (Mercenary, Garrison,
+            # …) — burning them on a losing target would waste both an action
+            # AND the price. Skip.
+            if any(e.type in (EffectType.PLAY_RESOURCE_COST, EffectType.GAIN_DEBT) for e in card.effects):
                 continue
 
             # Cards needing a search / tutor choice — defer to the normal

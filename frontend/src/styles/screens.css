@@ -655,6 +655,8 @@
   border-bottom: 1px solid var(--cc-scr-hairline);
 }
 .cc-scr-section-meta { font-size: 12px; color: var(--cc-text-faint); }
+.cc-scr-section-meta + .cc-scr-head-btn { margin-left: 0; }
+.cc-scr-head-btn { height: 24px; padding: 0 9px; font-size: 12px; margin: -6px 0 -4px auto; align-self: center; }
 
 /* Player seats */
 .cc-scr-seat {
@@ -1444,6 +1446,42 @@
 .cc-scr-htp-dot.is-active { width: 22px; background: linear-gradient(90deg, #c79a3c, #ffe39a); }
 .cc-scr-htp-nav { height: 38px; padding: 0 20px; font-size: 14px; }
 .cc-scr-htp-nav.cc-btn-primary { font-size: 13px; padding: 0 22px; }
+
+/* Map preview (lobby) */
+.cc-scr-map { width: min(94vw, 780px); }
+.cc-scr-map-board {
+  position: relative;
+  height: min(58vh, 540px);
+  height: min(58dvh, 540px);
+  /* On short screens the board gives up height first, so the key stays. */
+  flex: 1 1 auto;
+  min-height: 110px;
+  background: radial-gradient(ellipse at center, rgba(40, 70, 110, 0.35), rgba(6, 10, 24, 0.6));
+  border-bottom: 1px solid var(--cc-scr-hairline);
+  overflow: hidden;
+}
+.cc-scr-map-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cc-text-faint);
+  font-size: 14px;
+}
+.cc-scr-map-key { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px 20px; flex-shrink: 0; }
+.cc-scr-map-seats, .cc-scr-map-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.cc-scr-map-seat { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; }
+.cc-scr-map-seat i {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 6px rgba(255, 255, 255, 0.15);
+}
+.cc-scr-map-facts { font-size: 12px; color: var(--cc-text-faint); letter-spacing: 0.03em; font-variant-numeric: tabular-nums; }
+.cc-scr-map-fact { display: inline-flex; align-items: center; gap: 3px; }
+.cc-scr-map-hint { margin-left: auto; font-style: italic; }
+@media (max-width: 480px) { .cc-scr-map-hint { margin-left: 0; } }
 
 /* Card Browser */
 .cc-scr-cb { width: min(94vw, 920px); }

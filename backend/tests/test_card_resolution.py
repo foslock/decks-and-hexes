@@ -258,7 +258,7 @@ class TestNeutralGather:
 
 class TestNeutralMercenary:
     def test_mercenary_power_3(self, card_registry):
-        """Mercenary: Power 3 claim card."""
+        """Mercenary: Power 3 claim card; its price is a Debt, not resources."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         merc = _copy_card(card_registry["neutral_mercenary"], "test_merc")
@@ -268,12 +268,10 @@ class TestNeutralMercenary:
         q, r = _find_adjacent_neutral(game, "p0")
         assert q is not None
         player.hand = [merc] + player.hand[1:]
-        # Mercenary requires 2 resources to play
-        player.resources = 5
+        player.resources = 0
         success, _ = play_card(game, "p0", 0, target_q=q, target_r=r)
         assert success
-        # Should have deducted 2 resources
-        assert player.resources == 3
+        assert player.resources == 0
 
         submit_play(game, "p0")
         submit_play(game, "p1")
@@ -281,23 +279,10 @@ class TestNeutralMercenary:
         tile = game.grid.get_tile(q, r)
         assert tile.owner == "p0"
 
-    def test_mercenary_blocked_without_resources(self, card_registry):
-        """Mercenary: cannot play without sufficient resources."""
-        game = _make_2p_game(card_registry)
-        player = game.players["p0"]
-        merc = _copy_card(card_registry["neutral_mercenary"], "test_merc")
-        q, r = _find_adjacent_neutral(game, "p0")
-        assert q is not None
-        player.hand = [merc] + player.hand[1:]
-        player.resources = 1
-        success, msg = play_card(game, "p0", 0, target_q=q, target_r=r)
-        assert not success
-        assert "resources" in msg.lower()
-
 
 class TestNeutralProspector:
-    def test_prospector_gain_4(self, card_registry):
-        """Prospector: gain 4 resources immediately."""
+    def test_prospector_gain_6(self, card_registry):
+        """Prospector: gain 6 resources immediately (and a Debt)."""
         game = _make_2p_game(card_registry)
         player = game.players["p0"]
         prosp = _copy_card(card_registry["neutral_prospector"], "test_prosp")
@@ -306,7 +291,7 @@ class TestNeutralProspector:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial + 4
+        assert player.resources == initial + 6
 
 
 class TestNeutralSabotage:

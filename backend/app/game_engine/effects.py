@@ -136,7 +136,8 @@ class EffectType(str, Enum):
     ABANDON_TILE = "abandon_tile"                          # Exodus: give up a tile you own
     ABANDON_AND_BLOCK = "abandon_and_block"                # Scorched Retreat: give up tile, make it blocked
     MANDATORY_SELF_TRASH = "mandatory_self_trash"          # Demon Pact: trash exactly N cards (required)
-    PLAY_RESOURCE_COST = "play_resource_cost"              # Mercenary: must pay resources to play
+    PLAY_RESOURCE_COST = "play_resource_cost"              # must pay resources to play
+    GAIN_DEBT = "gain_debt"                                # Mercenary, Garrison, Siege Tower, Prospector: take N Debt
 
     # ── Tutor / search effects (browse a pile and move cards to another zone) ──
     SEARCH_ZONE = "search_zone"                            # Search discard/draw/trash for N cards; move each to hand/top_of_draw/discard/trash

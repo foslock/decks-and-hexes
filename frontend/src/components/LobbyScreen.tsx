@@ -7,6 +7,7 @@ import Tooltip from './Tooltip';
 import * as api from '../api/client';
 import { useSound } from '../audio/useSound';
 import CardBrowser, { clearBrowserCollapseMemory } from './CardBrowser';
+import MapPreview from './MapPreview';
 import { savePlayerName } from '../utils/playerName';
 import Icon from '../icons/Icon';
 
@@ -146,6 +147,7 @@ export default function LobbyScreen({
     p.id === selectedPackId || (p.id.startsWith('daily_') && selectedPackId.startsWith('daily_')),
   )?.description;
   const [showPackBrowser, setShowPackBrowser] = useState(false);
+  const [showMapPreview, setShowMapPreview] = useState(false);
   const [showSeedHistory, setShowSeedHistory] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const seedHistoryRef = useRef<HTMLDivElement>(null);
@@ -715,7 +717,15 @@ export default function LobbyScreen({
         <section className="cc-panel cc-scr-section" style={{ animationDelay: '120ms' }}>
           <div className="cc-scr-section-head">
             <h3 className="cc-scr-section-title">Game Settings</h3>
-            {!isHost && <span className="cc-scr-section-meta">Set by host</span>}
+            {!isHost && <span className="cc-scr-section-meta" style={{ marginLeft: 'auto' }}>Set by host</span>}
+            <button
+              onClick={() => setShowMapPreview(true)}
+              className="cc-scr-chip-btn cc-scr-head-btn"
+              title="See the map and where everyone starts"
+            >
+              <Icon name="vpTile" size={13} decorative />
+              Preview Map
+            </button>
           </div>
           {/* Settings rows — consistent style */}
           <div className="cc-scr-rows">
@@ -888,7 +898,7 @@ export default function LobbyScreen({
             {/* Map Seed */}
             <div ref={seedHistoryRef} className="cc-scr-row">
               <div>
-                <Tooltip content="Determines the layout of the grid.">
+                <Tooltip content="Picks which corners the bases start on. Each map size has one fixed map, the same from every seat.">
                   <span className="cc-scr-row-label" style={{ display: 'block' }}>Map Seed</span>
                 </Tooltip>
               </div>
@@ -1144,6 +1154,15 @@ export default function LobbyScreen({
           </div>
         )}
       </div>
+      {showMapPreview && (
+        <MapPreview
+          lobbyCode={lobbyCode}
+          playerId={playerId}
+          token={token}
+          lobby={lobby}
+          onClose={() => setShowMapPreview(false)}
+        />
+      )}
       {showPackBrowser && (() => {
         const packId = lobby.config.card_pack || 'everything';
         const pack = cardPacks.find(p => p.id === packId)

@@ -62,7 +62,7 @@ CARD_PACKS: dict[str, CardPack] = {
         # Synergies:
         #   1. Tax Collector + held VP hexes → 3 res per connected hex funds Siege Tower / Mercenary
         #   2. Dividends + Prospector/Tithe → bank resources, then Dividends pays 1 per 2 held
-        #   3. Mercenary + Tax Collector / Tithe → the economy covers Mercenary's 2 res play cost every turn
+        #   3. Mercenary + Tax Collector / Tithe → the economy pays off Mercenary's Debts
         #   4. Vanguard War Tithe / Plunder + Mercenary → claims pay for themselves
         #   5. Salvage + Mercenary / Tax Collector → recur your best claim or money card
         #   6. Vanguard Arms Dealer + Mercenary → scrap a spare Mercenary for 3 res and an action
@@ -71,14 +71,14 @@ CARD_PACKS: dict[str, CardPack] = {
         shared_card_ids=[
             "neutral_reduce",          # Cull: trash up to 1 card from hand (cost 2)
             "neutral_recruit",         # Levy: Claim P1 + 1 action (cost 2)
-            "neutral_prospector",      # Prospector: +4 resources (cost 3)
+            "neutral_prospector",      # Prospector: +6 resources, gain a Debt (cost 3)
             "neutral_war_bonds",       # Tithe: +2 resources, draw 1, +1 action (cost 3)
             "neutral_salvage",         # Salvage: discard → hand, 1 card (cost 3)
-            "neutral_mercenary",       # Mercenary: Claim P3, pay 2 res to play (cost 3)
+            "neutral_mercenary",       # Mercenary: Claim P3, gain a Debt (cost 5)
             "neutral_tax_collector",   # Tax Collector: +3 resources per connected VP hex (cost 3)
             "neutral_dividends",       # Dividends: +1 resource per 2 held (cost 4)
             "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
-            "neutral_siege_tower",     # Siege Tower: Claim P6, 2 actions, unique (cost 9)
+            "neutral_siege_tower",     # Siege Tower: Claim P6, gain a Debt, unique (cost 9)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -103,7 +103,7 @@ CARD_PACKS: dict[str, CardPack] = {
             "neutral_cease_fire",      # Cease Fire: draw 2 next round if you captured no enemy tile (cost 3)
             "neutral_fortified_post",  # Barricade: +2 permanent defense (cost 5)
             "neutral_diplomat",        # Diplomat: you get 2 Land Grants, opponents 1, trashed (cost 5)
-            "neutral_land_grant",      # Land Grant: worth 1 VP, dead card (cost 7)
+            "neutral_land_grant",      # Land Grant: worth 1 VP, dead card, a Debt when bought (cost 7)
             "neutral_eminent_domain",  # Eminent Domain: Claim P2 on any neutral tile, trashed (cost 5)
             "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
         ],
@@ -134,7 +134,7 @@ CARD_PACKS: dict[str, CardPack] = {
             "neutral_conqueror",       # Conqueror: Claim P5, ignores round defense, 2 actions, unique (cost 7)
             "neutral_rally_cry",       # Rally Cry: claims in hand gain Stackable, trashed (cost 5)
             "neutral_sabotage",        # Sabotage: target draws 1 fewer next round (cost 4)
-            "neutral_siege_tower",     # Siege Tower: Claim P6, 2 actions, unique (cost 9)
+            "neutral_siege_tower",     # Siege Tower: Claim P6, gain a Debt, unique (cost 9)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -193,10 +193,10 @@ CARD_PACKS: dict[str, CardPack] = {
             "neutral_watchtower",      # Watchtower: +2 defense this round, +1 action (cost 2)
             "neutral_ambush",          # Ambush: Claim P2, P4 vs owned/contested tiles (cost 4)
             "neutral_mobilize",        # Mobilize: +1 action per card played (max 3), trashed (cost 4)
-            "neutral_mercenary",       # Mercenary: Claim P3, pay 2 res to play (cost 3)
+            "neutral_mercenary",       # Mercenary: Claim P3, gain a Debt (cost 5)
             "neutral_redemption",      # Redemption: trash → hand, 1 card; trashes itself (cost 5)
             "neutral_conqueror",       # Conqueror: Claim P5, ignores round defense, 2 actions, unique (cost 7)
-            "neutral_siege_tower",     # Siege Tower: Claim P6, 2 actions, unique (cost 9)
+            "neutral_siege_tower",     # Siege Tower: Claim P6, gain a Debt, unique (cost 9)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),
@@ -283,7 +283,7 @@ CARD_PACKS: dict[str, CardPack] = {
         # Theme: Resources through combat — every claim pays dividends.
         # Synergies:
         #   1. Levy → cheap early claim + action chaining into Militia/Mercenary
-        #   2. Prospector (+4 res flat) → funds Mercenary's 2 res play cost without needing to hold hexes first
+        #   2. Prospector (+6 res now, a Debt later) → early resources without needing to hold hexes first
         #   3. Militia + wide territory → power 4 when surrounded; Mercenary for the hexes it can't reach
         #   4. Vanguard War Tithe + Mercenary → claims generate resources to buy more claims
         #   5. Fortress Robin Hood → 3 res per tile actually captured from you; an economic comeback
@@ -291,8 +291,8 @@ CARD_PACKS: dict[str, CardPack] = {
             "neutral_recruit",         # Levy: Claim P1 + 1 action (cost 2)
             "neutral_militia",         # Militia: Claim P2, P4 with 3+ adjacent owned (cost 3)
             "neutral_war_bonds",       # Tithe: +2 resources, draw 1, +1 action (cost 3)
-            "neutral_mercenary",       # Mercenary: Claim P3, pay 2 res to play (cost 3)
-            "neutral_prospector",      # Prospector: +4 resources (cost 3)
+            "neutral_mercenary",       # Mercenary: Claim P3, gain a Debt (cost 5)
+            "neutral_prospector",      # Prospector: +6 resources, gain a Debt (cost 3)
         ],
         archetype_card_ids=None,  # all archetype cards
     ),

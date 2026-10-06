@@ -15,6 +15,7 @@ from .cards import (
     CardType,
     DEF_ID_DEBT,
     Timing,
+    make_debt_card,
     make_land_grant_card,
     make_rubble_card,
 )
@@ -2190,6 +2191,32 @@ def _handle_create_cards_to_discard(effect: Effect, ctx: EffectContext) -> None:
     })
 
 
+def give_debt(game: "GameState", player: "Player", count: int, source_name: str) -> None:
+    """Put `count` Debt cards in the player's discard pile (a Debt-cost card's
+    price). The UI flies them in like any card added to the discard."""
+    if count <= 0:
+        return
+    debts = [make_debt_card() for _ in range(count)]
+    player.deck.add_to_discard(debts)
+    game._log(f"{player.name} takes {count} Debt from {source_name}", actor=player.id)
+    game.player_effects.append({
+        "source_player_id": player.id,
+        "target_player_id": player.id,
+        "card_name": source_name,
+        "effect": f"+{count} Debt",
+        "effect_type": "create_cards_to_discard",
+        "value": count,
+        "added_card_name": "Debt",
+        "added_card_count": count,
+        "added_card": debts[0].to_dict(),
+    })
+
+
+def _handle_gain_debt(effect: Effect, ctx: EffectContext) -> None:
+    """Mercenary, Garrison, Siege Tower, Prospector: the card's price is a Debt."""
+    give_debt(ctx.game, ctx.player, effect.effective_value(ctx.card.is_upgraded), ctx.card.name)
+
+
 def _handle_gain_resources_per_card_in_hand(effect: Effect, ctx: EffectContext) -> None:
     """Quartermaster: resources per matching card in hand (capped)."""
     per = effect.effective_value(ctx.card.is_upgraded)
@@ -2299,6 +2326,7 @@ register_handler(
 )
 register_handler(EffectType.DRAW_PER_TILES_OWNED, _handle_draw_per_tiles_owned)
 register_handler(EffectType.CREATE_CARDS_TO_DISCARD, _handle_create_cards_to_discard)
+register_handler(EffectType.GAIN_DEBT, _handle_gain_debt)
 register_handler(
     EffectType.GAIN_RESOURCES_PER_CARD_IN_HAND,
     _handle_gain_resources_per_card_in_hand,

@@ -235,17 +235,28 @@ since `vp_value` defaults to 1 for every tile.
 - Each player picks 1, remainder discarded
 
 ### Grid Sizes
-| Size | Tiles | VP Hexes | Blocked Terrain | Players |
-|---|---|---|---|---|
-| Small | 61 | 5 | 5–7 | 2–3 |
-| Medium | 91 | 6 | 8–10 | 3–4 |
-| Large | 127 | 9 | 10–14 | 4–6 |
-| Mega | 169 | 12 | 14–18 | 5–6 |
-| Ultra | 217 | 15 | 18–22 | 6 |
+One preset map per size (`backend/app/game_engine/map_presets.py`). A map is a
+recipe laid out around the bases — features on each base's line to the center
+(axis) and on the midline between neighboring bases (gaps) — so every seat
+sees the same map.
 
-- VP hexes distributed evenly (not center-clustered)
-- Blocked terrain placed randomly at setup
-- Starting corner clusters: 2 tiles each
+| Size | Tiles | Map | VP Hexes (premium + standard) | Mountains | Players |
+|---|---|---|---|---|---|
+| Small | 61 | Crown | 1 + 6 | 6 | 2–3 |
+| Medium | 91 | Frontiers | 1 + 6 | 6 | 3–4 |
+| Large | 127 | Rings | 1 + 12 | 12 | 4–6 |
+| Mega | 169 | Six Crowns | 6 + 7 | 12 | 5–6 |
+| Ultra | 217 | Twin Rings | 7 + 6 | 18 | 6 |
+
+- Bases are 2-tile clusters. 2, 3, 4 and 6 players start on corners (four take
+  two opposite pairs, so nobody is squeezed between rivals); corner maps are
+  symmetric under every rotation and mirror. Five players can't share six
+  corners fairly, so their bases spread evenly round the coast and the map is
+  laid out around them (`five_player_start`, `five_player_gaps`).
+- Every tile next to a base is open: no mountain, VP hex or defense.
+- The map seed only turns the board (which corners hold bases).
+- The lobby's **Preview Map** (`MapPreview.tsx`, `GET /api/lobby/{code}/map-preview`)
+  shows the island with each player's starting tiles in their color.
 - CPU players: optional, added by host only
 
 ### First Player
@@ -258,7 +269,7 @@ since `vp_value` defaults to 1 for every tile.
 ## Implementation Priority (suggested order)
 
 ### Phase 1 — Core Playable Prototype
-1. Hex grid generation (3 sizes, random blocked terrain, VP hex placement)
+1. Hex grid generation (one preset map per size)
 2. Player setup (archetype selection, passive draft, starting decks)
 3. Turn loop with all 5 phases
 4. Card playing with action slot tracking and immediate effect chaining
@@ -300,6 +311,7 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Round limit: **20** (configurable)
 - Debt start round: **5**
 - Debt trash cost: **3 resources**
+- Debt-cost cards: Mercenary, Garrison, Siege Tower (on resolve), Prospector (on play) — `gain_debt` effect; Warden, Land Grant (on buy) — `buy_debt` field
 - Re-roll cost: **1 resource**
 - Retain cost: **2 resources** (constant only — no Retain action exists)
 - Upgrade credit cost: **5 resources**

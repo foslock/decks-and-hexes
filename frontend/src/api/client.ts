@@ -1,4 +1,4 @@
-import type { BrowseGame, BrowseLobby, GameState, LobbyState, SearchSelection } from '../types/game';
+import type { BrowseGame, BrowseLobby, GameState, HexTile, LobbyState, SearchSelection } from '../types/game';
 
 const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
 export const BASE = BACKEND_HOST ? `${window.location.protocol}//${BACKEND_HOST}/api` : '/api';
@@ -234,6 +234,19 @@ export async function getLobby(
   token: string,
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}?player_id=${playerId}&token=${token}`);
+}
+
+/** The map the lobby's game will start on, with each player's starting tiles. */
+export interface MapPreview {
+  grid_size: string;
+  map_name: string;
+  tiles: Record<string, HexTile>;
+  /** Player ids in seat order (the order the game assigns bases). */
+  seats: string[];
+}
+
+export async function getMapPreview(code: string, playerId: string, token: string): Promise<MapPreview> {
+  return request(`/lobby/${code}/map-preview?player_id=${playerId}&token=${token}`);
 }
 
 export async function updateLobbyConfig(
