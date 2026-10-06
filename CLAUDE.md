@@ -49,6 +49,14 @@ PNG. After adding or replacing art, regenerate the WebPs (incremental):
 Preloading is handled by `frontend/src/utils/cardImagePreload.ts` (hand/deck/markets
 at high priority, the rest of the catalog during idle time).
 
+### Tutorial Cards
+The tutorial (`frontend/src/components/tutorial/`) embeds the cards it shows in
+`tutorialCards.ts`, generated from the card data. After changing any of them
+(Explore, Gather, Levy, Mercenary, Watchtower, Barricade, Siege Tower, Spoils,
+Rubble, Debt), regenerate: `cd backend && uv run python scripts/build_tutorial_cards.py`
+(`tests/test_tutorial_cards.py` fails until you do), then check the scenes'
+narration in `tutorialScenes.tsx` still describes them.
+
 ### Cards, Hand & Piles (frontend)
 - `CardFull` is the one full card face (fixed 220 × 308, metallic trim tiered by
   cost via `constants/cardTrim.ts`, ability text auto-fitted). Tight spots use

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Card, ResolutionStep } from '../../types/game';
+import type { Card, ResolutionEffect, ResolutionStep } from '../../types/game';
 import GameBoard, {
   type BoardControls, type BoardFx, type ClaimChevron, type GridTransform, type PlannedActionIcon, type VpPath,
 } from '../GameBoard';
@@ -11,7 +11,7 @@ import { CoinFlight, splitCoins, type Coin } from '../ResourceCounter';
 import TargetArrow from '../hand/TargetArrow';
 import CardPile from '../hand/CardPile';
 import { TileCardStack, CardDetailOverlay, boardCardScale, type BoardCardEntry } from '../BoardCards';
-import { CARD_H, CARD_W, flightKeyframes, poseTransform, runAnimation, type Pose } from '../hand/cardMotion';
+import { CARD_H, CARD_W, easeInOut, flightKeyframes, poseTransform, runAnimation, type Pose } from '../hand/cardMotion';
 import { PLAYER_COLORS } from '../../board3d/boardTypes';
 import type { CameraShot } from '../../board3d/engine';
 import { axialToPixel } from '../../utils/hexGeometry';
@@ -313,12 +313,12 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
       return { x: a.x - total / 2 + w / 2 + i * (w + 8), y: a.below ? a.y + (CARD_H * s) / 2 : a.y - (CARD_H * s) / 2, rot: 0, scale: s };
     };
 
-    const fly = (card: Card | null, from: Pose, to: Pose, opts: { duration?: number; arc?: number; flip?: boolean } = {}) => {
+    const fly = (card: Card | null, from: Pose, to: Pose, opts: { duration?: number; arc?: number; flip?: boolean; frames?: Keyframe[] } = {}) => {
       if (paceRef.current === 0) return Promise.resolve();
       const key = `f${++seq.current}`;
       const flight: Flight<'tut'> = {
         key, kind: 'tut', card,
-        frames: flightKeyframes(from, to, { arc: opts.arc ?? 60 }),
+        frames: opts.frames ?? flightKeyframes(from, to, { arc: opts.arc ?? 60 }),
         delay: 0,
         duration: (opts.duration ?? 560) * paceRef.current,
         flipFrames: opts.flip ? turnOver(false, 0.1, 0.6) : undefined,
@@ -461,11 +461,6 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
         sfx('cardPlay');
         set(w => ({ hand: w.hand.filter(c => c.id !== cardId), actions: w.actions - card.action_cost }));
         setLifted(null);
-        if (opts.pay) {
-          sfx('coinSpend');
-          set(w => ({ resources: w.resources - opts.pay! }));
-          pop(`-${opts.pay}`, { hud: 'resources' }, 'red');
-        }
         if (tile) {
           const n = worldRef.current.cards[tile]?.length ?? 0;
           const type = opts.temp || opts.perm ? 'defense' : 'claim';
@@ -559,7 +554,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
         await wait(hidden.length ? PLAY.revealed : 300);
       },
 
-      resolve: (steps) => {
+      resolve: (steps, effects = []) => {
         set({ planned: {}, chevrons: [] });
         const w0 = worldRef.current;
         const cards = new Map<string, PlanCard[]>();
@@ -568,7 +563,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
         }
         // The tutorial is teaching the rules: every tile counts up in full,
         // and the narration keeps the camera.
-        const plans = buildResolvePlans(steps, cards, w0.tiles, YOU).map(p => ({ ...p, focus: p.kind !== 'effect' }));
+        const plans = buildResolvePlans(steps, cards, w0.tiles, YOU, effects).map(p => ({ ...p, focus: p.kind !== 'effect' }));
         const finished = new Promise<void>(res => {
           resolveHooks.current = {
             api: {
@@ -576,10 +571,31 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
               setActive: (plan) => set({ focus: plan?.tileKey ?? null }),
               spread: () => {},
               flip: () => {},
-              // The tutorial's rounds have no card effects to pay out.
+              // The tutorial's card effects are cards you gain (Mercenary's Debt).
               bank: () => {},
               vp: () => {},
-              giveCard: () => {},
+              giveCard: (pid, card, count, at) => {
+                if (pid !== YOU) return;
+                const dest = point({ pile: 'discard' });
+                for (let i = 0; i < count; i++) {
+                  const add = () => set(w => ({ discard: [...w.discard, card] }));
+                  if (!dest) { add(); continue; }
+                  // Like a game: it pops up over the tile, shows itself a beat, then flies to your discard pile.
+                  const start: Pose = { x: at.x, y: at.y, rot: 0, scale: 0.1 };
+                  const lift: Pose = { x: at.x, y: at.y - 70, rot: 0, scale: 0.36 };
+                  const to: Pose = { x: dest.x, y: dest.y, rot: 6, scale: 0.26 * layoutRef.current.pileZoom };
+                  fly(card, start, to, {
+                    duration: 1300,
+                    frames: [
+                      { offset: 0, transform: poseTransform(start), opacity: 0 },
+                      { offset: 0.2, transform: poseTransform(lift), opacity: 1 },
+                      { offset: 0.45, transform: poseTransform(lift), opacity: 1 },
+                      ...flightKeyframes(lift, to, { arc: 60, ease: easeInOut, samples: 6 })
+                        .slice(1).map(f => ({ ...f, offset: 0.45 + (f.offset as number) * 0.55 })),
+                    ],
+                  }).then(add).catch(() => {});
+                }
+              },
               burn: () => {},
               sendHome: (keys) => {
                 const byTile = new Map<string, Set<string>>();

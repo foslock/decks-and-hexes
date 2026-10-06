@@ -1,4 +1,4 @@
-import type { Card, HexTile, ResolutionStep } from '../../types/game';
+import type { Card, HexTile, ResolutionEffect, ResolutionStep } from '../../types/game';
 import type { BoardCardEntry } from '../BoardCards';
 
 /**
@@ -261,6 +261,11 @@ export function claimStep(tile: string, claims: { pid: string; power: number; fr
     outcome: opts.outcome ?? (opts.winner && opts.winner !== defender ? 'claimed' : 'defended'),
     is_base_raid: !!opts.baseRaid,
   };
+}
+
+/** A card a player gains on a tile as it resolves (Mercenary's Debt), shaped like the server's. */
+export function cardGain(tile: string, pid: string, card: Card, source: string): ResolutionEffect {
+  return { type: 'card', player_id: pid, by_player_id: pid, tile_key: tile, card_name: card.name, count: 1, card, vp_each: 0, source_card: source };
 }
 
 /** Defense landing on your own tile (Watchtower / Barricade). */

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import type { Card, HexTile, ResolutionStep } from '../types/game';
+import type { Card, HexTile, ResolutionEffect, ResolutionStep } from '../types/game';
 import { SettingsProvider } from '../components/SettingsContext';
 import TutorialOverlay from '../components/tutorial/TutorialOverlay';
 import { SCENES, type Scene, type TutorialCtx } from '../components/tutorial/tutorialScenes';
@@ -43,7 +43,6 @@ async function dryRun(s: Scene): Promise<World> {
       const card = w.hand.find(c => c.id === id);
       expect(card, `${s.id}: ${id} is in the hand`).toBeTruthy();
       expect(w.actions, `${s.id}: actions for ${id}`).toBeGreaterThanOrEqual(card!.action_cost);
-      if (opts.pay) expect(w.resources, `${s.id}: resources to pay`).toBeGreaterThanOrEqual(opts.pay);
       if (tile) {
         const t = w.tiles[tile];
         if (card!.card_type === 'defense') {
@@ -61,7 +60,7 @@ async function dryRun(s: Scene): Promise<World> {
       set(x => ({
         hand: x.hand.filter(c => c.id !== id),
         actions: x.actions - card!.action_cost + card!.action_return,
-        resources: x.resources + card!.resource_gain - (opts.pay ?? 0),
+        resources: x.resources + card!.resource_gain,
       }));
     },
     rivalPlay: async (card, tile, from) => {
@@ -70,7 +69,12 @@ async function dryRun(s: Scene): Promise<World> {
       plays.push({ pid: RIVAL, tile, card });
     },
     reveal: async () => {},
-    resolve: async (steps: ResolutionStep[]) => {
+    resolve: async (steps: ResolutionStep[], effects: ResolutionEffect[] = []) => {
+      // A card that gains a Debt as it resolves (Mercenary, Siege Tower)
+      // shows it on its tile, and nothing else gives one.
+      const debts = plays.filter(p => steps.some(st => st.tile_key === p.tile) && p.card.effects?.some(e => e.type === 'gain_debt'));
+      expect(effects.filter(e => e.type === 'card' && e.card_name === 'Debt').map(e => [e.player_id, e.tile_key, e.source_card]), `${s.id}: Debts`)
+        .toEqual(debts.map(p => [p.pid, p.tile, p.card.name]));
       for (const step of steps) {
         const t = w.tiles[step.tile_key];
         if (step.outcome === 'defense_applied') {

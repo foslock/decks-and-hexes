@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
-import type { Card, ResolutionStep } from '../../types/game';
+import type { Card, ResolutionEffect, ResolutionStep } from '../../types/game';
 import type { BoardFx } from '../../board3d/boardTypes';
 import type { CameraShot } from '../../board3d/engine';
 import type { SoundApi } from '../../audio/useSound';
-import { BARRICADE, EXPLORE, GATHER, LEVY, MERCENARY, RUBBLE, SIEGE_TOWER, SPOILS, WATCHTOWER } from './tutorialCards';
+import { BARRICADE, DEBT, EXPLORE, GATHER, LEVY, MERCENARY, RUBBLE, SIEGE_TOWER, SPOILS, WATCHTOWER } from './tutorialCards';
 import {
   BASE_RIVAL, BASE_YOU, CENTER_VP, FINAL_STAR, FRONT, LAND, RIVAL, RIVAL_COLOR, STAR, YOU, YOU_COLOR,
-  board, claimStep, copy, defenseStep, frontier, makeWorld, parseKey, type World,
+  board, cardGain, claimStep, copy, defenseStep, frontier, makeWorld, parseKey, type World,
 } from './tutorialWorld';
 import { axialToPixel } from '../../utils/hexGeometry';
 
@@ -30,15 +30,16 @@ export interface TutorialCtx {
   deal(cards: Card[]): Promise<void>;
   /** Play a hand card: lift it, aim at the tile, fly it onto the board.
    *  No tile: an engine card (it resolves at once). */
-  play(cardId: string, tile?: string, opts?: { from?: string; pay?: number; temp?: number; perm?: number }): Promise<void>;
+  play(cardId: string, tile?: string, opts?: { from?: string; temp?: number; perm?: number }): Promise<void>;
   /** The rival plays a card face down: it goes out of sight (to their chip in
    *  the top bar) and only lands on its tile at the reveal. */
   rivalPlay(card: Card, tile: string, from: string): Promise<void>;
   /** "Reveal" — the rival's hidden plays land on their tiles and every
    *  face-down card turns over. */
   reveal(): Promise<void>;
-  /** Run the real resolve animation for these steps. */
-  resolve(steps: ResolutionStep[]): Promise<void>;
+  /** Run the real resolve animation for these steps (and what card effects
+   *  do on their tiles). */
+  resolve(steps: ResolutionStep[], effects?: ResolutionEffect[]): Promise<void>;
   banner(text: string, sub?: string, opts?: { hold?: number; stay?: boolean; big?: boolean }): Promise<void>;
   pop(text: string, at: Anchor, tone?: 'gold' | 'blue' | 'green' | 'red'): void;
   /** Fly a card (null = card back) between two anchors. */
@@ -74,6 +75,8 @@ const barricade = copy(BARRICADE, 'a');
 const merc = copy(MERCENARY, 'a');
 const merc2 = copy(MERCENARY, 'b');
 const siege = copy(SIEGE_TOWER, 'a');
+/** The Debts Mercenary and Siege Tower bring you. */
+const debtStar = copy(DEBT, 'star'), debtRaid = copy(DEBT, 'raid'), debtWin = copy(DEBT, 'win');
 const lastHand = [copy(EXPLORE, 'f1'), copy(EXPLORE, 'f2'), merc2, copy(GATHER, 'f3'), copy(GATHER, 'f4')];
 const filler = (tag: string) => [copy(EXPLORE, `${tag}1`), copy(GATHER, `${tag}2`), copy(EXPLORE, `${tag}3`), copy(GATHER, `${tag}4`)];
 
@@ -250,7 +253,7 @@ export const SCENES: Scene[] = [
     id: 'stars',
     eyebrow: 'Round 7',
     title: 'Win star hexes',
-    body: <><b>Star hexes</b> score VP while they connect to your base through your land: <b>1 VP</b>, or <b>2 VP</b> for the big center hex. They're defended (2 or 3), so bring power — <b>Mercenary</b> has power 3 but costs 2 resources to play.</>,
+    body: <><b>Star hexes</b> score VP while they connect to your base through your land: <b>1 VP</b>, or <b>2 VP</b> for the big center hex. They're defended (2 or 3), so bring power — <b>Mercenary</b> has power 3, but it gives you a <b>Debt</b>: a card that takes 3 resources to trash.</>,
     start: () => makeWorld({
       tiles: boardWalled(), round: 7, showHand: true, phase: 'Play phase',
       hand: [merc, ...filler('s')], drawCount: 4, discard: [barricade, levy], resources: 4,
@@ -261,10 +264,13 @@ export const SCENES: Scene[] = [
       ctx.fx()?.pillar(s.x, s.y, 0xffd24a, 1300);
       ctx.sfx('spotlightStar');
       await ctx.wait(800);
-      await ctx.play(merc.id, STAR, { from: '-1,3', pay: 2 });
+      await ctx.play(merc.id, STAR, { from: '-1,3' });
       await ctx.wait(BEAT);
       await ctx.reveal();
-      await ctx.resolve([claimStep(STAR, [{ pid: YOU, power: 3, from: '-1,3' }], { winner: YOU })]);
+      await ctx.resolve(
+        [claimStep(STAR, [{ pid: YOU, power: 3, from: '-1,3' }], { winner: YOU })],
+        [cardGain(STAR, YOU, debtStar, 'Mercenary')],
+      );
       ctx.set({ phase: null, paths: [STAR] });
       await ctx.wait(600);
       ctx.pop('+1 VP', { tile: STAR }, 'gold');
@@ -285,7 +291,7 @@ export const SCENES: Scene[] = [
     body: <>Every <b>3 tiles</b> you own are worth <b>1 VP</b>. Your 9 tiles make 3 VP, plus 1 VP for your connected star: <b>4 VP</b>. Keep your land connected — a star cut off from your base scores nothing.</>,
     start: () => makeWorld({
       tiles: boardStar(), round: 7, showHand: true, paths: [STAR],
-      hand: filler('s'), drawCount: 4, discard: [barricade, levy, merc], resources: 2,
+      hand: filler('s'), drawCount: 4, discard: [barricade, levy, merc, debtStar], resources: 4,
     }),
     run: async (ctx) => {
       await ctx.fly({ keys: [BASE_YOU, '1,1', '-2,3', '2,0'], zoom: 1.75, tilt: 0.5, rotation: 0, seconds: 2.2 });
@@ -311,7 +317,7 @@ export const SCENES: Scene[] = [
     tip: 'Upgrades cost 5 resources and make a card permanently stronger.',
     start: () => makeWorld({
       tiles: boardStar(), round: 7, showHand: true, phase: 'Buy phase', paths: [STAR],
-      hand: filler('s'), drawCount: 4, discard: [barricade, levy, merc], resources: 5,
+      hand: filler('s'), drawCount: 4, discard: [barricade, levy, merc, debtStar], resources: 6,
     }),
     run: async (ctx) => {
       await ctx.fly({ zoom: 1.0, tilt: 0.5, rotation: -0.15, seconds: 2 });
@@ -321,8 +327,9 @@ export const SCENES: Scene[] = [
       ctx.set(w => ({ shop: w.shop && { ...w.shop, hot: pick } }));
       await ctx.wait(1100);
       ctx.sfx('cardPurchase');
-      ctx.set(w => ({ resources: w.resources - 3, shop: w.shop && { ...w.shop, bought: [pick] } }));
-      ctx.pop('-3', { hud: 'resources' }, 'red');
+      const price = MERCENARY.buy_cost ?? 0;
+      ctx.set(w => ({ resources: w.resources - price, shop: w.shop && { ...w.shop, bought: [pick] } }));
+      ctx.pop(`-${price}`, { hud: 'resources' }, 'red');
       await ctx.flyCard(copy(MERCENARY, 'bought'), { shop: pick }, { pile: 'discard' }, { duration: 750, arc: 90 });
       ctx.set(w => ({ discard: [...w.discard, copy(MERCENARY, 'bought')] }));
       await ctx.wait(1300);
@@ -333,7 +340,7 @@ export const SCENES: Scene[] = [
     id: 'raid',
     eyebrow: 'Late in the game',
     title: 'Raid a base',
-    body: <>Bases have <b>3 defense</b> and can never be taken — but a successful <b>raid</b> wins you a <b>Spoils</b> card (+1 VP) and leaves the defender a useless <b>Rubble</b> card. <b>Siege Tower</b> has power 6 and costs 2 actions.</>,
+    body: <>Bases have <b>3 defense</b> and can never be taken — but a successful <b>raid</b> wins you a <b>Spoils</b> card (+1 VP) and leaves the defender a useless <b>Rubble</b> card. <b>Siege Tower</b> has power 6 — and, like Mercenary, brings you a Debt.</>,
     start: () => makeWorld({
       tiles: boardLate(), round: 11, showHand: true, phase: 'Play phase', paths: [STAR],
       hand: [siege, ...filler('k')], drawCount: 8, discard: [merc, barricade], resources: 3,
@@ -343,9 +350,10 @@ export const SCENES: Scene[] = [
       await ctx.play(siege.id, BASE_RIVAL, { from: '1,-4' });
       await ctx.wait(BEAT);
       await ctx.reveal();
-      await ctx.resolve([
-        claimStep(BASE_RIVAL, [{ pid: YOU, power: 6, from: '1,-4' }], { defender: RIVAL, defense: 3, defenderFrom: '0,-3', winner: YOU, baseRaid: true }),
-      ]);
+      await ctx.resolve(
+        [claimStep(BASE_RIVAL, [{ pid: YOU, power: 6, from: '1,-4' }], { defender: RIVAL, defense: 3, defenderFrom: '0,-3', winner: YOU, baseRaid: true })],
+        [cardGain(BASE_RIVAL, YOU, debtRaid, 'Siege Tower')],
+      );
       ctx.set({ phase: null });
       await ctx.wait(300);
       const spoils = ctx.flyCard(copy(SPOILS, 'won'), { tile: BASE_RIVAL }, { hud: 'vp' }, { duration: 1000, arc: 120, fromScale: 0.42, toScale: 0.12 });
@@ -366,20 +374,20 @@ export const SCENES: Scene[] = [
     start: () => makeWorld({
       tiles: boardLate(), round: 12, showHand: true, phase: 'Play phase', paths: [STAR], bonusVp: 1,
       hand: lastHand,
-      drawCount: 3, discard: [siege, barricade, levy], resources: 4,
+      drawCount: 3, discard: [siege, debtRaid, barricade, levy], resources: 4,
     }),
     run: async (ctx) => {
       await ctx.fly({ keys: ['1,1', '-2,2', FINAL_STAR], zoom: 1.5, tilt: 0.55, rotation: 0, seconds: 2.6, arc: 0.15, lower: 0.7 });
       await ctx.play(lastHand[0].id, '1,1', { from: '1,2' });
       await ctx.play(lastHand[1].id, '-2,2', { from: '-1,2' });
-      await ctx.play(merc2.id, FINAL_STAR, { from: FRONT, pay: 2 });
+      await ctx.play(merc2.id, FINAL_STAR, { from: FRONT });
       await ctx.wait(BEAT);
       await ctx.reveal();
       await ctx.resolve([
         claimStep('1,1', [{ pid: YOU, power: 0, from: '1,2' }], { winner: YOU }),
         claimStep('-2,2', [{ pid: YOU, power: 0, from: '-1,2' }], { winner: YOU }),
         claimStep(FINAL_STAR, [{ pid: YOU, power: 3, from: FRONT }], { winner: YOU }),
-      ]);
+      ], [cardGain(FINAL_STAR, YOU, debtWin, 'Mercenary')]);
       ctx.set({ phase: null, paths: [STAR, FINAL_STAR] });
       await ctx.wait(500);
       ctx.set({ victory: true });
