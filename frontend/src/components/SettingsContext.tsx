@@ -32,7 +32,7 @@ const STORAGE_KEY = 'cardclash_settings';
 
 const DEFAULT_SETTINGS: Settings = {
   animationMode: 'normal', tooltips: true, soundEnabled: true, soundVolume: 0.5,
-  musicEnabled: true, musicVolume: 0.5, visualQuality: 'high',
+  musicEnabled: false, musicVolume: 0.5, visualQuality: 'high',
 };
 
 function loadSettings(): Settings {
@@ -46,7 +46,7 @@ function loadSettings(): Settings {
         tooltips: parsed.tooltips !== false,  // default true
         soundEnabled: parsed.soundEnabled !== false,  // default true
         soundVolume: typeof parsed.soundVolume === 'number' ? parsed.soundVolume : 0.5,
-        musicEnabled: parsed.musicEnabled !== false,  // default true
+        musicEnabled: parsed.music === 'on',  // default off (see saveSettings)
         musicVolume: typeof parsed.musicVolume === 'number' ? parsed.musicVolume : 0.5,
         visualQuality: parsed.visualQuality === 'low' ? 'low' : 'high',
       };
@@ -56,8 +56,11 @@ function loadSettings(): Settings {
 }
 
 function saveSettings(settings: Settings) {
+  // Music is saved as `music`: older saves hold `musicEnabled: true` from when
+  // it defaulted to on, which the player never chose.
+  const { musicEnabled, ...rest } = settings;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...rest, music: musicEnabled ? 'on' : 'off' }));
   } catch { /* ignore */ }
 }
 

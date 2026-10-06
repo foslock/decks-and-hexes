@@ -184,6 +184,7 @@ export class BoardEngine {
   private lastShadow = 0;
   private readonly sunDir = new Vector3();
   private markers: MarkerLayer | null = null;
+  private onFlagPlant: ((inMs: number) => void) | null = null;
   private roads: RoadLayer | null = null;
   private floating: FloatingOverlay | null = null;
   /** 0 = near top-down → 1 = steep tilt (overlays float, labels rise). */
@@ -311,8 +312,10 @@ export class BoardEngine {
     if (!this.hero) this.rig.padding = 26;
     this.ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => this.resize()) : null;
     this.ro?.observe(host);
+    // resize() has already started the loop (through kick): a second
+    // requestAnimationFrame here would run two loops, drawing each busy frame twice.
     this.resize();
-    this.raf = requestAnimationFrame(this.loop);
+    this.kick();
 
     const onVis = () => { if (!document.hidden) this.kick(); };
     document.addEventListener('visibilitychange', onVis);
@@ -603,6 +606,12 @@ export class BoardEngine {
   setHold(progress: number): void {
     this.hold = progress;
     this.kick(0.2);
+  }
+
+  /** Called as a played claim's flag is about to plant (`inMs` from now). */
+  setOnFlagPlant(cb: ((inMs: number) => void) | null): void {
+    this.onFlagPlant = cb;
+    if (this.markers) this.markers.onPlant = cb;
   }
 
   setTokens(specs: TokenSpec[]): void {
@@ -946,6 +955,7 @@ export class BoardEngine {
     if (!this.markers) {
       this.markers = new MarkerLayer(layout, this.propMat, this.fxLayer!, this.glowPool, this.smokePool);
       this.markers.setAnimate(this.speed > 0);
+      this.markers.onPlant = this.onFlagPlant;
       this.world.add(this.markers.group);
     } else {
       this.markers.setLayout(layout);

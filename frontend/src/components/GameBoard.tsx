@@ -12,6 +12,7 @@ import { BoardEngine, type CameraShot, type CameraView } from '../board3d/engine
 import { CARD_FULL_HEIGHT } from './CardFull';
 import { boardCardScale } from './BoardCards';
 import { TOKEN_LABEL_LIFT, type TokenKind, type TokenSpec } from '../board3d/markers';
+import { useSound } from '../audio/useSound';
 import {
   PLAYER_COLORS, computeStackingPowerBonus,
   type BoardFx, type ClaimChevron, type PlannedActionIcon, type PlayerInfo, type VpPath,
@@ -40,8 +41,10 @@ export interface BoardControls {
   focusTile(key: string, shot: { zoom: number; tilt: number; lower?: number; seconds?: number; arc?: number }): void;
   /** Where a tile's card stack sits on screen — its bottom-center, or its
    *  top-center when it hangs below the tile (`below`, near the board's top
-   *  edge) — and the board's label zoom. Lets a played card land right on it. */
-  tileAnchor(key: string): { x: number; y: number; zoom: number; below: boolean } | null;
+   *  edge) — and the board's label zoom. Lets a played card land right on it.
+   *  `landing`: the card about to land there — the stack is placed as it will
+   *  be once that card's planned power / defense readout shows under it. */
+  tileAnchor(key: string, landing?: { card: Card; type?: string }): { x: number; y: number; zoom: number; below: boolean } | null;
 }
 
 interface GameBoardProps {
@@ -241,6 +244,9 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const tooltipsEnabled = useTooltips();
   const animSpeed = useAnimationSpeed();
+  const sound = useSound();
+  const soundRef = useRef(sound);
+  soundRef.current = sound;
 
   // Latest props for the engine's input callbacks (registered once).
   const live = useRef(props);
@@ -284,6 +290,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
     }
     engineRef.current = engine;
     if (import.meta.env.DEV) (window as unknown as { __board?: BoardEngine }).__board = engine;
+    engine.setOnFlagPlant((inMs) => soundRef.current.cue('flagPlant', inMs));
     if (transformRef) transformRef.current = engine.transform;
     if (fxRef) fxRef.current = fxProxy;
     if (controlsRef) {
@@ -296,12 +303,13 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
         getView: (current) => engine.getView(current),
         setView: (view, seconds) => engine.setView(view, seconds),
         focusTile: (key, shot) => engine.focusTile(key, shot),
-        tileAnchor: (key) => {
+        tileAnchor: (key, landing) => {
           const host = hostRef.current;
           const pt = { x: 0, y: 0 };
           if (!host) return null;
           const h = stackHeight(tileCardEls.current.get(key)) || CARD_FULL_HEIGHT * boardCardScale(labelScaleRef.current);
-          const placed = placeStackRef.current(engine, key, h, pt);
+          const label = landing ? landingLabelRef.current(key, landing.card, landing.type) : undefined;
+          const placed = placeStackRef.current(engine, key, h, pt, label);
           if (placed === null) return null;
           const r = host.getBoundingClientRect();
           return { x: pt.x + r.left, y: pt.y + r.top, zoom: labelScaleRef.current, below: placed };
@@ -761,10 +769,21 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
    *  label when it has one (planned power / defense readout), and always clear
    *  of the hexagon itself — a resolving card grows upward from here without
    *  covering the tile it's resolving on. */
-  const tileCardAnchorRef = useRef((engine: BoardEngine, key: string, out: { x: number; y: number }): boolean => {
+  /** The label a tile will have once `card` is planned on it: its VP row (if
+   *  any) and the planned readout, at the planned token's lift. */
+  const landingLabelRef = useRef<(key: string, card: Card, type?: string) => { lift: number; rows: unknown[] } | undefined>(() => undefined);
+  landingLabelRef.current = (key, card, type) => {
+    const tile = tiles[key];
+    if (!tile) return undefined;
+    const c = classify(card, tile, activePlayerId, type);
+    const kind: TokenKind = c.isConsecrate ? 'consecrate' : c.isAbandon ? 'abandon' : c.isPlayerTarget ? 'target' : c.isDefensive ? 'defense' : 'claim';
+    const base = tile.is_vp ? (tile.vp_value >= 2 ? 0.5 : 0.42) : tile.is_base ? 0.3 : 0.12;
+    return { lift: Math.max(base, TOKEN_LABEL_LIFT[kind]), rows: tile.is_vp ? [0, 0] : [0] };
+  };
+  const tileCardAnchorRef = useRef((engine: BoardEngine, key: string, out: { x: number; y: number }, landing?: { lift: number; rows: unknown[] }): boolean => {
     const tile = live.current.tiles[key];
     if (!tile) return false;
-    const l = labelByKeyRef.current.get(key);
+    const l = landing ?? labelByKeyRef.current.get(key);
     const lift = l ? l.lift : tile.is_vp ? (tile.vp_value >= 2 ? 0.5 : 0.42) : tile.is_base ? 0.3 : 0.12;
     const w = engine.tileWorld(key, lift + engine.tiltFactor * 0.42);
     if (!w) return false;
@@ -776,8 +795,8 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   });
   /** Place a stack `height` px tall: above the tile, or hanging below it
    *  when there's no room above. Returns whether it's below (null: no tile). */
-  const placeStackRef = useRef((engine: BoardEngine, key: string, height: number, out: { x: number; y: number }): boolean | null => {
-    if (!tileCardAnchorRef.current(engine, key, out)) return null;
+  const placeStackRef = useRef((engine: BoardEngine, key: string, height: number, out: { x: number; y: number }, landing?: { lift: number; rows: unknown[] }): boolean | null => {
+    if (!tileCardAnchorRef.current(engine, key, out, landing)) return null;
     if (out.y - height >= 6) return false;
     // Hang below the hexagon instead (still clear of the tile).
     const span = engine.tileScreenSpan(key);

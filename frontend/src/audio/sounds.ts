@@ -23,7 +23,7 @@ export const CORE_SOUND_NAMES = [
   'resolveBaseRaidRam', 'resolveBaseRaidShatter', 'resolveBaseRaidHold', 'upgradeCharge', 'upgradeCard', 'beginJingle',
   'tilePop', 'phaseCall3', 'phaseCall4', 'phaseCall5',
   'spotlightYou', 'spotlightRival', 'spotlightStar', 'tileGlow',
-  'tileAbandon', 'tileScorch', 'floodWave', 'powerBonus', 'coinGain',
+  'tileAbandon', 'tileScorch', 'floodWave', 'powerBonus', 'coinGain', 'flagPlant',
 ] as const;
 
 /** Optional extras (available on the engine + hook, not yet wired into components). */
@@ -84,6 +84,7 @@ const LEVELS: Record<SoundName, number> = {
   floodWave: -10,
   powerBonus: -12,
   coinGain: -10,
+  flagPlant: -5.5,
   phaseCall3: -11.1,
   phaseCall4: -11.2,
   phaseCall5: -11.7,
@@ -840,6 +841,22 @@ const coinGain: Recipe = (bus, when) => {
   v.done();
 };
 
+/** A claim's flag planted on its tile: the pole driven into the earth (a
+ *  dull thud, a knock of wood, a puff of dirt) and the cloth snapping out. */
+const flagPlant: Recipe = (bus, when) => {
+  const v = voice(bus, when, 'flagPlant', { vary: 0.8, pan: rand(-0.15, 0.15), reverb: 0.12 });
+  thump(v, { f: jitter(125, 0.06), f2: 55, drop: 0.07, gain: 0.7, decay: 0.16, drive: 1.8 });
+  woodKnock(v, { f: pick([165, 180, 195]), gain: 0.45, decay: 0.07, click: 0.2, bright: 0.6 });
+  v.noise({
+    color: 'brown', env: { a: 0.002, d: 0.13 }, gain: 0.8,
+    filters: [{ type: 'highpass', f: 90, q: 0.7 }, { type: 'lowpass', f: 900, f2: 300, sweep: 0.1, q: 0.6 }],
+  });
+  // The cloth: a sharp flap as it whips over, then a softer one as it settles.
+  swish(v, { at: 0.045, from: 2400, to: 1100, dur: 0.045, attack: 0.006, q: 1.3, gain: 0.55, hp: 500 });
+  swish(v, { at: 0.13, from: 1800, to: 900, dur: 0.05, attack: 0.008, q: 1.2, gain: 0.3, hp: 500 });
+  v.done();
+};
+
 export interface SoundDef {
   play: Recipe;
   /** Approximate dry length in seconds (offline renders add the reverb tail). */
@@ -879,6 +896,7 @@ export const SOUNDS: Record<SoundName, SoundDef> = {
   floodWave: { play: floodWave, length: 1.7 },
   powerBonus: { play: powerBonus, length: 0.8 },
   coinGain: { play: coinGain, length: 0.6 },
+  flagPlant: { play: flagPlant, length: 0.3 },
   phaseCall3: { play: phaseCall3, length: 0.9 },
   phaseCall4: { play: phaseCall4, length: 0.9 },
   phaseCall5: { play: phaseCall5, length: 0.9 },

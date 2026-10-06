@@ -509,6 +509,26 @@ export class FxLayer implements BoardFx {
     });
   }
 
+  /** Something small dropping into the sea at (x, z) (world): a few
+   *  droplets thrown up and a wisp of spray. */
+  private plop(x: number, z: number, size: number): void {
+    const n = 4 + Math.round(size * 60);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 0.25 + Math.random() * 0.45;
+      const tint = 0.85 + Math.random() * 0.15;
+      this.sparkPool.spawn({
+        x, y: WATER_Y + 0.02, z,
+        vx: Math.cos(a) * sp, vy: 0.7 + Math.random() * 0.8, vz: Math.sin(a) * sp,
+        r: 0.86 * tint, g: 0.95 * tint, b: 1.0, life: 0.35 + Math.random() * 0.25, size0: 0.035, size1: 0.012,
+        gravity: 4.2, drag: 1.1, shape: 2,
+      });
+    }
+    this.dustPool.spawn({
+      x, y: WATER_Y + 0.03, z, vx: 0, vy: 0.15, vz: 0,
+      r: 0.86, g: 0.92, b: 0.98, a: 0.25, life: 0.7, size0: 0.08, size1: 0.3, drag: 1.4, wind: 0.05,
+    });
+  }
+
   /** Captured-tile burst: ring + motes + puff in the new owner's color. */
   captureBurst(q: number, r: number, color: number, big = false): void {
     const c = axialToWorld(q, r);
@@ -813,12 +833,20 @@ export class FxLayer implements BoardFx {
         s.age += dt;
         s.vel.y -= g * dt;
         s.pos.addScaledVector(s.vel, dt);
-        const floor = this.ground(s.pos.x, s.pos.z) + s.size * 0.6;
-        if (s.pos.y < floor) {
-          s.pos.y = floor;
-          s.vel.y *= -0.32;
-          s.vel.x *= 0.6; s.vel.z *= 0.6;
-          s.spin.multiplyScalar(0.6);
+        if (this.layout.isLand(s.pos.x, s.pos.z)) {
+          const floor = this.ground(s.pos.x, s.pos.z) + s.size * 0.6;
+          if (s.pos.y < floor) {
+            s.pos.y = floor;
+            s.vel.y *= -0.32;
+            s.vel.x *= 0.6; s.vel.z *= 0.6;
+            s.spin.multiplyScalar(0.6);
+          }
+        } else if (s.pos.y < WATER_Y) {
+          // Off the island's edge: no ground to land on — it drops into the
+          // sea with a little splash and is gone.
+          this.plop(s.pos.x, s.pos.z, s.size);
+          s.age = s.life;
+          continue;
         }
         s.rot.addScaledVector(s.spin, dt);
         const k = s.age > s.life - 0.4 ? Math.max(0, (s.life - s.age) / 0.4) : 1;

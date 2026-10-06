@@ -27,7 +27,8 @@ class SoundEngine {
   private graph: AudioGraph | null = null;
   private enabled = true;
   private volume = 1;
-  private musicEnabled = true;
+  /** Off until the player turns it on in the settings. */
+  private musicEnabled = false;
   private musicVolume = 0.5;
   private musicHeld = false;
   /** Screens that want music turn it on (the lobby, the game). */
@@ -306,6 +307,7 @@ class SoundEngine {
   floodWave() { this.play('floodWave'); }
   powerBonus() { this.play('powerBonus'); }
   coinGain() { this.play('coinGain'); }
+  flagPlant() { this.play('flagPlant'); }
   /** A ring of tiles popping up as the board builds, `delay` s from now. */
   tilePop(delay = 0) { this.playIn('tilePop', delay); }
 

@@ -13,6 +13,9 @@ import { Soup, lin, mix } from './soup';
 
 export type TokenKind = 'claim' | 'defense' | 'target' | 'abandon' | 'consecrate';
 
+/** A claim's flag drops in from above and plants this long after it appears (s). */
+export const FLAG_PLANT_S = 0.42;
+
 export interface TokenSpec {
   key: string;
   q: number;
@@ -163,6 +166,11 @@ export class MarkerLayer {
   private emberAcc = 0;
   private now = 0;
   private animate = true;
+  /** A claim's flag will plant `inMs` from now (for its sound). */
+  onPlant: ((inMs: number) => void) | null = null;
+  /** Tokens have been placed once: later ones are new plays, not the board
+   *  filling in what's already planned. */
+  private primed = false;
 
   constructor(
     private layout: BoardLayout,
@@ -178,6 +186,7 @@ export class MarkerLayer {
     this.layout = layout;
     // Draped geometry depends on terrain heights: rebuild on next sync.
     this.chevronSig = '';
+    this.primed = false;
     for (const key of [...this.tokens.keys()]) this.dropToken(key, true);
     for (const key of [...this.barriers.keys()]) this.dropBarrier(key);
   }
@@ -209,12 +218,18 @@ export class MarkerLayer {
         }
       }
     }
+    let planting = false;
     for (const spec of specs) {
       const existing = this.tokens.get(spec.key);
       if (existing && !existing.removing) continue;
       if (existing) this.dropToken(spec.key, true);
       this.tokens.set(spec.key, this.makeToken(spec));
+      if (spec.kind === 'claim') planting = true;
     }
+    // A new claim's flag drops in and plants FLAG_PLANT_S from now (one sound
+    // however many flags go in together, e.g. a Flood's).
+    if (planting && this.primed && this.animate) this.onPlant?.(FLAG_PLANT_S * 1000);
+    this.primed = true;
   }
 
   private dropToken(key: string, immediate: boolean): void {
@@ -511,9 +526,9 @@ export class MarkerLayer {
       } else if (tok.bob) {
         if (tok.spec.kind === 'claim') {
           // Drop in from above, accelerating, then plant with a thud.
-          const t = Math.min(1, age / 0.42);
+          const t = Math.min(1, age / FLAG_PLANT_S);
           tok.bob.position.y = (1 - t * t) * 1.5;
-          const squash = t >= 1 ? 1 + Math.sin(Math.min(1, (age - 0.42) / 0.25) * Math.PI) * -0.12 : 1;
+          const squash = t >= 1 ? 1 + Math.sin(Math.min(1, (age - FLAG_PLANT_S) / 0.25) * Math.PI) * -0.12 : 1;
           tok.bob.scale.set(1, squash, 1);
           if (t >= 1 && !tok.landed) {
             tok.landed = true;
