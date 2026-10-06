@@ -39,6 +39,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
+  /* No rubber-band bounce or pull-to-refresh on the page itself (mobile):
+     the game's own pan, drag and scroll areas are the only movement. */
+  overscroll-behavior: none;
   background: var(--cc-bg-deep);
   color: var(--cc-text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -50,6 +53,8 @@ html, body {
 button { font-family: inherit; }
 
 html, body { cursor: var(--cc-cursor-arrow); }
+/* In a game the page itself never scrolls (set by GameScreen). */
+html.cc-page-locked, html.cc-page-locked body { height: 100%; overflow: hidden; }
 /* Anything you can click points with the gilded gauntlet (inline styles
    and more specific rules — grab, target, not-allowed — still win). */
 button:not(:disabled), [role="button"], a[href], select, summary, input[type="range"], input[type="checkbox"] {
