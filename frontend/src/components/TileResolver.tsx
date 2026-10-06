@@ -157,6 +157,9 @@ const CANCELLED = Symbol('cancelled');
 const CLAIM_R = 74;
 /** How long a counted card stays on the tile before it leaves (ms). */
 const LINGER_MS = 450;
+/** How long a tile's card row takes to close up after a card leaves it
+ *  (SIZE_EASE, plus a frame or two for the board to catch up) (ms). */
+const ROW_SETTLE_MS = 320;
 
 const css = (n: number | undefined, fallback = '#ffffff') => (n != null ? `#${n.toString(16).padStart(6, '0')}` : fallback);
 const colorOf = (pid: string | null) => (pid ? css(PLAYER_COLORS[pid]) : '#e8e4d8');
@@ -225,12 +228,28 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
      *  the next one steps up, then heads home. */
     const leaveSoon = (card: PlanCard | null) => {
       if (!card || burning.has(card.key)) return;
-      setTimeout(() => { if (!cancelled) live.current.api.sendHome([card.key]); }, ms(LINGER_MS));
+      setTimeout(() => { if (!cancelled) api.sendHome([card.key]); }, ms(LINGER_MS));
     };
     /** Cards that burn on this tile (Spoils of War) stay put until they do. */
     let burning = new Set<string>();
+    /** A card turns over where it lies: the row closes up (over SIZE_EASE)
+     *  when a card leaves it, so a card leaving waits for a turn-over to end,
+     *  and a card about to turn over waits for the row to settle. */
+    let flipUntil = 0;
+    let rowSettles = 0;
     const { api: rawApi } = live.current;
-    const api: ResolverApi = { ...rawApi, sendHome: (keys) => rawApi.sendHome(keys.filter(k => !burning.has(k))) };
+    const sendHome = (keys: string[]) => {
+      const leaving = keys.filter(k => !burning.has(k));
+      if (!leaving.length) return;
+      const hold = flipUntil - performance.now();
+      if (hold > 0) {
+        setTimeout(() => { if (!cancelled) sendHome(leaving); }, hold);
+        return;
+      }
+      rawApi.sendHome(leaving);
+      rowSettles = performance.now() + ROW_SETTLE_MS;
+    };
+    const api: ResolverApi = { ...rawApi, sendHome };
     const fx = () => fxRef.current;
     const sfx = live.current.sound;
 
@@ -267,11 +286,16 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       // As long as a board card takes to turn over (plus a frame for it to
       // start); a face-up card holds the same beat at the resolve's pace.
       const beat = (down.length ? Math.round(BOARD_FLIP_MS * (live.current.flipSpeed || 1)) : ms(BOARD_FLIP_MS)) + 50;
+      const pause = (n: number) => new Promise<void>((res, rej) => setTimeout(() => (cancelled ? rej(CANCELLED) : res()), Math.max(0, n)));
+      if (down.length) {
+        const settling = rowSettles - performance.now();
+        if (settling > 0) await pause(settling);
+        flipUntil = performance.now() + beat + 100;
+      }
       api.flip(real.map(c => c.key));
       // The power counts once the card is fully face up: wait for its
       // turn-over to finish (it starts once the board has the new state).
       const start = performance.now();
-      const pause = (n: number) => new Promise<void>((res, rej) => setTimeout(() => (cancelled ? rej(CANCELLED) : res()), Math.max(0, n)));
       let turns: Animation[] = [];
       for (let i = 0; down.length && !turns.length && i < 15; i++) {
         await pause(16);
@@ -283,6 +307,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
       } else {
         await pause(beat - (performance.now() - start));
       }
+      flipUntil = 0;
     };
     /** A player's face-down cards wait in a pile: before they turn over,
      *  the pile spreads out into a row (a lone card has nothing to spread). */

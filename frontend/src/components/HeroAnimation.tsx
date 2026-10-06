@@ -129,6 +129,8 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
   startRef.current = start;
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -291,6 +293,7 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
     let nextBorder = TOTAL_ANIM + 1200;
     let startTime = 0;
     let raf = 0;
+    let pausedSince = 0;
     // Cards wait offscreen until the intro starts.
     placeCard(blueCard, blueState);
     placeCard(redCard, redState);
@@ -302,6 +305,17 @@ export default function HeroAnimation({ start = true, onReady, paused = false }:
 
     const tick = () => {
       if (destroyed) return;
+      // Covered (the tutorial): the scene and its clock hold still, so the
+      // paused board isn't fed tile changes it can't animate.
+      if (pausedRef.current && startTime) {
+        if (!pausedSince) pausedSince = performance.now();
+        raf = requestAnimationFrame(tick);
+        return;
+      }
+      if (pausedSince) {
+        startTime += performance.now() - pausedSince;
+        pausedSince = 0;
+      }
       if (!startTime) {
         if (!startRef.current || !warmed) { raf = requestAnimationFrame(tick); return; }
         if (rebuild) {

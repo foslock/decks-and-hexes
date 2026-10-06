@@ -111,11 +111,16 @@ export default function SoundPreview() {
     return () => clearInterval(t);
   }, []);
   /** The background march (drums, and the horns from the ninth bar). */
+  // This page has no settings, so it turns the music on (off by default) itself.
   const [music, setMusic] = useState(false);
-  useEffect(() => () => soundEngine.setMusicActive(false), []);
+  useEffect(() => () => {
+    soundEngine.setMusicActive(false);
+    soundEngine.setMusicEnabled(false);
+  }, []);
   const toggleMusic = () => {
     const on = !music;
     setMusic(on);
+    soundEngine.setMusicEnabled(on);
     if (on) soundEngine.restartMusic(); else soundEngine.setMusicActive(false);
   };
   /** Sync check: a dot flashes on each beat with a tick cued to land on it. */

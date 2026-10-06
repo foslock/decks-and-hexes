@@ -6,7 +6,6 @@ import GameBoard, {
 import TileResolver, { type ResolverApi } from '../TileResolver';
 import { buildResolvePlans, type PlanCard, type TilePlan } from '../../utils/resolvePlan';
 import CardFull from '../CardFull';
-import CardBack from '../CardBack';
 import FlightCard, { turnOver, type Flight } from '../hand/FlightCard';
 import { CoinFlight, splitCoins, type Coin } from '../ResourceCounter';
 import TargetArrow from '../hand/TargetArrow';
@@ -227,9 +226,6 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
   const [coins, setCoins] = useState<Coin[]>([]);
   const [peek, setPeek] = useState<Card | null>(null);
   const [detail, setDetail] = useState<BoardCardEntry[] | null>(null);
-  /** Rival cards lying face down on tiles until the reveal. */
-  const [facedown, setFacedown] = useState<Record<string, { entry: BoardCardEntry; from: string }[]>>({});
-  const facedownRef = useRef(facedown);
   /** Rival plays still out of sight: like a real game, where they go isn't
    *  shown until the reveal. */
   const hiddenRef = useRef<{ card: Card; tile: string; from: string }[]>([]);
@@ -284,11 +280,6 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
       worldRef.current = next;
       setWorld(next);
     };
-    const setDown = (fn: (d: typeof facedownRef.current) => typeof facedownRef.current) => {
-      if (run.cancelled) return;
-      facedownRef.current = fn(facedownRef.current);
-      setFacedown(facedownRef.current);
-    };
 
     const tileCenter = (key: string) => {
       const t = transformRef.current;
@@ -311,9 +302,10 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
       if ('pile' in a) return center(`[data-tut-pile="${a.pile}"]`);
       return center(`[data-tut-shop-card="${a.shop}"]`);
     };
-    /** Pose of a card standing in a tile's card row (slot i of n). */
-    const tileSlot = (key: string, i = 0, n = 1): Pose | null => {
-      const a = controlsRef.current?.tileAnchor(key);
+    /** Pose of a card standing in a tile's card row (slot i of n) — once
+     *  `landing` is planned there, if given (its readout lifts the row). */
+    const tileSlot = (key: string, i = 0, n = 1, landing?: { card: Card; type?: string }): Pose | null => {
+      const a = controlsRef.current?.tileAnchor(key, landing);
       if (!a) return null;
       const s = boardCardScale(a.zoom);
       const w = CARD_W * s;
@@ -475,14 +467,13 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
           pop(`-${opts.pay}`, { hud: 'resources' }, 'red');
         }
         if (tile) {
-          const down = facedownRef.current[tile]?.length ?? 0;
-          const mine = worldRef.current.cards[tile]?.length ?? 0;
-          const to = tileSlot(tile, mine, mine + 1 + down) ?? { ...from, opacity: 0 };
+          const n = worldRef.current.cards[tile]?.length ?? 0;
+          const type = opts.temp || opts.perm ? 'defense' : 'claim';
+          const to = tileSlot(tile, n, n + 1, { card, type }) ?? { ...from, opacity: 0 };
           await fly(card, from, to, { duration: PLAY.toTile, arc: 90 });
           const [tq, tr] = parseKey(tile);
           const p = axialToPixel(tq, tr);
           fxRef.current?.dust(p.x, p.y, 10, 0.5);
-          const type = opts.temp || opts.perm ? 'defense' : 'claim';
           set(w => ({
             cards: { ...w.cards, [tile]: [...(w.cards[tile] ?? []), { key: `${card.id}@${tile}`, card, playerId: YOU, playerName: 'You' }] },
             planned: { ...w.planned, [tile]: { card, power: card.power, type, temp: opts.temp, perm: opts.perm } },
@@ -524,40 +515,48 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
         set({ phase: 'Reveal' });
         if (!run.cancelled) soundRef.current.phaseCall(4);
         await banner('Reveal');
-        // The rival's hidden plays land face down on their tiles…
+        // The rival's hidden plays land face down in their tiles' card rows…
         const hidden = hiddenRef.current;
         hiddenRef.current = [];
         if (hidden.length) {
           const chip = point({ hud: 'rivalVp' });
           sfx('cardPlay');
-          await Promise.all(hidden.map(({ tile }) => {
-            const mine = worldRef.current.cards[tile]?.length ?? 0;
-            const down = facedownRef.current[tile]?.length ?? 0;
-            const to = tileSlot(tile, mine + down, mine + down + 1);
+          // Each one's slot, given the cards already in its row.
+          const rows = new Map<string, number>();
+          const slots = hidden.map(({ tile }) => {
+            const i = rows.get(tile) ?? worldRef.current.cards[tile]?.length ?? 0;
+            rows.set(tile, i + 1);
+            return i;
+          });
+          // In the row (unseen) from the start, so the row has made room
+          // where each lands by the time it gets there.
+          const keys = new Set(hidden.map(({ card, tile }) => `${card.id}@${tile}`));
+          set(w => {
+            const cards = { ...w.cards };
+            for (const { card, tile } of hidden) {
+              cards[tile] = [...(cards[tile] ?? []), { key: `${card.id}@${tile}`, card, playerId: RIVAL, playerName: 'Rival', faceDown: true, arriving: true }];
+            }
+            return { cards };
+          });
+          await Promise.all(hidden.map(({ tile }, k) => {
+            const to = tileSlot(tile, slots[k], rows.get(tile)!);
             return chip && to ? fly(null, { x: chip.x, y: chip.y, rot: 0, scale: to.scale * 0.35 }, to, { duration: PLAY.rival, arc: 40 }) : Promise.resolve();
           }));
-          setDown(d => {
-            const next = { ...d };
-            for (const { card, tile, from } of hidden) {
-              next[tile] = [...(next[tile] ?? []), { entry: { key: `${card.id}@${tile}`, card, playerId: RIVAL, playerName: 'Rival' }, from }];
-            }
-            return next;
+          set(w => {
+            const cards: typeof w.cards = {};
+            for (const [k, list] of Object.entries(w.cards)) cards[k] = list.map(e => (keys.has(e.key) ? { ...e, arriving: false } : e));
+            return { cards };
           });
           await wait(450);
+          // …then turn over where they lie (the cards beside them stay put).
+          set(w => {
+            const cards: typeof w.cards = {};
+            for (const [k, list] of Object.entries(w.cards)) cards[k] = list.map(e => (e.faceDown ? { ...e, faceDown: false } : e));
+            return { cards, chevrons: [...w.chevrons, ...hidden.map(h => ({ from: h.from, to: h.tile, pid: RIVAL }))] };
+          });
+          sfx('cardDraw');
         }
-        // …then everything turns over.
-        const down = facedownRef.current;
-        setDown(() => ({}));
-        set(w => {
-          const cards = { ...w.cards };
-          const chevrons = [...w.chevrons];
-          for (const [k, list] of Object.entries(down)) {
-            cards[k] = [...(cards[k] ?? []), ...list.map(x => ({ ...x.entry, revealed: true }))];
-            for (const x of list) chevrons.push({ from: x.from, to: k, pid: RIVAL });
-          }
-          return { cards, chevrons };
-        });
-        await wait(Object.keys(down).length ? PLAY.revealed : 300);
+        await wait(hidden.length ? PLAY.revealed : 300);
       },
 
       resolve: (steps) => {
@@ -655,8 +654,6 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     setCoins([]);
     setPeek(null);
     setDetail(null);
-    facedownRef.current = {};
-    setFacedown({});
     hiddenRef.current = [];
     landings.current.clear();
     resolveHooks.current = null;
@@ -713,27 +710,17 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
     const points = owner ? pathToBase(world.tiles, owner, k) : null;
     return points ? [{ points, color: PLAYER_COLORS[owner!] ?? 0xffffff, alpha: 1, playerId: owner! }] : [];
   }), [world.paths, world.tiles]);
-  const tileKeys = useMemo(
-    () => [...new Set([...Object.keys(world.cards), ...Object.keys(facedown)])],
-    [world.cards, facedown],
-  );
-  const renderTileCards = useCallback((key: string, zoom: number) => {
-    const s = boardCardScale(zoom);
-    const entries = world.cards[key] ?? [];
-    const down = facedown[key] ?? [];
-    return (
-      <div className="cc-tut-tilecards">
-        {entries.length > 0 && (
-          <TileCardStack entries={entries} scale={s} focus={world.focus === key} open still={!!resolving} onOpen={(es) => setDetail(es)} />
-        )}
-        {down.map(d => (
-          <div key={d.entry.key} className="cc-tut-facedown" style={{ width: CARD_W * s, height: CARD_H * s, borderRadius: 14 * s }}>
-            <div style={{ transform: `scale(${s})`, transformOrigin: 'top left' }}><CardBack /></div>
-          </div>
-        ))}
-      </div>
-    );
-  }, [world.cards, world.focus, facedown, resolving]);
+  const tileKeys = useMemo(() => Object.keys(world.cards), [world.cards]);
+  const renderTileCards = useCallback((key: string, zoom: number) => (
+    <TileCardStack
+      entries={world.cards[key] ?? []}
+      scale={boardCardScale(zoom)}
+      focus={world.focus === key}
+      open
+      still={!!resolving}
+      onOpen={(es) => setDetail(es)}
+    />
+  ), [world.cards, world.focus, resolving]);
 
   const youVp = scoreVp(world.tiles, YOU, world.bonusVp).total;
   const rivalVp = scoreVp(world.tiles, RIVAL).total;

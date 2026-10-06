@@ -294,6 +294,28 @@ describe('SetupScreen', () => {
   });
 });
 
+describe('Music setting', () => {
+  const musicButton = (name: 'On' | 'Off') => {
+    const row = screen.getByText('Music:').parentElement!;
+    return Array.from(row.querySelectorAll('button')).find((b) => b.textContent === name)!;
+  };
+
+  it('is off until the player turns it on, even over an old save that had it on', () => {
+    // Saves from before it defaulted to off carry musicEnabled: true.
+    localStorage.setItem('cardclash_settings', JSON.stringify({ musicEnabled: true, tooltips: false }));
+    const { unmount } = render(<SettingsProvider><SettingsPanel /></SettingsProvider>);
+    expect(musicButton('Off')).toHaveClass('is-active');
+    fireEvent.click(musicButton('On'));
+    expect(musicButton('On')).toHaveClass('is-active');
+    expect(JSON.parse(localStorage.getItem('cardclash_settings')!).music).toBe('on');
+    unmount();
+    // Remembered next time.
+    render(<SettingsProvider><SettingsPanel /></SettingsProvider>);
+    expect(musicButton('On')).toHaveClass('is-active');
+    localStorage.removeItem('cardclash_settings');
+  });
+});
+
 describe('Visual Quality setting', () => {
   it('defaults to High, and Low is saved with the other settings', () => {
     localStorage.removeItem('cardclash_settings');

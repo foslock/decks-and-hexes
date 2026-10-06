@@ -129,8 +129,9 @@ call that climbs through the round: 1 → 3 Play, 1 → 4 Resolve, 1 → 5 Buy
 generated bar by bar on their own bus/volume, with quiet horn chords in G (the
 bugle's key) from the ninth bar — two bars a chord through a few march
 progressions (`PROGRESSIONS`), resting after two in a row, ending a run on G,
-≈ 6–9 dB under the drums (`LEVELS.horn`). It plays where a screen turns
-it on — the lobby (`setMusicActive`) and the game — never on the home screen;
+≈ 6–9 dB under the drums (`LEVELS.horn`). It's off until the player turns
+Music on in the settings (saved as `music: 'on'`), then plays where a screen
+turns it on — the lobby (`setMusicActive`) and the game — never on the home screen;
 pauses while the tab is hidden, holds silent through the lobby countdown
 (`holdMusic`) and starts over with each game (`restartMusic`). Nothing makes a
 sound (no AudioContext is even created) until the page has had a click, tap

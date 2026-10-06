@@ -2071,7 +2071,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         return next;
       }), Math.round(520 * animSpeed) + 40);
     }
-    const anchor = q != null && r != null ? boardControlsRef.current?.tileAnchor(`${q},${r}`) : null;
+    // Where the card will sit once it's planned there (its power / defense
+    // readout under it), so the flight ends exactly on its board copy.
+    const landingType = card.card_type === 'engine' && card.target_own_tile ? 'abandon' : card.card_type;
+    const anchor = q != null && r != null ? boardControlsRef.current?.tileAnchor(`${q},${r}`, { card, type: landingType }) : null;
     /** Where the played card lands (coins it earns fly from here). */
     let landing: { x: number; y: number } | null = null;
     if (q != null && r != null && anchor) {

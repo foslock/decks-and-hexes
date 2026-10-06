@@ -38,6 +38,7 @@ const NO_OP_SOUNDS = {
   floodWave: NO_OP,
   powerBonus: NO_OP,
   coinGain: NO_OP,
+  flagPlant: NO_OP,
   phaseCall: NO_OP as (step: 3 | 4 | 5) => void,
   claimSmash: NO_OP as (power: number) => void,
   /** A sound that belongs to something `inMs` from now on screen: heard
@@ -99,6 +100,7 @@ export function useSound(): SoundApi {
       floodWave: () => soundEngine.floodWave(),
       powerBonus: () => soundEngine.powerBonus(),
       coinGain: () => soundEngine.coinGain(),
+      flagPlant: () => soundEngine.flagPlant(),
       phaseCall: (step: 3 | 4 | 5) => soundEngine.phaseCall(step),
       claimSmash: (power: number) => soundEngine.claimSmash(power),
       cue: (name: SoundName, inMs: number) => soundEngine.cue(name, inMs),
