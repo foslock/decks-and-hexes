@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { SettingsProvider } from '../components/SettingsContext';
 import { TileCardStack, EngineQueue, fanOffset, tileSlots, type BoardCardEntry } from '../components/BoardCards';
@@ -91,11 +91,13 @@ describe('board cards', () => {
     expect(container.querySelector('[data-face-down]')).toBeNull();
   });
 
-  it('rings revealed cards, and every card on a shared tile, in its player\'s color', () => {
+  it('rings revealed cards, and every card on a shared tile, in its player\'s color (fading in)', async () => {
     const shared = [entry('a', 'Explore', 'player_0'), entry('b', 'Gather', 'player_1')];
     const { container, unmount } = render(<WithSettings><TileCardStack entries={shared} scale={0.25} onOpen={() => {}} /></WithSettings>);
     const cards = container.querySelectorAll<HTMLElement>('[data-board-card-body]');
-    expect(cards[0].style.boxShadow).toContain('#e6194b');
+    // The glow isn't there the moment a card lands: it fades in after.
+    expect(cards[0].style.boxShadow).toBe('');
+    await waitFor(() => expect(cards[0].style.boxShadow).toContain('#e6194b'));
     expect(cards[1].style.boxShadow).toContain('#3cb44b');
     unmount();
 
@@ -108,7 +110,7 @@ describe('board cards', () => {
     // …revealed cards do, all the way round.
     const revealed = [{ ...entry('e', 'Explore', 'player_1'), playerName: 'Xander' }];
     const { container: c3 } = render(<WithSettings><TileCardStack entries={revealed} scale={0.25} onOpen={() => {}} /></WithSettings>);
-    expect(c3.querySelector<HTMLElement>('[data-board-card-body]')!.style.boxShadow).toContain('0 0 0 2px #3cb44b');
+    await waitFor(() => expect(c3.querySelector<HTMLElement>('[data-board-card-body]')!.style.boxShadow).toContain('0 0 0 2px #3cb44b'));
   });
 
   it('keeps tile cards see-through until hovered, opened or resolving', () => {

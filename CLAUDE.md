@@ -71,7 +71,13 @@ narration in `tutorialScenes.tsx` still describes them.
 - Played cards live on the board: `BoardCards.tsx` (`TileCardStack` over
   tiles, `EngineQueue` under the ID card, hover zoom, `CardDetailOverlay`).
   GameBoard positions stacks each frame (`tileCardKeys` / `renderTileCards`;
-  `controls.tileAnchor` gives a played card its landing spot). At the reveal
+  `controls.tileAnchor` gives a played card its landing spot). A stack never
+  drops while it's up (`stackPerch`: it keeps above the tallest label it has
+  sat over, easing up to a taller one) and keeps to its side of the tile
+  (above, or hanging below near the top edge) while that side has room — so a
+  card stays one card from play through reveal and resolve. Your planned
+  cards stay on the board until the reveal's `revealCards` take over, and a
+  card's player glow fades in once it lands. At the reveal
   GameScreen turns every player's plays into `revealCards` (opponents' face
   down, each player's cards on a tile in one pile — `stacked`, `tileSlots`).
   `utils/resolvePlan.ts` turns the resolution steps into a per-tile plan

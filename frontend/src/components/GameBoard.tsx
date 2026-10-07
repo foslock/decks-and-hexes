@@ -27,6 +27,10 @@ export type {
 export type { GridTransform } from '../utils/hexGeometry';
 
 /** Imperative camera controls exposed to the game screen (buttons + hotkeys). */
+/** Where a tile's card stack sits: above a label this high (world units over
+ *  the tile) with this many rows. */
+interface Perch { lift: number; rows: number }
+
 export interface BoardControls {
   rotate(dir: 1 | -1): void;
   toggleTilt(): void;
@@ -309,7 +313,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
           if (!host) return null;
           const h = stackHeight(tileCardEls.current.get(key)) || CARD_FULL_HEIGHT * boardCardScale(labelScaleRef.current);
           const label = landing ? landingLabelRef.current(key, landing.card, landing.type) : undefined;
-          const placed = placeStackRef.current(engine, key, h, pt, label);
+          const placed = placeStackRef.current(engine, key, h, pt, { ...perchTargetRef.current(key, label), below: stackPerch.current.get(key)?.below });
           if (placed === null) return null;
           const r = host.getBoundingClientRect();
           return { x: pt.x + r.left, y: pt.y + r.top, zoom: labelScaleRef.current, below: placed };
@@ -780,41 +784,81 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
     const base = tile.is_vp ? (tile.vp_value >= 2 ? 0.5 : 0.42) : tile.is_base ? 0.3 : 0.12;
     return { lift: Math.max(base, TOKEN_LABEL_LIFT[kind]), rows: tile.is_vp ? [0, 0] : [0] };
   };
-  const tileCardAnchorRef = useRef((engine: BoardEngine, key: string, out: { x: number; y: number }, landing?: { lift: number; rows: unknown[] }): boolean => {
+  /** Each tile's card stack keeps above the tallest label it has sat over
+   *  since it appeared, and eases up to a taller one: the readout changing
+   *  under it — the planned power going at the reveal, the defense row hidden
+   *  while its tile resolves — doesn't make the cards jump. */
+  const stackPerch = useRef(new Map<string, Perch & { shown: Perch; at: number; below?: boolean }>());
+  /** Where a tile's stack sits now (or, given `landing`, once that card is
+   *  planned there): its label's lift and rows, never below the stack's perch. */
+  const perchTargetRef = useRef((key: string, landing?: { lift: number; rows: unknown[] }): Perch => {
     const tile = live.current.tiles[key];
-    if (!tile) return false;
     const l = landing ?? labelByKeyRef.current.get(key);
-    const lift = l ? l.lift : tile.is_vp ? (tile.vp_value >= 2 ? 0.5 : 0.42) : tile.is_base ? 0.3 : 0.12;
-    const w = engine.tileWorld(key, lift + engine.tiltFactor * 0.42);
+    const base = !tile ? 0.12 : tile.is_vp ? (tile.vp_value >= 2 ? 0.5 : 0.42) : tile.is_base ? 0.3 : 0.12;
+    const held = stackPerch.current.get(key);
+    return { lift: Math.max(l ? l.lift : base, held?.lift ?? 0), rows: Math.max(l ? l.rows.length : 0, held?.rows ?? 0) };
+  });
+  const tileCardAnchorRef = useRef((engine: BoardEngine, key: string, out: { x: number; y: number }, perch: Perch): boolean => {
+    if (!live.current.tiles[key]) return false;
+    const w = engine.tileWorld(key, perch.lift + engine.tiltFactor * 0.42);
     if (!w) return false;
     engine.projectWorld(w, out);
-    if (l) out.y -= l.rows.length * 21 * labelScaleRef.current + 4;
+    // Each label row is 21px (scaled), plus a 4px gap over a label at all.
+    out.y -= perch.rows * 21 * labelScaleRef.current + Math.min(1, perch.rows) * 4;
     const span = engine.tileScreenSpan(key);
     if (span) out.y = Math.min(out.y, span.top - 4 * labelScaleRef.current);
     return true;
   });
   /** Place a stack `height` px tall: above the tile, or hanging below it
    *  when there's no room above. Returns whether it's below (null: no tile). */
-  const placeStackRef = useRef((engine: BoardEngine, key: string, height: number, out: { x: number; y: number }, landing?: { lift: number; rows: unknown[] }): boolean | null => {
-    if (!tileCardAnchorRef.current(engine, key, out, landing)) return null;
-    if (out.y - height >= 6) return false;
-    // Hang below the hexagon instead (still clear of the tile).
+  const placeStackRef = useRef((engine: BoardEngine, key: string, height: number, out: { x: number; y: number }, perch: Perch & { below?: boolean }): boolean | null => {
+    if (!tileCardAnchorRef.current(engine, key, out, perch)) return null;
+    const fitsAbove = out.y - height >= 6;
+    // A stack keeps to the side of its tile it's on while that side has room
+    // (no flipping over as the camera moves); a new one goes above if it fits.
+    if (fitsAbove && perch.below !== true) return false;
+    // Hang below the hexagon (still clear of the tile).
+    const above = { ...out };
     const span = engine.tileScreenSpan(key);
     const g = engine.tileWorld(key, 0.04);
     if (!g) return false;
     engine.projectWorld(g, out);
     out.y = span ? span.bottom + 6 * labelScaleRef.current : out.y + 12 * labelScaleRef.current;
+    const room = hostRef.current?.clientHeight ?? Infinity;
+    if (perch.below === true && fitsAbove && out.y + height > room - 6) {
+      // No room left below: back above.
+      out.x = above.x;
+      out.y = above.y;
+      return false;
+    }
     return true;
   });
   const positionTileCards = (engine: BoardEngine) => {
     const pt = { x: 0, y: 0 };
     const keys = tileCardKeysRef.current;
+    const now = performance.now();
+    // A stack gone (its cards went home) gives up its perch.
+    for (const k of stackPerch.current.keys()) if (!keys.includes(k)) stackPerch.current.delete(k);
     // Read sizes first, then write transforms (no layout thrash).
     const heights = keys.map(k => stackHeight(tileCardEls.current.get(k)));
     keys.forEach((key, i) => {
       const el = tileCardEls.current.get(key);
       if (!el) return;
-      const below = placeStackRef.current(engine, key, heights[i], pt);
+      const target = perchTargetRef.current(key);
+      let p = stackPerch.current.get(key);
+      if (!p) {
+        p = { ...target, shown: { ...target }, at: now };
+        stackPerch.current.set(key, p);
+      } else {
+        const k = Math.min(1, (now - p.at) / 90);
+        p.lift = target.lift;
+        p.rows = target.rows;
+        p.shown.lift += (target.lift - p.shown.lift) * k;
+        p.shown.rows += (target.rows - p.shown.rows) * k;
+        p.at = now;
+      }
+      const below = placeStackRef.current(engine, key, heights[i], pt, { ...p.shown, below: p.below });
+      if (below !== null) p.below = below;
       if (below === null) return;
       el.style.transform = `translate3d(${pt.x.toFixed(1)}px, ${pt.y.toFixed(1)}px, 0) translate(-50%, ${below ? '0' : '-100%'})`;
       const flag = below ? '1' : '0';
