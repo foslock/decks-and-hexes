@@ -313,7 +313,13 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
           if (!host) return null;
           const h = stackHeight(tileCardEls.current.get(key)) || CARD_FULL_HEIGHT * boardCardScale(labelScaleRef.current);
           const label = landing ? landingLabelRef.current(key, landing.card, landing.type) : undefined;
-          const placed = placeStackRef.current(engine, key, h, pt, { ...perchTargetRef.current(key, label), below: stackPerch.current.get(key)?.below });
+          const perch = perchTargetRef.current(key, label);
+          if (label) {
+            landingSeeds.current.set(key, { ...perch, at: performance.now() });
+            const held = stackPerch.current.get(key);
+            if (held) { held.lift = Math.max(held.lift, perch.lift); held.rows = Math.max(held.rows, perch.rows); }
+          }
+          const placed = placeStackRef.current(engine, key, h, pt, { ...perch, below: stackPerch.current.get(key)?.below });
           if (placed === null) return null;
           const r = host.getBoundingClientRect();
           return { x: pt.x + r.left, y: pt.y + r.top, zoom: labelScaleRef.current, below: placed };
@@ -789,6 +795,10 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
    *  under it — the planned power going at the reveal, the defense row hidden
    *  while its tile resolves — doesn't make the cards jump. */
   const stackPerch = useRef(new Map<string, Perch & { shown: Perch; at: number; below?: boolean }>());
+  /** Where a card that's flying in will sit (from tileAnchor): its stack
+   *  starts there when it appears, instead of easing up once the card's
+   *  readout shows on landing. */
+  const landingSeeds = useRef(new Map<string, Perch & { at: number }>());
   /** Where a tile's stack sits now (or, given `landing`, once that card is
    *  planned there): its label's lift and rows, never below the stack's perch. */
   const perchTargetRef = useRef((key: string, landing?: { lift: number; rows: unknown[] }): Perch => {
@@ -844,9 +854,13 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
     keys.forEach((key, i) => {
       const el = tileCardEls.current.get(key);
       if (!el) return;
-      const target = perchTargetRef.current(key);
+      let target = perchTargetRef.current(key);
       let p = stackPerch.current.get(key);
       if (!p) {
+        // A card flying in (tileAnchor seeded where it lands) starts there.
+        const seed = landingSeeds.current.get(key);
+        landingSeeds.current.delete(key);
+        if (seed && now - seed.at < 5000) target = { lift: Math.max(target.lift, seed.lift), rows: Math.max(target.rows, seed.rows) };
         p = { ...target, shown: { ...target }, at: now };
         stackPerch.current.set(key, p);
       } else {

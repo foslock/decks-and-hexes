@@ -373,8 +373,10 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow, still,
         height: CARD_H * scale,
         cursor: inert ? cursor('arrow') : 'var(--cc-cursor-pointer)',
         borderRadius: 14 * scale,
-        // In place the moment its flight lands (a fade would flicker).
-        opacity: entry.arriving ? 0 : 1,
+        // In place the moment its flight lands (a fade would flicker). Not
+        // quite 0 while it's on its way: Safari doesn't paint a fully
+        // transparent card, so its art would come in dark when it shows.
+        opacity: entry.arriving ? 0.001 : 1,
         transition: `transform 0.25s cubic-bezier(0.2, 0.8, 0.3, 1), width ${SIZE_EASE}, height ${SIZE_EASE}, left ${SIZE_EASE}, box-shadow 0.25s ease, filter 0.45s ease-out`,
         touchAction: 'none',
         ...style,
