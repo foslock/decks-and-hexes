@@ -35,8 +35,9 @@ export interface TutorialCtx {
    *  the top bar) and only lands on its tile at the reveal. */
   rivalPlay(card: Card, tile: string, from: string): Promise<void>;
   /** "Reveal" — the rival's hidden plays land on their tiles and every
-   *  face-down card turns over. */
-  reveal(): Promise<void>;
+   *  face-down card turns over. Given the steps about to resolve, each tile's
+   *  cards line up in the order they'll count (and land straight there). */
+  reveal(steps?: ResolutionStep[]): Promise<void>;
   /** Run the real resolve animation for these steps (and what card effects
    *  do on their tiles). */
   resolve(steps: ResolutionStep[], effects?: ResolutionEffect[]): Promise<void>;
@@ -167,11 +168,12 @@ export const SCENES: Scene[] = [
       await ctx.play(E2.id, '1,2', { from: '0,3' });
       ctx.set({ highlight: [] });
       await ctx.wait(BEAT);
-      await ctx.reveal();
-      await ctx.resolve([
+      const steps = [
         claimStep('-1,3', [{ pid: YOU, power: 0, from: '0,3' }], { winner: YOU }),
         claimStep('1,2', [{ pid: YOU, power: 0, from: '0,3' }], { winner: YOU }),
-      ]);
+      ];
+      await ctx.reveal(steps);
+      await ctx.resolve(steps);
       ctx.set({ phase: null });
     },
   },
@@ -195,10 +197,11 @@ export const SCENES: Scene[] = [
       await ctx.wait(800);
       await ctx.rivalPlay(copy(EXPLORE, 'r1'), FRONT, '2,-1');
       await ctx.wait(1100);
-      await ctx.reveal();
-      await ctx.resolve([
+      const steps = [
         claimStep(FRONT, [{ pid: YOU, power: 1, from: '2,1' }, { pid: RIVAL, power: 0, from: '2,-1' }], { winner: YOU }),
-      ]);
+      ];
+      await ctx.reveal(steps);
+      await ctx.resolve(steps);
       ctx.set({ phase: null });
     },
   },
@@ -217,11 +220,12 @@ export const SCENES: Scene[] = [
       await ctx.wait(500);
       await ctx.play(watchtower.id, FRONT, { temp: 2 });
       await ctx.wait(BEAT);
-      await ctx.reveal();
-      await ctx.resolve([
+      const steps = [
         defenseStep(FRONT, YOU, 0, 2),
         claimStep(FRONT, [{ pid: RIVAL, power: 1, from: '2,-1' }], { defender: YOU, defense: 2, defenderFrom: '2,1', winner: YOU }),
-      ]);
+      ];
+      await ctx.reveal(steps);
+      await ctx.resolve(steps);
       ctx.set({ phase: null });
       await ctx.wait(900);
       // The round ends: Watchtower's defense wears off.
@@ -241,8 +245,9 @@ export const SCENES: Scene[] = [
       await ctx.fly({ keys: [FRONT], zoom: 2.9, tilt: 0.86, rotation: -0.5, seconds: 2.2, lower: 0.9 });
       await ctx.play(barricade.id, FRONT, { perm: 2 });
       await ctx.wait(BEAT);
-      await ctx.reveal();
-      await ctx.resolve([defenseStep(FRONT, YOU, 2, 0)]);
+      const steps = [defenseStep(FRONT, YOU, 2, 0)];
+      await ctx.reveal(steps);
+      await ctx.resolve(steps);
       ctx.set({ phase: null });
       await ctx.wait(700);
       await ctx.fly({ keys: [FRONT], zoom: 2.8, tilt: 0.8, rotation: 0.55, seconds: 3.4 });
@@ -266,11 +271,9 @@ export const SCENES: Scene[] = [
       await ctx.wait(800);
       await ctx.play(merc.id, STAR, { from: '-1,3' });
       await ctx.wait(BEAT);
-      await ctx.reveal();
-      await ctx.resolve(
-        [claimStep(STAR, [{ pid: YOU, power: 3, from: '-1,3' }], { winner: YOU })],
-        [cardGain(STAR, YOU, debtStar, 'Mercenary')],
-      );
+      const steps = [claimStep(STAR, [{ pid: YOU, power: 3, from: '-1,3' }], { winner: YOU })];
+      await ctx.reveal(steps);
+      await ctx.resolve(steps, [cardGain(STAR, YOU, debtStar, 'Mercenary')]);
       ctx.set({ phase: null, paths: [STAR] });
       await ctx.wait(600);
       ctx.pop('+1 VP', { tile: STAR }, 'gold');
@@ -349,11 +352,11 @@ export const SCENES: Scene[] = [
       await ctx.fly({ keys: [BASE_RIVAL, '1,-4'], zoom: 2.45, tilt: 0.72, rotation: 0.25, seconds: 3.0, arc: 0.3, lower: 1.1 });
       await ctx.play(siege.id, BASE_RIVAL, { from: '1,-4' });
       await ctx.wait(BEAT);
-      await ctx.reveal();
-      await ctx.resolve(
-        [claimStep(BASE_RIVAL, [{ pid: YOU, power: 6, from: '1,-4' }], { defender: RIVAL, defense: 3, defenderFrom: '0,-3', winner: YOU, baseRaid: true })],
-        [cardGain(BASE_RIVAL, YOU, debtRaid, 'Siege Tower')],
-      );
+      const steps = [
+        claimStep(BASE_RIVAL, [{ pid: YOU, power: 6, from: '1,-4' }], { defender: RIVAL, defense: 3, defenderFrom: '0,-3', winner: YOU, baseRaid: true }),
+      ];
+      await ctx.reveal(steps);
+      await ctx.resolve(steps, [cardGain(BASE_RIVAL, YOU, debtRaid, 'Siege Tower')]);
       ctx.set({ phase: null });
       await ctx.wait(300);
       const spoils = ctx.flyCard(copy(SPOILS, 'won'), { tile: BASE_RIVAL }, { hud: 'vp' }, { duration: 1000, arc: 120, fromScale: 0.42, toScale: 0.12 });
@@ -382,12 +385,13 @@ export const SCENES: Scene[] = [
       await ctx.play(lastHand[1].id, '-2,2', { from: '-1,2' });
       await ctx.play(merc2.id, FINAL_STAR, { from: FRONT });
       await ctx.wait(BEAT);
-      await ctx.reveal();
-      await ctx.resolve([
+      const steps = [
         claimStep('1,1', [{ pid: YOU, power: 0, from: '1,2' }], { winner: YOU }),
         claimStep('-2,2', [{ pid: YOU, power: 0, from: '-1,2' }], { winner: YOU }),
         claimStep(FINAL_STAR, [{ pid: YOU, power: 3, from: FRONT }], { winner: YOU }),
-      ], [cardGain(FINAL_STAR, YOU, debtWin, 'Mercenary')]);
+      ];
+      await ctx.reveal(steps);
+      await ctx.resolve(steps, [cardGain(FINAL_STAR, YOU, debtWin, 'Mercenary')]);
       ctx.set({ phase: null, paths: [STAR, FINAL_STAR] });
       await ctx.wait(500);
       ctx.set({ victory: true });

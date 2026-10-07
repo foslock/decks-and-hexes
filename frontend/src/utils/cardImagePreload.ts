@@ -63,6 +63,22 @@ export function isCardImageReady(definitionId: string): boolean {
   return status.get(definitionId) === 'ready';
 }
 
+/** How many card faces are showing each image right now. */
+const showing = new Map<string, number>();
+
+/** A card face started (or stopped) showing this image. */
+export function cardImageShowing(definitionId: string, on: boolean): void {
+  const n = (showing.get(definitionId) ?? 0) + (on ? 1 : -1);
+  if (n > 0) showing.set(definitionId, n); else showing.delete(definitionId);
+}
+
+/** True when the image is decoded in memory — preloaded at high priority, or
+ *  on screen in another card face — so a new <img> can decode it with its
+ *  first paint at no cost (no blank frame). */
+export function isCardImageDecoded(definitionId: string): boolean {
+  return retained.has(definitionId) || showing.has(definitionId);
+}
+
 export function isCardImageMissing(definitionId: string): boolean {
   return status.get(definitionId) === 'failed';
 }

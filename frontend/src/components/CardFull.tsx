@@ -11,7 +11,9 @@ import { buildCardSubtitle, type CardSubtitleContext, type SubtitlePart } from '
 import { renderSubtitle } from './SubtitlePartRenderer';
 import CardName, { plainCardName } from './CardName';
 import {
+  cardImageShowing,
   cardImageUrl,
+  isCardImageDecoded,
   isCardImageMissing,
   isCardImageReady,
   markCardImageMissing,
@@ -248,6 +250,10 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor, upgraded }: {
   const [loaded, setLoaded] = useState(() => isCardImageReady(cardId));
   // Only animate the fade when the art wasn't already warm at mount.
   const fadeIn = useRef(!loaded);
+  // Art already decoded in memory paints with this <img>'s first frame: a new
+  // copy of a card (picked up off the hand, landing on the board) shows its
+  // art at once instead of a blank frame first.
+  const syncDecode = useRef(loaded && isCardImageDecoded(cardId));
   const imgUrl = cardImageUrl(cardId);
 
   const hasImage = !imgFailed;
@@ -258,6 +264,11 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor, upgraded }: {
     if (loaded) return;
     return onCardImageReady(cardId, () => setLoaded(true));
   }, [cardId, loaded]);
+  useEffect(() => {
+    if (!loaded || imgFailed) return;
+    cardImageShowing(cardId, true);
+    return () => cardImageShowing(cardId, false);
+  }, [cardId, loaded, imgFailed]);
 
   return (
     <div
@@ -281,7 +292,7 @@ function CardArtSlot({ cardId, cardName, cardType, typeColor, upgraded }: {
           src={imgUrl}
           alt={cardName}
           draggable={false}
-          decoding="async"
+          decoding={syncDecode.current ? 'sync' : 'async'}
           onLoad={() => { markCardImageReady(cardId); setLoaded(true); }}
           onError={() => {
             if (!imgUrl.endsWith('.png')) {
