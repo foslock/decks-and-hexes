@@ -447,13 +447,18 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
         if (tile) {
           const n = worldRef.current.cards[tile]?.length ?? 0;
           const type = opts.temp || opts.perm ? 'defense' : 'claim';
+          const key = `${card.id}@${tile}`;
+          // Like a game, the card is on the board (unseen) while it flies
+          // there: its art is painted by the time it lands, instead of coming
+          // in dark for a moment (Safari) on a card that appears only then.
+          set(w => ({ cards: { ...w.cards, [tile]: [...(w.cards[tile] ?? []), { key, card, playerId: YOU, playerName: 'You', arriving: true }] } }));
           const to = tileSlot(tile, n, n + 1, { card, type }) ?? { ...from, opacity: 0 };
           await fly(card, from, to, { duration: PLAY.toTile, arc: 90 });
           const [tq, tr] = parseKey(tile);
           const p = axialToPixel(tq, tr);
           fxRef.current?.dust(p.x, p.y, 10, 0.5);
           set(w => ({
-            cards: { ...w.cards, [tile]: [...(w.cards[tile] ?? []), { key: `${card.id}@${tile}`, card, playerId: YOU, playerName: 'You' }] },
+            cards: { ...w.cards, [tile]: (w.cards[tile] ?? []).map(e => (e.key === key ? { ...e, arriving: false } : e)) },
             planned: { ...w.planned, [tile]: { card, power: card.power, type, temp: opts.temp, perm: opts.perm } },
             chevrons: opts.from ? [...w.chevrons, { from: opts.from, to: tile, pid: YOU }] : w.chevrons,
           }));

@@ -941,7 +941,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const skipIntro = skipIntroProp || animationOff;
   const [showIntro, setShowIntro] = useState(!skipIntro);
   // Intro sequence after overlay: 'overlay' → 'hud_fadein' → 'grid_build' → 'draw' → 'done'
-  const [introSequence, setIntroSequence] = useState<'overlay' | 'hud_fadein' | 'grid_build' | 'draw' | 'done'>(skipIntro ? 'done' : 'overlay');
+  const [introSequence, setIntroSequence] = useState<'overlay' | 'hud_fadein' | 'grid_build' | 'base' | 'draw' | 'done'>(skipIntro ? 'done' : 'overlay');
   // HUD visibility (fades in during intro)
   const [hudVisible, setHudVisible] = useState(skipIntro ? true : false);
   // Whether the hand area has faded in and is ready for draw animations
@@ -1350,9 +1350,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       if (tile.is_base && tile.base_owner === playerId) {
         const p = axialToPixel(tile.q, tile.r);
         const baseAngle = Math.atan2(p.y - cy, p.x - cx);
-        // Target: base at upper-left (-5PI/6 ≈ -150°) with pointy-top offset (+PI/6)
-        // Raw rotation = targetAngle - baseAngle
-        const raw = -5 * Math.PI / 6 + Math.PI / 6 - baseAngle;
+        // Target: base at the bottom, right above your hand (PI/2: screen y
+        // runs down). The board turns by exactly this on screen.
+        const raw = Math.PI / 2 - baseAngle;
         // Snap to nearest 30° (PI/6) increment so hex rows stay perfectly aligned
         const step = Math.PI / 6;
         return Math.round(raw / step) * step;
@@ -3475,7 +3475,13 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
 
   // The board's tiles pop in once per build.
   const tilePopsRef = useRef(false);
-  useEffect(() => { if (introSequence === 'overlay') tilePopsRef.current = false; }, [introSequence]);
+  /** Your base has had its spotlight this intro. */
+  const baseFlashRef = useRef(false);
+  useEffect(() => {
+    if (introSequence !== 'overlay') return;
+    tilePopsRef.current = false;
+    baseFlashRef.current = false;
+  }, [introSequence]);
   // A new game starts the music over from the top.
   useEffect(() => { soundEngine.restartMusic(); }, [gameState.id]);
   // The page itself never scrolls during a game (only the game's own areas do).
@@ -3498,7 +3504,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     setInteractionBlocked(true);
   }, [animationOff]);
 
-  // Intro sequence: hud_fadein → grid_build → draw → "Begin!" banner
+  // Intro sequence: hud_fadein → grid_build → base → draw → "Begin!" banner
   useEffect(() => {
     if (introSequence === 'hud_fadein') {
       // Fade in HUD elements over 2.5s, then start grid build
@@ -3533,11 +3539,26 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           raf = requestAnimationFrame(tick);
         } else {
           setGridBuildProgress(undefined); // fully built, no more prop
-          setIntroSequence('draw');
+          setIntroSequence('base');
         }
       };
       raf = requestAnimationFrame(tick);
       return () => cancelAnimationFrame(raf);
+    }
+    if (introSequence === 'base') {
+      // Your base lights up in your color — where you start — before your
+      // hand is dealt (as in the tutorial).
+      const base = Object.values(gameState.grid.tiles).find(t => t.is_base && t.base_owner === activePlayerId);
+      if (base && !baseFlashRef.current) {
+        baseFlashRef.current = true;
+        const p = axialToPixel(base.q, base.r);
+        const color = PLAYER_COLORS[activePlayerId] ?? 0xffffff;
+        boardFxRef.current?.pillar(p.x, p.y, color, 1400);
+        boardFxRef.current?.shockwave(p.x, p.y, color, 1.1, 800);
+        sound.spotlightYou();
+      }
+      const timer = setTimeout(() => setIntroSequence('draw'), Math.round(1300 * animSpeed) || 600);
+      return () => clearTimeout(timer);
     }
     if (introSequence === 'draw') {
       // First let the hand area fade in, then pass cards to trigger draw animations.
