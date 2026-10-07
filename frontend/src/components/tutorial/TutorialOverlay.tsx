@@ -48,6 +48,13 @@ interface Props {
 const CANCELLED = Symbol('tutorial-cancelled');
 
 /** One scene's script run; cancelling rejects everything it's waiting on. */
+/** A world's tile cards as the resolve plan sees them. */
+function planCardsOf(cards: Record<string, BoardCardEntry[]>): Map<string, PlanCard[]> {
+  return new Map(Object.entries(cards).map(([tile, entries]) => [tile, entries.map(e => ({
+    key: e.key, playerId: e.playerId, cardType: e.card.card_type, power: e.card.power, defense: e.card.defense_bonus ?? 0,
+  }))]));
+}
+
 class Run {
   cancelled = false;
   private hooks = new Set<() => void>();
@@ -482,35 +489,33 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
         if (!run.cancelled) hiddenRef.current = [...hiddenRef.current, { card, tile, from }];
       },
 
-      reveal: async () => {
+      reveal: async (steps = []) => {
         set({ phase: 'Reveal' });
         if (!run.cancelled) soundRef.current.phaseCall(4);
         await banner('Reveal');
         // The rival's hidden plays land face down in their tiles' card rows…
         const hidden = hiddenRef.current;
         hiddenRef.current = [];
+        const keyOf = ({ card, tile }: { card: Card; tile: string }) => `${card.id}@${tile}`;
+        // Every tile's cards line up in the order they'll count as it
+        // resolves, and the hidden ones land straight in their places there
+        // (in the row, unseen, from the start, so the row has made room by
+        // the time each arrives) — nothing reshuffles when the tile resolves.
+        const w0 = worldRef.current;
+        const rows: Record<string, BoardCardEntry[]> = { ...w0.cards };
+        for (const h of hidden) {
+          rows[h.tile] = [...(rows[h.tile] ?? []), { key: keyOf(h), card: h.card, playerId: RIVAL, playerName: 'Rival', faceDown: true, arriving: true }];
+        }
+        const order = revealOrder(buildResolvePlans(steps, planCardsOf(rows), w0.tiles, YOU));
+        for (const t of Object.keys(rows)) rows[t] = sortByReveal(rows[t], order);
+        set({ cards: rows });
         if (hidden.length) {
           const chip = point({ hud: 'rivalVp' });
           sfx('cardPlay');
-          // Each one's slot, given the cards already in its row.
-          const rows = new Map<string, number>();
-          const slots = hidden.map(({ tile }) => {
-            const i = rows.get(tile) ?? worldRef.current.cards[tile]?.length ?? 0;
-            rows.set(tile, i + 1);
-            return i;
-          });
-          // In the row (unseen) from the start, so the row has made room
-          // where each lands by the time it gets there.
-          const keys = new Set(hidden.map(({ card, tile }) => `${card.id}@${tile}`));
-          set(w => {
-            const cards = { ...w.cards };
-            for (const { card, tile } of hidden) {
-              cards[tile] = [...(cards[tile] ?? []), { key: `${card.id}@${tile}`, card, playerId: RIVAL, playerName: 'Rival', faceDown: true, arriving: true }];
-            }
-            return { cards };
-          });
-          await Promise.all(hidden.map(({ tile }, k) => {
-            const to = tileSlot(tile, slots[k], rows.get(tile)!);
+          const keys = new Set(hidden.map(keyOf));
+          await Promise.all(hidden.map(h => {
+            const row = rows[h.tile];
+            const to = tileSlot(h.tile, row.findIndex(e => e.key === keyOf(h)), row.length);
             return chip && to ? fly(null, { x: chip.x, y: chip.y, rot: 0, scale: to.scale * 0.35 }, to, { duration: PLAY.rival, arc: 40 }) : Promise.resolve();
           }));
           set(w => {
@@ -533,10 +538,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
       resolve: (steps, effects = []) => {
         set({ planned: {}, chevrons: [] });
         const w0 = worldRef.current;
-        const cards = new Map<string, PlanCard[]>();
-        for (const [tile, entries] of Object.entries(w0.cards)) {
-          cards.set(tile, entries.map(e => ({ key: e.key, playerId: e.playerId, cardType: e.card.card_type, power: e.card.power, defense: e.card.defense_bonus ?? 0 })));
-        }
+        const cards = planCardsOf(w0.cards);
         // The tutorial is teaching the rules: every tile counts up in full,
         // and the narration keeps the camera.
         const plans = buildResolvePlans(steps, cards, w0.tiles, YOU, effects).map(p => ({ ...p, focus: p.kind !== 'effect' }));
