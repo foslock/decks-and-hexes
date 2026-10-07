@@ -978,6 +978,9 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   const boardFlightSeq = useRef(0);
   /** Set up the reveal's board cards (assigned below; called from the phase effect). */
   const beginRevealRef = useRef<(state: GameState) => void>(() => {});
+  /** This round's reveal has laid out its cards (until then, your planned
+   *  cards stay on the board, so they carry on into the reveal unbroken). */
+  const [revealBegun, setRevealBegun] = useState(false);
   // Hold the discard count while revealed cards fly to the discard pile; +1 per landing
   const [discardCountOverride, setDiscardCountOverride] = useState<number | null>(null);
   /** My cards still to fly in from card effects as the reveal resolves. */
@@ -1226,6 +1229,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   }, []);
   const activePlayer = gameState.players[activePlayerId];
   const phase = gameState.current_phase;
+  useLayoutEffect(() => { if (phase === 'play') setRevealBegun(false); }, [phase]);
 
   // Chime when the local player's VP goes up (tracked per player so a
   // hot-seat seat switch doesn't count as a gain).
@@ -5112,6 +5116,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
   // Reveal: every player's plays land over their tiles — opponents' face
   // down, each turning over as its tile resolves.
   beginRevealRef.current = (state: GameState) => {
+    setRevealBegun(true);
     const revealed = state.revealed_actions;
     if (!revealed || animationOff) return;
     const cards: RevealCard[] = [];
@@ -5488,9 +5493,11 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       for (const [key, list] of tiles) tiles.set(key, sortByReveal(list, resolveCardOrder));
       return { tiles, engines };
     }
-    // Planned cards show during play only — at the reveal they become revealCards
-    // (planned_actions linger on the server until the next round).
-    if (phase !== 'play' || showIntro || introSequence !== 'done') return { tiles, engines };
+    // Planned cards show during play — and on into the reveal until they become
+    // revealCards (the same cards, so nothing remounts or jumps between the two;
+    // planned_actions linger on the server until the next round).
+    const planning = phase === 'play' || (phase === 'reveal' && !revealBegun);
+    if (!planning || showIntro || introSequence !== 'done') return { tiles, engines };
     const actions = activePlayer?.planned_actions ?? [];
     actions.forEach((a, i) => {
       const c = a.effective_power != null ? { ...a.card, power: a.effective_power } : a.card;
@@ -5505,7 +5512,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       }
     });
     return { tiles, engines };
-  }, [revealCards, resolveCardOrder, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds, reviewing, replay, reviewHoveredTile, reviewEntries]);
+  }, [revealCards, revealBegun, resolveCardOrder, phase, showIntro, introSequence, activePlayer?.planned_actions, activePlayerId, frozenSubtitleContext, arrivingIds, warBannerPulseIds, reviewing, replay, reviewHoveredTile, reviewEntries]);
   const tileCardKeys = useMemo(() => [...boardCards.tiles.keys()], [boardCards]);
   /** Rivals' engine cards at the reveal: a face-down pile beside each one's ID card. */
   const rivalPiles = useMemo(() => {

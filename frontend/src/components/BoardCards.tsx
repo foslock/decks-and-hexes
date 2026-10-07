@@ -315,8 +315,15 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow, still,
     if (still) endHover();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [still]);
-  // Whose card it is: a glow all round it in their color.
-  const ring = glow ?? (entry.playerName ? playerColor(entry.playerId) : undefined);
+  // Whose card it is: a glow all round it in their color, fading in once the
+  // card is in place (not while it's still flying there).
+  const [ringIn, setRingIn] = useState(false);
+  useEffect(() => {
+    if (entry.arriving) { setRingIn(false); return; }
+    const id = requestAnimationFrame(() => setRingIn(true));
+    return () => cancelAnimationFrame(id);
+  }, [entry.arriving]);
+  const ring = ringIn ? glow ?? (entry.playerName ? playerColor(entry.playerId) : undefined) : undefined;
   // A card that moves (fan reflow, focus) refreshes its zoom anchor.
   useEffect(() => {
     if (hoverRect && ref.current) setHoverRect(ref.current.getBoundingClientRect());
@@ -379,7 +386,7 @@ function MiniCard({ entry, scale, style, placement, onOpen, onUndo, glow, still,
           position: 'relative', width: CARD_W * scale, height: CARD_H * scale, transformOrigin: '50% 50%',
           borderRadius: 14 * scale,
           boxShadow: ring ? `0 0 0 2px ${ring}, 0 0 10px 3px ${ring}cc, 0 0 22px 6px ${ring}55` : undefined,
-          transition: `width ${SIZE_EASE}, height ${SIZE_EASE}, box-shadow 0.25s ease`,
+          transition: `width ${SIZE_EASE}, height ${SIZE_EASE}, box-shadow 0.45s ease-out`,
         }}>
           {/* The card itself (inside its player ring): the resolve pulses
               this, so the ring stays steady. */}
