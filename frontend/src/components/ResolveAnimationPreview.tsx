@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { Card, HexTile, PlayerEffect, ResolutionClaimCard, ResolutionEffect, ResolutionStep, ResolutionClaimant } from '../types/game';
 import GameBoard, { type GridTransform, type BoardFx, type BoardControls, PLAYER_COLORS } from './GameBoard';
-import TileResolver, { resolveCamera, type ResolverApi } from './TileResolver';
+import TileResolver, { GIFT_POSE, resolveCamera, type ResolverApi } from './TileResolver';
 import { buildResolvePlans, revealOrder, sortByReveal, tileAfterStep, type PlanCard } from '../utils/resolvePlan';
 import { TileCardStack, boardCardScale, type BoardCardEntry } from './BoardCards';
 import FlightCard, { type Flight } from './hand/FlightCard';
@@ -940,7 +940,7 @@ export default function ResolveAnimationPreview() {
       if (!base) return;
       if (vpEach) flyStarsRef.current(pid, vpEach * count, at);
       const start: Pose = { x: at.x, y: at.y, rot: 0, scale: 0.1 };
-      const lift: Pose = { x: at.x, y: at.y - 70, rot: 0, scale: 0.36 };
+      const lift: Pose = { x: at.x, y: at.y - GIFT_POSE.lift, rot: 0, scale: GIFT_POSE.scale };
       const to: Pose = { x: base.x, y: base.y, rot: 0, scale: 0.06, opacity: 0 };
       const launched: Flight<'home'>[] = [];
       for (let i = 0; i < count; i++) {

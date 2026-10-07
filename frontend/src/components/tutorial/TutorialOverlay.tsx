@@ -3,7 +3,7 @@ import type { Card, ResolutionEffect, ResolutionStep } from '../../types/game';
 import GameBoard, {
   type BoardControls, type BoardFx, type ClaimChevron, type GridTransform, type PlannedActionIcon, type VpPath,
 } from '../GameBoard';
-import TileResolver, { type ResolverApi } from '../TileResolver';
+import TileResolver, { GIFT_POSE, type ResolverApi } from '../TileResolver';
 import { buildResolvePlans, revealOrder, sortByReveal, type PlanCard, type TilePlan } from '../../utils/resolvePlan';
 import CardFull from '../CardFull';
 import FlightCard, { turnOver, type Flight } from '../hand/FlightCard';
@@ -558,7 +558,7 @@ function Tutorial({ onClose, onPlay, onRules, covered = false }: Props) {
                   if (!dest) { add(); continue; }
                   // Like a game: it pops up over the tile, shows itself a beat, then flies to your discard pile.
                   const start: Pose = { x: at.x, y: at.y, rot: 0, scale: 0.1 };
-                  const lift: Pose = { x: at.x, y: at.y - 70, rot: 0, scale: 0.36 };
+                  const lift: Pose = { x: at.x, y: at.y - GIFT_POSE.lift, rot: 0, scale: GIFT_POSE.scale };
                   const to: Pose = { x: dest.x, y: dest.y, rot: 6, scale: 0.26 * layoutRef.current.pileZoom };
                   fly(card, start, to, {
                     duration: 1300,

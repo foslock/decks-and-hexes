@@ -13,7 +13,7 @@ import PileSearchFlyAnimation, { type SearchFlight } from './PileSearchFlyAnimat
 import FullGameLog from './FullGameLog';
 import SettingsPanel from './SettingsPanel';
 import PhaseBanner from './PhaseBanner';
-import TileResolver, { resolveCamera, type ResolverApi } from './TileResolver';
+import TileResolver, { GIFT_POSE, resolveCamera, type ResolverApi } from './TileResolver';
 import { buildResolvePlans, revealOrder, sortByReveal, tileAfterStep, type PlanCard, type TilePlan } from '../utils/resolvePlan';
 import type { CameraView } from '../board3d/engine';
 import PlayerEffectPopups from './PlayerEffectPopups';
@@ -5319,7 +5319,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       const speed = resolveSpeed || 1;
       const mine = pid === activePlayerId;
       const start: Pose = { x: at.x, y: at.y, rot: 0, scale: 0.1 };
-      const lift: Pose = { x: at.x, y: at.y - 70, rot: 0, scale: 0.36 };
+      const lift: Pose = { x: at.x, y: at.y - GIFT_POSE.lift, rot: 0, scale: GIFT_POSE.scale };
       // A card worth VP (Land Grant, Spoils): its VP flies to the score as stars.
       if (vpEach) flyVp(pid, vpEach * count, at);
       for (let i = 0; i < count; i++) {

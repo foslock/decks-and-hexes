@@ -6,6 +6,7 @@ import type { CameraView } from '../board3d/engine';
 import type { BoardControls } from './GameBoard';
 import { axialToPixel } from '../utils/hexGeometry';
 import { BOARD_FLIP_ID, BOARD_FLIP_MS } from './BoardCards';
+import { CARD_H } from './hand/cardMotion';
 import { useResolveSpeed } from './SettingsContext';
 import { useSound } from '../audio/useSound';
 import Icon from '../icons/Icon';
@@ -157,6 +158,11 @@ const CANCELLED = Symbol('cancelled');
 const CLAIM_R = 74;
 /** How long a counted card stays on the tile before it leaves (ms). */
 const LINGER_MS = 450;
+/** A card a player gains at the reveal (Debt, Land Grant…) pops up this far
+ *  above its tile (px) at this scale, shows itself a beat, then flies home. */
+export const GIFT_POSE = { lift: 70, scale: 0.36 };
+/** Its chip sits just under it, where the card can't cover it. */
+const GIFT_CHIP_Y = -GIFT_POSE.lift + (CARD_H * GIFT_POSE.scale) / 2 + 40;
 /** How long a tile's card row takes to close up after a card leaves it
  *  (SIZE_EASE, plus a frame or two for the board to catch up) (ms). */
 const ROW_SETTLE_MS = 320;
@@ -702,7 +708,8 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
         // Keep the chips on screen (a base can sit at the very edge).
         const nudge = (v: number, lo: number, hi: number) => (v < lo ? lo - v : v > hi ? hi - v : 0);
         const x = at ? nudge(at.x, 130, window.innerWidth - 130) : 0;
-        const y = -46 - (i % 3) * 36 + (at ? nudge(at.y - 46 - (i % 3) * 36, 70, window.innerHeight - 40) : 0);
+        const place = (dy: number) => dy + (at ? nudge(at.y + dy, 70, window.innerHeight - 40) : 0);
+        const y = place(-46 - (i % 3) * 36);
         const color = colorOf(e.player_id);
         if (e.type === 'resources' && e.amount) {
           const gain = e.amount > 0;
@@ -718,7 +725,7 @@ export default function TileResolver({ plans, speed, fxRef, project, api, onComp
           const bad = e.card_name === 'Debt' || e.card_name === 'Rubble';
           const total = group.reduce((n, g) => n + (g.count ?? 0), 0);
           chip({
-            x, y, text: `+${total} ${e.card_name}${group.length > 1 && total > 1 ? 's' : ''}`,
+            x, y: place(GIFT_CHIP_Y + (i % 3) * 40), text: `+${total} ${e.card_name}${group.length > 1 && total > 1 ? 's' : ''}`,
             icon: e.card_name === 'Debt' ? 'debt' : e.card_name === 'Rubble' ? 'rubble' : 'cardAdd',
             caption: e.source_card, color: group.length > 1 ? colorOf(e.by_player_id ?? e.player_id) : color, tone: bad ? 'loss' : 'gain',
           });
