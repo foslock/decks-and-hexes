@@ -225,6 +225,11 @@ function UpgradeHoldBadge({
   }, []);
 
   useEffect(() => () => { clearTimer(); fillAnimRef.current?.cancel(); }, [clearTimer]);
+  // The badge goes away under the pointer once its card upgrades (no
+  // pointerleave comes): let go of the hover then, too.
+  const hoverRef = useRef(onHoverChange);
+  hoverRef.current = onHoverChange;
+  useEffect(() => () => hoverRef.current(false), []);
 
   const runFill = (from: number, to: number, duration: number, easing: string) => {
     const el = fillRef.current;
@@ -445,7 +450,9 @@ export default function CardHand({
 
   // ── Interaction state ──
   const [hovered, setHovered] = useState<number | null>(null);
-  const [badgeHover, setBadgeHover] = useState<number | null>(null);
+  /** The card whose upgrade badge is hovered (by card, not hand position:
+   *  the hand shifts as cards are played). */
+  const [badgeHover, setBadgeHover] = useState<string | null>(null);
   /** The card whose upgrade badge is held (it gathers a golden glow) and the
    *  card that just upgraded (its burst), with the charge-up sound. */
   const [chargingId, setChargingId] = useState<string | null>(null);
@@ -1323,7 +1330,7 @@ export default function CardHand({
             const dimmed = (claimBanned && card.card_type === 'claim') || cantAfford || notEnoughActions
               || searchZoneEmpty(card, { discard: discardCards, draw: deckCards, trash: trashCards });
             const empowered = !dimmed && !disabled && isCardEmpowered(card, subtitleContext, claimBuffBonus);
-            const showUpgraded = isHovered && (shiftHeld || badgeHover === di);
+            const showUpgraded = isHovered && (shiftHeld || badgeHover === card.id);
             const faceCard = showUpgraded ? getUpgradedPreview(card) : card;
             const showBadge = upgradeBadgeOk && hasUpgradePreview(card) && (isSelected || isHovered) && !enter && !isLifted;
             return (
@@ -1438,8 +1445,8 @@ export default function CardHand({
                     label={upgradeCreditsAvailable > 1 ? `Hold to Upgrade (${upgradeCreditsAvailable})` : 'Hold to Upgrade'}
                     animated={animated}
                     onHoverChange={(hov) => {
-                      if (hov) setBadgeHover(di);
-                      else setBadgeHover(prev => (prev === di ? null : prev));
+                      if (hov) setBadgeHover(card.id);
+                      else setBadgeHover(prev => (prev === card.id ? null : prev));
                     }}
                     onChargeChange={(on) => {
                       chargeSoundRef.current?.stop(on ? 0 : 160);
