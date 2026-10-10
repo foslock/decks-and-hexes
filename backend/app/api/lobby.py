@@ -14,6 +14,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from app.api.game_locks import game_lock
 from app.api.name_filter import NAME_REJECTED_MESSAGE, is_name_allowed
 from app.api.ws_manager import manager
 from app.data_loader.loader import load_all_cards
@@ -38,7 +39,7 @@ logger = logging.getLogger(__name__)
 def _maybe_restart_cpu_buys(game: GameState) -> None:
     """Re-launch CPU buy task if the game is in BUY phase with pending CPUs
     and no active background task (e.g. after a service restart)."""
-    from app.api.routes import _active_cpu_buy_tasks, _game_locks, _process_cpu_buys_with_cursors
+    from app.api.routes import _active_cpu_buy_tasks, _process_cpu_buys_with_cursors
 
     if game.current_phase != Phase.BUY:
         return
@@ -56,10 +57,7 @@ def _maybe_restart_cpu_buys(game: GameState) -> None:
     logger.info("Restarting orphaned CPU buy task for game %s", game.id)
     task = asyncio.create_task(_process_cpu_buys_with_cursors(game.id))
     _active_cpu_buy_tasks[game.id] = task
-    def _cleanup(_t: asyncio.Task[None]) -> None:
-        _active_cpu_buy_tasks.pop(game.id, None)
-        _game_locks.pop(game.id, None)
-    task.add_done_callback(_cleanup)
+    task.add_done_callback(lambda _t: _active_cpu_buy_tasks.pop(game.id, None))
 
 # ── Data structures ─────────────────────────────────────────
 
@@ -67,6 +65,7 @@ def _maybe_restart_cpu_buys(game: GameState) -> None:
 _CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 _CODE_LENGTH = 4
 _LOBBY_EXPIRY_SECONDS = 900  # 15 minutes of inactivity
+_STARTED_LOBBY_EXPIRY_SECONDS = 2 * 3600  # game idle 2 hours, nobody connected
 _LOBBY_CHECK_INTERVAL = 60   # Check for expired lobbies every 60s
 
 # 12 distinct player colors (CSS hex strings)
@@ -437,7 +436,9 @@ async def browse_lobbies() -> dict[str, Any]:
                 "last_activity": lobby.last_activity,
             })
         elif lobby.status == "started" and lobby.game_id:
-            game = await store.get(lobby.game_id)
+            # Cache only: the home page polls this, and it mustn't reload
+            # (and keep in memory) games that went idle.
+            game = store.get_cached(lobby.game_id)
             if not game or game.current_phase == Phase.GAME_OVER:
                 continue
             active = [(pid, p) for pid, p in game.players.items() if not p.has_left]
@@ -870,50 +871,67 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
     if waiting_players:
         raise HTTPException(400, f"Waiting for players to return: {', '.join(waiting_players)}")
 
+    from app.api.routes import (
+        SERVER_FULL_MESSAGE, has_room_for_game, release_game_slot, reserve_game_slot,
+    )
+
+    # Refuse before the countdown when there's no room for another game
+    if not has_room_for_game():
+        raise HTTPException(503, SERVER_FULL_MESSAGE)
+
     # Send countdown to all connected players
     lobby.status = "countdown"
     for seconds in [3, 2, 1]:
         await manager.broadcast(code, {"type": "countdown", "seconds_remaining": seconds})
         await asyncio.sleep(1)
 
-    # Create the game from lobby config — use explicit player_order if set
-    registry = _get_registry()
-    ordered_pids = _seat_order(lobby)
-    player_configs = []
-    for pid in ordered_pids:
-        p = lobby.players[pid]
-        player_configs.append({
-            "id": pid,
-            "name": p.name,
-            "archetype": p.archetype,
-            "color": p.color,
-            "is_cpu": p.is_cpu,
-            "cpu_difficulty": p.cpu_difficulty,
-            "cpu_noise": p.cpu_noise,
-        })
-
+    # Games may have started elsewhere during the countdown
+    if not reserve_game_slot():
+        lobby.status = "waiting"
+        await manager.broadcast_lobby(code, lobby.to_dict())
+        await manager.broadcast(code, {"type": "error", "message": SERVER_FULL_MESSAGE})
+        raise HTTPException(503, SERVER_FULL_MESSAGE)
     try:
-        grid_size = GridSize(lobby.config.grid_size)
-    except ValueError:
-        raise HTTPException(400, f"Invalid grid size: {lobby.config.grid_size}")
+        # Create the game from lobby config — use explicit player_order if set
+        registry = _get_registry()
+        ordered_pids = _seat_order(lobby)
+        player_configs = []
+        for pid in ordered_pids:
+            p = lobby.players[pid]
+            player_configs.append({
+                "id": pid,
+                "name": p.name,
+                "archetype": p.archetype,
+                "color": p.color,
+                "is_cpu": p.is_cpu,
+                "cpu_difficulty": p.cpu_difficulty,
+                "cpu_noise": p.cpu_noise,
+            })
 
-    game = create_game(
-        grid_size, player_configs, registry,
-        test_mode=lobby.config.test_mode,
-        speed=lobby.config.speed,
-        vp_target=lobby.config.vp_target,
-        granted_actions=lobby.config.granted_actions,
-        card_pack=lobby.config.card_pack,
-        map_seed=lobby.config.map_seed,
-        max_rounds=lobby.config.max_rounds,
-        archetype_market_size=lobby.config.archetype_market_size,
-    )
-    game.host_id = lobby.host_id
-    game.lobby_code = code
-    execute_start_of_turn(game)
+        try:
+            grid_size = GridSize(lobby.config.grid_size)
+        except ValueError:
+            raise HTTPException(400, f"Invalid grid size: {lobby.config.grid_size}")
 
-    store = _get_store()
-    await store.put(game)
+        game = create_game(
+            grid_size, player_configs, registry,
+            test_mode=lobby.config.test_mode,
+            speed=lobby.config.speed,
+            vp_target=lobby.config.vp_target,
+            granted_actions=lobby.config.granted_actions,
+            card_pack=lobby.config.card_pack,
+            map_seed=lobby.config.map_seed,
+            max_rounds=lobby.config.max_rounds,
+            archetype_market_size=lobby.config.archetype_market_size,
+        )
+        game.host_id = lobby.host_id
+        game.lobby_code = code
+        execute_start_of_turn(game)
+
+        store = _get_store()
+        await store.put(game)
+    finally:
+        release_game_slot()
     lobby.game_id = game.id
     lobby.status = "started"
     _game_to_lobby[game.id] = code
@@ -1230,25 +1248,54 @@ async def handle_return_to_lobby(game_id: str, player_id: str, token: str) -> di
 # ── Lobby expiry background task ──────────────────────────
 
 
+async def expire_lobbies(now: Optional[float] = None) -> list[str]:
+    """Remove expired lobbies; returns their codes.
+
+    An unstarted lobby (waiting, or stuck in a countdown whose start failed)
+    expires after 15 minutes without activity. A started one
+    expires once its game has had no activity for 2 hours and nobody is
+    connected: the game stays in the DB (marked abandoned unless it
+    finished), and the lobby, its tokens and game mapping are dropped.
+    """
+    now = time.time() if now is None else now
+    expired: list[str] = []
+    for code, lobby in list(_lobbies.items()):
+        idle = now - lobby.last_activity
+        if lobby.status in ("waiting", "countdown") and idle > _LOBBY_EXPIRY_SECONDS:
+            _lobbies.pop(code, None)
+            lobby.status = "expired"
+            await manager.broadcast(code, {"type": "error", "message": "Lobby expired due to inactivity"})
+            for ws in manager.close_group(code):
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+        elif (
+            lobby.status == "started" and lobby.game_id
+            and idle > _STARTED_LOBBY_EXPIRY_SECONDS
+            and not manager.get_player_ids(lobby.game_id)
+        ):
+            _lobbies.pop(code, None)
+            lobby.status = "expired"
+            async with game_lock(lobby.game_id):
+                await _get_store().abandon(lobby.game_id)
+        else:
+            continue
+        for pid in lobby.players:
+            _tokens.pop((lobby.code, pid), None)
+        for game_id in [g for g, c in _game_to_lobby.items() if c == code]:
+            _game_to_lobby.pop(game_id, None)
+            _return_to_lobby_done.pop(game_id, None)
+        expired.append(code)
+        logger.info("Expired lobby %s", code)
+    return expired
+
+
 async def lobby_expiry_task() -> None:
     """Background task that removes expired lobbies every 60 seconds."""
     while True:
         await asyncio.sleep(_LOBBY_CHECK_INTERVAL)
-        now = time.time()
-        expired_codes = [
-            code for code, lobby in _lobbies.items()
-            if lobby.status == "waiting" and now - lobby.last_activity > _LOBBY_EXPIRY_SECONDS
-        ]
-        for code in expired_codes:
-            lobby = _lobbies.pop(code, None)
-            if lobby:
-                lobby.status = "expired"
-                await manager.broadcast(code, {"type": "error", "message": "Lobby expired due to inactivity"})
-                for ws in manager.close_group(code):
-                    try:
-                        await ws.close()
-                    except Exception:
-                        pass
-                for pid in lobby.players:
-                    _tokens.pop((lobby.code, pid), None)
-                logger.info("Expired lobby %s", code)
+        try:
+            await expire_lobbies()
+        except Exception:
+            logger.exception("Lobby expiry failed")

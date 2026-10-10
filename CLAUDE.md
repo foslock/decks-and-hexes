@@ -373,5 +373,11 @@ Card data files use YAML-style fields within markdown. Key fields:
 - Starting resources: **0**
 - Action slot hard cap: **none** (5 starting actions)
 - Base raid Rubble: **1 per raid** (`RAID_RUBBLE_CAP`)
+- Max live games per server process: **200** (`MAX_LIVE_GAMES` env var, `routes.py`) —
+  games held in memory (≈2 MB each). When full, finished games and ones idle 5+ min
+  are dropped from memory (they stay in the DB) before new games get a 503
+- Memory: finished games leave the cache after **10 min** idle, in-progress ones after
+  **30 min** (reloaded from the DB on return); unstarted lobbies expire after **15 min**
+  without activity, started ones after **2 h** with nobody connected
 - Objective VP reward: **2**
 - Objective reveal rounds: **3 / 4 / 5 / 6 / 7** (Small / Medium / Large / Mega / Ultra)

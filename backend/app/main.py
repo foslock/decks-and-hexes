@@ -6,15 +6,16 @@ import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.api.routes import router, _get_card_registry, init_routes
+from app.api.routes import router, _get_card_registry, game_cache_sweep_task, init_routes
 from app.api.lobby import lobby_router, init_lobby, lobby_expiry_task
 from app.models.game import Base
 from app.storage.engine import create_db_engine, is_sqlite
 from app.storage.analytics import AnalyticsRecorder
-from app.storage.game_store import GameStore
+from app.storage.game_store import GameConflictError, GameStore
 from app.storage.repository import GameRepository
 
 logger = logging.getLogger(__name__)
@@ -44,18 +45,28 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     init_routes(store, analytics)
     init_lobby(store, _get_card_registry)
 
-    # Start lobby expiry background task
-    task = asyncio.create_task(lobby_expiry_task())
+    # Background tasks: expire idle lobbies, drop idle games from memory
+    tasks = [
+        asyncio.create_task(lobby_expiry_task()),
+        asyncio.create_task(game_cache_sweep_task()),
+    ]
     logger.info("Card Clash backend started (DB: %s)", engine.url)
 
     yield
 
     # Shutdown
-    task.cancel()
+    for task in tasks:
+        task.cancel()
     await engine.dispose()
 
 
-app = FastAPI(title="Card Clash", version="0.2.7", lifespan=lifespan)
+app = FastAPI(title="Card Clash", version="0.2.8", lifespan=lifespan)
+
+
+@app.exception_handler(GameConflictError)
+async def game_conflict_handler(_request: Request, exc: GameConflictError) -> JSONResponse:
+    """A save lost a race with another writer: nothing was saved; refetch."""
+    return JSONResponse(status_code=409, content={"detail": "Game changed — please refresh"})
 
 # CORS — allow frontend origins (dev + Render)
 origins = [
