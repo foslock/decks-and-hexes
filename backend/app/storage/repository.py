@@ -199,11 +199,14 @@ class GameRepository:
             return new_version
 
     async def abandon(self, game_id: str) -> None:
-        """Mark a game as abandoned (e.g. all players left)."""
+        """Mark a game as abandoned (e.g. all players left).
+
+        Only an active game — a finished one keeps its result.
+        """
         async with self._session_factory() as session:
             stmt = (
                 update(GameRecord)
-                .where(GameRecord.id == game_id)
+                .where(GameRecord.id == game_id, GameRecord.status == "active")
                 .values(
                     status="abandoned",
                     updated_at=datetime.now(timezone.utc),

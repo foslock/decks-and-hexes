@@ -5,14 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import pickle
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.api.game_locks import game_lock, game_lock_in_use, locked_game_route
 from app.api.ws_manager import manager
-from app.api.lobby import get_visible_player_ids
+from app.api.lobby import get_lobby_for_game, get_visible_player_ids
 from app.data_loader.loader import load_all_cards
 from app.game_engine.card_packs import CARD_PACKS
 from app.game_engine.cards import Archetype
@@ -38,7 +40,7 @@ from app.game_engine.game_state import (
 )
 from app.game_engine.hex_grid import GridSize
 from app.storage.analytics import AnalyticsRecorder
-from app.storage.game_store import GameStore
+from app.storage.game_store import GameConflictError, GameStore
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +48,11 @@ router = APIRouter(prefix="/api")
 
 # Game storage — backed by DB with in-memory cache
 _store: GameStore | None = None
+# A CPU's whole buy phase must finish within this; stragglers are ended.
+CPU_BUY_TIMEOUT_SECONDS = 15.0
+
 # Track active CPU buy background tasks per game to detect orphaned buys
 _active_cpu_buy_tasks: dict[str, "asyncio.Task[None]"] = {}
-# Per-game locks to serialize concurrent CPU buy mutations
-_game_locks: dict[str, asyncio.Lock] = {}
-
-
-def _get_game_lock(game_id: str) -> asyncio.Lock:
-    """Get or create an asyncio lock for a game to serialize state mutations."""
-    if game_id not in _game_locks:
-        _game_locks[game_id] = asyncio.Lock()
-    return _game_locks[game_id]
 _analytics: AnalyticsRecorder | None = None
 _card_registry: dict[str, Any] | None = None
 
@@ -72,6 +68,122 @@ def _get_store() -> GameStore:
     if _store is None:
         raise RuntimeError("Routes not initialized — call init_routes() first")
     return _store
+
+
+# ── Cache eviction ───────────────────────────────────────────
+# Games are saved to the DB on every change, so the cache only holds games in
+# use. Idle ones are dropped and reloaded from the DB if anyone comes back.
+FINISHED_GAME_CACHE_SECONDS = 10 * 60   # game over, nobody looking
+IDLE_GAME_CACHE_SECONDS = 30 * 60       # in progress, no requests
+GAME_SWEEP_INTERVAL_SECONDS = 60
+
+
+def _evictable(game_id: str) -> bool:
+    """Not in use: no CPU buy task running and nothing holding its lock."""
+    task = _active_cpu_buy_tasks.get(game_id)
+    return not (task and not task.done()) and not game_lock_in_use(game_id)
+
+
+def evict_idle_games() -> list[str]:
+    """Drop finished and idle games from the cache; returns their ids.
+
+    If games reloaded from the DB pushed the cache past MAX_LIVE_GAMES, also
+    trims it back (see make_room_for_games).
+    """
+    store = _get_store()
+    evicted: list[str] = []
+    for game_id in store.cached_game_ids():
+        game = store.get_cached(game_id)
+        if game is None:
+            continue
+        limit = (
+            FINISHED_GAME_CACHE_SECONDS if game.current_phase == Phase.GAME_OVER
+            else IDLE_GAME_CACHE_SECONDS
+        )
+        if store.idle_seconds(game_id) < limit or not _evictable(game_id):
+            continue
+        store.evict(game_id)
+        evicted.append(game_id)
+    return evicted + make_room_for_games(0)
+
+
+# ── Live game cap ────────────────────────────────────────────
+# Each game in memory costs ~2 MB (more on big maps with many players), so
+# past MAX_LIVE_GAMES new games are refused instead of running out of memory.
+MAX_LIVE_GAMES = int(os.environ.get("MAX_LIVE_GAMES", "200"))
+# When full, in-progress games idle at least this long are dropped from memory
+# to make room (they reload from the DB if a player comes back).
+MAKE_ROOM_MIN_IDLE_SECONDS = 5 * 60
+SERVER_FULL_MESSAGE = "The server is full right now. Please try again in a few minutes."
+# Slots taken by games being created but not yet in the cache.
+_reserved_game_slots = 0
+
+
+def _live_game_count() -> int:
+    return len(_get_store().cached_game_ids()) + _reserved_game_slots
+
+
+def make_room_for_games(count: int) -> list[str]:
+    """Evict games until *count* more fit under MAX_LIVE_GAMES; returns the
+    evicted ids. Finished games go first, then in-progress ones idle at
+    least MAKE_ROOM_MIN_IDLE_SECONDS, longest idle first."""
+    store = _get_store()
+    excess = _live_game_count() + count - MAX_LIVE_GAMES
+    if excess <= 0:
+        return []
+    candidates: list[tuple[bool, float, str]] = []
+    for game_id in store.cached_game_ids():
+        game = store.get_cached(game_id)
+        if game is None or not _evictable(game_id):
+            continue
+        idle = store.idle_seconds(game_id)
+        finished = game.current_phase == Phase.GAME_OVER
+        if finished or idle >= MAKE_ROOM_MIN_IDLE_SECONDS:
+            candidates.append((not finished, -idle, game_id))
+    evicted = [game_id for _, _, game_id in sorted(candidates)[:excess]]
+    for game_id in evicted:
+        store.evict(game_id)
+    return evicted
+
+
+def has_room_for_game() -> bool:
+    """Whether one more game fits under MAX_LIVE_GAMES (making room if needed)."""
+    make_room_for_games(1)
+    if _live_game_count() < MAX_LIVE_GAMES:
+        return True
+    logger.warning("Server full: refusing a new game (%d live, max %d)",
+                   _live_game_count(), MAX_LIVE_GAMES)
+    return False
+
+
+def reserve_game_slot() -> bool:
+    """Claim room for one new game; False when the server is full. Pair with
+    release_game_slot() once the game is in the cache."""
+    global _reserved_game_slots
+    if not has_room_for_game():
+        return False
+    _reserved_game_slots += 1
+    return True
+
+
+def release_game_slot() -> None:
+    global _reserved_game_slots
+    _reserved_game_slots -= 1
+
+
+async def game_cache_sweep_task() -> None:
+    """Background task: evict idle games from the cache every minute."""
+    while True:
+        await asyncio.sleep(GAME_SWEEP_INTERVAL_SECONDS)
+        try:
+            evicted = evict_idle_games()
+            if evicted:
+                logger.info(
+                    "Evicted %d idle game(s) from memory (%d cached)",
+                    len(evicted), len(_get_store().cached_game_ids()),
+                )
+        except Exception:
+            logger.exception("Game cache sweep failed")
 
 
 def _get_card_registry() -> dict[str, Any]:
@@ -94,6 +206,11 @@ def _game_state_for_player(game: GameState, player_id: str) -> dict[str, Any]:
 
 async def _broadcast_state(game_id: str, game: GameState) -> None:
     """Broadcast game state to all connected players with proper visibility."""
+    # Every multiplayer change broadcasts, so this keeps a game's lobby from
+    # expiring while the game is being played.
+    lobby = get_lobby_for_game(game_id)
+    if lobby:
+        lobby.touch()
     await manager.broadcast_game_state(game_id, game, get_visible_ids=get_visible_player_ids)
 
 
@@ -195,11 +312,16 @@ async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
             cfg["cpu_noise"] = p["cpu_noise"]
         player_configs.append(cfg)
 
-    game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode, speed=req.speed)
-    # Auto-execute start of turn for round 1
-    execute_start_of_turn(game)
-    store = _get_store()
-    await store.put(game)
+    if not reserve_game_slot():
+        raise HTTPException(503, SERVER_FULL_MESSAGE)
+    try:
+        game = create_game(grid_size, player_configs, registry, seed=req.seed, test_mode=req.test_mode, speed=req.speed)
+        # Auto-execute start of turn for round 1
+        execute_start_of_turn(game)
+        store = _get_store()
+        await store.put(game)
+    finally:
+        release_game_slot()
 
     return {"game_id": game.id, "state": game.to_dict()}
 
@@ -217,6 +339,7 @@ async def get_game(game_id: str, player_id: Optional[str] = None) -> dict[str, A
 
 
 @router.post("/games/{game_id}/play")
+@locked_game_route
 async def play_card_route(game_id: str, req: PlayCardRequest) -> dict[str, Any]:
     """Play a card during Play phase."""
     store = _get_store()
@@ -267,6 +390,7 @@ class UndoCardRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/undo-card")
+@locked_game_route
 async def undo_card_route(game_id: str, req: UndoCardRequest) -> dict[str, Any]:
     """Undo a reversible planned action during Play phase."""
     store = _get_store()
@@ -286,6 +410,7 @@ async def undo_card_route(game_id: str, req: UndoCardRequest) -> dict[str, Any]:
 
 
 @router.post("/games/{game_id}/submit-discard")
+@locked_game_route
 async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[str, Any]:
     """Submit deferred discard choices (e.g. Regroup: draw first, then discard)."""
     store = _get_store()
@@ -305,6 +430,7 @@ async def submit_discard_route(game_id: str, req: SubmitDiscardRequest) -> dict[
 
 
 @router.post("/games/{game_id}/submit-search")
+@locked_game_route
 async def submit_search_route(game_id: str, req: SubmitSearchRequest) -> dict[str, Any]:
     """Submit deferred tutor/search selections (SEARCH_ZONE effects)."""
     store = _get_store()
@@ -324,6 +450,7 @@ async def submit_search_route(game_id: str, req: SubmitSearchRequest) -> dict[st
 
 
 @router.post("/games/{game_id}/submit-play")
+@locked_game_route
 async def submit_play_route(game_id: str, req: SubmitPlanRequest) -> dict[str, Any]:
     """Submit plan for a player."""
     store = _get_store()
@@ -347,6 +474,7 @@ async def submit_play_route(game_id: str, req: SubmitPlanRequest) -> dict[str, A
 
 
 @router.post("/games/{game_id}/advance-resolve")
+@locked_game_route
 async def advance_resolve_route(game_id: str, req: AdvanceResolveRequest) -> dict[str, Any]:
     """Player acknowledges resolve phase (animations done), advance to buy."""
     store = _get_store()
@@ -366,6 +494,7 @@ async def advance_resolve_route(game_id: str, req: AdvanceResolveRequest) -> dic
 
 
 @router.post("/games/{game_id}/buy")
+@locked_game_route
 async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
     """Buy a card during Buy phase."""
     store = _get_store()
@@ -411,6 +540,7 @@ async def buy_card_route(game_id: str, req: BuyCardRequest) -> dict[str, Any]:
 
 
 @router.post("/games/{game_id}/upgrade-card")
+@locked_game_route
 async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str, Any]:
     """Spend an upgrade credit to upgrade a card in hand during Play phase."""
     store = _get_store()
@@ -430,6 +560,7 @@ async def upgrade_card_route(game_id: str, req: UpgradeCardRequest) -> dict[str,
 
 
 @router.post("/games/{game_id}/reroll")
+@locked_game_route
 async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
     """Re-roll archetype market."""
     store = _get_store()
@@ -449,6 +580,7 @@ async def reroll_route(game_id: str, req: RerollRequest) -> dict[str, Any]:
 
 
 @router.post("/games/{game_id}/end-buy")
+@locked_game_route
 async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
     """End buy phase for a player."""
     store = _get_store()
@@ -468,6 +600,7 @@ async def end_buy_route(game_id: str, req: EndBuyRequest) -> dict[str, Any]:
 
 
 @router.post("/games/{game_id}/process-cpu-buys")
+@locked_game_route
 async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
     """Process CPU buyers during the buy phase.
 
@@ -498,10 +631,7 @@ async def process_cpu_buys_route(game_id: str) -> dict[str, Any]:
             return {"message": "Bot buys already in progress", "state": game.to_dict()}
         task = asyncio.create_task(_process_cpu_buys_with_cursors(game_id))
         _active_cpu_buy_tasks[game_id] = task
-        def _cleanup(_t: asyncio.Task[None]) -> None:
-            _active_cpu_buy_tasks.pop(game_id, None)
-            _game_locks.pop(game_id, None)
-        task.add_done_callback(_cleanup)
+        task.add_done_callback(lambda _t: _active_cpu_buy_tasks.pop(game_id, None))
         return {"message": "Bot buys started (async)", "state": game.to_dict()}
 
     # Hot-seat: process instantly
@@ -515,11 +645,9 @@ async def _process_cpu_buys_with_cursors(game_id: str) -> None:
 
     All CPU players buy concurrently — each runs as an independent coroutine
     that re-fetches game state before every purchase to stay in sync.
-    If the task crashes or is cancelled, a finally block ensures all pending
-    CPU players get end_buy_phase() so the game doesn't get stuck.
+    If they time out or crash, every CPU still buying is ended
+    (end_buy_phase) so the round can't get stuck waiting on them.
     """
-    from app.game_engine.cpu_player import CPUPlayer
-
     store = _get_store()
     game = await store.get(game_id)
     if not game or game.current_phase != Phase.BUY:
@@ -535,27 +663,40 @@ async def _process_cpu_buys_with_cursors(game_id: str) -> None:
         return
 
     try:
-        # Hard timeout of 15s prevents infinite stalls
+        # Hard timeout prevents infinite stalls
         await asyncio.wait_for(
             asyncio.gather(*[_process_single_cpu_buy(game_id, pid) for pid in cpu_pids]),
-            timeout=15.0,
+            timeout=CPU_BUY_TIMEOUT_SECONDS,
         )
+        return  # All CPUs finished normally
     except asyncio.TimeoutError:
         logger.warning("CPU buy task timed out for game %s — forcing completion", game_id)
     except Exception:
         logger.exception("CPU buy task failed for game %s — forcing completion", game_id)
-    else:
-        return  # All CPUs finished normally
-        # Force-complete any CPUs that didn't finish
-        lock = _get_game_lock(game_id)
-        async with lock:
-            game = await store.get(game_id)
-            if game and game.current_phase == Phase.BUY:
-                for pid in cpu_pids:
-                    if pid not in game.players_done_buying:
-                        end_buy_phase(game, pid)
+    await _force_end_cpu_buys(game_id, cpu_pids)
+
+
+async def _force_end_cpu_buys(game_id: str, cpu_pids: list[str]) -> None:
+    """End the buy phase for any of *cpu_pids* still buying."""
+    store = _get_store()
+    # A save that loses a race evicts the game; the retry reloads it from the DB.
+    for attempt in range(2):
+        try:
+            async with game_lock(game_id):
+                game = await store.get(game_id)
+                if not game or game.current_phase != Phase.BUY:
+                    return
+                pending = [pid for pid in cpu_pids if pid not in game.players_done_buying]
+                if not pending:
+                    return
+                for pid in pending:
+                    end_buy_phase(game, pid)
                 await store.save(game)
                 await _broadcast_state(game_id, game)
+                return
+        except GameConflictError:
+            if attempt:
+                logger.exception("Could not force-end CPU buys for game %s", game_id)
 
 
 async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
@@ -598,17 +739,19 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
         if not _all_humans_done(g):
             await asyncio.sleep(min(seconds, _remaining()))
 
-    lock = _get_game_lock(game_id)
+    lock = game_lock(game_id)
 
-    # Reroll market if desirable — needs lock for state mutation
+    # Reroll market if desirable
     if cpu.should_reroll_market(game):
-        async with lock:
-            game = await store.get(game_id)
-            if not game or game.current_phase != Phase.BUY:
-                return
-            reroll_market(game, pid)
-            await store.save(game)
-            await _broadcast_state(game_id, game)
+        async def reroll(g: GameState) -> GameState:
+            reroll_market(g, pid)
+            await store.save(g)
+            await _broadcast_state(game_id, g)
+            return g
+        stepped = await _cpu_buy_step(game_id, reroll)
+        if stepped is None:
+            return
+        game = stepped
         await _cpu_sleep(game, 0.5)
 
     # Plan purchases under lock (reads shared state like shared market)
@@ -659,13 +802,10 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
                 })
                 await asyncio.sleep(min(0.3 + random.random() * 0.4, _remaining()))
 
-        # Execute purchase under lock — atomic read-mutate-save
-        async with lock:
-            game = await store.get(game_id)
-            if not game or game.current_phase != Phase.BUY:
-                return
+        # Execute purchase — atomic read-mutate-save
+        async def buy(g: GameState) -> GameState:
             success, _msg = buy_card(
-                game, pid, purchase["source"], purchase.get("card_id", ""),
+                g, pid, purchase["source"], purchase.get("card_id", ""),
                 cpu_reasoning=purchase.get("cpu_reasoning"),
             )
             if success:
@@ -682,8 +822,13 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
                     "type": "cursor_click",
                     "player_id": pid,
                 })
-                await store.save(game)
-                await _broadcast_state(game_id, game)
+                await store.save(g)
+                await _broadcast_state(game_id, g)
+            return g
+        stepped = await _cpu_buy_step(game_id, buy)
+        if stepped is None:
+            return
+        game = stepped
         await _cpu_sleep(game, 0.3)
 
     # Clear cursor and signal done
@@ -696,13 +841,32 @@ async def _process_single_cpu_buy(game_id: str, pid: str) -> None:
         "source": None,
     })
 
-    async with lock:
-        game = await store.get(game_id)
-        if not game or game.current_phase != Phase.BUY:
-            return
-        end_buy_phase(game, pid)
-        await store.save(game)
-        await _broadcast_state(game_id, game)
+    async def end(g: GameState) -> GameState:
+        end_buy_phase(g, pid)
+        await store.save(g)
+        await _broadcast_state(game_id, g)
+        return g
+    await _cpu_buy_step(game_id, end)
+
+
+async def _cpu_buy_step(
+    game_id: str, step: Callable[[GameState], Awaitable[GameState]],
+) -> Optional[GameState]:
+    """Run one read-mutate-save step of a CPU's buy phase under the game
+    lock, if the game is still buying (None if not).
+
+    Shielded from cancellation: the buy-phase timeout cancels the CPU
+    coroutines, and a step cancelled mid-save can commit to the DB without
+    the cache learning the new version, so the next save would conflict.
+    The step runs to the end holding the lock, so the force-end waits for it.
+    """
+    async def run() -> Optional[GameState]:
+        async with game_lock(game_id):
+            game = await _get_store().get(game_id)
+            if not game or game.current_phase != Phase.BUY:
+                return None
+            return await step(game)
+    return await asyncio.shield(run())
 
 
 def _pick_cpu_decoy_hovers(
@@ -737,6 +901,7 @@ def _pick_cpu_decoy_hovers(
 
 
 @router.post("/games/{game_id}/advance-upkeep")
+@locked_game_route
 async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
     """Advance past the Upkeep phase to Play phase."""
     store = _get_store()
@@ -757,6 +922,7 @@ async def advance_upkeep_route(game_id: str) -> dict[str, Any]:
 
 
 @router.post("/games/{game_id}/end-turn")
+@locked_game_route
 async def end_turn_route(game_id: str, req: EndTurnRequest) -> dict[str, Any]:
     """End the current turn for a player (delegates to end_buy_phase)."""
     store = _get_store()
@@ -921,6 +1087,7 @@ class TestSetStatsRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/test/give-card")
+@locked_game_route
 async def test_give_card(game_id: str, req: TestGiveCardRequest) -> dict[str, Any]:
     """Test mode: add a copy of any card from the registry to a player's hand."""
     game = await _get_store().get(game_id)
@@ -956,6 +1123,7 @@ async def test_give_card(game_id: str, req: TestGiveCardRequest) -> dict[str, An
 
 
 @router.post("/games/{game_id}/test/set-stats")
+@locked_game_route
 async def test_set_stats(game_id: str, req: TestSetStatsRequest) -> dict[str, Any]:
     """Test mode: set VP and/or resources for a player."""
     game = await _get_store().get(game_id)
@@ -992,6 +1160,7 @@ class TestTrashCardRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/test/trash-card")
+@locked_game_route
 async def test_trash_card(game_id: str, req: TestTrashCardRequest) -> dict[str, Any]:
     """Test mode: trash (permanently remove) a card from a player's hand."""
     game = await _get_store().get(game_id)
@@ -1026,6 +1195,7 @@ class TestPlayerRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/test/discard-card")
+@locked_game_route
 async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[str, Any]:
     """Test mode: discard a card from a player's hand to their discard pile."""
     game = await _get_store().get(game_id)
@@ -1050,6 +1220,7 @@ async def test_discard_card(game_id: str, req: TestDiscardCardRequest) -> dict[s
 
 
 @router.post("/games/{game_id}/test/draw-card")
+@locked_game_route
 async def test_draw_card(game_id: str, req: TestPlayerRequest) -> dict[str, Any]:
     """Test mode: draw a card from the player's draw pile into their hand."""
     game = await _get_store().get(game_id)
@@ -1075,6 +1246,7 @@ async def test_draw_card(game_id: str, req: TestPlayerRequest) -> dict[str, Any]
 
 
 @router.post("/games/{game_id}/test/discard-hand")
+@locked_game_route
 async def test_discard_hand(game_id: str, req: TestPlayerRequest) -> dict[str, Any]:
     """Test mode: discard all cards in the player's hand to their discard pile."""
     game = await _get_store().get(game_id)
@@ -1102,6 +1274,7 @@ class TestSetRoundRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/test/set-round")
+@locked_game_route
 async def test_set_round(game_id: str, req: TestSetRoundRequest) -> dict[str, Any]:
     """Test mode: set the current round number."""
     game = await _get_store().get(game_id)
@@ -1130,6 +1303,7 @@ class TestSetTileOwnerRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/test/set-tile-owner")
+@locked_game_route
 async def test_set_tile_owner(game_id: str, req: TestSetTileOwnerRequest) -> dict[str, Any]:
     """Test mode: cycle tile ownership (shift+click from frontend)."""
     game = await _get_store().get(game_id)
@@ -1178,6 +1352,7 @@ class EndGameRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/leave")
+@locked_game_route
 async def leave_game_route(game_id: str, req: LeaveGameRequest) -> dict[str, Any]:
     """Player leaves the game mid-play."""
     from app.api.lobby import handle_leave_game
@@ -1185,6 +1360,7 @@ async def leave_game_route(game_id: str, req: LeaveGameRequest) -> dict[str, Any
 
 
 @router.post("/games/{game_id}/end")
+@locked_game_route
 async def end_game_route(game_id: str, req: EndGameRequest) -> dict[str, Any]:
     """Host ends the game for all players."""
     from app.api.lobby import handle_end_game
@@ -1200,6 +1376,7 @@ class ReturnToLobbyRequest(BaseModel):
 
 
 @router.post("/games/{game_id}/return-to-lobby")
+@locked_game_route
 async def return_to_lobby_route(game_id: str, req: ReturnToLobbyRequest) -> dict[str, Any]:
     """Return a player to the lobby after a game ends."""
     from app.api.lobby import handle_return_to_lobby
