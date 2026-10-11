@@ -17,6 +17,7 @@ cards:
 
   - id: neutral_explore
     name: Explore
+    set: core
     name_upgraded: Explore+
     type: Claim
     buy_cost: null
@@ -26,25 +27,26 @@ cards:
     reversible: true
     power: 0
     unoccupied_only: true
-    upgraded_unoccupied_only: false
-    effect: "Claim: Power 0 on any adjacent unoccupied tile."
-    effect_upgraded: "Claim: Power 1. Draw 1 card."
-    upgraded_draw_cards: 1
+    defenseless_only: true
+    multi_target_count: 0
+    upgraded_multi_target_count: 1
+    effect: "Claim 1 defenseless, unoccupied tile next to your land."
+    effect_upgraded: "Claim up to 2 defenseless, unoccupied tiles next to your land."
     trash_on_use: false
     note: "The baseline scouting action. Claims uncontested neutral tiles; loses any contested claim. Every archetype starts with copies of this card."
 
   - id: neutral_gather
     name: Gather
+    set: core
     name_upgraded: Gather+
     type: Engine
     buy_cost: null
 
     starter: true
     action_return: 0
-    upgraded_action_return: 1
     power: 0
     effect: "Gain 2 resources."
-    effect_upgraded: "Gain 3 resources. Gain 1 action."
+    effect_upgraded: "Gain 3 resources."
     resource_gain: 2
     upgraded_resource_gain: 3
     trash_on_use: false
@@ -54,6 +56,7 @@ cards:
 
   - id: rubble
     name: Rubble
+    set: core
     name_upgraded: null
     type: Passive
     buy_cost: null
@@ -70,6 +73,7 @@ cards:
 
   - id: spoils
     name: Spoils
+    set: core
     name_upgraded: null
     type: Passive
     buy_cost: null
@@ -88,9 +92,10 @@ cards:
 
   - id: neutral_mercenary
     name: Mercenary
+    set: core
     name_upgraded: Mercenary+
     type: Claim
-    buy_cost: 5
+    buy_cost: 3
 
     action_return: 0
     reversible: true
@@ -106,6 +111,7 @@ cards:
 
   - id: neutral_land_grant
     name: Land Grant
+    set: core
     type: Passive
     buy_cost: 7
 
@@ -120,6 +126,7 @@ cards:
 
   - id: neutral_sabotage
     name: Sabotage
+    set: set_aside
     name_upgraded: Sabotage+
     type: Engine
     buy_cost: 4
@@ -134,6 +141,7 @@ cards:
 
   - id: neutral_cease_fire
     name: Cease Fire
+    set: set_aside
     name_upgraded: Cease Fire+
     type: Engine
     buy_cost: 3
@@ -151,9 +159,10 @@ cards:
 
   - id: neutral_road_builder
     name: Road Builder
+    set: core
     name_upgraded: Road Builder+
     type: Claim
-    buy_cost: 3
+    buy_cost: 4
 
     action_return: 0
     reversible: true
@@ -172,14 +181,15 @@ cards:
 
   - id: neutral_prospector
     name: Prospector
+    set: core
     name_upgraded: Prospector+
     type: Engine
     buy_cost: 3
 
-    action_return: 0
+    action_return: 1
     power: 0
-    effect: "Gain 6 resources. Gain a Debt."
-    effect_upgraded: "Gain 7 resources. Gain a Debt."
+    effect: "Gain 6 resources. Gain 1 action. Gain a Debt."
+    effect_upgraded: "Gain 7 resources. Gain 1 action. Gain a Debt."
     trash_on_use: false
 
     effects:
@@ -189,6 +199,7 @@ cards:
 
   - id: neutral_surveyor
     name: Surveyor
+    set: set_aside
     name_upgraded: Surveyor+
     type: Engine
     buy_cost: 2
@@ -206,6 +217,7 @@ cards:
 
   - id: neutral_militia
     name: Militia
+    set: set_aside
     name_upgraded: Militia+
     type: Claim
     buy_cost: 3
@@ -226,6 +238,7 @@ cards:
 
   - id: neutral_eminent_domain
     name: Eminent Domain
+    set: set_aside
     name_upgraded: Eminent Domain+
     type: Claim
     buy_cost: 5
@@ -242,16 +255,18 @@ cards:
 
   - id: neutral_fortified_post
     name: Barricade
+    set: core
     name_upgraded: Barricade+
     type: Defense
+    draw_cards: 1
     buy_cost: 5
 
-    action_return: 0
-    reversible: true
+    action_return: 1
+    reversible: false
     power: 0
     defense_bonus: 0
-    effect: "One tile you own permanently gains +2 defense until captured."
-    effect_upgraded: "One tile you own permanently gains +3 defense until captured."
+    effect: "One tile you own permanently gains +2 defense until captured. Draw 1 card. Gain 1 action."
+    effect_upgraded: "One tile you own permanently gains +3 defense until captured. Draw 1 card. Gain 1 action."
     trash_on_use: false
     effects:
       - type: permanent_defense
@@ -261,8 +276,10 @@ cards:
 
   - id: neutral_palisade
     name: Palisade
+    set: set_aside
     name_upgraded: Palisade+
     type: Defense
+    reversible: false
     buy_cost: 3
 
     action_return: 0
@@ -270,15 +287,17 @@ cards:
     defense_bonus: 3
     upgraded_defense_bonus: 5
     draw_cards: 1
-    upgraded_draw_cards: 1
     effect: "One tile you own gains +3 defense this round. Draw 1 card."
     effect_upgraded: "One tile you own gains +5 defense this round. Draw 1 card."
     trash_on_use: false
 
   - id: neutral_moat
     name: Moat
+    set: set_aside
     name_upgraded: Moat+
     type: Defense
+    draw_cards: 0
+    reversible: false
     buy_cost: 4
 
     action_return: 1
@@ -293,47 +312,45 @@ cards:
 
   - id: neutral_forced_march
     name: Forced March
+    set: set_aside
     name_upgraded: Forced March+
     type: Engine
     buy_cost: 3
 
     action_return: 2
+    upgraded_action_return: 3
     power: 0
     effect: "Gain 2 actions. All other players gain 1 extra action next round."
-    effect_upgraded: "Gain 2 actions."
+    effect_upgraded: "Gain 3 actions. All other players gain 1 extra action next round."
     trash_on_use: false
     note: "The shared action gain creates diplomatic tension — upgrading removes the downside entirely."
     effects:
       - type: grant_actions_next_turn
         value: 1
-        upgraded_value: 0
         timing: on_resolution
         target: all_others
 
   - id: neutral_rally_cry
     name: Rally Cry
+    set: core
     name_upgraded: Rally Cry+
     type: Engine
-    buy_cost: 5
+    buy_cost: 3
 
     action_return: 0
     power: 0
-    draw_cards: 0
-    upgraded_draw_cards: 1
-    effect: "All Claim cards in your hand gain Stackable this round. Trash this card."
-    effect_upgraded: "All Claim cards in your hand gain Stackable this round. Your next 5 Claims this round each get +1 power. Draw 1 card. Trash this card."
+    draw_cards: 1
+    upgraded_draw_cards: 2
+    effect: "All Claim cards in your hand gain Stackable this round. Draw 1 card. Trash this card."
+    effect_upgraded: "All Claim cards in your hand gain Stackable this round. Draw 2 cards. Trash this card."
     trash_on_use: true
     effects:
       - type: grant_stackable
         timing: immediate
-      - type: claim_buff_next_n
-        value: 0
-        upgraded_value: 5
-        timing: immediate
-        metadata: {power_bonus: 1, draw_next_round_on_success: 0}
 
   - id: neutral_war_bonds
     name: Tithe
+    set: core
     name_upgraded: Tithe+
     type: Engine
     buy_cost: 3
@@ -350,6 +367,7 @@ cards:
 
   - id: neutral_reduce
     name: Cull
+    set: core
     name_upgraded: Cull+
     type: Engine
     buy_cost: 2
@@ -369,6 +387,7 @@ cards:
 
   - id: neutral_recruit
     name: Levy
+    set: core
     name_upgraded: Levy+
     type: Claim
     buy_cost: 2
@@ -381,6 +400,7 @@ cards:
 
   - id: neutral_conscription
     name: Muster
+    set: core
     name_upgraded: Muster+
     type: Engine
     buy_cost: 4
@@ -395,25 +415,27 @@ cards:
 
   - id: neutral_watchtower
     name: Watchtower
+    set: core
     name_upgraded: Watchtower+
     type: Defense
-    buy_cost: 2
+    reversible: false
+    buy_cost: 3
 
     action_return: 1
     power: 0
     defense_bonus: 2
     upgraded_defense_bonus: 3
-    draw_cards: 0
-    upgraded_draw_cards: 1
-    effect: "One tile you own gains +2 defense this round. Gain 1 action."
+    draw_cards: 1
+    effect: "One tile you own gains +2 defense this round. Draw 1 card. Gain 1 action."
     effect_upgraded: "One tile you own gains +3 defense this round. Draw 1 card. Gain 1 action."
     trash_on_use: false
 
   - id: neutral_siege_tower
     name: Siege Tower
+    set: core
     name_upgraded: Siege Tower+
     type: Claim
-    buy_cost: 9
+    buy_cost: 8
 
     action_return: 0
     reversible: true
@@ -431,6 +453,7 @@ cards:
 
   - id: neutral_conqueror
     name: Conqueror
+    set: set_aside
     name_upgraded: Conqueror+
     type: Claim
     buy_cost: 7
@@ -441,35 +464,39 @@ cards:
     unique: true
     power: 5
     upgraded_power: 6
-    effect: "Claim: Power 5. Ignores temporary defense bonuses on targeted tile. Costs 2 actions to play."
-    effect_upgraded: "Claim: Power 6. Ignores temporary defense bonuses on targeted tile. Costs 2 actions to play."
+    effect: "Claim: Power 5. +2 power if the target tile has a defense bonus (from Defense cards or permanent defense). Costs 2 actions to play."
+    effect_upgraded: "Claim: Power 6. +2 power if the target tile has a defense bonus (from Defense cards or permanent defense). Costs 2 actions to play."
     trash_on_use: false
     note: "Premium anti-defense finisher. Unique — you may own only one copy. Bypasses round-based defense cards (Fortify, Watchtower, Moat, etc.) but still respects intrinsic terrain defense and permanent fortifications (Entrench, Barricade, Twin Cities)."
 
     effects:
-      - type: ignore_defense
+      - type: power_modifier
+        value: 2
         timing: on_resolution
+        condition: if_target_has_defense
 
   - id: neutral_reclaim
     name: Reclaim
+    set: set_aside
     name_upgraded: Reclaim+
     type: Engine
     buy_cost: 3
 
     action_return: 0
     power: 0
-    effect: "Trash 1 card from your hand. If you did, gain resources equal to half its buy cost (rounded down)."
-    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half its buy cost (rounded down) +1."
+    effect: "Trash 1 card from your hand. If you did, gain resources equal to half its buy cost (rounded down), plus 1."
+    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half its buy cost (rounded down), plus 2."
     trash_on_use: false
     effects:
       - type: trash_gain_buy_cost
         value: 1
         timing: immediate
         requires_choice: true
-        metadata: {optional: true, upgrade_bonus: 1}
+        metadata: {optional: true, bonus: 1, upgraded_bonus: 2}
 
   - id: neutral_diplomat
     name: Diplomat
+    set: set_aside
     name_upgraded: Diplomat+
     type: Engine
     buy_cost: 5
@@ -490,6 +517,7 @@ cards:
 
   - id: neutral_spyglass
     name: Spyglass
+    set: set_aside
     name_upgraded: Spyglass+
     type: Engine
     buy_cost: 1
@@ -499,7 +527,7 @@ cards:
     draw_cards: 1
     upgraded_draw_cards: 1
     effect: "Draw 1 card. If you have 3 or fewer cards in hand after drawing, gain 1 action."
-    effect_upgraded: "Draw 1 card. If you have 3 or fewer cards in hand after drawing, gain 1 action and 1 resource."
+    effect_upgraded: "Draw 1 card. If you have 4 or fewer cards in hand after drawing, gain 1 action."
     trash_on_use: false
     effects:
       - type: conditional_action
@@ -507,10 +535,12 @@ cards:
         value: 1
         condition: hand_size_lte
         condition_threshold: 3
+        metadata: {upgraded_threshold: 4}
     note: "Cheap draw that rewards spending your hand. Play your actions first, then refuel with Spyglass for a bonus action."
 
   - id: neutral_dividends
     name: Dividends
+    set: set_aside
     name_upgraded: Dividends+
     type: Engine
     buy_cost: 4
@@ -518,19 +548,20 @@ cards:
     action_return: 0
     power: 0
     draw_cards: 0
-    upgraded_draw_cards: 1
     effect: "Gain 1 resource for every 2 resources you already have (rounded down, minimum 1)."
-    effect_upgraded: "Draw 1 card. Gain 1 resource for every 2 resources you already have (rounded down, minimum 1)."
+    effect_upgraded: "Gain 1 resource for every 2 resources you already have (rounded down, minimum 3)."
     trash_on_use: false
     effects:
       - type: resource_scaling
         timing: immediate
         value: 2
         condition: per_resources_held
+        metadata: {min: 1, upgraded_min: 3}
     note: "Rewards banking resources instead of spending them every round. Synergizes with Prospector, Tithe, and the Hoarder passive."
 
   - id: neutral_cartographer
     name: Cartographer
+    set: set_aside
     name_upgraded: Cartographer+
     type: Engine
     buy_cost: 3
@@ -548,6 +579,7 @@ cards:
 
   - id: neutral_tax_collector
     name: Tax Collector
+    set: core
     name_upgraded: Tax Collector+
     type: Engine
     buy_cost: 3
@@ -566,6 +598,7 @@ cards:
 
   - id: neutral_mobilize
     name: Mobilize
+    set: set_aside
     name_upgraded: Mobilize+
     type: Engine
     buy_cost: 4
@@ -573,27 +606,27 @@ cards:
     action_return: 0
     power: 0
     effect: "Gain 1 action for each other card you've played this round (max 3). Trash this card."
-    effect_upgraded: "Gain 1 action for each other card you've played this round (max 3). Draw 1 card. Trash this card."
+    effect_upgraded: "Gain 1 action for each other card you've played this round (max 4). Trash this card."
     trash_on_use: true
     effects:
       - type: actions_per_cards_played
         timing: immediate
         value: 1
-        metadata: {max: 3, upgraded_max: 3}
+        metadata: {max: 3, upgraded_max: 4}
     note: "The combo payoff card. Set up with cheap action-neutral cards, then Mobilize for an explosive round. Trash-on-use prevents recurring abuse."
 
   - id: neutral_ambush
     name: Ambush
+    set: core
     name_upgraded: Ambush+
     type: Claim
-    buy_cost: 4
+    buy_cost: 5
 
     action_return: 0
     reversible: true
     power: 2
-    upgraded_resource_gain: 1
     effect: "Claim: Power 2. If the target tile is owned by an opponent or also claimed by an opponent this round, power is 4 instead."
-    effect_upgraded: "Claim: Power 2. If the target tile is owned by an opponent or also claimed by an opponent this round, power is 5 instead. Gain 1 resource."
+    effect_upgraded: "Claim: Power 2. If the target tile is owned by an opponent or also claimed by an opponent this round, power is 5 instead."
     trash_on_use: false
     effects:
       - type: power_modifier
@@ -605,6 +638,7 @@ cards:
 
   - id: neutral_supply_depot
     name: Supply Depot
+    set: set_aside
     name_upgraded: Supply Depot+
     type: Engine
     buy_cost: 6
@@ -612,12 +646,12 @@ cards:
     action_return: 0
     power: 0
     effect: "At the start of your next round, draw 2 cards and gain 3 resources."
-    effect_upgraded: "At the start of your next round, draw 2 cards, gain 4 resources, and gain 1 action."
+    effect_upgraded: "At the start of your next round, draw 2 cards and gain 4 resources."
     trash_on_use: false
     effects:
       - type: next_turn_bonus
         timing: on_resolution
-        metadata: {draw: 2, resources: 3, upgraded_draw: 2, upgraded_resources: 4, upgraded_actions: 1}
+        metadata: {draw: 2, resources: 3, upgraded_draw: 2, upgraded_resources: 4}
     note: "Invest an action now for a better next round. The upgraded version's extra action is particularly strong for setting up big combo rounds."
 
   # ── TUTOR / SEARCH CARDS ──────────────────────────────────────────────
@@ -631,6 +665,7 @@ cards:
 
   - id: neutral_salvage
     name: Salvage
+    set: core
     name_upgraded: Salvage+
     type: Engine
     buy_cost: 3
@@ -654,6 +689,7 @@ cards:
 
   - id: neutral_foresight
     name: Foresight
+    set: set_aside
     name_upgraded: Foresight+
     type: Engine
     buy_cost: 7
@@ -678,6 +714,7 @@ cards:
 
   - id: neutral_redemption
     name: Redemption
+    set: set_aside
     name_upgraded: Redemption+
     type: Engine
     buy_cost: 5
@@ -685,12 +722,12 @@ cards:
     action_return: 0
     power: 0
     trash_on_use: true
-    upgraded_draw_cards: 1
     effect: "Search your trash for 1 card and put it into your hand. Trash this card."
-    effect_upgraded: "Search your trash for 1 card and put it into your hand. Draw 1 card. Trash this card."
+    effect_upgraded: "Search your trash for 2 cards and put them into your hand. Trash this card."
     effects:
       - type: search_zone
         value: 1
+        upgraded_value: 2
         timing: immediate
         requires_choice: true
         metadata:
@@ -701,6 +738,7 @@ cards:
 
   - id: neutral_recall
     name: Recall
+    set: set_aside
     name_upgraded: Recall+
     type: Engine
     buy_cost: 2
@@ -724,6 +762,7 @@ cards:
 
   - id: neutral_caravan
     name: Caravan
+    set: set_aside
     name_upgraded: Caravan+
     type: Engine
     buy_cost: 4
@@ -745,6 +784,7 @@ cards:
 
   - id: neutral_sift
     name: Sift
+    set: set_aside
     name_upgraded: Sift+
     type: Engine
     buy_cost: 2

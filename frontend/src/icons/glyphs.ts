@@ -57,6 +57,9 @@ const SWORD_MIRROR =
   'M1.78 1.78 L2.66 4.85 L8.46 10.65 L7.79 11.33 L7.79 11.96 L8.43 12.60 L9.06 12.60 L10.12 11.54 L11.61 13.02 L13.02 11.61 L11.54 10.12 L12.60 9.06 L12.60 8.43 L11.96 7.79 L11.33 7.79 L10.65 8.46 L4.85 2.66 Z';
 const SWORD_MIRROR_POMMEL = 'M12.81 11.40 L14.23 12.81 L12.81 14.23 L11.40 12.81 Z';
 const STAR = 'M8 0.95 L9.85 6 L15.23 6.2 L11 9.52 L12.47 14.7 L8 11.7 L3.53 14.7 L5 9.52 L0.77 6.2 L6.15 6 Z';
+/** Three points over a band, a knockout line between them. */
+const CROWN_POINTS = 'M0.9 3.9 L4.9 7.7 L8 1.4 L11.1 7.7 L15.1 3.9 L13.6 11.1 H2.4 Z';
+const CROWN_BAND = ' M2.4 12.7 H13.6 V15 H2.4 Z';
 const GEAR =
   'M13.48 8.46 L15.3 9.73 L14.38 11.94 L12.2 11.55 L11.55 12.2 L11.94 14.38 L9.73 15.3 L8.46 13.48 L7.54 13.48 L6.27 15.3 L4.06 14.38 L4.45 12.2 L3.8 11.55 L1.62 11.94 L0.7 9.73 L2.52 8.46 L2.52 7.54 L0.7 6.27 L1.62 4.06 L3.8 4.45 L4.45 3.8 L4.06 1.62 L6.27 0.7 L7.54 2.52 L8.46 2.52 L9.73 0.7 L11.94 1.62 L11.55 3.8 L12.2 4.45 L14.38 4.06 L15.3 6.27 L13.48 7.54 Z';
 const HELM =
@@ -124,6 +127,15 @@ export const GLYPHS = {
       d: `${STAR} M8 5.89 L8.65 7.66 L10.53 7.73 L9.05 8.89 L9.56 10.7 L8 9.65 L6.44 10.7 L6.95 8.89 L5.47 7.73 L7.35 7.66 Z`,
       evenOdd: true,
     }],
+  },
+  // The solo overworld's towns (levels): a crown, so they don't read as VP.
+  crown: {
+    label: 'Town (cleared)', group: 'board',
+    layers: [{ d: CROWN_POINTS + CROWN_BAND }],
+  },
+  crownOutline: {
+    label: 'Town', group: 'board',
+    layers: [{ d: `${CROWN_POINTS} M5.6 9.3 L8 6.8 L10.4 9.3 Z${CROWN_BAND}`, evenOdd: true }],
   },
   tile: {
     label: 'Tile', group: 'board',

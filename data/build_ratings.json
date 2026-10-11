@@ -1,0 +1,55 @@
+{
+ "border_war": {},
+ "deep_roots": {},
+ "far_reaches": {},
+ "first_clash": {
+  "bastion": {
+   "large": 0.44
+  },
+  "big_guns": {
+   "large": 0.273
+  },
+  "blitzkrieg": {
+   "large": 0.67
+  },
+  "discipline": {
+   "large": 0.73
+  },
+  "disciplined_climb": {
+   "large": 0.615
+  },
+  "drone_tide": {
+   "large": 0.735
+  },
+  "encircle": {
+   "large": 0.677
+  },
+  "horde": {
+   "large": 0.68
+  },
+  "levy_flood": {
+   "large": 0.535
+  },
+  "mountaineers": {
+   "large": 0.568
+  },
+  "outpost_line": {
+   "large": 0.393
+  },
+  "plunder": {
+   "large": 0.642
+  },
+  "shock_troops": {
+   "large": 0.632
+  },
+  "siege_line": {
+   "large": 0.735
+  },
+  "stronghold": {
+   "large": 0.443
+  },
+  "tidewatch": {
+   "large": 0.688
+  }
+ }
+}

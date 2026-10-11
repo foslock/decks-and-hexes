@@ -84,6 +84,10 @@ class ValuationTuning:
     draw_mult: float = 1.0       # scales card-draw value
     vp_re: float = VP_RE         # resource-equivalent of one VP
     upgrade_mult: float = 1.0    # scales upgrade gains
+    # Whether the player plans stacked claims (DifficultyProfile
+    # combined_stack_scoring). One that doesn't rarely stacks on purpose, so
+    # a card's stacking extras are worth nothing to it.
+    stack_aware: bool = True
 
 
 DEFAULT_TUNING = ValuationTuning()
@@ -300,9 +304,12 @@ def estimated_claim_power(card: Card, ctx: ValuationContext) -> float:
             elif e.condition == ConditionType.IF_BRIDGES_TERRITORY:
                 # Road Builder: a bridging target is uncommon; mostly base power.
                 power += ev * 0.15
+            elif e.condition == ConditionType.IF_PLAYED_CLAIM_THIS_TURN:
+                # Strike Team: almost every hand holds another Claim (Explore).
+                power += ev * 0.9
             else:
                 power += ev * 0.5
-        elif e.type == EffectType.STACKING_POWER_BONUS:
+        elif e.type == EffectType.STACKING_POWER_BONUS and ctx.tuning.stack_aware:
             power += e.effective_value(card.is_upgraded) * 0.5
     return power
 
@@ -325,7 +332,7 @@ def _claim_value(card: Card, ctx: ValuationContext) -> float:
 
     if card.effective_unoccupied_only:
         v *= 0.55
-    if card.stackable:
+    if card.stackable and ctx.tuning.stack_aware:
         v += 0.6
     if card.claim_range > 1 or not card.adjacency_required:
         v += 0.8
@@ -362,14 +369,14 @@ def _claim_value(card: Card, ctx: ValuationContext) -> float:
             v -= 1.2 * val
         elif t == EffectType.GRANT_ACTIONS_NEXT_TURN and e.target == "self":
             v += 0.6 * val
-        elif t == EffectType.GRANT_ACTIONS_IF_STACKED:
+        elif t == EffectType.GRANT_ACTIONS_IF_STACKED and ctx.tuning.stack_aware:
             v += 0.4 * val
         elif t == EffectType.ON_DEFEND_FORCED_DISCARD:
             v += 0.5
         elif t == EffectType.CONDITIONAL_ACTION_RETURN:
             v += 0.5 * ctx.avg_value * ctx.cards_factor
-    if card.forced_discard > 0:
-        v += 0.9 * card.forced_discard
+    if card.effective_forced_discard > 0:
+        v += 0.9 * card.effective_forced_discard
     return v
 
 
@@ -389,7 +396,9 @@ _ENGINE_EFFECT_RE: dict[EffectType, float] = {
     EffectType.GLOBAL_RANDOM_TRASH: 1.2,
     EffectType.INJECT_RUBBLE: 1.4,
     EffectType.GLOBAL_CLAIM_BAN: 1.0,
-    EffectType.ABANDON_TILE: 0.6,
+    # Exodus gives up a tile: about a third of a VP (and the ground it
+    # held), not a perk. Scored as one, Medium bought Exodus over Claims.
+    EffectType.ABANDON_TILE: -1.5,
     EffectType.ABANDON_AND_BLOCK: 0.8,
     EffectType.CONDITIONAL_DRAW_NEXT_ROUND: 1.5,
     EffectType.RESOURCES_PER_TILES_CAPTURED_LAST_ROUND: 1.3,
@@ -501,8 +510,8 @@ def card_play_value(card: Card, ctx: ValuationContext,
                 mine, theirs = land_grant_counts(e, card.is_upgraded)
                 net = mine - theirs * ctx.opponents
                 v += max(0.5, 0.5 * net * tn.vp_re)
-        if card.forced_discard > 0:
-            v += 0.9 * card.forced_discard
+        if card.effective_forced_discard > 0:
+            v += 0.9 * card.effective_forced_discard
         v += thinning_value(card, ctx)
         if weights is not None:
             # Archetype flavor: lean slightly toward the archetype's plan.

@@ -500,6 +500,8 @@ def _serialize_tile(tile: HexTile) -> dict[str, Any]:
         d["is_scorched"] = True
     if tile.scorched_vp:
         d["scorched_vp"] = tile.scorched_vp
+    if tile.is_water:
+        d["is_water"] = True
     return d
 
 
@@ -521,6 +523,7 @@ def _deserialize_tile(data: dict[str, Any]) -> HexTile:
         base_owner=data.get("base_owner"),
         is_scorched=data.get("is_scorched", False),
         scorched_vp=data.get("scorched_vp", 0),
+        is_water=data.get("is_water", False),
     )
 
 
@@ -679,6 +682,7 @@ def serialize_game(game: GameState) -> str:
         "archetype_market_size": game.archetype_market_size,
         "winners": game.winners,
         "test_mode": game.test_mode,
+        "solo": game.solo,
         # Grid
         "grid": _serialize_grid(game.grid) if game.grid else None,
         # Players
@@ -772,6 +776,7 @@ def deserialize_game(
         max_rounds=blob.get("max_rounds", 20),
         archetype_market_size=blob.get("archetype_market_size", 5),
         winners=blob.get("winners", []),
+        solo=blob.get("solo"),
         resolution_steps=blob.get("resolution_steps", []),
         player_effects=blob.get("player_effects", []),
         resolution_effects=blob.get("resolution_effects", []),

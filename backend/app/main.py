@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.routes import router, _get_card_registry, game_cache_sweep_task, init_routes
 from app.api.lobby import lobby_router, init_lobby, lobby_expiry_task
+from app.api.solo import solo_router
 from app.models.game import Base
 from app.storage.engine import create_db_engine, is_sqlite
 from app.storage.analytics import AnalyticsRecorder
@@ -60,7 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await engine.dispose()
 
 
-app = FastAPI(title="Card Clash", version="0.2.8", lifespan=lifespan)
+app = FastAPI(title="Card Clash", version="0.2.10", lifespan=lifespan)
 
 
 @app.exception_handler(GameConflictError)
@@ -90,6 +91,7 @@ app.add_middleware(
 
 app.include_router(router)
 app.include_router(lobby_router)
+app.include_router(solo_router)
 
 
 @app.get("/health")

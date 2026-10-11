@@ -92,6 +92,9 @@ export function worldOf(s: Soup, x: number, y: number, z: number): Vector3 {
 }
 
 /** Poisson-ish scatter inside a hex ring. */
+/** The layout buildDecor is scattering over: nothing grows on a beach. */
+let scatterLayout: BoardLayout | null = null;
+
 function scatter(tile: TileLayout, r: () => number, count: number, minR: number, maxR: number, minDist: number, taken: { x: number; z: number; d: number }[] = []): { x: number; z: number }[] {
   const out: { x: number; z: number }[] = [];
   let tries = 0;
@@ -104,6 +107,7 @@ function scatter(tile: TileLayout, r: () => number, count: number, minR: number,
     if (hexSdf(dx, dz) > -0.1) continue;
     const x = tile.x + dx;
     const z = tile.z + dz;
+    if (scatterLayout && scatterLayout.beach(x, z) > 0.1) continue;
     let ok = true;
     for (const t of taken) {
       if (Math.hypot(t.x - x, t.z - z) < Math.max(minDist, t.d)) { ok = false; break; }
@@ -404,6 +408,7 @@ export function buildDecor(
   const s = new Soup(layout.mapSeed);
   const maxRing = Math.max(1, layout.maxRing);
   let prevKey: string | null = null;
+  scatterLayout = layout;
   for (const tile of layout.tiles) {
     if (only && !only.has(tile.key)) continue;
     // Each tile's decor is one run of vertices: [start, end) per tile key.

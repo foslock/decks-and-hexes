@@ -159,8 +159,10 @@ def test_value_purchasing_by_tier(difficulty, expected):
 def test_hard_has_full_tactical_suite():
     p = CPUPlayer("p", difficulty=HARD).profile
     assert p.threat_modeling and p.connectivity_cuts and p.endgame_awareness and p.purchase_saving
+    # Medium shares Hard's play tactics; it differs in what it buys.
     m = CPUPlayer("p", difficulty=MEDIUM).profile
-    assert not (m.threat_modeling or m.connectivity_cuts or m.endgame_awareness or m.purchase_saving)
+    assert m.threat_modeling and m.connectivity_cuts and m.claim_bonus_lookahead
+    assert not (m.endgame_awareness or m.purchase_saving or m.board_aware_valuation)
 
 
 # ── Live buy planning ───────────────────────────────────────────────
@@ -269,3 +271,99 @@ def test_forced_march_waits_until_the_actions_are_needed(card_registry):
     assert not cpu._drawback_pays(game, player, player.hand[0], 0)
     player = _hand(card_registry, game, "p0", ["neutral_forced_march"] + ["neutral_explore"] * 7)
     assert cpu._drawback_pays(game, player, player.hand[0], 0)
+
+
+# ── Tier-specific valuation and play ───────────────────────────────
+
+def test_stacking_extras_count_only_for_a_stacking_player(card_registry):
+    """A tier that doesn't plan stacked claims (Easy) gets nothing from Dog
+    Pile's stacking bonus: valued as a plain power-2 Claim."""
+    from app.game_engine.cpu_valuation import ValuationTuning
+
+    game = _game(card_registry, archetypes=("swarm", "vanguard"))
+    assert CPUPlayer("p0", difficulty=HARD)._valuation_context(game).tuning.stack_aware
+    assert not CPUPlayer("p0", difficulty=EASY)._valuation_context(game).tuning.stack_aware
+    dog_pile = card_registry["swarm_dog_pile"]
+    aware = build_context(game, "p0", board_aware=False)
+    blind = build_context(game, "p0", board_aware=False, tuning=ValuationTuning(stack_aware=False))
+    assert card_play_value(dog_pile, blind) == pytest.approx(claim_curve(2))
+    assert card_play_value(dog_pile, aware) > card_play_value(dog_pile, blind)
+
+
+def test_abandoning_a_tile_counts_against_exodus(card_registry):
+    """Regression: giving up a tile was scored as a perk, so Medium Swarm
+    bought Exodus over Claims."""
+    from app.game_engine.effects import EffectType
+
+    game = _game(card_registry, archetypes=("swarm", "vanguard"))
+    ctx = build_context(game, "p0")
+    exodus = card_registry["swarm_exodus"]
+    keep_tile = dataclasses.replace(
+        exodus, effects=[e for e in exodus.effects if e.type != EffectType.ABANDON_TILE])
+    assert card_play_value(exodus, ctx) < card_play_value(keep_tile, ctx)
+
+
+def test_hard_counts_strike_teams_bonus_from_a_claim_still_in_hand(card_registry):
+    """Strike Team's +2 (another Claim this round) is settled at the reveal;
+    Hard and Medium count a Claim still in hand, Easy only the ones placed."""
+    game = _game(card_registry)
+    player = _hand(card_registry, game, "p0", ["vanguard_strike_team", "neutral_explore"])
+    strike = player.hand[0]
+    tile = next(t for t in game.grid.tiles.values() if not t.is_blocked)
+    assert CPUPlayer("p0", difficulty=HARD)._estimate_effective_power(game, player, tile, strike) == 4
+    assert CPUPlayer("p0", difficulty=EASY)._estimate_effective_power(game, player, tile, strike) == 2
+    player.hand = [strike]
+    assert CPUPlayer("p0", difficulty=HARD)._estimate_effective_power(game, player, tile, strike) == 2
+
+
+def test_hard_saves_for_an_archetype_pile_in_a_pack_game(card_registry):
+    """A pack's archetype piles are on show every round, so a much better
+    archetype card one income away is worth skipping filler for."""
+    configs = [{"id": "p0", "name": "P0", "archetype": "vanguard"},
+               {"id": "p1", "name": "P1", "archetype": "swarm"}]
+    game = create_game(GridSize.SMALL, configs, card_registry, seed=3, vp_target=10,
+                       card_pack="far_reaches")
+    execute_start_of_turn(game)
+    execute_upkeep(game)
+    game.current_phase = Phase.BUY
+    player = game.players["p0"]
+    player.archetype_market = [c for c in player.archetype_market
+                               if c.definition_id in ("vanguard_breakthrough", "vanguard_rearguard")]
+    for base_id, stack in game.shared_market.stacks.items():
+        if base_id != "neutral_conscription":
+            stack.clear()
+    cpu = CPUPlayer("p0", difficulty=HARD, noise=0.0)
+    # This is about the valuation's saving rule, not the pack's builds.
+    import dataclasses
+    cpu.profile = dataclasses.replace(cpu.profile, follow_builds=False)
+    player.resources = 5
+    assert cpu.pick_next_purchase(game) is None
+    player.resources = 6
+    pick = cpu.pick_next_purchase(game)
+    assert pick is not None and pick["definition_id"] == "vanguard_breakthrough"
+
+
+def test_strike_team_valued_near_its_full_power(card_registry):
+    """Strike Team's +2 needs another Claim this round — nearly every hand
+    has one (Explore) — so it's valued close to power 4, not 3."""
+    from app.game_engine.cpu_valuation import estimated_claim_power
+
+    game = _game(card_registry)
+    ctx = build_context(game, "p0")
+    assert estimated_claim_power(card_registry["vanguard_strike_team"], ctx) >= 3.75
+
+
+def test_easy_counts_the_debt_a_card_adds(card_registry):
+    """Regression: Easy's cost-divided scorer read Prospector as pure +6
+    income and filled its deck with Debts (it won 2% of Border War games)."""
+    from app.game_engine.effects import EffectType
+
+    game = _game(card_registry, archetypes=("fortress", "swarm"))
+    player = game.players["p0"]
+    cpu = CPUPlayer("p0", difficulty=EASY, noise=0.0)
+    weights = cpu._get_weights(player, game)
+    prospector = card_registry["neutral_prospector"]
+    no_debt = dataclasses.replace(
+        prospector, effects=[e for e in prospector.effects if e.type != EffectType.GAIN_DEBT])
+    score = cpu._score_card_for_purchase(prospector, player, weights, 3, game)
+    assert score < 0.75 * cpu._score_card_for_purchase(no_debt, player, weights, 3, game)

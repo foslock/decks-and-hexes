@@ -414,8 +414,8 @@ class TestFinancier:
         # No Debt in hand/draw/discard → no draws
         assert len(p0.hand) == hand_before - 1
 
-    def test_financier_upgraded_grants_actions(self, card_registry):
-        """Upgraded Financier grants 2 extra actions via action_return."""
+    def test_financier_upgraded_draws_two_per_debt(self, card_registry):
+        """Upgraded Financier draws 2 cards per Debt."""
         game = _make_2p_game(card_registry)
         _advance_to_play(game)
 
@@ -428,12 +428,10 @@ class TestFinancier:
         p0.deck.cards = [_copy_card(card_registry["neutral_explore"], f"filler_{i}") for i in range(5)]
         p0.deck.discard = []
 
-        actions_before = p0.actions_available
         success, _ = play_card(game, "p0", 0)
         assert success
-        # Upgraded action_return is 2 → actions_available increases by 2
-        # (play cost tracked via actions_used, not subtracted from actions_available)
-        assert p0.actions_available == actions_before + 2
+        # 1 Debt in hand → 2 cards drawn (hand: the Debt + 2)
+        assert len(p0.hand) == 3
 
     def test_financier_draws_multiple_debts(self, card_registry):
         """Financier draws correct count with Debts spread across zones."""

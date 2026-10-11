@@ -32,6 +32,7 @@ export const EXPLORE: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": true,
+  "defenseless_only": true,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -42,14 +43,14 @@ export const EXPLORE: Card = {
   "vp_formula": "",
   "unique": false,
   "buy_debt": 0,
-  "description": "Claim: Power 0 on any adjacent unoccupied tile.",
-  "upgrade_description": "Claim: Power 1. Draw 1 card.",
+  "description": "Claim 1 defenseless, unoccupied tile next to your land.",
+  "upgrade_description": "Claim up to 2 defenseless, unoccupied tiles next to your land.",
   "name_upgraded": "Explore+",
   "starter": true,
+  "card_set": "core",
   "effects": [],
   "upgraded_stats": {
-    "power": 1,
-    "draw_cards": 1
+    "multi_target_count": 1
   }
 };
 
@@ -76,6 +77,7 @@ export const GATHER: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -87,13 +89,13 @@ export const GATHER: Card = {
   "unique": false,
   "buy_debt": 0,
   "description": "Gain 2 resources.",
-  "upgrade_description": "Gain 3 resources. Gain 1 action.",
+  "upgrade_description": "Gain 3 resources.",
   "name_upgraded": "Gather+",
   "starter": true,
+  "card_set": "core",
   "effects": [],
   "upgraded_stats": {
-    "resource_gain": 3,
-    "action_return": 1
+    "resource_gain": 3
   }
 };
 
@@ -120,6 +122,7 @@ export const LEVY: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -134,6 +137,7 @@ export const LEVY: Card = {
   "upgrade_description": "Claim: Power 2. Gain 1 action.",
   "name_upgraded": "Levy+",
   "starter": false,
+  "card_set": "core",
   "effects": [],
   "upgraded_stats": {
     "power": 2
@@ -151,7 +155,7 @@ export const MERCENARY: Card = {
   "action_return": 0,
   "action_cost": 1,
   "timing": "immediate",
-  "buy_cost": 5,
+  "buy_cost": 3,
   "is_upgraded": false,
   "trash_on_use": false,
   "stackable": false,
@@ -163,6 +167,7 @@ export const MERCENARY: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -177,6 +182,7 @@ export const MERCENARY: Card = {
   "upgrade_description": "Claim: Power 4. Gain a Debt.",
   "name_upgraded": "Mercenary+",
   "starter": false,
+  "card_set": "core",
   "effects": [
     {
       "type": "gain_debt",
@@ -206,18 +212,19 @@ export const WATCHTOWER: Card = {
   "action_return": 1,
   "action_cost": 1,
   "timing": "immediate",
-  "buy_cost": 2,
+  "buy_cost": 3,
   "is_upgraded": false,
   "trash_on_use": false,
   "stackable": false,
   "granted_stackable": false,
   "reversible": false,
   "forced_discard": 0,
-  "draw_cards": 0,
+  "draw_cards": 1,
   "defense_bonus": 2,
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -228,10 +235,11 @@ export const WATCHTOWER: Card = {
   "vp_formula": "",
   "unique": false,
   "buy_debt": 0,
-  "description": "One tile you own gains +2 defense this round. Gain 1 action.",
+  "description": "One tile you own gains +2 defense this round. Draw 1 card. Gain 1 action.",
   "upgrade_description": "One tile you own gains +3 defense this round. Draw 1 card. Gain 1 action.",
   "name_upgraded": "Watchtower+",
   "starter": false,
+  "card_set": "core",
   "effects": [],
   "upgraded_stats": {
     "draw_cards": 1,
@@ -247,7 +255,7 @@ export const BARRICADE: Card = {
   "card_type": "defense",
   "power": 0,
   "resource_gain": 0,
-  "action_return": 0,
+  "action_return": 1,
   "action_cost": 1,
   "timing": "immediate",
   "buy_cost": 5,
@@ -255,13 +263,14 @@ export const BARRICADE: Card = {
   "trash_on_use": false,
   "stackable": false,
   "granted_stackable": false,
-  "reversible": true,
+  "reversible": false,
   "forced_discard": 0,
-  "draw_cards": 0,
+  "draw_cards": 1,
   "defense_bonus": 0,
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -272,10 +281,11 @@ export const BARRICADE: Card = {
   "vp_formula": "",
   "unique": false,
   "buy_debt": 0,
-  "description": "One tile you own permanently gains +2 defense until captured.",
-  "upgrade_description": "One tile you own permanently gains +3 defense until captured.",
+  "description": "One tile you own permanently gains +2 defense until captured. Draw 1 card. Gain 1 action.",
+  "upgrade_description": "One tile you own permanently gains +3 defense until captured. Draw 1 card. Gain 1 action.",
   "name_upgraded": "Barricade+",
   "starter": false,
+  "card_set": "core",
   "effects": [
     {
       "type": "permanent_defense",
@@ -290,7 +300,10 @@ export const BARRICADE: Card = {
         "upgraded_value": 3
       }
     }
-  ]
+  ],
+  "upgraded_stats": {
+    "draw_cards": 1
+  }
 };
 
 export const SIEGE_TOWER: Card = {
@@ -304,7 +317,7 @@ export const SIEGE_TOWER: Card = {
   "action_return": 0,
   "action_cost": 1,
   "timing": "immediate",
-  "buy_cost": 9,
+  "buy_cost": 8,
   "is_upgraded": false,
   "trash_on_use": false,
   "stackable": false,
@@ -316,6 +329,7 @@ export const SIEGE_TOWER: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -330,6 +344,7 @@ export const SIEGE_TOWER: Card = {
   "upgrade_description": "Claim: Power 8. Gain a Debt.",
   "name_upgraded": "Siege Tower+",
   "starter": false,
+  "card_set": "core",
   "effects": [
     {
       "type": "gain_debt",
@@ -371,6 +386,7 @@ export const SPOILS: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -385,6 +401,7 @@ export const SPOILS: Card = {
   "upgrade_description": "",
   "name_upgraded": "",
   "starter": false,
+  "card_set": "core",
   "effects": []
 };
 
@@ -411,6 +428,7 @@ export const RUBBLE: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -425,6 +443,7 @@ export const RUBBLE: Card = {
   "upgrade_description": "",
   "name_upgraded": "",
   "starter": false,
+  "card_set": "core",
   "effects": []
 };
 
@@ -451,6 +470,7 @@ export const DEBT: Card = {
   "adjacency_required": true,
   "claim_range": 1,
   "unoccupied_only": false,
+  "defenseless_only": false,
   "multi_target_count": 0,
   "defense_target_count": 1,
   "flood": false,
@@ -465,5 +485,6 @@ export const DEBT: Card = {
   "upgrade_description": "",
   "name_upgraded": "",
   "starter": false,
+  "card_set": "core",
   "effects": []
 };

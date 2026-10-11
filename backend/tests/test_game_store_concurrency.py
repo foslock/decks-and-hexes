@@ -585,6 +585,7 @@ class TestLiveGameCap:
             created_at=_time.time(), last_activity=_time.time(),
         )
         lobby.config.grid_size = "small"
+        lobby.config.grid_size_auto = False
         lobby_module._lobbies[code] = lobby
         lobby_module._tokens[(code, "p0")] = "t0"
         return lobby

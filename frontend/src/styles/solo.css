@@ -1,0 +1,561 @@
+/* ── Solo campaign: overworld, level briefing, in-game objective ───────── */
+
+/* Home: Create · Join · Solo */
+.cc-scr-home-row.is-three { grid-template-columns: 1fr 1fr 1fr; }
+@media (max-width: 420px) {
+  .cc-scr-home-row.is-three .cc-scr-btn-xl { font-size: 16px; letter-spacing: 0.06em; padding: 0 8px; }
+}
+
+.cc-solo-root {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: radial-gradient(ellipse at 50% 40%, #1d1d40, var(--cc-bg-deep) 75%);
+  color: var(--cc-text);
+  font-family: var(--cc-font-body);
+  overflow: hidden;
+}
+/* Everything in the bar sits on one line with the settings gear (fixed
+   16px from the top, 42px tall): the title's line is 42px, the buttons 38px
+   two pixels down. A subtitle hangs below without moving them. */
+.cc-solo-head {
+  position: relative;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: start;
+  gap: 12px;
+  padding: calc(16px + env(safe-area-inset-top, 0px)) 72px 8px 16px;
+  pointer-events: none;
+}
+.cc-solo-head > * { pointer-events: auto; }
+.cc-solo-back {
+  justify-self: start;
+  height: 38px;
+  margin-top: 2px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.cc-solo-title { text-align: center; }
+.cc-solo-title .cc-title { font-size: clamp(22px, 4vw, 34px); line-height: 42px; margin: 0; }
+.cc-solo-sub { font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cc-text-dim); margin-top: 2px; }
+/* Balances the back button so the title stays centred. */
+.cc-solo-next-spacer { justify-self: end; }
+.cc-solo-board { position: relative; flex: 1; min-height: 0; }
+/* The arrival: the island fades in under its clouds; labels, plaques and
+   the level list come in once the camera has settled. */
+.cc-solo-board-fade { position: absolute; inset: 0; animation: cc-fade-in 1.2s ease both; }
+.cc-solo-board .cc-board-labels,
+.cc-solo-board .cc-board-tilecards,
+.cc-solo-board .cc-cam-controls,
+.cc-solo-list { transition: opacity 600ms ease, transform 600ms var(--cc-ease-out); }
+.cc-solo-root:not(.is-arrived) .cc-board-labels,
+.cc-solo-root:not(.is-arrived) .cc-board-tilecards,
+.cc-solo-root:not(.is-arrived) .cc-cam-controls { opacity: 0; pointer-events: none; }
+.cc-solo-root:not(.is-arrived) .cc-solo-list { opacity: 0; transform: translateY(-6px); pointer-events: none; }
+/* Loading (and failing to load): centred on the whole screen, not the
+   board, which sits beside the level list. */
+.cc-solo-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  pointer-events: none;
+}
+.cc-solo-loading-card {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  min-width: min(300px, 100%);
+  max-width: 420px;
+  padding: 26px 30px 24px;
+  border-radius: var(--cc-radius-lg);
+  border: 1px solid rgba(232, 196, 106, 0.28);
+  background: rgba(16, 12, 28, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  box-shadow: var(--cc-shadow);
+  text-align: center;
+  /* Quick loads never flash it. */
+  animation: cc-rise-in 420ms 180ms var(--cc-ease-out) backwards;
+}
+.cc-solo-loading-card .cc-scr-ornament { margin: 0; width: 180px; }
+.cc-solo-loading-hex {
+  position: relative;
+  width: 46px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: linear-gradient(180deg, #ffe39a, #a8822c);
+  animation: cc-solo-hex-turn 2.8s var(--cc-ease-out) infinite;
+}
+.cc-solo-loading-hex > i {
+  width: 38px;
+  height: 43px;
+  clip-path: inherit;
+  background: radial-gradient(circle at 50% 40%, #2a2550, #12102a 70%);
+  box-shadow: inset 0 0 12px rgba(232, 196, 106, 0.4);
+}
+.cc-solo-loading-hex::after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 14px;
+  clip-path: inherit;
+  background: linear-gradient(180deg, #ffe39a, #c79a3c);
+  animation: cc-solo-hex-pulse 1.4s ease-in-out infinite;
+}
+.cc-solo-loading-text {
+  font-family: var(--cc-font-display);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--cc-gold-bright);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.6), 0 0 18px rgba(232, 196, 106, 0.25);
+}
+.cc-solo-loading-track {
+  position: relative;
+  overflow: hidden;
+  width: 160px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+.cc-solo-loading-track > i {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, #e8c46a, #ffe39a, #e8c46a, transparent);
+  animation: cc-solo-track 1.6s ease-in-out infinite;
+}
+.cc-solo-loading-error { font-size: 13px; line-height: 1.45; color: var(--cc-text-dim); }
+.cc-solo-loading-retry { height: 38px; padding: 0 18px; font-size: 13px; margin-top: 2px; }
+.cc-solo-loading-card.is-failed .cc-solo-loading-hex { animation: none; filter: grayscale(0.6) brightness(0.8); }
+.cc-solo-loading-card.is-failed .cc-solo-loading-hex::after { animation: none; opacity: 0.4; }
+@keyframes cc-solo-hex-turn {
+  0% { transform: rotate(0deg); }
+  60%, 100% { transform: rotate(360deg); }
+}
+@keyframes cc-solo-hex-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+@keyframes cc-solo-track {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-solo-loading-hex, .cc-solo-loading-hex::after, .cc-solo-loading-track > i { animation: none; }
+  .cc-solo-loading-track > i { width: 100%; opacity: 0.5; }
+}
+
+/* Level list: floats over the board's left edge with no panel behind it —
+   just the level you're on, each level its own pill. Hovering (or the
+   toggle, on touch; keyboard focus) unfolds the rest in order. */
+.cc-solo-list {
+  position: absolute;
+  left: 16px;
+  top: 76px;
+  z-index: 15;
+  width: 240px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 92px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.cc-solo-list ol { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; }
+.cc-solo-list li {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 260ms var(--cc-ease-out), opacity 200ms ease;
+}
+.cc-solo-list li.is-current,
+.cc-solo-list:hover li,
+.cc-solo-list.is-open li,
+.cc-solo-list:has(:focus-visible) li { grid-template-rows: 1fr; opacity: 1; }
+.cc-solo-list-fold { overflow: hidden; min-height: 0; padding: 2px 0; }
+.cc-solo-list-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(14, 14, 34, 0.82);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  color: var(--cc-text);
+  text-align: left;
+  font: inherit;
+  cursor: var(--cc-cursor-pointer);
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+.cc-solo-list-item:hover:not(:disabled) { border-color: rgba(255, 216, 119, 0.6); }
+.cc-solo-list-item:disabled { cursor: var(--cc-cursor-arrow); color: var(--cc-text-dim); }
+.cc-solo-list-item:disabled .cc-solo-list-num { opacity: 0.6; }
+.cc-solo-list-item.is-open { border-color: rgba(232, 196, 106, 0.6); }
+.cc-solo-list li.is-current .cc-solo-list-item {
+  border-color: rgba(255, 216, 119, 0.85);
+  box-shadow: 0 0 0 2px rgba(232, 196, 106, 0.15), 0 4px 14px rgba(0, 0, 0, 0.4);
+}
+.cc-solo-list-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--cc-text-dim);
+}
+.cc-solo-list-item.is-open .cc-solo-list-num { background: var(--cc-gold); color: #2a1d05; }
+.cc-solo-list-item.is-cleared .cc-solo-list-num { background: rgba(84, 214, 138, 0.2); color: var(--cc-success); }
+.cc-solo-list-text { display: flex; flex-direction: column; min-width: 0; }
+.cc-solo-list-name { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-solo-list-goal { font-size: 11px; color: var(--cc-text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-solo-list-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 12px;
+  padding: 3px 9px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(14, 14, 34, 0.6);
+  color: var(--cc-text-dim);
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  cursor: var(--cc-cursor-pointer);
+}
+.cc-solo-list-toggle svg { transform: rotate(90deg); transition: transform 200ms var(--cc-ease-out); }
+.cc-solo-list:hover .cc-solo-list-toggle svg,
+.cc-solo-list.is-open .cc-solo-list-toggle svg { transform: rotate(-90deg); }
+.cc-solo-list-toggle:hover { color: var(--cc-gold-bright); }
+@media (prefers-reduced-motion: reduce) {
+  .cc-solo-list li { transition: none; }
+}
+
+@media (max-width: 760px) {
+  .cc-solo-head { grid-template-columns: auto 1fr; padding-right: 64px; }
+  .cc-solo-title { text-align: left; min-width: 0; }
+  /* One line, so it stays on the gear's line and clear of the level pill. */
+  .cc-solo-head { padding-right: 70px; }
+  .cc-solo-title .cc-title { display: flex; gap: 8px; min-width: 0; font-size: 17px; white-space: nowrap; }
+  .cc-solo-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .cc-solo-title-emblem { width: 24px; height: 24px; flex-shrink: 0; }
+  .cc-solo-next-spacer { display: none; }
+  .cc-solo-list { top: 68px; left: 10px; width: 210px; }
+}
+
+/* Level plaques over the board's spots. */
+.cc-solo-badge {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 3px;
+  margin-bottom: 4px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(18, 18, 42, 0.88);
+  color: var(--cc-text);
+  font-family: var(--cc-font-body);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: scale(var(--z, 1));
+  transform-origin: 50% 100%;
+  cursor: var(--cc-cursor-pointer);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.cc-solo-badge.is-locked, .cc-solo-badge.is-soon { cursor: var(--cc-cursor-arrow); color: var(--cc-text-faint); }
+.cc-solo-badge.is-soon { font-style: italic; opacity: 0.75; }
+.cc-solo-badge.is-open {
+  border-color: rgba(255, 216, 119, 0.9);
+  box-shadow: 0 0 0 2px rgba(232, 196, 106, 0.2), 0 0 16px rgba(232, 196, 106, 0.45);
+  animation: cc-solo-pulse 2.2s ease-in-out infinite;
+}
+.cc-solo-badge:hover:not(.is-locked):not(.is-soon) { border-color: var(--cc-gold-bright); }
+.cc-solo-badge-num {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.cc-solo-badge.is-open .cc-solo-badge-num { background: var(--cc-gold); color: #2a1d05; }
+.cc-solo-badge.is-cleared .cc-solo-badge-num { background: rgba(84, 214, 138, 0.25); color: var(--cc-success); }
+@keyframes cc-solo-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(232, 196, 106, 0.2), 0 0 10px rgba(232, 196, 106, 0.3); }
+  50% { box-shadow: 0 0 0 3px rgba(232, 196, 106, 0.35), 0 0 22px rgba(232, 196, 106, 0.6); }
+}
+
+/* Level briefing */
+.cc-solo-panel { width: min(94vw, 640px); }
+/* Desktop: wide enough for five full cards in a row (scaled to fit). */
+@media (min-width: 761px) {
+  .cc-solo-panel { width: min(96vw, 1180px); }
+  .cc-solo-panel-body > p, .cc-solo-panel-body > .cc-solo-objective, .cc-solo-hints { max-width: 760px; }
+}
+.cc-solo-fullcards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: start; }
+.cc-solo-fullcard, .cc-solo-fullcard-ph {
+  position: relative;
+  width: var(--card-w);
+  height: var(--card-h);
+  padding: 0;
+  border: none;
+  border-radius: 14px;
+  background: none;
+}
+.cc-solo-fullcard-ph { background: rgba(255, 255, 255, 0.05); }
+.cc-solo-fullcard { cursor: var(--cc-cursor-pointer); transition: transform 160ms var(--cc-ease-out), box-shadow 160ms ease; }
+.cc-solo-fullcard:hover { transform: translateY(-3px); }
+.cc-solo-fullcard.is-spotlight { box-shadow: 0 0 0 2px rgba(255, 216, 119, 0.85), 0 0 18px rgba(232, 196, 106, 0.45); }
+.cc-solo-fullcard-face {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 220px;
+  height: 308px;
+  transform: scale(var(--card-scale));
+  transform-origin: top left;
+  pointer-events: none;
+}
+.cc-solo-panel-body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 16px; }
+.cc-solo-panel-body section { display: flex; flex-direction: column; gap: 6px; }
+.cc-solo-intro { margin: 0; font-size: 15px; line-height: 1.45; color: var(--cc-text); }
+.cc-solo-label {
+  font-family: var(--cc-font-display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--cc-gold);
+}
+.cc-solo-sublabel { font-size: 12px; color: var(--cc-text-dim); margin-top: 4px; }
+.cc-solo-objective {
+  padding: 12px 14px;
+  border-radius: var(--cc-radius);
+  border: 1px solid rgba(232, 196, 106, 0.4);
+  background: linear-gradient(180deg, rgba(232, 196, 106, 0.1), rgba(232, 196, 106, 0.03));
+}
+.cc-solo-goal { font-family: var(--cc-font-display); font-size: 19px; font-weight: 700; color: var(--cc-gold-bright); }
+.cc-solo-deadline { font-size: 13px; color: var(--cc-text-dim); display: inline-flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.cc-solo-hints { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.45; color: var(--cc-text); display: flex; flex-direction: column; gap: 4px; }
+.cc-solo-facts { flex-direction: row !important; flex-wrap: wrap; gap: 6px 14px !important; font-size: 12px; color: var(--cc-text-dim); }
+.cc-solo-facts > span { display: inline-flex; align-items: center; gap: 4px; }
+.cc-solo-cards { display: flex; flex-wrap: wrap; gap: 6px; }
+.cc-solo-card {
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  cursor: var(--cc-cursor-pointer);
+  transition: transform 150ms var(--cc-ease-out);
+}
+.cc-solo-card:hover { transform: translateY(-2px); }
+.cc-solo-card.is-spotlight { box-shadow: 0 0 0 2px rgba(255, 216, 119, 0.85), 0 0 14px rgba(232, 196, 106, 0.45); }
+.cc-solo-card-ph { width: 132px; height: 52px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); }
+.cc-solo-bots { display: flex; flex-wrap: wrap; gap: 8px; }
+.cc-solo-bot {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 3px;
+  border-radius: 999px;
+  font-size: 13px;
+  background: rgba(255, 92, 108, 0.1);
+  border: 1px solid rgba(255, 92, 108, 0.3);
+}
+.cc-solo-bot img { width: 24px; height: 24px; object-fit: contain; }
+.cc-solo-archetypes { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.cc-solo-arch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--cc-radius);
+  border: 1px solid var(--cc-panel-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--cc-text);
+  font: inherit;
+  text-align: left;
+  cursor: var(--cc-cursor-pointer);
+  opacity: 0.7;
+  transition: opacity 150ms ease, border-color 150ms ease;
+}
+.cc-solo-arch:hover { opacity: 0.9; }
+.cc-solo-arch.is-active {
+  opacity: 1;
+  border-color: rgba(232, 196, 106, 0.85);
+  box-shadow: 0 0 0 2px rgba(232, 196, 106, 0.15);
+}
+.cc-solo-arch img { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+.cc-solo-arch span { display: flex; flex-direction: column; }
+.cc-solo-arch b { font-size: 14px; }
+.cc-solo-arch small { font-size: 11px; color: var(--cc-text-dim); }
+.cc-solo-panel .cc-scr-modal-foot button { height: 40px; padding: 0 18px; font-size: 14px; }
+.cc-solo-start { min-width: 120px; }
+.cc-solo-error { color: var(--cc-danger); font-size: 13px; }
+.cc-solo-zoom { display: contents; }
+
+/* In-game objective (top-left panel) */
+.cc-solo-hud { display: flex; flex-direction: column; gap: 3px; min-width: 180px; max-width: 260px; }
+.cc-solo-hud-level { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cc-gold); }
+.cc-solo-hud-goal { font-size: 13px; font-weight: 700; color: var(--cc-text); white-space: normal; }
+.cc-solo-hud-progress { display: flex; align-items: center; gap: 8px; }
+.cc-solo-hud-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.cc-solo-hud-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--cc-gold-deep), var(--cc-gold-bright));
+  transition: width 600ms var(--cc-ease-out);
+}
+.cc-solo-hud-bar.is-met > i { background: linear-gradient(90deg, #2f9a5d, var(--cc-success)); }
+.cc-solo-hud-count { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.cc-solo-hud-count small { font-weight: 400; color: var(--cc-text-dim); }
+.cc-solo-hud-rounds { font-size: 11.5px; color: var(--cc-text-dim); display: inline-flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+.cc-solo-hud-rounds.is-last { color: #ffe14d; }
+.cc-solo-hud-rival { color: #ff9aa5; }
+
+/* Game over: "Level Cleared" is longer than "Victory". */
+.cc-ov-go-word.is-long { font-size: clamp(30px, 8.5vw, 62px); letter-spacing: 0.1em; padding-left: 0.1em; }
+
+/* Campaign choice */
+.cc-solo-select-grid {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  align-content: center;
+  width: min(1040px, 100%);
+  margin: 0 auto;
+  padding: 16px;
+}
+.cc-solo-camp {
+  --camp: var(--cc-gold);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 22px 18px 18px;
+  border-radius: var(--cc-radius-lg);
+  border: 1px solid var(--cc-panel-border-strong);
+  background:
+    radial-gradient(ellipse at 50% 0%, color-mix(in srgb, var(--camp) 22%, transparent), transparent 65%),
+    var(--cc-panel);
+  color: var(--cc-text);
+  font: inherit;
+  text-align: center;
+  cursor: var(--cc-cursor-pointer);
+  box-shadow: var(--cc-shadow);
+  transition: transform 180ms var(--cc-ease-out), border-color 180ms ease, box-shadow 180ms ease;
+  animation: cc-rise-in 420ms var(--cc-ease-out) backwards;
+}
+.cc-solo-camp:nth-child(2) { animation-delay: 80ms; }
+.cc-solo-camp:nth-child(3) { animation-delay: 160ms; }
+.cc-solo-camp.is-vanguard { --camp: #e8574a; }
+.cc-solo-camp.is-swarm { --camp: #6cc04a; }
+.cc-solo-camp.is-fortress { --camp: #6f9de8; }
+.cc-solo-camp:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--camp) 70%, white); }
+.cc-solo-camp.is-last { border-color: color-mix(in srgb, var(--camp) 60%, transparent); }
+.cc-solo-camp-emblem { width: 96px; height: 96px; object-fit: contain; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5)); }
+.cc-solo-camp-title { font-family: var(--cc-font-display); font-size: 22px; font-weight: 900; letter-spacing: 0.08em; color: var(--cc-gold-bright); }
+.cc-solo-camp-blurb { flex: 1; font-size: 13.5px; line-height: 1.45; color: var(--cc-text-dim); }
+.cc-solo-camp-meter { display: flex; gap: 4px; margin-top: 4px; }
+.cc-solo-camp-meter i { width: 18px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.12); }
+.cc-solo-camp-meter i.is-done { background: var(--camp); }
+.cc-solo-camp-meter i.is-next { background: color-mix(in srgb, var(--camp) 40%, transparent); }
+.cc-solo-camp-progress { font-size: 12px; color: var(--cc-text-faint); letter-spacing: 0.06em; }
+.cc-solo-camp-cta {
+  margin-top: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1b1405;
+  background: linear-gradient(180deg, var(--cc-gold-bright), var(--cc-gold));
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Overworld title: the campaign's emblem */
+.cc-solo-title .cc-title { display: inline-flex; align-items: center; gap: 10px; }
+.cc-solo-title-emblem { width: 1.3em; height: 1.3em; object-fit: contain; }
+.cc-solo-badge-shared { display: inline-grid; place-items: center; color: var(--cc-gold); margin-left: -2px; }
+
+/* Briefing additions */
+.cc-solo-shared {
+  margin: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--cc-radius-sm);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--cc-text-dim);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed var(--cc-panel-border-strong);
+}
+.cc-solo-shared svg { flex-shrink: 0; margin-top: 2px; color: var(--cc-gold); }
+.cc-solo-panel-body .cc-solo-playas { flex-direction: row; align-items: center; gap: 10px; font-size: 13.5px; color: var(--cc-text-dim); }
+.cc-solo-playas img { width: 34px; height: 34px; object-fit: contain; }
+.cc-solo-playas b { color: var(--cc-text); }
+.cc-solo-panel .cc-scr-modal-foot .cc-solo-preview { display: inline-flex; align-items: center; gap: 6px; }
+.cc-solo-preview-short { display: none; }
+
+/* HUD: how a hold-out is going */
+.cc-solo-hud-detail { font-size: 11.5px; color: var(--cc-text-dim); }
+.cc-solo-hud-detail.is-failed { color: var(--cc-danger); }
+.cc-solo-hud-bar.is-failed > i { background: linear-gradient(90deg, #8a2a35, var(--cc-danger)); }
+
+@media (max-width: 760px) {
+  .cc-solo-select-grid { align-content: start; grid-template-columns: 1fr; }
+  .cc-solo-camp { flex-direction: column; padding: 16px; }
+  .cc-solo-camp-emblem { width: 64px; height: 64px; }
+  .cc-solo-camp-blurb { min-height: 0; }
+  .cc-solo-panel .cc-scr-modal-foot { flex-wrap: wrap; padding: 12px 14px; }
+  /* One row on a phone: the map button drops "Preview", Start narrows. */
+  .cc-solo-panel .cc-scr-modal-foot button { padding: 0 14px; }
+  .cc-solo-preview-long { display: none; }
+  .cc-solo-preview-short { display: inline; }
+  .cc-solo-start { min-width: 96px; }
+}

@@ -29,11 +29,14 @@ from .effects import ConditionType, EffectType, TurnModifiers
 from .effect_resolver import (
     calculate_effective_power,
     give_debt,
+    power_counts_hand,
     resolve_immediate_effects,
+    resource_scaling_min,
     resolve_on_resolution_effects,
+    settle_claim_powers,
     tile_has_defense_bonus,
 )
-from .card_packs import get_pack
+from .card_packs import CardPack, get_pack
 from .hex_grid import (
     BASE_DEFENSE,
     GRID_CONFIG,
@@ -64,6 +67,17 @@ DEBT_START_ROUND = 5  # Debt cards start being distributed at this round
 SPEED_MULTIPLIERS: dict[str, float] = {"fast": 0.66, "normal": 1.0, "slow": 1.33}
 REROLL_COST = 1
 RETAIN_COST = 2  # reserved: there is no Retain action in the digital game yet
+# Pack games: every player has a private pile of each of their archetype's
+# pack cards, all on show every round (so there's no re-roll).
+ARCHETYPE_PILE_SIZE = 3
+# Shared market piles: a base plus a few per player.
+SHARED_PILE_BASE = 4
+SHARED_PILE_PER_PLAYER = 2
+
+
+def shared_pile_size(num_players: int) -> int:
+    """Copies in each shared market pile."""
+    return SHARED_PILE_BASE + SHARED_PILE_PER_PLAYER * num_players
 UPGRADE_CREDIT_COST = 5
 # A successful base raid gives the defender this many Rubble (at most),
 # however far the attack beat the base's defense, plus 1 Spoils to the attacker.
@@ -88,6 +102,23 @@ def tiles_per_vp(grid_size: GridSize) -> int:
     return 3
 
 
+# The map a game suggests for its player count: the smallest on which games
+# run 11+ rounds, long enough for an early investment to pay off (Hard CPUs,
+# First Clash: 2p Large 12.1, 3p Large 12.9, 4p Medium 15.5, 5–6p Large
+# 19+; on Small 2–3 players finish in about 7). Players can pick any size.
+SUGGESTED_GRID: dict[int, GridSize] = {
+    2: GridSize.LARGE,
+    3: GridSize.LARGE,
+    4: GridSize.MEDIUM,
+    5: GridSize.LARGE,
+    6: GridSize.LARGE,
+}
+
+
+def suggested_grid_size(player_count: int) -> GridSize:
+    return SUGGESTED_GRID[max(2, min(6, player_count))]
+
+
 def compute_vp_target(grid_size: GridSize, player_count: int = 2, speed: str = "normal") -> int:
     """Compute the recommended VP target based on grid size and player count.
 
@@ -106,6 +137,59 @@ def compute_vp_target(grid_size: GridSize, player_count: int = 2, speed: str = "
 
 
 
+
+
+def game_pack(game: "GameState") -> CardPack:
+    """The cards a game is played with: a solo level's own pool (see solo.py),
+    else its card pack."""
+    solo = game.solo or {}
+    pool = solo.get("pack")
+    if pool:
+        return CardPack(
+            id=game.card_pack, name=str(solo.get("level_title", "Solo")),
+            shared_card_ids=pool.get("shared_card_ids"),
+            # A random market draws from the level's cards each round.
+            archetype_card_ids=pool.get("archetype_card_ids") if pool.get("fixed", True) else None,
+        )
+    return get_pack(game.card_pack)
+
+
+def archetype_market_fixed(game: "GameState") -> bool:
+    """A pack game: each player's archetype cards are a fixed set of piles,
+    all on show every round — nothing to re-roll."""
+    return game_pack(game).archetype_card_ids is not None
+
+
+def _supply_market(player: "Player") -> list[Card]:
+    """The top copy of each archetype pile that has copies left (pack order).
+    A card bought this round stays out until next round: one of each per round."""
+    seen: set[str] = set()
+    market: list[Card] = []
+    for card in player.archetype_deck:
+        if card.definition_id not in seen:
+            seen.add(card.definition_id)
+            market.append(card)
+    return market
+
+
+def archetype_supply(game: "GameState", player: "Player") -> list[dict[str, Any]]:
+    """Every archetype pile of a pack game, bought out or not: the card, how
+    many copies are left and whether it can be bought right now."""
+    ids = (game_pack(game).archetype_card_ids or {}).get(player.archetype.value, [])
+    on_sale = {c.definition_id: c for c in player.archetype_market}
+    supply: list[dict[str, Any]] = []
+    for cid in ids:
+        template = game.card_registry.get(cid)
+        if template is None:
+            continue
+        remaining = sum(1 for c in player.archetype_deck if c.definition_id == cid)
+        market_card = on_sale.get(cid)
+        supply.append({
+            "card": (market_card or template).to_dict(),
+            "remaining": remaining,
+            "available": market_card is not None,
+        })
+    return supply
 
 
 def _draw_archetype_market(
@@ -220,10 +304,10 @@ class PlannedAction:
     target_r: Optional[int] = None
     target_player_id: Optional[str] = None  # for forced discards
     extra_targets: list[tuple[int, int]] = field(default_factory=list)  # Surge multi-targets
-    # Effective power computed once at play time — accounts for dynamic modifiers
-    # (hand size, tile count, adjacency, etc.) frozen at the moment the card was
-    # played.  Used for all display and for claim resolution.  None for non-claim
-    # cards or cards without dynamic modifiers (they just use base card power).
+    # A Claim's settled power (conditional bonuses and Claim buffs included,
+    # stacking bonuses not): set at the reveal from the board just before any
+    # tile changes hands (settle_claim_powers), or at play time for power that
+    # counts your hand. None while the round is still being planned.
     effective_power: Optional[int] = None
     # Dynamic resource gain snapshotted at play time (e.g. War Tithe).
     # None when the card has no dynamic resource effects.
@@ -372,6 +456,16 @@ class Player:
                 d["current_vp"] = card.passive_vp + formula_val
             return d
 
+        def _planned_dict(action: PlannedAction) -> dict[str, Any]:
+            """A planned card; an unsettled Claim gets a live power preview."""
+            d = action.to_dict()
+            if (game and action.effective_power is None and action.target_q is not None
+                    and action.card.card_type == CardType.CLAIM):
+                d["effective_power"] = calculate_effective_power(
+                    game, self, action.card, action, include_stacking_bonus=False,
+                )
+            return d
+
         return {
             "id": self.id,
             "name": self.name,
@@ -391,7 +485,7 @@ class Player:
             "discard": [_card_dict(c) for c in self.deck.discard],
             "deck_cards": [_card_dict(c) for c in self.deck.cards],
             "planned_action_count": len(self.planned_actions),
-            "planned_actions": [] if hide_hand else [a.to_dict() for a in self.planned_actions],
+            "planned_actions": [] if hide_hand else [_planned_dict(a) for a in self.planned_actions],
             "has_submitted_play": self.has_submitted_play,
             "has_acknowledged_resolve": self.has_acknowledged_resolve,
             "has_ended_turn": self.has_ended_turn,
@@ -602,6 +696,9 @@ class GameState:
     max_rounds: int = DEFAULT_MAX_ROUNDS
     archetype_market_size: int = 5
     winners: list[str] = field(default_factory=list)  # all winners (for tied victories)
+    # Solo campaign level (solo.py): the level, its objective and card pool,
+    # and once decided the result. None in a regular game.
+    solo: Optional[dict[str, Any]] = None
 
     def _log(self, msg: str, visible_to: Optional[list[str]] = None,
              actor: Optional[str] = None,
@@ -665,6 +762,9 @@ class GameState:
                     dynamic = calculate_dynamic_buy_cost(self, p, stack[0])
                     effective_costs[base_id] = _preview_cost_reductions(p, stack[0], base_cost_override=dynamic) if has_reductions else dynamic
             pdata["effective_buy_costs"] = effective_costs
+            pdata["archetype_market_fixed"] = archetype_market_fixed(self)
+            if pdata["archetype_market_fixed"]:
+                pdata["archetype_supply"] = archetype_supply(self, p)
             pdata["effective_reroll_cost"] = _preview_cost_reductions_flat(p, REROLL_COST) if has_reductions else REROLL_COST
             pdata["effective_upgrade_credit_cost"] = _preview_cost_reductions_flat(p, UPGRADE_CREDIT_COST) if has_reductions else UPGRADE_CREDIT_COST
             players_dict[pid] = pdata
@@ -698,6 +798,7 @@ class GameState:
             "claim_ban_rounds": self.claim_ban_rounds,
             "max_rounds": self.max_rounds,
             "winners": self.winners,
+            "solo": _solo_view(self),
         }
         if self.resolution_steps:
             result["resolution_steps"] = self.resolution_steps
@@ -718,6 +819,14 @@ class GameState:
                 for pid, p in self.players.items()
             }
         return result
+
+
+def _solo_view(game: GameState) -> Optional[dict[str, Any]]:
+    """A solo level's info with live objective progress (see solo.py)."""
+    if not game.solo:
+        return None
+    from .solo import solo_view
+    return solo_view(game)
 
 
 def compute_player_vp(game: GameState, player_id: str) -> int:
@@ -766,8 +875,8 @@ def compute_player_vp(game: GameState, player_id: str) -> int:
 
 
 def arsenal_divisor(is_upgraded: bool) -> int:
-    """Cards per VP for Arsenal (vp_formula "deck_div_12")."""
-    return 10 if is_upgraded else 12
+    """Cards per VP for Arsenal (vp_formula "deck_div_12", a legacy key)."""
+    return 12 if is_upgraded else 14
 
 
 def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> int:
@@ -832,13 +941,17 @@ def _compute_formula_vp(card: "Card", player: "Player", game: "GameState") -> in
         return groups
 
     elif formula == "uncaptured_tiles_8":
-        # Warden: 1 VP per 8 tiles (6 upgraded) that have never changed hands
+        # Warden: 1 VP per N tiles (the card's effect value) that have never changed hands
         # since this player claimed them: tiles they've held continuously since
         # their first claim. Tiles taken from an opponent count; tiles the
         # player lost (or abandoned) and later retook don't (tile.lost_by).
         if not game.grid:
             return 0
-        divisor = 6 if is_upgraded else 8
+        divisor = next(
+            (e.effective_value(is_upgraded) for e in card.effects
+             if e.type == EffectType.VP_FROM_UNCAPTURED_TILES),
+            8,
+        ) or 8
         count = sum(
             1 for t in game.grid.tiles.values()
             if t.owner == player.id and not t.is_base and player.id not in t.lost_by
@@ -890,8 +1003,15 @@ def create_game(
     map_seed: Optional[str] = None,
     max_rounds: Optional[int] = None,
     archetype_market_size: Optional[int] = None,
+    grid: Optional[HexGrid] = None,
+    pack: Optional[CardPack] = None,
 ) -> GameState:
-    """Create a new game with the given configuration."""
+    """Create a new game with the given configuration.
+
+    `grid` and `pack` replace the size's preset map and the `card_pack`'s
+    cards (solo levels bring their own; see solo.py). A grid's
+    starting_positions seat the players in order.
+    """
     # Map seed: user-visible 6-char seed that controls grid layout only
     if not map_seed:
         if seed is not None:
@@ -906,8 +1026,9 @@ def create_game(
     num_players = len(player_configs)
 
     game = GameState(rng=rng, card_registry=card_registry, test_mode=test_mode, card_pack=card_pack, map_seed=map_seed)
-    pack = get_pack(card_pack, card_registry)
-    game.grid = generate_map(grid_size, num_players, map_seed)
+    if pack is None:
+        pack = get_pack(card_pack, card_registry)
+    game.grid = grid if grid is not None else generate_map(grid_size, num_players, map_seed)
 
     # Set VP target: explicit override > dynamic computation
     if vp_target is not None:
@@ -963,14 +1084,19 @@ def create_game(
             c for c in card_registry.values()
             if c.archetype == archetype and not c.starter and c.buy_cost is not None
         ]
-        # Filter by pack if it restricts this archetype's cards
-        if pack.archetype_card_ids is not None:
-            arch_ids = pack.archetype_card_ids.get(archetype.value)
-            if arch_ids is not None:
-                arch_id_set = set(arch_ids)
-                archetype_cards = [c for c in archetype_cards if c.id in arch_id_set]
-        player.archetype_deck = [_copy_card(c, f"market_{j}") for j, c in enumerate(archetype_cards)]
-        rng.shuffle(player.archetype_deck)
+        arch_ids = pack.archetype_card_ids.get(archetype.value) if pack.archetype_card_ids else None
+        if arch_ids is not None:
+            # A pack's cards: one private pile each, in the pack's order.
+            by_id = {c.id: c for c in archetype_cards}
+            player.archetype_deck = [
+                _copy_card(by_id[cid], f"market_{k}")
+                for cid in arch_ids if cid in by_id
+                for k in range(ARCHETYPE_PILE_SIZE)
+            ]
+        else:
+            # Every card, one copy each, drawn at random into the market.
+            player.archetype_deck = [_copy_card(c, f"market_{j}") for j, c in enumerate(archetype_cards)]
+            rng.shuffle(player.archetype_deck)
 
         game.players[player_id] = player
         game.player_order.append(player_id)
@@ -980,7 +1106,6 @@ def create_game(
     # Random first player
     game.first_player_index = rng.randint(0, num_players - 1)
 
-    # Set up shared market (N*2 copies per card, where N = player count)
     _setup_shared_market(game, card_registry, num_players, pack)
 
     game._log(f"Game created with {num_players} players on {grid_size.value} grid")
@@ -994,9 +1119,8 @@ def _setup_shared_market(
     game: GameState, card_registry: dict[str, Card], num_players: int,
     pack: Any = None,
 ) -> None:
-    """Set up the shared market stacks.
+    """Set up the shared market stacks (shared_pile_size copies of each card).
 
-    Each neutral card gets N*2 copies where N is the number of players.
     Filtered by the active card pack's shared_card_ids if specified.
     """
     neutral_cards = [
@@ -1009,7 +1133,7 @@ def _setup_shared_market(
         allowed = set(pack.shared_card_ids)
         neutral_cards = [c for c in neutral_cards if c.id in allowed]
 
-    copies_count = num_players * 2
+    copies_count = shared_pile_size(num_players)
     for card in neutral_cards:
         copies = [_copy_card(card, f"neutral_{i}") for i in range(copies_count)]
         game.shared_market.stacks[card.id] = copies
@@ -1113,9 +1237,11 @@ def execute_start_of_turn(game: GameState) -> GameState:
         player.has_acknowledged_resolve = False
         player.has_ended_turn = False
 
-        # Reveal archetype market (N random cards from archetype deck)
+        # Reveal archetype market: a pack's whole supply, or N random cards
         player.archetype_market = []
-        if player.archetype_deck:
+        if archetype_market_fixed(game):
+            player.archetype_market = _supply_market(player)
+        elif player.archetype_deck:
             player.archetype_market = _draw_archetype_market(
                 player.archetype_deck, game.archetype_market_size, game.rng, player,
             )
@@ -1129,15 +1255,17 @@ def execute_start_of_turn(game: GameState) -> GameState:
 def _apply_upkeep(game: GameState) -> None:
     """Internal: beginning-of-round phase.
 
-    Distributes Debt cards to the VP leader starting at round 5.
+    Distributes Debt cards to the VP leader starting at round 5. Debt reins
+    in a leader, so a player alone (a solo level without bots) never gets
+    it, and a solo level can turn it off (`debt: false`).
     Called during execute_start_of_turn before transitioning to UPKEEP phase.
     """
     game._log("=== Upkeep ===")
 
     # Debt card distribution (round 5+)
-    if game.current_round >= DEBT_START_ROUND:
+    if game.current_round >= DEBT_START_ROUND and (game.solo or {}).get("debt", True):
         active_pids = [pid for pid in game.player_order if not game.players[pid].has_left]
-        if active_pids:
+        if len(active_pids) >= 2:
             vp_scores = {pid: compute_player_vp(game, pid) for pid in active_pids}
             max_vp = max(vp_scores.values())
             leaders = [pid for pid, vp in vp_scores.items() if vp == max_vp]
@@ -1168,11 +1296,6 @@ def _tile_bridges_territory(grid: 'HexGrid', player_id: str, q: int, r: int) -> 
     """Return True if claiming tile (q, r) would connect two or more disconnected
     groups of the player's territory. Thin wrapper kept for existing callers."""
     return tile_bridges_territory(grid, player_id, q, r)
-
-
-# Power-modifier conditions that are always evaluated (and frozen) at play
-# time instead of being re-checked when Claims resolve. See play_card.
-_PLAY_TIME_POWER_CONDITIONS = frozenset({ConditionType.IF_BRIDGES_TERRITORY})
 
 
 def play_card(game: GameState, player_id: str, card_index: int,
@@ -1276,6 +1399,8 @@ def play_card(game: GameState, player_id: str, card_index: int,
             # Prevent unoccupied_only cards from targeting owned tiles
             if card.effective_unoccupied_only and tile.owner is not None:
                 return False, f"{card.name} can only target unoccupied tiles"
+            if card.defenseless_only and tile.defense_power > 0:
+                return False, f"{card.name} can only claim a tile with no defense"
 
             # Power-vs-defense is NOT checked here — players may target tiles
             # with higher defense (e.g. to stack multiple claims). Insufficient
@@ -1360,6 +1485,8 @@ def play_card(game: GameState, player_id: str, card_index: int,
                     continue
             if card.effective_unoccupied_only and et_tile.owner is not None:
                 continue
+            if card.defenseless_only and et_tile.defense_power > 0:
+                continue
             # A non-stackable claim can't land on a tile any prior planned
             # non-stackable claim (primary or extra) already targets this
             # round. Stackable claims pass through unrestricted.
@@ -1369,7 +1496,8 @@ def play_card(game: GameState, player_id: str, card_index: int,
 
         # All targets (primary + extras) must form a connected subgraph via
         # direct hex adjacency — e.g. Surge/Hive Mind target "adjacent tiles".
-        if validated_extra:
+        # Explore+ just needs each tile next to your land.
+        if validated_extra and not card.defenseless_only:
             primary: tuple[int, int] = (target_q, target_r)
             all_targets: set[tuple[int, int]] = {primary, *validated_extra}
             # BFS from primary through hex-neighbors restricted to target set
@@ -1450,45 +1578,27 @@ def play_card(game: GameState, player_id: str, card_index: int,
                     return False, f"{card.name} requires {type_label} cards in your {zone_name}"
                 return False, f"{card.name} requires cards in your {zone_name}"
 
-    # Remove card from hand and create planned action
-    # Compute effective power BEFORE removing the card so dynamic modifiers
-    # (hand size, tile count, adjacency) reflect the game state at play time.
-    #
-    # Snapshot rule (audit B16 — deliberate, documented behaviour): the value
-    # is frozen only when it DIFFERS from the card's printed power. When a
-    # conditional modifier isn't active at play time the action stores no
-    # snapshot, and calculate_effective_power re-evaluates the condition when
-    # Claims resolve. Consequences:
-    #   * Strike Team gets its +2 if ANY other Claim is played this round,
-    #     before or after it (the "dynamic power" behaviour of d9afd57).
-    #   * Battering Ram on a tile with no bonus at play time sees Defense cards
-    #     the owner plays on it this round (they resolve before Claims).
-    # Conditions in _PLAY_TIME_POWER_CONDITIONS are always frozen at play time
-    # (Road Builder's bridge check), since the board mutates while Claims resolve.
+    # Remove card from hand and create planned action.
+    # A Claim's power is settled at the reveal, from the board just before any
+    # tile changes hands (settle_claim_powers). Only power that counts your
+    # hand (Strength in Numbers) is fixed now, BEFORE the card leaves the hand
+    # — the hand only exists while you play.
     snapshotted_power: Optional[int] = None
     consumed_claim_buff: Optional[dict[str, Any]] = None
     consumed_claim_buff_sources: Optional[list[dict[str, Any]]] = None
-    # Skip snapshotting for cards with IF_CONTESTED power modifiers (Ambush) —
-    # contest status isn't known until reveal phase when all claims are visible.
-    has_contested_modifier = any(
-        e.type == EffectType.POWER_MODIFIER and e.condition == ConditionType.IF_CONTESTED
-        for e in card.effects
-    )
-    if card.card_type in (CardType.CLAIM, CardType.DEFENSE) and not has_contested_modifier:
+    if card.card_type == CardType.CLAIM:
         # Build a temporary action to pass to calculate_effective_power
         _tmp_action = PlannedAction(
             card=card,
             target_q=target_q,
             target_r=target_r,
             extra_targets=validated_extra if (
-                card.card_type == CardType.CLAIM and target_q is not None and card.effective_multi_target_count > 0
-            ) or (
-                card.card_type == CardType.DEFENSE and card.effective_defense_target_count > 1
+                target_q is not None and card.effective_multi_target_count > 0
             ) else [],
         )
-        # Snapshot intrinsic power only — stacking_power_bonus (Dog Pile)
-        # is applied fresh at resolve time, since more stacking sources may
-        # be played on this tile after this snapshot is taken.
+        # Power as things stand now — stacking_power_bonus (Dog Pile) is
+        # applied at resolve time, since more stacking sources may be played
+        # on this tile after this.
         computed = calculate_effective_power(
             game, player, card, _tmp_action, include_stacking_bonus=False,
         ) if card.effects else (card.effective_power or 0)
@@ -1532,14 +1642,7 @@ def play_card(game: GameState, player_id: str, card_index: int,
                             f"{player.name}'s queued Claim buff(s) add +{total_bonus} "
                             f"power to {card.name} ({len(consumed)} source(s))",
                             visible_to=[player.id], actor=player.id)
-        # Only store if it differs from the base power (i.e. a dynamic modifier
-        # applied, or a claim_buff was consumed) — or the card's condition must
-        # be judged at play time.
-        freeze_now = any(
-            e.type == EffectType.POWER_MODIFIER and e.condition in _PLAY_TIME_POWER_CONDITIONS
-            for e in card.effects
-        )
-        if computed != card.effective_power or (freeze_now and card.card_type == CardType.CLAIM):
+        if power_counts_hand(card):
             snapshotted_power = computed
 
     # Snapshot dynamic resource gain (War Tithe, Dividends) before removing card from hand
@@ -1552,7 +1655,8 @@ def play_card(game: GameState, player_id: str, card_index: int,
                 break
             if eff.type == EffectType.RESOURCE_SCALING:
                 divisor = eff.value or 2
-                snapshotted_resource_gain = max(1, player.resources // divisor)
+                snapshotted_resource_gain = max(resource_scaling_min(eff, card.is_upgraded),
+                                                player.resources // divisor)
                 break
             if eff.type == EffectType.RESOURCES_PER_TILES_LOST:
                 per_tile = eff.upgraded_value if card.is_upgraded and eff.upgraded_value else eff.value
@@ -2321,6 +2425,10 @@ def execute_reveal(game: GameState) -> GameState:
         for tk in claims_by_tile.keys()
     }
 
+    # Every Claim's conditions are judged now, on one board — after abandons
+    # and Defense cards, before any tile changes hands.
+    settle_claim_powers(game, [c for claims in claims_by_tile.values() for c in claims])
+
     # Resolve claims: highest power wins, ties to defender
     for tile_key, claims in claims_by_tile.items():
         tile = game.grid.tiles.get(tile_key)
@@ -2631,18 +2739,18 @@ def execute_reveal(game: GameState) -> GameState:
                 player.hand.extend(drawn)
 
         # Forced discards
-        if card.forced_discard > 0 and action.target_player_id:
+        if card.effective_forced_discard > 0 and action.target_player_id:
             target = game.players.get(action.target_player_id)
             if target:
-                target.forced_discard_next_turn += card.forced_discard
-                game._log(f"{player.name} forces {target.name} to discard {card.forced_discard} next turn")
+                target.forced_discard_next_turn += card.effective_forced_discard
+                game._log(f"{player.name} forces {target.name} to discard {card.effective_forced_discard} next turn")
                 game.player_effects.append({
                     "source_player_id": pid,
                     "target_player_id": action.target_player_id,
                     "card_name": card.name,
-                    "effect": f"-{card.forced_discard} card{'s' if card.forced_discard > 1 else ''} next turn",
+                    "effect": f"-{card.effective_forced_discard} card{'s' if card.effective_forced_discard > 1 else ''} next turn",
                     "effect_type": "forced_discard",
-                    "value": card.forced_discard,
+                    "value": card.effective_forced_discard,
                 })
 
         # Consecrate: the tile's VP before, so the step shows only a real change
@@ -2844,6 +2952,13 @@ def advance_resolve(game: GameState, player_id: str) -> tuple[bool, str]:
 
 def _transition_to_buy(game: GameState) -> None:
     """Transition from REVEAL to BUY phase (concurrent — all players buy simultaneously)."""
+    # Solo: a reveal that clears the level skips that round's buy phase.
+    if game.solo is not None:
+        from .solo import won_this_round
+        if won_this_round(game):
+            game._log("Objective complete — no buy phase")
+            execute_end_of_turn(game)
+            return
     game.current_phase = Phase.BUY
     game.buy_phase_purchases = {}
     game.shared_market.selling_out.clear()
@@ -3231,7 +3346,7 @@ def _preview_cost_reductions(player: Player, card: Card, base_cost_override: Opt
 
 
 def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
-    """Re-roll archetype market for 2 resources (once per turn)."""
+    """Re-roll the archetype market for REROLL_COST (a free re-roll first)."""
     if game.current_phase != Phase.BUY:
         return False, "Not in Buy phase"
 
@@ -3241,6 +3356,9 @@ def reroll_market(game: GameState, player_id: str) -> tuple[bool, str]:
 
     if player.has_ended_turn or player_id in game.players_done_buying:
         return False, "Already done buying"
+
+    if archetype_market_fixed(game):
+        return False, "Your whole market is already on show"
 
     # Use free rerolls first (from Surveyor), otherwise charge resources
     # (applying any active cost reductions, e.g. Supply Line).
@@ -3387,11 +3505,17 @@ def execute_end_of_turn(game: GameState) -> GameState:
     # so that multi-round effects (like Stronghold's 2-round immunity) persist
     # across the end-of-turn boundary.
 
+    # --- Solo campaign: the level's objective decides instead of the checks below ---
+    if game.solo is not None:
+        from .solo import check_solo_objective
+        if check_solo_objective(game):
+            return game
+
     # --- VP target check (checked at end of round) ---
     # Everyone who reached the target this round is a candidate; seat order
     # never decides it (audit B11). See rank_vp_target_winners for the
     # tie-break order.
-    qualifying = [
+    qualifying = [] if game.solo is not None else [
         pid for pid in game.player_order
         if not game.players[pid].has_left
         and compute_player_vp(game, pid) >= game.vp_target
@@ -3423,7 +3547,7 @@ def execute_end_of_turn(game: GameState) -> GameState:
         return game
 
     # --- Round limit check ---
-    if game.current_round >= game.max_rounds:
+    if game.solo is None and game.current_round >= game.max_rounds:
         active_pids = [pid for pid in game.player_order if not game.players[pid].has_left]
         vp_scores = {pid: compute_player_vp(game, pid) for pid in active_pids}
         max_vp = max(vp_scores.values()) if vp_scores else 0

@@ -561,10 +561,11 @@ class TestNeutralConscription:
 
 class TestNeutralWatchtower:
     def test_watchtower_defense_and_cost(self, card_registry):
-        """Watchtower: +2 defense, draw 1."""
+        """Watchtower: +2 defense, draw 1, gain 1 action."""
         card = card_registry["neutral_watchtower"]
         assert card.defense_bonus == 2
-        assert card.buy_cost == 2
+        assert card.draw_cards == 1 and card.action_return == 1
+        assert card.buy_cost == 3
 
 
 class TestNeutralSiegeTower:
@@ -572,7 +573,7 @@ class TestNeutralSiegeTower:
         """Siege Tower: Power 6, cost 9, Unique."""
         card = card_registry["neutral_siege_tower"]
         assert card.power == 6
-        assert card.buy_cost == 9
+        assert card.buy_cost == 8
         assert card.unique is True
 
 
@@ -594,8 +595,8 @@ class TestNeutralReclaim:
 
         success, _ = play_card(game, "p0", 0, trash_card_indices=[0])
         assert success
-        # Should have gained 2 resources (half of 5, rounded down)
-        assert player.resources == initial_res + 2
+        # Half of 5 (rounded down) plus 1
+        assert player.resources == initial_res + 3
         assert any(c.name == "Trash Me" for c in player.trash)
 
     def test_consolidate_even_cost(self, card_registry):
@@ -609,7 +610,7 @@ class TestNeutralReclaim:
 
         success, _ = play_card(game, "p0", 0, trash_card_indices=[0])
         assert success
-        assert player.resources == initial_res + 2  # half of 4
+        assert player.resources == initial_res + 3  # half of 4, plus 1
 
 
 class TestNeutralDiplomat:
@@ -783,7 +784,7 @@ class TestVanguardWarCache:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial + 4
+        assert player.resources == initial + 3
 
 
 class TestVanguardFlanking:
@@ -920,22 +921,20 @@ class TestVanguardArsenal:
             player.deck.discard.append(_make_card(f"dummy_{i}"))
         assert compute_player_vp(game, "p0") == vp_base
 
-        # 12 total → 1 VP from arsenal
-        for i in range(2):
+        # 14 total → 1 VP from arsenal
+        for i in range(4):
             player.deck.discard.append(_make_card(f"dummy_b{i}"))
-        vp_12 = compute_player_vp(game, "p0")
-        assert vp_12 == vp_base + 1
+        assert compute_player_vp(game, "p0") == vp_base + 1
 
-        # 24 total → 2 VP from arsenal
-        for i in range(12):
+        # 28 total → 2 VP from arsenal
+        for i in range(14):
             player.deck.discard.append(_make_card(f"dummy2_{i}"))
-        vp_24 = compute_player_vp(game, "p0")
-        assert vp_24 == vp_base + 2
+        assert compute_player_vp(game, "p0") == vp_base + 2
 
-        # Arsenal+: 1 VP per 10 → 24 cards = 2, 30 cards = 3
+        # Arsenal+: 1 VP per 12 → 28 cards = 2, 36 cards = 3
         arsenal.is_upgraded = True
         assert compute_player_vp(game, "p0") == vp_base + 2
-        for i in range(6):
+        for i in range(8):
             player.deck.discard.append(_make_card(f"dummy3_{i}"))
         assert compute_player_vp(game, "p0") == vp_base + 3
 
@@ -1506,13 +1505,13 @@ class TestSwarmBlitzRush:
 
 class TestSwarmScavenge:
     def test_scavenge_resource_gain(self, card_registry):
-        """Scavenge: gain 2 resources, no draw, no unconditional action return."""
+        """Scavenge: gain 2 resources and 1 action, no draw."""
         game = _make_2p_game(card_registry)
         player = game.players["p1"]
         scav = _copy_card(card_registry["swarm_scavenge"], "test_scav")
         assert scav.resource_gain == 2
         assert scav.draw_cards == 0
-        assert scav.action_return == 0
+        assert scav.action_return == 1
         player.hand = [scav] + player.hand[1:]
         initial_res = player.resources
 
@@ -1535,8 +1534,8 @@ class TestSwarmScavenge:
         # After playing (uses 1), was at 0, so conditional grants 1 back
         assert player.actions_available - player.actions_used == 1
 
-    def test_scavenge_no_action_when_actions_remain(self, card_registry):
-        """Scavenge: does NOT grant action if player has actions remaining."""
+    def test_scavenge_always_returns_its_action(self, card_registry):
+        """Scavenge: gives back the action it cost, whatever is left."""
         game = _make_2p_game(card_registry)
         player = game.players["p1"]
         scav = _copy_card(card_registry["swarm_scavenge"], "test_scav")
@@ -1546,8 +1545,8 @@ class TestSwarmScavenge:
 
         success, _ = play_card(game, "p1", 0)
         assert success
-        # Used 1 of 3, still has 2 remaining — no bonus action
-        assert player.actions_available - player.actions_used == 2
+        # Used 1 of 3 and got it back
+        assert player.actions_available - player.actions_used == 3
 
 
 class TestSwarmConsecrate:
@@ -1807,7 +1806,7 @@ class TestFortressSupplyLine:
 
     def test_supply_line_resources(self, card_registry):
         card = card_registry["fortress_supply_line"]
-        assert card.resource_gain == 2
+        assert card.resource_gain == 3
         assert card.action_return == 1
 
 
@@ -1890,7 +1889,7 @@ class TestFortressWarCouncil:
 
 class TestFortressIronDiscipline:
     def test_iron_discipline_resources_draw_action(self, card_registry):
-        """Iron Discipline: gain 2 resources, draw 1, action return 1."""
+        """Iron Discipline: gain 1 resource, draw 1, action return 1."""
         game = _make_2p_game(card_registry, arch0="fortress")
         player = game.players["p0"]
         id_card = _copy_card(card_registry["fortress_iron_discipline"], "test_id")
@@ -1901,7 +1900,7 @@ class TestFortressIronDiscipline:
 
         success, _ = play_card(game, "p0", 0)
         assert success
-        assert player.resources == initial_res + 2
+        assert player.resources == initial_res + 1
         assert len(player.hand) == initial_hand - 1 + 1  # played 1, drew 1
 
 
@@ -2164,10 +2163,10 @@ class TestVanguardCounterattack:
 
 class TestVanguardRearguard:
     def test_rearguard_stats(self, card_registry):
-        """Rearguard: cost 4, defense type, gains 3 resources."""
+        """Rearguard: cost 4, defense type, draws 1 and gains 2 resources."""
         card = card_registry["vanguard_rearguard"]
         assert card.buy_cost == 4
-        assert card.resource_gain == 3
+        assert card.resource_gain == 2 and card.draw_cards == 1
         assert card.card_type == CardType.DEFENSE
 
 
@@ -2215,9 +2214,10 @@ class TestSwarmNest:
 
 class TestSwarmSafetyInNumbers:
     def test_safety_in_numbers_stats(self, card_registry):
-        """Safety in Numbers: cost 3, defense type."""
+        """Phalanx: cost 4, defense type, draws 1 and gives back its action."""
         card = card_registry["swarm_safety_in_numbers"]
-        assert card.buy_cost == 3
+        assert card.buy_cost == 4
+        assert card.draw_cards == 1 and card.action_return == 1
         assert card.card_type == CardType.DEFENSE
 
 
@@ -2519,10 +2519,10 @@ class TestVanguardWarTithe:
 
 class TestSwarmColony:
     def test_colony_properties(self, card_registry):
-        """Colony: passive card, cost 4, VP from disconnected groups."""
+        """Colony: passive card, cost 3, VP from disconnected groups."""
         card = card_registry["swarm_colony"]
         assert card.card_type == CardType.PASSIVE
-        assert card.buy_cost == 4
+        assert card.buy_cost == 3
         assert card.archetype == Archetype.SWARM
         assert card.unplayable is True
         assert card.vp_formula == "disconnected_groups_3"
@@ -2640,9 +2640,9 @@ class TestFortressWarden:
         card = card_registry["fortress_warden"]
         matching = [e for e in card.effects if e.type.value == "vp_from_uncaptured_tiles"]
         assert len(matching) >= 1
-        assert matching[0].value == 8  # divisor base
-        assert matching[0].upgraded_value == 6  # divisor upgraded
-        assert matching[0].metadata.get("divisor") == 8
+        assert matching[0].value == 10  # divisor base
+        assert matching[0].upgraded_value == 8  # divisor upgraded
+        assert matching[0].metadata.get("divisor") == 10
 
     def test_warden_is_unplayable(self, card_registry):
         """Warden: cannot be played as an action."""
@@ -2849,8 +2849,8 @@ class TestNeutralSpyglass:
         # No bonus action; only the base action cost
         assert player.actions_available == initial_actions
 
-    def test_spyglass_upgraded_resource(self, card_registry):
-        """Upgraded Spyglass also grants +1 resource when condition met."""
+    def test_spyglass_upgraded_threshold(self, card_registry):
+        """Upgraded Spyglass gives the action with up to 4 cards in hand."""
         card = card_registry.get("neutral_spyglass")
         if not card:
             pytest.skip("Card not in registry")
@@ -2858,12 +2858,14 @@ class TestNeutralSpyglass:
         player = game.players["p0"]
         spy = _copy_card(card, "test_spy_up")
         spy.is_upgraded = True
-        # Small hand so condition is met
-        player.hand = [spy, player.hand[0], player.hand[1]]
+        # 3 other cards + the draw = 4 in hand: base wouldn't qualify, upgraded does
+        player.hand = [spy, player.hand[0], player.hand[1], player.hand[2]]
         initial_resources = player.resources
+        actions_before = player.actions_available
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        assert player.resources == initial_resources + 1
+        assert player.actions_available == actions_before + 1
+        assert player.resources == initial_resources
 
 
 class TestNeutralDividends:
@@ -3064,7 +3066,7 @@ class TestNeutralMobilize:
         eff = card.effects[0]
         assert eff.type == EffectType.ACTIONS_PER_CARDS_PLAYED
         assert eff.metadata.get("max") == 3
-        assert eff.metadata.get("upgraded_max") == 3
+        assert eff.metadata.get("upgraded_max") == 4
 
     def test_mobilize_action_gain_scales(self, card_registry):
         """Mobilize gains 1 action per other card played this turn."""
@@ -3110,12 +3112,12 @@ class TestNeutralMobilize:
 
 class TestNeutralAmbush:
     def test_ambush_properties(self, card_registry):
-        """Ambush: claim, cost 4, power 2, power_modifier with if_contested."""
+        """Ambush: claim, cost 5, power 2, power_modifier with if_contested."""
         card = card_registry.get("neutral_ambush")
         if not card:
             pytest.skip("Card not in registry")
         assert card.card_type == CardType.CLAIM
-        assert card.buy_cost == 4
+        assert card.buy_cost == 5
         assert card.power == 2
         assert card.archetype == Archetype.SHARED
         assert len(card.effects) >= 1
@@ -3228,7 +3230,7 @@ class TestNeutralAmbush:
         assert result_tile.owner == "p0"
 
     def test_ambush_upgraded_contested(self, card_registry):
-        """Ambush+ gets +3 power and 1 resource on contested claim."""
+        """Ambush+ gets +3 power on a contested claim."""
         card = card_registry.get("neutral_ambush")
         if not card:
             pytest.skip("Card not in registry")
@@ -3258,8 +3260,7 @@ class TestNeutralAmbush:
         # Ambush+: base 2 + bonus 3 = 5 > 4 defense → p0 wins
         result_tile = game.grid.get_tile(target_tile.q, target_tile.r)
         assert result_tile.owner == "p0"
-        # Upgraded also gains 1 resource immediately on play
-        assert p0.resources == initial_resources + 1
+        assert p0.resources == initial_resources
 
     def test_ambush_no_bonus_on_unowned_uncontested(self, card_registry):
         """Ambush does NOT get bonus on uncontested neutral tile — effective power is base 2 only."""
@@ -3326,7 +3327,7 @@ class TestNeutralSupplyDepot:
         assert eff.metadata.get("resources") == 3
         assert eff.metadata.get("upgraded_draw") == 2
         assert eff.metadata.get("upgraded_resources") == 4
-        assert eff.metadata.get("upgraded_actions") == 1
+        assert eff.metadata.get("upgraded_resources") == 4
 
     def test_supply_depot_next_turn_bonuses(self, card_registry):
         """Supply Depot queues +2 draw and +3 resources for next turn."""
@@ -3345,8 +3346,8 @@ class TestNeutralSupplyDepot:
         assert player.turn_modifiers.extra_draws_next_turn >= 2
         assert player.turn_modifiers.extra_resources_next_turn >= 3
 
-    def test_supply_depot_upgraded_extra_action(self, card_registry):
-        """Upgraded Supply Depot grants +2 draw, +4 resources, +1 action next turn."""
+    def test_supply_depot_upgraded_more_resources(self, card_registry):
+        """Upgraded Supply Depot grants +2 draw and +4 resources next turn."""
         card = card_registry.get("neutral_supply_depot")
         if not card:
             pytest.skip("Card not in registry")
@@ -3361,7 +3362,7 @@ class TestNeutralSupplyDepot:
         submit_play(game, "p1")
         assert player.turn_modifiers.extra_draws_next_turn >= 2
         assert player.turn_modifiers.extra_resources_next_turn >= 4
-        assert player.turn_modifiers.extra_actions_next_turn >= 1
+        assert player.turn_modifiers.extra_actions_next_turn == 0
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -3395,12 +3396,11 @@ class TestFortressMulligan:
         hand_before = len(player.hand)
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        # After play: card removed (-1), remaining hand discarded, redraw same count
-        # Mulligan discards the remaining hand (hand_before - 1 cards), then draws that many
-        assert len(player.hand) == hand_before - 1
+        # Mulligan discards the remaining hand (hand_before - 1 cards), then draws that many plus 1
+        assert len(player.hand) == hand_before
 
     def test_mulligan_upgraded_draws_extra(self, card_registry):
-        """Upgraded Mulligan draws hand_size + 1."""
+        """Upgraded Mulligan draws hand_size + 2."""
         card = card_registry.get("fortress_mulligan")
         if not card:
             pytest.skip("Card not in registry")
@@ -3412,8 +3412,8 @@ class TestFortressMulligan:
         hand_before = len(player.hand)
         success, msg = play_card(game, "p0", 0)
         assert success, msg
-        # Remaining hand was hand_before - 1, redraw that many + 1
-        assert len(player.hand) == hand_before
+        # Remaining hand was hand_before - 1, redraw that many + 2
+        assert len(player.hand) == hand_before + 1
 
 
 class TestFortressRobinHood:
@@ -3741,10 +3741,10 @@ class TestSwarmHeadyBrew:
         draw_before = len(player.deck.cards)
         success, msg = play_card(game, "p1", 0)
         assert success, msg
-        # After swap: old discard becomes draw pile (shuffled), old draw becomes discard
-        # The new draw pile has the old discard cards (shuffled)
+        # After swap: old discard becomes draw pile (shuffled), old draw becomes
+        # discard; then it draws 1 from the new draw pile
         assert len(player.deck.discard) == draw_before
-        assert len(player.deck.cards) == discard_before
+        assert len(player.deck.cards) == discard_before - 1
 
     def test_heady_brew_upgraded_draws(self, card_registry):
         """Upgraded Heady Brew also draws 2 cards."""

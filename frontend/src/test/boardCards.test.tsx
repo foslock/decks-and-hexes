@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { SettingsProvider } from '../components/SettingsContext';
-import { TileCardStack, EngineQueue, fanOffset, tileSlots, type BoardCardEntry } from '../components/BoardCards';
+import { TileCardStack, EngineQueue, detailLayout, fanOffset, tileSlots, type BoardCardEntry } from '../components/BoardCards';
 import { makeCard } from './fixtures';
 
 function WithSettings({ children }: { children: ReactNode }) {
@@ -187,5 +187,20 @@ describe('board cards', () => {
     expect(screen.getByText(/Played/)).toHaveTextContent('Played (2)');
     expect(screen.getByText('Gather')).toBeInTheDocument();
     expect(screen.getByText('Tithe')).toBeInTheDocument();
+  });
+
+  it('shows the detail view half again the card size, smaller only to fit the screen', () => {
+    // A card on a desktop screen: 1.5x.
+    expect(detailLayout(1, 1280, 900, 32)).toEqual({ scale: 1.5, cols: 1 });
+    // A phone: as wide as the screen allows.
+    const phone = detailLayout(1, 375, 812, 32);
+    expect(phone.scale).toBeLessThan(1.5);
+    expect(220 * phone.scale + 48).toBeLessThanOrEqual(375);
+    // Several cards share the room, in the layout that lets them be biggest.
+    const four = detailLayout(4, 1280, 900, 32);
+    expect(four.cols).toBe(4);
+    expect(4 * 220 * four.scale + 3 * 20 + 48).toBeLessThanOrEqual(1280);
+    // Never smaller than the normal card.
+    expect(detailLayout(8, 400, 400, 96).scale).toBe(1);
   });
 });

@@ -118,10 +118,12 @@ def calculate_effective_power(
 ) -> int:
     """Calculate total power for a claim card including conditional modifiers.
 
-    If the action already has a snapshotted effective_power (computed at play
-    time), that frozen intrinsic value is used as the base. Otherwise the
-    intrinsic value is computed from the card's own effects against the
-    current game state.
+    If the action already has a settled effective_power, that value is used
+    as the base: it is set at the reveal (settle_claim_powers) from the board
+    just before any tile changes hands, or at play time for power that counts
+    your hand. Otherwise the intrinsic value — plus any queued Claim buff
+    (War Banner) the card consumed — is computed against the current game
+    state (a live preview while the round is being planned).
 
     STACKING_POWER_BONUS (Dog Pile) is applied on top and is *not*
     snapshotted — the tile may gain or lose stacking sources after this
@@ -131,17 +133,42 @@ def calculate_effective_power(
     Pass `include_stacking_bonus=False` when the caller is itself snapshotting
     this action's intrinsic power (to avoid double-counting at resolve).
     """
-    # Intrinsic power: either the frozen snapshot (if a dynamic modifier
-    # applied at play time) or computed fresh from the card's own effects.
+    # Intrinsic power: the settled value, or computed fresh from the card's
+    # own effects and the Claim buff it consumed when played.
     if action.effective_power is not None:
         intrinsic = action.effective_power
     else:
         intrinsic = _calculate_intrinsic_power(game, player, card, action)
+        if action.consumed_claim_buff:
+            intrinsic += int(action.consumed_claim_buff.get("power_bonus", 0))
 
     if not include_stacking_bonus or card.card_type != CardType.CLAIM or action.target_q is None:
         return intrinsic
 
     return intrinsic + _stacking_power_bonus(player, action)
+
+
+def power_counts_hand(card: Card) -> bool:
+    """Power worked out from your hand (Strength in Numbers) — fixed when the
+    card is played, since the hand only exists while you play."""
+    return any(
+        e.type == EffectType.POWER_MODIFIER and e.condition == ConditionType.CARDS_IN_HAND
+        for e in card.effects
+    )
+
+
+def settle_claim_powers(game: GameState, actions: list[tuple[str, PlannedAction]]) -> None:
+    """Settle every Claim's power at the reveal — after abandons and Defense
+    cards, before any tile changes hands — so a Claim's conditions are all
+    judged on the same board, whatever order the tiles resolve in."""
+    seen: set[int] = set()
+    for pid, action in actions:
+        if id(action) in seen or action.effective_power is not None:
+            continue
+        seen.add(id(action))
+        action.effective_power = calculate_effective_power(
+            game, game.players[pid], action.card, action, include_stacking_bonus=False,
+        )
 
 
 def _stacking_power_bonus(player: Player, action: PlannedAction) -> int:
@@ -607,11 +634,9 @@ def _handle_trash_gain_buy_cost(effect: Effect, ctx: EffectContext) -> None:
         trashed_card = ctx.player.hand.pop(idx)
         ctx.player.trash.append(trashed_card)
         base_cost = trashed_card.buy_cost or 0
-        refund = base_cost // 2  # half buy cost, rounded down
-        # Upgraded bonus (e.g. Fortress Consolidate+ gives +2, Neutral Consolidate+ gives +1)
-        if ctx.card.is_upgraded:
-            upgrade_bonus = int(effect.metadata.get("upgrade_bonus", 0))
-            refund += upgrade_bonus
+        # Half the buy cost (rounded down), plus the card's bonus
+        refund = base_cost // 2 + int(effect.metadata.get(
+            "upgraded_bonus" if ctx.card.is_upgraded else "bonus", 0))
         ctx.player.resources += refund
         if refund > 0:
             ctx.player.cumulative_resources_gained += refund
@@ -1414,6 +1439,8 @@ register_handler(EffectType.VP_FROM_UNCAPTURED_TILES, _handle_stub)
 def _handle_conditional_action(effect: Effect, ctx: EffectContext) -> None:
     """Spyglass: gain action if hand size <= threshold after drawing."""
     threshold = effect.condition_threshold
+    if ctx.card.is_upgraded:
+        threshold = int(effect.metadata.get("upgraded_threshold", threshold))
     if len(ctx.player.hand) <= threshold:
         actions = effect.effective_value(ctx.card.is_upgraded)
         ctx.player.actions_available += actions
@@ -1423,13 +1450,6 @@ def _handle_conditional_action(effect: Effect, ctx: EffectContext) -> None:
             f"{ctx.player.name}'s {ctx.card.name} grants {actions} action(s) "
             f"(hand size {len(ctx.player.hand)} <= {threshold})",
             visible_to=[ctx.player.id], actor=ctx.player.id)
-        # Upgraded Spyglass also grants 1 resource
-        if ctx.card.is_upgraded:
-            ctx.player.resources += 1
-            ctx.player.cumulative_resources_gained += 1
-            ctx.game._log(
-                f"{ctx.player.name} gains 1 resource from {ctx.card.name}+",
-                visible_to=[ctx.player.id], actor=ctx.player.id)
     else:
         ctx.game._log(
             f"{ctx.player.name}'s {ctx.card.name}: hand size {len(ctx.player.hand)} "
@@ -1437,14 +1457,15 @@ def _handle_conditional_action(effect: Effect, ctx: EffectContext) -> None:
             visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
-def _handle_resource_scaling(effect: Effect, ctx: EffectContext) -> None:
-    """Dividends: gain 1 resource per N resources currently held (min 1).
+def resource_scaling_min(effect: Effect, is_upgraded: bool) -> int:
+    """Dividends' minimum gain."""
+    return int(effect.metadata.get("upgraded_min" if is_upgraded else "min", 1))
 
-    Dividends+'s "Draw 1 card" is the card's upgraded_draw_cards stat, drawn
-    by play_card — not here (it used to be both, drawing 2).
-    """
+
+def _handle_resource_scaling(effect: Effect, ctx: EffectContext) -> None:
+    """Dividends: gain 1 resource per N resources currently held (with a minimum)."""
     divisor = effect.value  # e.g. 2 = gain 1 per 2 held
-    gained = max(1, ctx.player.resources // divisor)
+    gained = max(resource_scaling_min(effect, ctx.card.is_upgraded), ctx.player.resources // divisor)
     ctx.player.resources += gained
     ctx.player.cumulative_resources_gained += gained
     ctx.game._log(
@@ -1548,14 +1569,6 @@ def _handle_actions_per_cards_played(effect: Effect, ctx: EffectContext) -> None
         f"{ctx.player.name}'s {ctx.card.name} grants {actions_gained} action(s) "
         f"({other_cards} other card(s) played, max {max_actions})",
         visible_to=[ctx.player.id], actor=ctx.player.id)
-    # Upgraded Mobilize also draws 1 card
-    if is_upgraded:
-        drawn = ctx.player.deck.draw(1, ctx.game.rng)
-        ctx.player.hand.extend(drawn)
-        if drawn:
-            ctx.game._log(
-                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
-                visible_to=[ctx.player.id], actor=ctx.player.id)
 
 
 def _handle_next_turn_bonus(effect: Effect, ctx: EffectContext) -> None:
@@ -1600,7 +1613,7 @@ def _handle_next_turn_bonus(effect: Effect, ctx: EffectContext) -> None:
 
 
 def _handle_mulligan(effect: Effect, ctx: EffectContext) -> None:
-    """Mulligan: discard entire hand, draw that many cards (+1 if upgraded)."""
+    """Mulligan: discard entire hand, draw that many cards plus an extra."""
     hand_size = len(ctx.player.hand)
     if hand_size == 0:
         ctx.game._log(
@@ -1617,8 +1630,9 @@ def _handle_mulligan(effect: Effect, ctx: EffectContext) -> None:
         f"{ctx.player.name} mulligans {hand_size} card(s): {names}",
         visible_to=[ctx.player.id], actor=ctx.player.id)
 
-    # Draw that many (+1 if upgraded)
-    draw_count = hand_size + (1 if ctx.card.is_upgraded else 0)
+    # Draw that many, plus the card's extra
+    draw_count = hand_size + int(effect.metadata.get(
+        "upgraded_extra" if ctx.card.is_upgraded else "extra", 0))
     drawn = ctx.player.deck.draw(draw_count, ctx.game.rng)
     ctx.player.hand.extend(drawn)
     ctx.game._log(
@@ -1692,14 +1706,7 @@ def _handle_global_claim_ban(effect: Effect, ctx: EffectContext) -> None:
             "effect_type": "global_claim_ban",
             "value": effect.duration,
         })
-    # Upgraded Snowy Holiday: draw 2 cards
-    if ctx.card.is_upgraded:
-        drawn = ctx.player.deck.draw(2, ctx.game.rng)
-        ctx.player.hand.extend(drawn)
-        if drawn:
-            ctx.game._log(
-                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
-                visible_to=[ctx.player.id], actor=ctx.player.id)
+    _draw_from_metadata(effect, ctx)
 
 
 def _handle_global_random_trash(effect: Effect, ctx: EffectContext) -> None:
@@ -1726,6 +1733,17 @@ def _handle_global_random_trash(effect: Effect, ctx: EffectContext) -> None:
         actor=ctx.player.id)
 
 
+def _draw_from_metadata(effect: Effect, ctx: EffectContext) -> None:
+    """Draw the cards an effect's metadata names ("draw" / "upgraded_draw")."""
+    count = int(effect.metadata.get("upgraded_draw" if ctx.card.is_upgraded else "draw", 0))
+    drawn = ctx.player.deck.draw(count, ctx.game.rng) if count > 0 else []
+    ctx.player.hand.extend(drawn)
+    if drawn:
+        ctx.game._log(
+            f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}",
+            visible_to=[ctx.player.id], actor=ctx.player.id)
+
+
 def _handle_swap_draw_discard(effect: Effect, ctx: EffectContext) -> None:
     """Heady Brew: swap draw and discard piles, then shuffle draw pile."""
     old_draw = ctx.player.deck.cards
@@ -1736,14 +1754,7 @@ def _handle_swap_draw_discard(effect: Effect, ctx: EffectContext) -> None:
         f"{ctx.player.name}'s {ctx.card.name} swaps draw/discard piles and shuffles "
         f"({len(ctx.player.deck.cards)} cards now in draw pile)",
         visible_to=[ctx.player.id], actor=ctx.player.id)
-    # Upgraded Heady Brew: draw 2 cards
-    if ctx.card.is_upgraded:
-        drawn = ctx.player.deck.draw(2, ctx.game.rng)
-        ctx.player.hand.extend(drawn)
-        if drawn:
-            ctx.game._log(
-                f"{ctx.player.name} draws {len(drawn)} card(s) from {ctx.card.name}+",
-                visible_to=[ctx.player.id], actor=ctx.player.id)
+    _draw_from_metadata(effect, ctx)
 
 
 def _handle_abandon_tile(effect: Effect, ctx: EffectContext) -> None:

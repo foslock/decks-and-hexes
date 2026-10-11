@@ -165,10 +165,9 @@ class TestPursuit:
         initial_hand = len(player.hand)
         ok, _ = play_card(game, "p0", 0)
         assert ok
-        # Upgraded: 2 per tile × 2 = 4
+        # Upgraded: 2 per tile × 2 = 4, no draw
         assert player.resources == initial_res + 4
-        # +1 draw: hand = initial - 1 (played) + 1 (draw) = initial
-        assert len(player.hand) == initial_hand
+        assert len(player.hand) == initial_hand - 1
 
 
 # ── Vanguard: War Banner ──────────────────────────────────────────
@@ -378,7 +377,7 @@ class TestChatter:
 
 
 class TestDroneWave:
-    """Draws floor(tiles_owned / divisor), capped. Base: /3 max 3. Upgraded: /2 max 4."""
+    """Draws floor(tiles_owned / divisor), capped. Base: /3 max 2. Upgraded: /2 max 3."""
 
     def test_draws_from_tile_count(self, small_2p_game, card_registry):
         game = small_2p_game
@@ -407,7 +406,7 @@ class TestDroneWave:
         ok, _ = play_card(game, "p1", 0)
         assert ok
 
-        expected_draws = min(tile_count // 3, 3)
+        expected_draws = min(tile_count // 3, 2)
         # Hand: initial - 1 (played) + expected_draws
         assert len(player.hand) == initial_hand - 1 + expected_draws
 
@@ -426,8 +425,8 @@ class TestDroneWave:
         initial_hand = len(player.hand)
         ok, _ = play_card(game, "p1", 0)
         assert ok
-        # Capped at 3 draws regardless of tile count
-        assert len(player.hand) == initial_hand - 1 + 3
+        # Capped at 2 draws regardless of tile count
+        assert len(player.hand) == initial_hand - 1 + 2
 
     def test_upgraded_divisor_and_cap(self, small_2p_game, card_registry):
         game = small_2p_game
@@ -444,8 +443,8 @@ class TestDroneWave:
         initial_hand = len(player.hand)
         ok, _ = play_card(game, "p1", 0)
         assert ok
-        # Upgraded cap = 4
-        assert len(player.hand) == initial_hand - 1 + 4
+        # Upgraded cap = 3
+        assert len(player.hand) == initial_hand - 1 + 3
 
 
 # ── Swarm: Hatching Grounds ───────────────────────────────────────
@@ -583,10 +582,9 @@ class TestQuartermaster:
         initial_hand = len(player.hand)
         ok, _ = play_card(game_f, "f0", 0)
         assert ok
-        # Upgraded: 3 per defense × min(4, 6) = 12
-        assert player.resources == initial_res + 12
-        # +1 draw from upgraded_draw; hand net: initial - 1 (played qm) + 1 (draw) = initial
-        assert len(player.hand) == initial_hand
+        # Upgraded: 3 per defense × min(4, 3) = 9, no draw
+        assert player.resources == initial_res + 9
+        assert len(player.hand) == initial_hand - 1
 
 
 # ── Fortress: Watchful Keep ───────────────────────────────────────

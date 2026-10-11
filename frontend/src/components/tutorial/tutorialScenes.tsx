@@ -153,7 +153,7 @@ export const SCENES: Scene[] = [
     id: 'claim',
     eyebrow: 'Round 1',
     title: 'Claim land',
-    body: <><b>Explore</b> claims an empty tile next to yours. Its power is 0 — but empty land has <b>0 defense</b>, and a tie on empty land goes to the attacker. Play as many cards as your actions allow, then reveal.</>,
+    body: <><b>Explore</b> claims an open tile next to yours: one nobody owns, with <b>no defense</b>. Play as many cards as your actions allow, then reveal.</>,
     tip: 'In a game, drag a card onto a glowing tile, then press Submit Play.',
     start: () => makeWorld({
       tiles: boardStart(), showHand: true, phase: 'Play phase',
@@ -209,7 +209,7 @@ export const SCENES: Scene[] = [
     id: 'defend',
     eyebrow: 'The next round',
     title: 'Defend your land',
-    body: <>Your rival strikes back with Levy (power 1). <b>Watchtower</b> gives your tile <b>+2 defense</b> this round. To capture a tile, power must <b>beat</b> its defense — <b>ties go to the defender</b>.</>,
+    body: <>Your rival strikes back with Levy (power 1). <b>Watchtower</b> gives your tile <b>+2 defense</b> this round, draws you a card and gives back its action. To capture a tile, power must <b>beat</b> its defense — <b>ties go to the defender</b>.</>,
     start: () => makeWorld({
       tiles: boardFront(), round: 5, showHand: true, phase: 'Play phase',
       hand: [watchtower, ...filler('d')], drawCount: 4, discard: [E1, G1, levy], resources: 4,
@@ -219,6 +219,7 @@ export const SCENES: Scene[] = [
       await ctx.rivalPlay(copy(LEVY, 'r'), FRONT, '2,-1');
       await ctx.wait(500);
       await ctx.play(watchtower.id, FRONT, { temp: 2 });
+      await ctx.deal([copy(GATHER, 'd5')]);
       await ctx.wait(BEAT);
       const steps = [
         defenseStep(FRONT, YOU, 0, 2),
@@ -236,7 +237,7 @@ export const SCENES: Scene[] = [
     id: 'walls',
     eyebrow: 'Round 6',
     title: 'Build walls',
-    body: <><b>Barricade</b> adds +2 defense that lasts until the tile is captured. Lasting defense raises <b>walls</b> — the stronger the defense, the bigger the wall. The big hex in the center starts heavily walled.</>,
+    body: <><b>Barricade</b> adds +2 defense that lasts until the tile is captured (and draws a card). Lasting defense raises <b>walls</b> — the stronger the defense, the bigger the wall. The big hex in the center starts heavily walled.</>,
     start: () => makeWorld({
       tiles: boardFront(), round: 6, showHand: true, phase: 'Play phase',
       hand: [barricade, ...filler('w')], drawCount: 9, resources: 2,
@@ -244,6 +245,7 @@ export const SCENES: Scene[] = [
     run: async (ctx) => {
       await ctx.fly({ keys: [FRONT], zoom: 2.9, tilt: 0.86, rotation: -0.5, seconds: 2.2, lower: 0.9 });
       await ctx.play(barricade.id, FRONT, { perm: 2 });
+      await ctx.deal([copy(EXPLORE, 'w5')]);
       await ctx.wait(BEAT);
       const steps = [defenseStep(FRONT, YOU, 2, 0)];
       await ctx.reveal(steps);

@@ -20,7 +20,7 @@ from app.api.ws_manager import manager
 from app.data_loader.loader import load_all_cards
 from app.game_engine.card_packs import CARD_PACKS, DEFAULT_PACK_ID, pack_display_name
 from app.game_engine.cards import Archetype
-from app.game_engine.game_state import generate_map_seed
+from app.game_engine.game_state import generate_map_seed, suggested_grid_size
 from app.game_engine.game_state import (
     GameState,
     Phase,
@@ -113,7 +113,10 @@ class LobbyPlayer:
 
 @dataclass
 class LobbyConfig:
-    grid_size: str = "medium"
+    # The host's pick; while grid_size_auto is on the lobby uses the size
+    # suggested for its player count instead (Lobby.grid_size).
+    grid_size: str = "large"
+    grid_size_auto: bool = True
     speed: str = "normal"
     max_players: int = 6  # Seats (humans + bots) the host opens, 2-6
     test_mode: bool = False
@@ -132,6 +135,7 @@ class LobbyConfig:
     def to_dict(self) -> dict[str, Any]:
         return {
             "grid_size": self.grid_size,
+            "grid_size_auto": self.grid_size_auto,
             "speed": self.speed,
             "max_players": self.max_players,
             "test_mode": self.test_mode,
@@ -157,6 +161,16 @@ class Lobby:
     status: str = "waiting"  # waiting | countdown | started | expired
     player_order: list[str] = field(default_factory=list)  # explicit ordering for turn order
 
+    @property
+    def suggested_grid_size(self) -> str:
+        return suggested_grid_size(len(self.players)).value
+
+    @property
+    def grid_size(self) -> str:
+        """The map the game will be played on: the host's pick, or the size
+        suggested for however many players are seated."""
+        return self.suggested_grid_size if self.config.grid_size_auto else self.config.grid_size
+
     def to_dict(self) -> dict[str, Any]:
         # Use explicit player_order if set, otherwise dict insertion order
         order = self.player_order if self.player_order else list(self.players.keys())
@@ -165,7 +179,8 @@ class Lobby:
             "host_id": self.host_id,
             "players": {pid: p.to_dict() for pid, p in self.players.items()},
             "player_order": order,
-            "config": self.config.to_dict(),
+            "config": {**self.config.to_dict(), "grid_size": self.grid_size,
+                       "suggested_grid_size": self.suggested_grid_size},
             "status": self.status,
             "game_id": self.game_id,
         }
@@ -311,6 +326,7 @@ class JoinLobbyRequest(BaseModel):
 
 class UpdateConfigRequest(BaseModel):
     grid_size: Optional[str] = None
+    grid_size_auto: Optional[bool] = None  # True: go back to the suggested size
     speed: Optional[str] = None
     max_players: Optional[int] = None
     test_mode: Optional[bool] = None
@@ -418,7 +434,7 @@ async def browse_lobbies() -> dict[str, Any]:
             "code": lobby.code,
             "host_name": host.name if host else "",
             "host_color": host.color if host else "",
-            "grid_size": lobby.config.grid_size,
+            "grid_size": lobby.grid_size,
             "card_pack": lobby.config.card_pack,
             "card_pack_name": pack_display_name(lobby.config.card_pack),
         }
@@ -580,9 +596,9 @@ async def map_preview(code: str, player_id: str, token: str) -> dict[str, Any]:
     if player_id not in lobby.players:
         raise HTTPException(403, "Not a member of this lobby")
     try:
-        grid_size = GridSize(lobby.config.grid_size)
+        grid_size = GridSize(lobby.grid_size)
     except ValueError:
-        raise HTTPException(400, f"Invalid grid size: {lobby.config.grid_size}")
+        raise HTTPException(400, f"Invalid grid size: {lobby.grid_size}")
 
     seats = _seat_order(lobby)
     grid = generate_map(grid_size, len(seats), lobby.config.map_seed)
@@ -614,6 +630,10 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
         except ValueError:
             raise HTTPException(400, f"Invalid grid size: {req.grid_size}")
         lobby.config.grid_size = req.grid_size
+        lobby.config.grid_size_auto = False
+
+    if req.grid_size_auto:
+        lobby.config.grid_size_auto = True
 
     if req.speed is not None:
         if req.speed not in ("fast", "normal", "slow"):
@@ -645,14 +665,7 @@ async def update_config(code: str, req: UpdateConfigRequest) -> dict[str, Any]:
         lobby.config.granted_actions = req.granted_actions
 
     if req.card_pack is not None:
-        if req.card_pack.startswith("daily_"):
-            try:
-                seed_val = int(req.card_pack.split("_", 1)[1])
-                if seed_val < 20200101 or seed_val > 29991231:
-                    raise ValueError
-            except (ValueError, IndexError):
-                raise HTTPException(400, f"Invalid daily pack seed: {req.card_pack}")
-        elif req.card_pack not in CARD_PACKS:
+        if req.card_pack not in CARD_PACKS:
             raise HTTPException(400, f"Invalid card pack: {req.card_pack}")
         lobby.config.card_pack = req.card_pack
 
@@ -909,9 +922,9 @@ async def start_lobby(code: str, req: StartLobbyRequest) -> dict[str, Any]:
             })
 
         try:
-            grid_size = GridSize(lobby.config.grid_size)
+            grid_size = GridSize(lobby.grid_size)
         except ValueError:
-            raise HTTPException(400, f"Invalid grid size: {lobby.config.grid_size}")
+            raise HTTPException(400, f"Invalid grid size: {lobby.grid_size}")
 
         game = create_game(
             grid_size, player_configs, registry,

@@ -19,6 +19,7 @@ from app.data_loader.loader import load_all_cards
 from app.game_engine.card_packs import CARD_PACKS
 from app.game_engine.cards import Archetype
 from app.game_engine.game_state import (
+    suggested_grid_size,
     GameState,
     Phase,
     advance_resolve,
@@ -218,7 +219,7 @@ async def _broadcast_state(game_id: str, game: GameState) -> None:
 
 
 class CreateGameRequest(BaseModel):
-    grid_size: str = "small"
+    grid_size: Optional[str] = None  # None: the size suggested for the player count
     players: list[dict[str, Any]]
     seed: Optional[int] = None
     test_mode: bool = False
@@ -288,7 +289,7 @@ class AdvanceResolveRequest(BaseModel):
 async def create_new_game(req: CreateGameRequest) -> dict[str, Any]:
     """Create a new game."""
     try:
-        grid_size = GridSize(req.grid_size)
+        grid_size = GridSize(req.grid_size) if req.grid_size else suggested_grid_size(len(req.players))
     except ValueError:
         raise HTTPException(400, f"Invalid grid size: {req.grid_size}")
 
@@ -1041,11 +1042,8 @@ async def get_game_log(game_id: str, player_id: Optional[str] = None) -> dict[st
 
 @router.get("/card-packs")
 async def list_card_packs() -> dict[str, Any]:
-    """List all available card packs with their metadata."""
-    from app.game_engine.card_packs import get_today_daily_pack
-    daily = get_today_daily_pack(_get_card_registry())
-    packs = [daily.to_dict()] + [pack.to_dict() for pack in CARD_PACKS.values()]
-    return {"packs": packs}
+    """List the card packs in lobby order (Everything, for testing, last)."""
+    return {"packs": [pack.to_dict() for pack in CARD_PACKS.values()]}
 
 
 @router.get("/cards")

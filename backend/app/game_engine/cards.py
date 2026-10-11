@@ -84,6 +84,8 @@ class Card:
     adjacency_required: bool = True
     claim_range: int = 1  # max hex distance from owned tiles (1=adjacent, 2=two steps, etc.)
     unoccupied_only: bool = False
+    # Explore: only a tile nobody owns with no defense at all (it has no power).
+    defenseless_only: bool = False
     multi_target_count: int = 0  # Surge/Hive Mind: max extra targets (0=single, 1=up to 2 total, 2=up to 3, 3=up to 4)
     defense_target_count: int = 1  # Defense: number of tiles to apply defense to (default 1)
     flood: bool = False  # Flood: target own tile, claim all adjacent at resolution
@@ -94,6 +96,9 @@ class Card:
     vp_formula: str = ""  # Dynamic VP formula: "trash_div_5", "fortified_tiles_4", "deck_div_12"
     unique: bool = False  # If true, player may only own one copy in their deck (draw + hand + discard)
     buy_debt: int = 0  # Debt cards added to the buyer's discard pile when bought (Warden, Land Grant)
+    # Card set (YAML `set`): "core" cards make up the card packs; "set_aside"
+    # cards wait for future sets (they only appear in the Everything pack).
+    card_set: str = "core"
     description: str = ""
     upgrade_description: str = ""
     # Structured effects list (parsed from YAML)
@@ -168,6 +173,12 @@ class Card:
         return self.draw_cards
 
     @property
+    def effective_forced_discard(self) -> int:
+        if self.is_upgraded and self.upgraded_forced_discard is not None:
+            return self.upgraded_forced_discard
+        return self.forced_discard
+
+    @property
     def effective_defense_bonus(self) -> int:
         if self.is_upgraded and self.upgraded_defense_bonus is not None:
             return self.upgraded_defense_bonus
@@ -209,12 +220,13 @@ class Card:
             "stackable": self.stackable,
             "granted_stackable": self.granted_stackable,
             "reversible": self.effective_reversible,
-            "forced_discard": self.forced_discard,
+            "forced_discard": self.effective_forced_discard,
             "draw_cards": self.effective_draw_cards,
             "defense_bonus": self.effective_defense_bonus,
             "adjacency_required": self.adjacency_required,
             "claim_range": self.claim_range,
             "unoccupied_only": self.effective_unoccupied_only,
+            "defenseless_only": self.defenseless_only,
             "multi_target_count": self.effective_multi_target_count,
             "defense_target_count": self.effective_defense_target_count,
             "flood": self.flood,
@@ -229,6 +241,7 @@ class Card:
             "upgrade_description": self.upgrade_description,
             "name_upgraded": self.name_upgraded,
             "starter": self.starter,
+            "card_set": self.card_set,
             "effects": [e.to_dict() for e in self.effects if hasattr(e, 'to_dict')],
             **self._upgraded_stats_dict(),
         }

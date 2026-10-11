@@ -87,7 +87,7 @@ def test_entrench_action_refund_cannot_be_undone(card_registry):
     assert p0.actions_available - p0.actions_used == actions_after_play
 
 
-def test_explore_undo_allowed_but_not_upgraded_draw(card_registry):
+def test_explore_undo_allowed_upgraded_too(card_registry):
     game = _game(card_registry, "vanguard")
     p0 = game.players["p0"]
 
@@ -99,14 +99,12 @@ def test_explore_undo_allowed_but_not_upgraded_draw(card_registry):
     ok, msg = undo_planned_action(game, "p0", len(p0.planned_actions) - 1)
     assert ok, msg
 
-    # Explore+ draws a card on play: undo is refused.
+    # Explore+ just has more power: still no side effect, still undoable.
     _give(game, card_registry, "neutral_explore", upgraded=True)
-    hand_before = len(p0.hand)
     ok, msg = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
     assert ok, msg
-    ok, _ = undo_planned_action(game, "p0", len(p0.planned_actions) - 1)
-    assert not ok
-    assert len(p0.hand) == hand_before
+    ok, msg = undo_planned_action(game, "p0", len(p0.planned_actions) - 1)
+    assert ok, msg
 
 
 def test_serialized_reversible_flag_matches_undo_rule(card_registry):
@@ -114,7 +112,7 @@ def test_serialized_reversible_flag_matches_undo_rule(card_registry):
     explore = _copy_card(card_registry["neutral_explore"], "ser1")
     assert explore.to_dict()["reversible"] is True
     explore.is_upgraded = True
-    assert explore.to_dict()["reversible"] is False
+    assert explore.to_dict()["reversible"] is True
     assert _copy_card(card_registry["swarm_nest"], "ser2").to_dict()["reversible"] is False
     assert _copy_card(card_registry["vanguard_coordinated_push"], "ser3").to_dict()["reversible"] is False
 

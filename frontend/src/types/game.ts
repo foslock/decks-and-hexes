@@ -15,6 +15,9 @@ export interface HexTile {
   is_scorched?: boolean;
   /** The VP value a scorched tile had (its town's ruins are drawn). */
   scorched_vp?: number;
+  /** Water (solo maps): a lake or inlet nobody can claim (also blocked),
+   *  drawn as sea with beaches on the land around it. */
+  is_water?: boolean;
   immune?: boolean;  // tile has claim immunity this round (Iron Wall / Stronghold)
 }
 
@@ -47,6 +50,10 @@ export interface Card {
   adjacency_required: boolean;
   claim_range: number;
   unoccupied_only: boolean;
+  /** "core" cards make up the card packs; "set_aside" ones wait for future sets. */
+  card_set?: string;
+  /** Explore: only a tile nobody owns with no defense (it has no power). */
+  defenseless_only?: boolean;
   multi_target_count: number;
   defense_target_count: number;
   flood: boolean;
@@ -77,6 +84,14 @@ export interface Card {
     multi_target_count?: number;
     defense_target_count?: number;
   };
+}
+
+export interface ArchetypeSupplyEntry {
+  card: Card;
+  /** Copies left in this private pile (including the one on sale). */
+  remaining: number;
+  /** On sale right now (false once bought this round, or sold out). */
+  available: boolean;
 }
 
 export interface PlannedAction {
@@ -135,6 +150,10 @@ export interface Player {
   actions_used: number;
   actions_available: number;
   archetype_market: Card[];
+  /** Pack games: the market is the pack's whole archetype supply (no re-roll). */
+  archetype_market_fixed?: boolean;
+  /** Pack games: every archetype pile, bought out or not, in pack order. */
+  archetype_supply?: ArchetypeSupplyEntry[];
   upgrade_credits: number;
   deck_size: number;
   discard_count: number;
@@ -329,6 +348,114 @@ export interface GameState {
   claim_ban_rounds?: number;
   max_rounds?: number;
   winners?: string[];
+  /** A solo campaign level (null in a regular game). */
+  solo?: SoloGameInfo | null;
+}
+
+// ── Solo campaign ────────────────────────────────────────
+
+export type SoloObjectiveType = 'vp' | 'territory' | 'vp_hexes' | 'raid' | 'capture' | 'fortify' | 'survive';
+
+export interface SoloObjective {
+  type: SoloObjectiveType;
+  /** The last round; null: no time limit (lost only when a rival reaches bot_vp). */
+  rounds: number | null;
+  vp: number | null;
+  /** territory: tiles to hold (from `share` of `land` when given); capture:
+   *  tiles to take; fortify: tiles to fortify; survive: tiles still held at the end. */
+  tiles: number | null;
+  share: number | null;
+  land: number | null;
+  /** vp_hexes: VP hexes on the map; raid / capture / survive: rivals. */
+  count: number | null;
+  connected: boolean;
+  /** fortify: the permanent defense each tile needs. */
+  defense: number | null;
+  /** survive: raids on your base you can take (more and it's lost). */
+  raids_allowed: number;
+  /** survive: tiles you can lose (null: any). */
+  tiles_lost_max: number | null;
+  /** A bot reaching this first loses the level (null: bots can't). */
+  bot_vp: number | null;
+  /** "Reach 7 VP" — the goal alone (a survive goal includes its deadline). */
+  goal: string;
+  /** The goal in a few words, for titles: "Hold out for 10 rounds". */
+  headline: string;
+  /** The goal with its deadline, as one sentence. */
+  text: string;
+}
+
+export interface SoloProgressInfo {
+  value: number;
+  target: number;
+  unit: string;
+  met: boolean;
+  /** survive: already lost (raided, or too many tiles lost). */
+  failed: boolean;
+  /** survive: "base unraided · 1 of 3 tiles lost". */
+  detail: string | null;
+}
+
+/** GameState.solo: the level being played and, once decided, the result. */
+export interface SoloGameInfo {
+  level_id: string;
+  level_title: string;
+  /** The campaign (and the archetype you play). */
+  campaign: string;
+  player_id: string;
+  objective: SoloObjective;
+  debt: boolean;
+  market: 'fixed' | 'random';
+  pack: { shared_card_ids: string[]; archetype_card_ids: Record<string, string[]>; fixed: boolean };
+  result: 'won' | 'lost' | null;
+  reason: string | null;
+  round?: number;
+  raided?: string[];
+  progress?: SoloProgressInfo;
+}
+
+export interface SoloLevel {
+  id: string;
+  /** The campaign it's played in (you play as this archetype). */
+  archetype: string;
+  /** Its overworld tile key. */
+  spot: string;
+  title: string;
+  intro: string;
+  objective: SoloObjective;
+  map: { name: string; tiles: number; vp_hexes: number; vp_total: number; mountains: number; scorched?: number; water?: number };
+  cards: { shared: string[]; archetype: Record<string, string[]> };
+  pack_id: string | null;
+  market: 'fixed' | 'random';
+  market_size: number;
+  bots: { name: string; archetype: string; difficulty: string }[];
+  debt: boolean;
+  hints: string[];
+  /** Cards the level introduces. */
+  spotlight: string[];
+  /** Other campaigns this level is in, fought from their side. */
+  shared_with: string[];
+}
+
+/** One archetype's campaign on the overworld. */
+export interface SoloArchetypeCampaign {
+  archetype: string;
+  title: string;
+  blurb: string;
+  castle: string;
+  /** Each level's spot, in play order. */
+  spots: string[];
+  /** Spots past the last level ("coming soon"). */
+  soon: string[];
+  /** segments[i]: the road to stop i (spots, then soon), from the castle or
+   *  the stop before; it ends on the stop. */
+  segments: string[][];
+  levels: SoloLevel[];
+}
+
+export interface SoloCampaigns {
+  overworld: { tiles: Record<string, { q: number; r: number; blocked: boolean; scorched?: boolean; water?: boolean }> };
+  campaigns: SoloArchetypeCampaign[];
 }
 
 // ── Lobby types ──────────────────────────────────────────
@@ -345,7 +472,12 @@ export interface LobbyPlayer {
 }
 
 export interface LobbyConfig {
+  /** The map the game will start on: the host's pick, or (while
+   *  grid_size_auto) the size suggested for the player count. */
   grid_size: string;
+  grid_size_auto?: boolean;
+  /** Smallest map where games run 11+ rounds for this many players. */
+  suggested_grid_size?: string;
   speed: string;
   max_players: number;
   test_mode: boolean;

@@ -568,26 +568,115 @@
   pointer-events: none;
 }
 
-/* "Purchased!" placeholder for bought archetype slots. */
+/* Bought / sold-out stand-in for an archetype slot: the empty slot the card
+   left, in its shape — a dark well inside a faint gilded trim — with a gold
+   seal, the label and a note centred on it. */
 .cc-ov-purchased {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas: "seal title" "note note";
+  align-content: center;
   justify-content: center;
-  gap: 6px;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  padding: 6px;
+  text-align: center;
   border-radius: 8px;
-  border: 1px dashed rgba(232, 196, 106, 0.4);
+  border: 1px solid rgba(232, 196, 106, 0.32);
   background:
-    repeating-linear-gradient(135deg, rgba(232, 196, 106, 0.05) 0 6px, transparent 6px 12px),
-    rgba(10, 10, 26, 0.85);
+    radial-gradient(ellipse at 50% 45%, rgba(232, 196, 106, 0.1), transparent 70%),
+    repeating-linear-gradient(135deg, rgba(232, 196, 106, 0.035) 0 6px, transparent 6px 12px),
+    linear-gradient(180deg, #17172f, #0c0c1b);
+  box-shadow:
+    inset 0 0 0 3px rgba(6, 6, 16, 0.55),
+    inset 0 0 0 4px rgba(232, 196, 106, 0.14),
+    inset 0 10px 24px rgba(0, 0, 0, 0.45);
   color: var(--cc-gold);
+  pointer-events: none;
+}
+.cc-ov-purchased-seal {
+  grid-area: seal;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: #2a1d08;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 6px rgba(232, 196, 106, 0.3));
+}
+.cc-ov-purchased-seal::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #ffe9a8, #e0b45a 55%, #a87a2c);
+  clip-path: polygon(25% 3%, 75% 3%, 100% 50%, 75% 97%, 25% 97%, 0 50%);
+}
+.cc-ov-purchased-seal svg { position: relative; width: 58%; height: 58%; }
+.cc-ov-purchased-title {
+  grid-area: title;
   font-family: var(--cc-font-display);
   font-weight: 700;
   font-size: 12px;
-  letter-spacing: 0.12em;
+  line-height: 1.1;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
+  color: var(--cc-gold-bright);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7);
 }
+.cc-ov-purchased-rule { display: none; }
+.cc-ov-purchased-note {
+  grid-area: note;
+  font-size: 10.5px;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: var(--cc-text-dim);
+}
+/* A full card's slot: the seal over the label, a gold rule, the note. */
+.cc-ov-purchased.is-full {
+  grid-template-columns: auto;
+  grid-template-areas: "seal" "title" "rule" "note";
+  justify-items: center;
+  row-gap: 0;
+  padding: 16px;
+  box-shadow:
+    inset 0 0 0 6px rgba(6, 6, 16, 0.55),
+    inset 0 0 0 7px rgba(232, 196, 106, 0.16),
+    inset 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+.cc-ov-purchased.is-full .cc-ov-purchased-seal { width: 46px; height: 46px; margin-bottom: 12px; }
+.cc-ov-purchased.is-full .cc-ov-purchased-title { font-size: 17px; letter-spacing: 0.18em; padding-left: 0.18em; }
+.cc-ov-purchased.is-full .cc-ov-purchased-rule {
+  grid-area: rule;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(120px, 70%);
+  margin: 9px 0 8px;
+}
+.cc-ov-purchased-rule::before,
+.cc-ov-purchased-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(232, 196, 106, 0.65));
+}
+.cc-ov-purchased-rule::after { background: linear-gradient(270deg, transparent, rgba(232, 196, 106, 0.65)); }
+.cc-ov-purchased-rule > i {
+  width: 7px;
+  height: 6px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #ffe39a, #c79a3c);
+  clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+}
+.cc-ov-purchased.is-full .cc-ov-purchased-note { font-size: 13px; }
+/* Sold out: the pile is gone for good — a dimmer, silvered seal. */
+.cc-ov-purchased.is-sold-out { color: var(--cc-text-dim); border-color: rgba(200, 200, 220, 0.18); }
+.cc-ov-purchased.is-sold-out .cc-ov-purchased-seal::before { background: linear-gradient(180deg, #d9d9e6, #8d8da3 60%, #5d5d72); }
+.cc-ov-purchased.is-sold-out .cc-ov-purchased-seal { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+.cc-ov-purchased.is-sold-out .cc-ov-purchased-title { color: #c9c7d8; }
 .cc-ov-purchased.cc-ov-anim { animation: cc-ov-stamp calc(440ms * var(--cc-ov-speed)) var(--cc-ease-spring) both; }
 
 /* "Selling out" ribbon. */
@@ -1746,3 +1835,11 @@
   color: var(--cc-gold);
 }
 .cc-ov-market-title .cc-ov-action { padding: 3px 10px; font-size: 11px; letter-spacing: 0; text-transform: none; }
+
+/* Desktop shop: full cards, 5 to a row. */
+.cc-ov-shop.is-full {
+  width: min(94vw, 1240px);
+  max-height: 92vh;
+}
+.cc-ov-shop.is-full .cc-ov-shop-grid { gap: 12px; }
+.cc-ov-shop.is-full .cc-ov-buy { width: 100%; }

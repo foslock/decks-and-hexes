@@ -41,6 +41,10 @@ export interface BoardControls {
   /** The current framing, and a glide back to one. */
   getView(current?: boolean): CameraView | null;
   setView(view: CameraView, seconds?: number): void;
+  /** A cinematic arrival on the resting view (see BoardEngine.arrive). */
+  arrive(opts?: { turn?: number; tilt?: number; endTilt?: number; zoom?: number; seconds?: number; passAt?: number[] }): void;
+  /** Cover the island in cloud (1) or clear it (0) over `seconds`. */
+  setCloudCover(amount: number, seconds?: number): void;
   /** Close in on a tile, keeping the board's orbit. */
   focusTile(key: string, shot: { zoom: number; tilt: number; lower?: number; seconds?: number; arc?: number }): void;
   /** Where a tile's card stack sits on screen — its bottom-center, or its
@@ -62,6 +66,8 @@ interface GameBoardProps {
   /** Tiles where claim power is insufficient — shown with orange outline */
   weakHighlightTiles?: Set<string>;
   multiTileTargets?: [number, number][];
+  /** How many tiles the multi-target card being placed can take (its "Y" in X/Y). */
+  multiTileMax?: number;
   playerInfo?: Record<string, PlayerInfo>;
   transformRef?: React.MutableRefObject<GridTransform | null>;
   borderTiles?: Set<string>;
@@ -86,6 +92,8 @@ interface GameBoardProps {
   vpPaths?: VpPath[];
   /** VP tile keys that are owned AND connected to the owner's base (filled star) */
   connectedVpTiles?: Set<string>;
+  /** The VP tiles' glyph: stars, or crowns where they aren't VP (the solo overworld's towns). */
+  vpGlyph?: 'star' | 'crown';
   /** When true, suppress hover effects (highlight, tooltips) */
   disableHover?: boolean;
   /** Suppress tile tooltips but keep the hover outline + preview label (card drag). */
@@ -235,9 +243,9 @@ export default function GameBoard(props: GameBoardProps) {
 
 function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   const {
-    tiles, highlightTiles, weakHighlightTiles, multiTileTargets, playerInfo, transformRef, activePlayerId,
+    tiles, highlightTiles, weakHighlightTiles, multiTileTargets, multiTileMax, playerInfo, transformRef, activePlayerId,
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimPowerOn, claimChevrons, vpPaths,
-    connectedVpTiles, disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
+    connectedVpTiles, vpGlyph = 'star', disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
     paused, undoableTiles, fxRef, controlsRef, showCameraControls, cameraLocked = false, dragHoverPosition,
     tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0, raisedTileKey, focusTileKey, hideDefenseLabelKey,
   } = props;
@@ -307,6 +315,8 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
         getView: (current) => engine.getView(current),
         setView: (view, seconds) => engine.setView(view, seconds),
         focusTile: (key, shot) => engine.focusTile(key, shot),
+        arrive: (opts) => engine.arrive(opts),
+        setCloudCover: (amount, seconds) => engine.setCloudCover(amount, seconds),
         tileAnchor: (key, landing) => {
           const host = hostRef.current;
           const pt = { x: 0, y: 0 };
@@ -355,6 +365,11 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   }, [tiles, playerInfo, connectedVpTiles]);
 
   const multiKeys = useMemo(() => new Set((multiTileTargets ?? []).map(([q, r]) => `${q},${r}`)), [multiTileTargets]);
+  /** Selection order of each multi-target tile (1 = the first one chosen). */
+  const multiOrder = useMemo(
+    () => new Map((multiTileTargets ?? []).map(([q, r], i) => [`${q},${r}`, i + 1])),
+    [multiTileTargets],
+  );
   useEffect(() => {
     engineRef.current?.setOverlay({
       highlight: highlightTiles, weak: weakHighlightTiles, multi: multiKeys,
@@ -607,7 +622,9 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       if (tile.is_vp) {
         const vpVal = tile.vp_value || 1;
         const connected = connectedVpTiles?.has(key) ?? false;
-        const icon: IconName = connected ? 'vp' : 'vpOutline';
+        const icon: IconName = vpGlyph === 'crown'
+          ? (connected ? 'crown' : 'crownOutline')
+          : (connected ? 'vp' : 'vpOutline');
         const color = connected ? (vpVal >= 2 ? '#fff066' : '#ffd700') : '#9a9a9a';
         const size = vpVal === 1 ? 18 : vpVal <= 3 ? 15 : 13;
         rows.push(row(vpVal > 4 ? [{ text: `${vpVal}×` }, { icon }] : Array.from({ length: vpVal }, () => ({ icon })), size, color));
@@ -633,6 +650,10 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
         const c = classify(pa.card, tile, activePlayerId, pa.type);
         const kind: TokenKind = c.isConsecrate ? 'consecrate' : c.isAbandon ? 'abandon' : c.isPlayerTarget ? 'target' : c.isDefensive ? 'defense' : 'claim';
         lift = Math.max(lift, TOKEN_LABEL_LIFT[kind]);
+      }
+      // Multi-target selection: "2/3" — which pick this tile is, of how many.
+      if (isMulti && multiTileMax && multiTileMax > 1) {
+        rows.push(row([{ text: `${multiOrder.get(key) ?? 1}/${multiTileMax}` }], 20, '#ffd86b'));
       }
       if (main && key !== hideDefenseLabelKey) rows.push(main);
       if (rows.length) out.push({ key, lift, rows, prominent: !!pa || isHoverPreview || isMulti });
@@ -720,7 +741,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
       const persist = tile.base_defense + (tile.permanent_defense_bonus ?? 0) + pa.permanentDefPower;
       return defenseRow(persist, hasImmunity ? 0 : pa.tempDefPower, hasImmunity, ACTION_SIZE);
     }
-  }, [tiles, plannedActions, multiKeys, previewCard, previewValidTiles, previewClaimBuffBonus, claimPowerOn, connectedVpTiles, hovered, activePlayerId, hideDefenseLabelKey]);
+  }, [tiles, plannedActions, multiKeys, multiOrder, multiTileMax, previewCard, previewValidTiles, previewClaimBuffBonus, claimPowerOn, connectedVpTiles, vpGlyph, hovered, activePlayerId, hideDefenseLabelKey]);
 
   // Position labels every rendered frame.
   const labelEls = useRef(new Map<string, HTMLDivElement>());

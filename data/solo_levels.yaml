@@ -1,0 +1,1253 @@
+# Card Clash — solo campaigns.
+#
+# Three campaigns, one per archetype, like StarCraft's races: you pick
+# Vanguard, Swarm or Fortress, then play that campaign's levels in order as
+# that archetype, from its own castle on the shared overworld. Clearing a
+# level extends your territory along the road to the next, which unlocks it.
+# Loaded and checked by backend/app/game_engine/solo.py (tests/test_solo.py
+# fails on any mistake). Print a level's map with its tile coordinates, or
+# playtest the levels with CPUs, with backend/scripts/solo_levels.py.
+#
+# ── Campaigns ──────────────────────────────────────────────────────────────
+# campaigns.<archetype>: title, blurb, levels (ids in play order), soon (spot
+# characters shown as "coming soon" after the last level). Every campaign has
+# ten levels on the same curve: 1–3 easy (no rivals, simple objectives — but
+# never won with the starting deck), 4–7 medium, the meat of it, and 8–10
+# hard, with no time limit, interesting maps and every tool in play; 10 is
+# the finale, two hard rivals with a head start on the map (not the deck).
+#
+# A level sits on one overworld spot (`spot`). A level in two campaigns is a
+# shared level — the same spot, map and tile, reached by each campaign's own
+# road and usually played from the other side: `variants.<archetype>` changes
+# title, intro, objective, cards, bots, hints, spotlight, market, debt or
+# `seat` for that campaign. `seat: B` puts you on B's base; the bots take the
+# other bases in letter order, and bases nobody takes become plain land.
+#
+# ── Maps: hex art ──────────────────────────────────────────────────────────
+# One character per tile, two characters per column; each column sits half a
+# row below the one to its left, so a column's tiles are two lines apart:
+#
+#       .            a tile's neighbours: two lines up and down in its
+#     .   .          column, and one line up and down in the columns either
+#   .   .   .        side. Sea is a space.
+#     .   .
+#       A
+#
+# Draw your base at the bottom: the game turns the board to put it right
+# above your hand. Write `layout: |2` and indent the picture two spaces past
+# `layout` (YAML would otherwise take the first line's indentation as the
+# margin and reject the rest).
+#
+# Legend (a level's `legend` adds or replaces characters):
+#   .  land               #  mountain (can't be claimed)
+#   *  VP hex, 1 VP       @  premium VP hex, 2 VP
+#      (defense 2)           (defense 3)
+#   1–9  land with that much defense (Explore only takes defenseless land)
+#   ~  water — a lake or inlet nobody can claim, drawn as sea with beaches
+#      on the land round it (several together make a lake)
+#   %  scorched earth — burnt wasteland nobody can claim
+#   &  scorched earth with a burnt town's ruins on it
+#   A–F  bases (A is yours unless a variant sets `seat`; bots take the rest)
+#   a–f  land each base starts with (any number: a bot's head start)
+#
+# Or start from a preset map: `preset: small` (medium, large, mega, ultra).
+# `overrides` change single tiles of either kind of map by "q,r" key — a
+# legend character, " " for sea, or a mapping like {vp: 3, defense: 4}
+# (also `water: true`, `scorched: true`, `ruins: true`).
+#
+# ── Objectives ─────────────────────────────────────────────────────────────
+# Judged at the end of every round; `rounds` is the game's last round. Leave
+# `rounds` out for no time limit: the level is lost only when a rival
+# reaches `bot_vp` first (so it needs bots and a `bot_vp`, and can't be a
+# survive; 50 rounds without a result still ends it, as a loss). Turn Debt
+# off there (`debt: false`) — it would keep the leaders from ever getting
+# there — and pick `bot_vp` with `solo_levels.py play --curve`, which shows
+# the leading rival's VP round by round: rivals sharing a map level off.
+#   type: vp        — reach `vp` VP
+#   type: territory — hold `tiles` tiles, or more than `share` (0.5 = half)
+#                     of the map's claimable land
+#   type: vp_hexes  — hold every VP hex at once (`connected: true`: each one
+#                     linked to your base)
+#   type: raid      — raid every rival's base (beat its defense; once each)
+#   type: capture   — take `tiles` tiles from your rivals, over the game
+#   type: fortify   — hold `tiles` tiles with permanent defense `defense` or
+#                     more at once (the tile's own plus Barricade-style bonuses)
+#   type: survive   — hold out to the end of round `rounds`; lost as soon as
+#                     your base is raided more than `raids_allowed` times
+#                     (default 0) or you lose more than `tiles_lost_max` tiles
+#                     (if set); at the end you must still hold `tiles` (if set)
+# With bots, a bot reaching `bot_vp` first loses the level (a vp objective
+# sets it to `vp` unless given; the others only when given). If you and a bot
+# both reach a VP target in the same round, the usual tie-breaks decide.
+# Bots only raid bases at Hard difficulty.
+#
+# No level may be won with the starting deck alone. Explore only takes open
+# land (no defense, nobody's) next to yours, so the most Explore and Gather
+# can ever hold is your start plus the open land joined to it — that must
+# fall short of the objective (tests/test_solo.py checks; `solo_levels.py
+# list` shows it). Ring the start with defended land (1–9) the level's cards
+# break through, give a survive objective a `tiles` count above it (else
+# sitting tight wins), and keep VP hexes defended.
+#
+# ── Cards ──────────────────────────────────────────────────────────────────
+#   pack: a 5 + 5 card pack (first_clash, border_war, deep_roots,
+#   far_reaches); `shared` / `vanguard` / `swarm` / `fortress` replace its
+#   lists — card ids, "core" (the Core set) or "all" (set-aside cards too).
+#   market: fixed (default — a pile of 3 of each archetype card, all on show)
+#   or random (market_size random archetype cards each round, re-roll for 1).
+#   A level without bots can't use cards that target an opponent.
+#
+# Other fields: bots (archetype, difficulty easy/medium/hard, name), debt
+# (Debt for the VP leader from round 5; only ever with bots), hints (lines
+# shown before play), spotlight (card ids the level introduces — build the
+# level so it's near impossible without them; the briefing shows them first).
+
+overworld:
+  # V, S, F = the Vanguard, Swarm and Fortress castles. Lower-case letters
+  # and digits are level spots (a level names its spot). Roads are the
+  # shortest way over land from each level's spot to the next.
+  layout: |2
+                  .
+                .   S   .
+                  #   .   .
+                .   .   i
+          .   #   j   .   .
+        .   .   .   .   .   .
+          .   .   .   ~   k   .
+    .   #   #   l   ~   .   .   .   .
+      #   .   .   .   .   .   .   #
+    #   #   .   ~   m   %   .   #
+      .   y   .   .   .   .   0   #
+    .   .   #   n   %   o   #   .   .
+      .   .   #   .   .   #   .   .
+    .   .   .   %   p   %   .   #   .
+      .   .   g   %   %   v   .   .
+    .   c   %   .   #   .   ~   .   .
+      .   .   .   h   x   .   t   #
+    .   .   .   %   %   %   .   .   .
+      a   ~   e   .   .   u   .   .
+    .   .   ~   .   %   .   ~   r   .
+      .   .   .   f   w   .   .   #
+    .   .   .   ~   #   %   ~   .   .
+      V   b   d   .   .   .   .   F
+        #   .   .   #   .   .   .   .
+          .   .   .   .   s   q   .
+        .   #   #   z   .   .   .
+          .   .   .   .   .
+                .   #   .   .
+              .   #   .
+                .   #   .
+                      #
+                    .
+
+campaigns:
+  vanguard:
+    title: The Vanguard
+    blurb: >
+      Strike first and strike hard: heavy Claims, raids on rival bases, and
+      taking what's theirs.
+    levels: [landfall, hill_country, the_crown, raiders, border_clash, the_siege, long_reach, the_gauntlet, ashen_fields, twin_thrones]
+  swarm:
+    title: The Swarm
+    blurb: >
+      Spread faster than anyone can stop you: cheap Claims, wide borders and
+      numbers that grow back.
+    levels: [first_hatch, open_range, island_hopping, land_bridge, the_flood, border_clash, pile_on, infestation, spore_isles, devour]
+  fortress:
+    title: The Fortress
+    blurb: >
+      Dig in and outlast: walls, defenses that hold, and Claims that hit like
+      a ram.
+    levels: [stonefield, the_bulwark, long_march, hold_the_pass, the_siege, the_flood, iron_ring, toll_road, long_winter, siegebreaker]
+
+levels:
+  # ── Vanguard ────────────────────────────────────────────────────────────
+
+  - id: landfall
+    spot: a
+    title: Landfall
+    intro: >
+      A quiet island with nobody else on it. Spread out from your castle and
+      grow your land before the season turns.
+    objective: {type: vp, vp: 7, rounds: 6}
+    spotlight: [neutral_recruit, vanguard_blitz]
+    hints:
+      - Explore claims open land next to yours. Every 3 tiles you hold are worth 1 VP.
+      - Explore can't take land with defense. Levy's power 1 breaks the hedgerows (defense 1); a VP hex's defense 2 needs Blitz or Mercenary.
+      - A VP hex is worth its stars while a path of your land connects it to your base.
+    cards: {pack: first_clash}
+    map:
+      name: Landfall
+      layout: |2
+              .
+            .   .
+          #   *   .
+        .   .   .   .
+          .   .   #
+        .   .   .   .
+          1   1   1
+        #   *   1   1
+          .   .   *
+        .   .   .   #
+          .   a   .
+            .   .
+              A
+
+  - id: hill_country
+    spot: b
+    title: Hill Country
+    intro: >
+      A ridge cuts the island in two. The richest town lies just behind it,
+      guarded by its walls — the Vanguard's heavy Claims were made for this.
+    objective: {type: vp, vp: 9, rounds: 8}
+    spotlight: [vanguard_strike_team]
+    hints:
+      - VP hexes have defense. Match a neutral tile's defense with a Claim's power to take it.
+      - Strike Team hits for 4 when you've played another Claim this round — enough for the premium town's defense of 3.
+      - The ridge has passes at both ends, and a defended gap in the middle.
+      - Hedges of farmland (defense 1) ring your valley; Explore can't take them.
+    cards: {pack: first_clash}
+    map:
+      name: Hill Country
+      layout: |2
+                .
+              .   .
+            .   .   .
+          .   .   .   .
+        .   *   .   .   .
+          .   .   .   *
+        .   #   @   .   .
+          #   #   #   #
+        .   .   1   #   .
+          1   1   1   1
+        1   1   1   1   1
+          *   .   .   .
+        #   .   .   *   #
+          .   .   .   .
+            .   a   .
+              .   .
+                A
+
+  - id: the_crown
+    spot: c
+    title: The Crown
+    intro: >
+      Four walled towns guard the corners of the island, each behind defense 5.
+      Nothing you start with can breach them. Hold all four at once.
+    objective: {type: vp_hexes, rounds: 16}
+    spotlight: [neutral_siege_tower]
+    hints:
+      - The towns have defense 5. Siege Tower's power 6 takes one; no other Claim here comes close.
+      - Siege Tower costs 9 and gives you a Debt — save up, and trash the Debt when you can.
+      - Towns you take stay yours — nobody else is on the island.
+    cards: {pack: first_clash}
+    map:
+      name: The Crown
+      legend:
+        X: {vp: 1, defense: 5}
+      layout: |2
+              X
+            .   .
+          .   .   .
+        .   #   .   .
+          X   .   X
+        #   .   .   .
+          .   .   .
+        .   .   #   #
+          .   .   .
+        X   .   .   .
+          .   a   .
+            .   .
+              A
+
+  - id: raiders
+    spot: d
+    title: Raiders
+    intro: >
+      Your first rival: a warlord dug in at the far corner of the island. Raid
+      that base. Its walls turn back any ordinary Claim — bring a Spearhead,
+      or stack your Claims.
+    objective: {type: raid, rounds: 11}
+    spotlight: [vanguard_spearhead, neutral_rally_cry]
+    hints:
+      - A raid needs more power than the base's defense (3, plus any defense played on it).
+      - Spearhead hits for 8, once — then it's gone. Rally Cry makes every Claim in your hand stackable this round, so their power adds up.
+      - Claims still need a tile of yours next to the target, so build a road to the base first.
+    cards:
+      shared: [neutral_rally_cry, neutral_recruit, neutral_watchtower, neutral_conscription, neutral_mercenary]
+      vanguard: [vanguard_spearhead, vanguard_blitz, vanguard_rapid_assault, vanguard_double_time, vanguard_war_cache]
+      fortress: [fortress_overwhelming_force, fortress_war_of_attrition, fortress_supply_line, fortress_iron_wall, fortress_slow_advance]
+    bots:
+      - {archetype: fortress, difficulty: easy, name: Warlord}
+    map:
+      name: Raiders
+      layout: |2
+              .
+            .   .
+          .   .   .
+        .   .   .   B
+          .   .   b
+        .   .   *   .
+          .   #   .
+        .   *   .   .
+          .   .   .
+        .   .   .   .
+          .   a   .
+            .   .
+              A
+
+  # ── Swarm ───────────────────────────────────────────────────────────────
+
+  - id: first_hatch
+    spot: i
+    title: First Hatch
+    intro: >
+      An empty island and a hungry brood. Cover as much of it as you can, as
+      fast as you can.
+    objective: {type: territory, tiles: 14, rounds: 5}
+    spotlight: [swarm_surge, swarm_rabble]
+    hints:
+      - Explore claims open land next to yours; Gather pays for the cards that spread you faster.
+      - A band of scrub (defense 1) hems in your nest. Explore can't take it — Surge, Rabble and Levy can, with power 1.
+      - Surge claims two tiles at once, and Rabble gives its action back.
+      - Only how many tiles you hold counts here.
+    cards: {pack: first_clash}
+    map:
+      name: First Hatch
+      layout: |2
+              .
+            .   #
+          .   .   .
+        .   .   .   .
+          #   .   .
+        .   .   .   .
+          .   .   #
+        1   1   1   1
+          1   1   1
+        .   .   .   .
+          .   a   .
+            .   .
+              A
+
+  - id: open_range
+    spot: j
+    title: Open Range
+    intro: >
+      Wide grassland, crossed by belts of thorny scrub that Explore can't get
+      through. Claim more than half of it before the season ends.
+    objective: {type: territory, share: 0.5, rounds: 10}
+    spotlight: [swarm_rabble, swarm_surge, neutral_recruit]
+    hints:
+      - Land with defense 1 can't be Explored — any Claim with power 1 or more takes it.
+      - Rabble and Levy give their action back, so you can play a handful a turn; Surge takes two tiles at once.
+      - VP doesn't matter here, only how many tiles you hold.
+    cards: {pack: first_clash}
+    map:
+      name: Open Range
+      layout: |2
+                .
+              .   .
+            .   .   .
+          .   .   .   .
+        .   .   1   .   .
+          .   1   1   .
+        .   1   #   1   .
+          #   .   .   #
+        1   .   .   .   1
+          .   .   .   .
+        .   .   1   .   .
+          .   1   1   .
+        .   1   .   1   .
+          1   .   .   1
+            .   a   .
+              .   .
+                A
+
+  - id: island_hopping
+    spot: k
+    title: Island Hopping
+    intro: >
+      Four undefended towns sit on islets out at sea, beyond the reach of any
+      ordinary Claim. A swarm doesn't need roads. Hold all four at once.
+    objective: {type: vp_hexes, rounds: 10}
+    spotlight: [swarm_proliferate]
+    hints:
+      - Claims need a tile of yours next to the target — the sea is in the way.
+      - Proliferate claims any neutral tile on the board, ignoring adjacency.
+      - The towns have no defense; once you're on an islet you can spread from there.
+    cards: {pack: far_reaches}
+    map:
+      name: Island Hopping
+      legend:
+        v: {vp: 1, defense: 0}
+      layout: |2
+            v
+          .   .       v
+            .       .   .
+                      .
+
+
+
+          v               v
+        .   .           .   .
+          .               .
+
+                  .
+                .   .
+              .   .   .
+                .   .
+              .   .   .
+                .   .
+              .   a   .
+                .   .
+                  A
+
+  - id: land_bridge
+    spot: l
+    title: The Land Bridge
+    intro: >
+      Two islands joined by a narrow causeway, and your first rival on the far
+      shore. The town in the middle of the bridge is worth fighting for — but
+      walls guard both ends of the crossing.
+    objective: {type: vp, vp: 9, rounds: 10}
+    hints:
+      - Your rival wins the level by reaching the VP target first.
+      - Explore can't cross the walled ends of the bridge.
+      - Your base has defense 3; a raid on it costs you a Rubble and gives the raider a VP.
+    cards: {pack: first_clash}
+    bots:
+      - {archetype: swarm, difficulty: easy, name: Marauder}
+    map:
+      name: The Land Bridge
+      layout: |2
+            B
+          .   .
+        .   b   .
+          .   .
+        *   .   *
+          .   .
+        .   .   .
+          .   .
+            .
+
+            1
+
+            .
+
+            @
+
+            .
+
+            1
+
+            .
+
+            .
+          .   .
+        .   .   .
+          .   .
+        *   .   *
+          .   .
+        .   a   .
+          .   .
+            A
+
+  # ── Fortress ────────────────────────────────────────────────────────────
+
+  - id: stonefield
+    spot: q
+    title: Stonefield
+    intro: >
+      A stony island nobody has bothered to settle. Claim it, town by town,
+      and learn what a Fortress does with neutral ground.
+    objective: {type: vp, vp: 6, rounds: 6}
+    spotlight: [fortress_slow_advance]
+    hints:
+      - Explore claims open land next to yours. Every 3 tiles you hold are worth 1 VP.
+      - Stony land has defense 1 and walled towns more — Explore can't take them, but Mountaineer hits neutral land with power 4.
+      - A wall of stony ground (defense 1) shuts in your valley — you won't get far with Explore alone.
+    cards: {pack: first_clash}
+    map:
+      name: Stonefield
+      layout: |2
+              *
+            .   .
+          .   .   .
+        #   1   .   #
+          .   1   .
+        .   .   .   .
+          *   1   *
+        1   1   1   1
+          .   .   .
+        .   .   .   .
+          1   a   1
+            .   .
+              A
+
+  - id: the_bulwark
+    spot: r
+    title: The Bulwark
+    intro: >
+      Old stone walls dot the hills around your castle. Take them, and build
+      them up until three of them stand at defense 4.
+    objective: {type: fortify, tiles: 3, defense: 4, rounds: 12}
+    spotlight: [neutral_fortified_post]
+    hints:
+      - The old walls have defense 2 of their own. Barricade adds 2 more for good — until someone takes the tile.
+      - Barricade bonuses stack — two on the same tile add 4.
+      - Mountaineer claims neutral land with power 4, walls included.
+    cards: {pack: first_clash}
+    map:
+      name: The Bulwark
+      layout: |2
+              .
+            *   .
+          .   #   *
+        #   .   .   #
+          .   .   .
+        .   .   .   .
+          2   2   .
+        .   .   .   .
+          .   .   2
+        .   2   2   .
+          .   a   .
+            .   .
+              A
+
+  - id: long_march
+    spot: s
+    title: The Long March
+    intro: >
+      A long, narrow island with its towns strung out to the far end. Walled
+      crossings slow the march north. Hold every town at once.
+    objective: {type: vp_hexes, rounds: 15}
+    spotlight: [fortress_slow_advance]
+    hints:
+      - Tiles marked with defense can't be Explored; bring Claims to break through.
+      - Mountaineer hits neutral land with power 4 — more than any town here has.
+      - Nobody else is here, so towns you take stay yours.
+    cards: {pack: far_reaches}
+    map:
+      name: The Long March
+      layout: |2
+            *   .
+          .   .   .
+        .   1   .   @
+          .   .   #
+        .   .   .   .
+          #   .   .
+        .   .   *   .
+          .   .   .
+        .   #   .   .
+          .   .   .
+        *   .   .   #
+          .   1   .
+        .   .   .   .
+          .   .   .
+        .   #   .   *
+          .   .   .
+        .   .   .   .
+          .   a   .
+            .   A
+
+  - id: hold_the_pass
+    spot: t
+    title: Hold the Pass
+    intro: >
+      A mountain wall splits the valley, with a single pass through it — and
+      a warband is coming down from the north. Hold your land.
+    objective: {type: survive, rounds: 10, tiles_lost_max: 2, tiles: 12}
+    spotlight: [fortress_iron_wall, neutral_watchtower]
+    bots:
+      - {archetype: vanguard, difficulty: hard, name: Warband}
+    hints:
+      - Every tile the warband takes from you counts; lose more than 2 and the pass has fallen.
+      - Watchtower adds 2 defense to a tile for the round; Iron Wall makes a tile impossible to claim this round.
+      - The pass has defense 1. Hold it and they can't reach the valley except through you.
+      - Farm walls (defense 1) ring your castle, and you need 12 tiles at the end — Levy or Mountaineer gets you through them.
+    cards: {pack: first_clash}
+    map:
+      name: Hold the Pass
+      layout: |2
+                B
+              .   .
+            .   b   .
+          .   .   .   .
+        .   *   .   *   .
+          #   .   .   .
+        #   .   .   .   #
+          #   #   #   #
+        #   #   1   #   #
+          .   .   .   .
+        .   .   .   .   .
+          .   .   .   .
+        1   *   1   *   1
+          1   1   1   1
+            .   a   .
+              .   .
+                A
+
+  # ── Shared: each side of the same fight ─────────────────────────────────
+
+  - id: the_siege
+    spot: z
+    map:
+      name: The Siege
+      layout: |2
+                *
+              .   .
+            #   .   #
+          .   .   .   .
+        .   .   2   .   .
+          .   2   2   .
+        .   .   A   .   .
+          #   2   2   .
+        .   .   a   .   .
+          .   2   2   #
+        .   *   2   *   .
+          b   .   .   c
+        B   .   .   .   C
+          .   .   .   .
+            .   #   .
+              .   .
+                .
+    cards: {pack: first_clash}
+    variants:
+      fortress:
+        title: The Siege
+        intro: >
+          Your keep stands behind a ring of old walls, and two Vanguard
+          warlords have camped at its gates. Hold out until the season ends
+          with at least 5 tiles: if they raid your keep even once, or take
+          more than 5 of your tiles, it has fallen.
+        objective: {type: survive, rounds: 10, tiles_lost_max: 5, tiles: 5}
+        spotlight: [fortress_iron_wall, fortress_garrison]
+        bots:
+          - {archetype: vanguard, difficulty: hard, name: Warlord}
+          - {archetype: vanguard, difficulty: hard, name: Reaver}
+        hints:
+          - A raid needs more power than your base's defense of 3 plus any defense you play on it.
+          - Iron Wall makes a tile impossible to claim this round; Garrison defends an owned tile with power 6.
+          - The walls around the keep have defense 2. Claim them first (Mountaineer hits neutral land with power 4), and the raiders have to break them to reach you.
+      vanguard:
+        title: Storm the Keep
+        seat: B
+        intro: >
+          A Fortress has dug in behind a ring of old walls at the heart of the
+          island. Break through and raid the keep — the same siege, from the
+          other side.
+        objective: {type: raid, rounds: 8}
+        spotlight: [neutral_siege_tower]
+        bots:
+          - {archetype: fortress, difficulty: hard, name: Castellan}
+        hints:
+          - The keep has defense 3, plus whatever the Castellan plays on it. Siege Tower hits for 6.
+          - The walls have defense 2 — and more once the Castellan holds them. Break one to get next to the keep.
+
+  - id: border_clash
+    spot: y
+    map:
+      name: Border Clash
+      layout: |2
+                B
+              .   .
+            .   b   .
+          1   1   1   1
+        1   1   1   1   1
+          c   .   .   .
+        C   .   .   .   .
+          #   1   1   #
+        .   *   #   *   .
+          .   .   .   .
+        .   .   .   .   .
+          .   .   .   .
+        .   .   .   .   .
+          .   .   .   .
+            .   a   .
+              .   .
+                A
+    cards: {pack: border_war}
+    variants:
+      vanguard:
+        title: Border Clash
+        intro: >
+          A Swarm is spreading toward your border, thin and fast. Cut into it:
+          take its land, tile by tile.
+        objective: {type: capture, tiles: 6, rounds: 10}
+        spotlight: [neutral_ambush]
+        bots:
+          - {archetype: swarm, difficulty: medium, name: Hive}
+        hints:
+          - Only tiles you take from the Hive count — claim its land, not open ground.
+          - A rival's tile needs more power than its defense; ties go to the holder.
+          - Ambush hits harder against a rival's tile.
+      swarm:
+        title: Hold the Border
+        seat: B
+        intro: >
+          Two Vanguard warbands are cutting into your land. You can't stop
+          every blow — just keep growing faster than they can take.
+        objective: {type: survive, rounds: 10, raids_allowed: 1, tiles_lost_max: 5, tiles: 12}
+        spotlight: [swarm_safety_in_numbers, swarm_hatching_grounds]
+        bots:
+          - {archetype: vanguard, difficulty: hard, name: Raider}
+          - {archetype: vanguard, difficulty: hard, name: Reaver}
+        hints:
+          - Lose more than 5 tiles, or have your base raided twice, and the border has fallen.
+          - Phalanx raises the defense of four tiles at once; Hatching Grounds fills your deck with Rabble.
+          - Scrub (defense 1) rings your nest and you need 12 tiles at the end — Rabble and Surge break through it; Explore can't.
+          - Retake what you lose. The raiders can't hold everything.
+
+  - id: the_flood
+    spot: "0"
+    map:
+      name: The Flood
+      layout: |2
+                A
+              .   .
+            .   a   .
+          1   1   1   1
+        1   *   1   *   1
+          .   .   .   .
+        .   .   @   .   .
+          #   .   .   #
+        .   .   .   .   .
+          1   1   1   1
+        1   1   1   1   1
+          b   .   .   c
+        B   .   #   .   C
+          .   .   .   .
+            .   .   .
+              .   .
+                .
+    cards: {pack: first_clash}
+    variants:
+      swarm:
+        title: The Flood
+        seat: B
+        intro: >
+          A Fortress holds the high ground to the north, behind its walled
+          towns. Flood the plain around it before it can dig in.
+        objective: {type: territory, tiles: 26, rounds: 10}
+        spotlight: [swarm_surge]
+        bots:
+          - {archetype: fortress, difficulty: medium, name: Castellan}
+        hints:
+          - Only how many tiles you hold counts. A belt of scrub (defense 1) crosses the plain, and the Fortress's towns are walled.
+          - Surge takes two tiles at once.
+      fortress:
+        title: Against the Tide
+        intro: >
+          Two swarms are pouring across the plain toward your keep. You won't
+          stop them all — hold on to what matters.
+        objective: {type: survive, rounds: 10, tiles_lost_max: 7, tiles: 10}
+        spotlight: [neutral_fortified_post]
+        bots:
+          - {archetype: swarm, difficulty: medium, name: Brood}
+          - {archetype: swarm, difficulty: medium, name: Horde}
+        hints:
+          - Every tile the swarms take from you counts; lose more than 7 and you're overrun.
+          - Barricade adds 2 defense to a tile for good. Swarm Claims are weak one by one.
+          - Scrub (defense 1) rings your keep and you need 10 tiles at the end — Mountaineer or Levy takes it.
+
+  # ── The heights: each campaign's levels 7–10 ───────────────────────────
+  # 7 is the last of the middle stretch; 8–10 are hard, with no time limit
+  # (lost only when a rival reaches its VP first), and 10 is the finale: two
+  # hard rivals with a head start on the map (not on their decks).
+
+  # Vanguard
+
+  - id: long_reach
+    spot: e
+    title: The Long Reach
+    intro: >
+      A river cuts the island in two, and a Swarm has taken the far bank.
+      There is one guarded ford — or there is the Vanguard's long reach.
+    objective: {type: capture, tiles: 7, rounds: 11}
+    spotlight: [vanguard_overrun, vanguard_breakthrough]
+    bots:
+      - {archetype: swarm, difficulty: medium, name: Brood}
+    hints:
+      - Overrun hits a tile up to 2 steps from your land — straight over the river.
+      - Breakthrough takes a free neutral tile next to whatever it wins.
+      - Only tiles you take from the Brood count. The ford has defense 2.
+    cards: {pack: far_reaches}
+    map:
+      name: The Long Reach
+      layout: |2
+            .   B   .
+          .   .   .   .
+        .   .   b   .   .
+          .   *   .   .
+        #   .   .   .   #
+          .   .   .   *
+        .   .   #   .   .
+          .   .   .   .
+        .   .   .   .   .
+          ~   ~   ~   ~
+        ~   ~   2   ~   ~
+          .   .   .   .
+        .   .   .   .   .
+          .   *   .   .
+        #   .   .   #   .
+          .   .   *   .
+        .   .   a   .   .
+          .   .   .   .
+            .   A   .
+
+  - id: the_gauntlet
+    spot: f
+    title: The Gauntlet
+    intro: >
+      The Castellan's keep stands at the head of a long, narrow valley,
+      behind its walls and two passes you could hold with a dozen spears.
+      Fight your way up it and raid the keep. Take as long as you need — but the
+      Castellan grows richer every round you spend at the gates.
+    objective: {type: raid, bot_vp: 15}
+    debt: false
+    spotlight: [vanguard_spearhead, neutral_siege_tower, neutral_rally_cry]
+    bots:
+      - {archetype: fortress, difficulty: medium, name: Castellan}
+    hints:
+      - The keep's walls have defense 2; the keep itself 3, plus whatever the Castellan plays on it.
+      - Spearhead hits for 8 once; Siege Tower hits for 6. Rally Cry lets every Claim in your hand stack on one tile.
+      - The valley narrows to a single tile twice — once through a walled town. Hold the passes and the Castellan comes to you.
+    cards:
+      pack: border_war
+      shared: [neutral_recruit, neutral_rally_cry, neutral_siege_tower, neutral_watchtower, neutral_conscription]
+      vanguard: [vanguard_spearhead, vanguard_strike_team, vanguard_rapid_assault, vanguard_blitz, vanguard_double_time]
+    map:
+      name: The Gauntlet
+      layout: |2
+        #   .   .   #
+          .   B   .
+        .   b   b   .
+          2   .   2
+        %   2   2   %
+          #   .   #
+        #   .   .   #
+          .   @   .
+        .   .   .   .
+          #   *   #
+        %   .   .   %
+          .   .   .
+        .   .   .   .
+          .   *   .
+        #   .   .   #
+          .   a   .
+        .   .   .   .
+          .   A   .
+
+  - id: ashen_fields
+    spot: g
+    title: Ashen Fields
+    intro: >
+      The war burnt the middle of the island to ash. Three causeways cross
+      it, one through the ruins of the last town standing. Beyond them, a
+      Swarm and a Fortress share the north. Take their land.
+    objective: {type: capture, tiles: 12, bot_vp: 9}
+    debt: false
+    spotlight: [vanguard_battle_glory, neutral_ambush]
+    bots:
+      - {archetype: swarm, difficulty: hard, name: Locust}
+      - {archetype: fortress, difficulty: hard, name: Ashlord}
+    hints:
+      - Only tiles you take from your rivals count — twelve of them, from either.
+      - Battle Glory pays a VP when two of your Claims beat rival tiles in a round; Ambush hits rival tiles harder.
+      - The causeways are one tile wide. Whoever holds the far end holds the crossing.
+    cards: {pack: border_war}
+    map:
+      name: Ashen Fields
+      layout: |2
+        .   .   #   .   .
+          B   .   .   C
+        b   b   #   c   c
+          .   *   *   .
+        .   .   #   .   .
+          .   .   .   .
+        .   %   .   %   .
+          %   %   %   %
+        .   %   @   %   .
+          %   &   %   %
+        .   %   .   %   .
+          %   %   %   %
+        .   %   .   %   .
+          .   .   .   .
+        .   *   .   *   .
+          .   .   .   .
+        #   .   a   .   #
+          .   .   .   .
+            .   A   .
+
+  - id: twin_thrones
+    spot: h
+    title: Twin Thrones
+    intro: >
+      The Hive Queen and the Iron Duke have carved up the north between them
+      and come down to finish you. They hold twice your land — but no better
+      cards. Sack both their castles before either crowns themselves.
+    objective: {type: raid, bot_vp: 9}
+    debt: false
+    spotlight: [vanguard_overrun, vanguard_spearhead, neutral_rally_cry]
+    bots:
+      - {archetype: swarm, difficulty: hard, name: Hive Queen}
+      - {archetype: fortress, difficulty: hard, name: Iron Duke}
+    hints:
+      - Raid both castles, once each. They have defense 3, plus whatever their owners play on them.
+      - The lake splits the north. A ridge splits the two thrones, with a gap they'll fight over — and that you can use.
+      - Overrun hits a castle from 2 tiles away. Spearhead breaks one outright; Rally Cry stacks the rest of your hand on it.
+    cards:
+      pack: border_war
+      shared: [neutral_recruit, neutral_rally_cry, neutral_siege_tower, neutral_watchtower, neutral_war_bonds]
+      vanguard: [vanguard_spearhead, vanguard_overrun, vanguard_strike_team, vanguard_double_time, vanguard_war_cache]
+    map:
+      name: Twin Thrones
+      layout: |2
+        b   b   .   .   c   c
+          b   B   #   C   c
+        b   b   b   c   c   c
+          .   b   .   c   .
+        .   .   *   *   .   .
+          %   .   ~   .   %
+        #   .   ~   ~   .   #
+          .   .   ~   .   .
+        .   1   .   .   1   .
+          #   1   *   1   #
+        %   .   1   1   .   %
+          .   .   .   .   .
+        .   .   .   .   .   .
+          .   .   a   .   .
+            .   .   .   .
+              .   A   .
+
+  # Swarm
+
+  - id: pile_on
+    spot: m
+    title: Pile On
+    intro: >
+      A Fortress has walled itself in on a hill above the marsh. No one Claim
+      of yours will crack it. A dozen at once will.
+    objective: {type: raid, rounds: 13}
+    spotlight: [swarm_dog_pile, swarm_hatching_grounds]
+    bots:
+      - {archetype: fortress, difficulty: medium, name: Warden}
+    hints:
+      - A raid has to beat the keep's defense of 3, plus whatever the Warden plays on it.
+      - Dog Pile stacks, and gives every other Claim on its tile +1. Rally Cry lets all your Claims stack.
+      - Hatching Grounds fills your deck with Rabble — each Rabble you play grows the others.
+    cards: {pack: border_war}
+    map:
+      name: Pile On
+      layout: |2
+            .   B   .
+          .   b   b   .
+        .   2   .   2   .
+          2   .   .   2
+        .   ~   2   ~   .
+          .   .   .   .
+        ~   .   *   .   ~
+          .   ~   ~   .
+        .   .   ~   .   .
+          ~   .   .   ~
+        .   .   .   .   .
+          .   .   .   .
+        .   *   .   *   .
+          .   .   .   .
+        .   ~   a   ~   .
+          .   .   .   .
+            .   A   .
+
+  - id: infestation
+    spot: n
+    title: Infestation
+    intro: >
+      Old walled steadings dot this island, and a Fortress means to take
+      them all. Get there first. Smother more than half the island before
+      the Fortress builds its kingdom.
+    objective: {type: territory, share: 0.5, bot_vp: 12}
+    debt: false
+    spotlight: [swarm_overwhelm, swarm_drone_wave]
+    bots:
+      - {archetype: fortress, difficulty: hard, name: Steward}
+    hints:
+      - The walls have defense 2. Overwhelm gets +1 power for every tile of yours around its target.
+      - Drone Wave draws more the bigger you are, and gives 2 actions back.
+      - What counts is what you hold at the end of a round, all at once.
+    cards: {pack: first_clash}
+    map:
+      name: Infestation
+      layout: |2
+        .   .   .   .   .   .
+          .   .   B   .   .
+        .   2   b   b   2   .
+          2   .   .   .   2
+        .   2   .   .   2   .
+          .   ~   2   ~   .
+        2   .   .   .   .   2
+          2   .   @   .   2
+        .   2   .   .   2   .
+          .   ~   .   ~   .
+        %   .   2   2   .   %
+          .   2   *   2   .
+        .   .   2   2   .   .
+          .   .   .   .   .
+        ~   1   1   1   1   ~
+          1   .   a   .   1
+            .   .   .   .
+              .   A   .
+
+  - id: spore_isles
+    spot: o
+    title: The Spore Isles
+    intro: >
+      Five towns on three islands and two lonely islets, and a Vanguard
+      corsair on the fourth island — joined to the west isle by a spit of
+      sand, and able to leap the channels anyway. Seed every shore and hold
+      all five towns at once.
+    objective: {type: vp_hexes, bot_vp: 13}
+    debt: false
+    spotlight: [swarm_proliferate, swarm_dog_pile]
+    bots:
+      - {archetype: vanguard, difficulty: hard, name: Corsair}
+    hints:
+      - Proliferate claims any neutral tile on the board — the only way across the water for you.
+      - Towns have defense 2. Land beside one first, then take it with Dog Pile or a stack.
+      - The islets' towns have no shore to land on. Only Proliferate+ (power 2) reaches them — upgrade one.
+      - The Corsair's Overrun reaches 2 tiles, channels and all. Watch your towns.
+    cards: {pack: far_reaches}
+    map:
+      name: The Spore Isles
+      layout: |2
+        .   .   .   .   .   .
+          .   b   B   b   .
+        .   .   b   b   .   .
+          .   .   ~   .   .
+        .   .   ~   ~   .   .
+          .   ~   *   ~   ~
+        ~   ~   ~   ~   ~   ~
+          .   *   ~   *   .
+        .   .   .   .   .   .
+          .   .   ~   .   .
+        .   .   .   .   .   .
+          .   .   ~   .   .
+        ~   ~   ~   ~   ~   ~
+          ~   ~   *   ~   ~
+        .   .   ~   ~   .   .
+          .   *   ~   .   .
+        .   .   .   .   .   .
+          .   .   a   .   .
+            .   .   .   .
+              .   A   .
+
+  - id: devour
+    spot: p
+    title: Devour
+    intro: >
+      A Vanguard warlord holds the west, a Fortress the east, and between
+      them lies the marsh you hatched in. They each hold twice your land —
+      but no better cards. Overrun both their castles.
+    objective: {type: raid, bot_vp: 13}
+    debt: false
+    spotlight: [swarm_dog_pile, swarm_hatching_grounds, neutral_rally_cry]
+    bots:
+      - {archetype: vanguard, difficulty: hard, name: Warlord}
+      - {archetype: fortress, difficulty: hard, name: Castellan}
+    hints:
+      - Raid both castles, once each. They have defense 3, plus whatever their owners play on them.
+      - A pile of Rabble, Dog Pile and Swarm Tactics on one castle beats any wall. Rally Cry makes the whole hand stack.
+      - Lakes split the marsh. Each castle can be reached two ways — find the one they aren't watching.
+    cards:
+      pack: border_war
+      shared: [neutral_recruit, neutral_rally_cry, neutral_watchtower, neutral_conscription, neutral_war_bonds]
+      swarm: [swarm_dog_pile, swarm_rabble, swarm_hatching_grounds, swarm_overwhelm, swarm_swarm_tactics]
+    map:
+      name: Devour
+      layout: |2
+        .   .   .   #   .   .
+          .   .   %   .   .
+        .   *   %   %   *   .
+          .   .   %   .   .
+        .   .   .   .   .   .
+          b   .   ~   .   c
+        b   b   ~   ~   c   c
+          B   .   ~   .   C
+        b   b   .   .   c   c
+          b   .   @   .   c
+        .   .   .   .   .   .
+          %   .   ~   .   %
+        .   .   ~   ~   .   .
+          #   .   .   .   #
+        .   1   .   .   1   .
+          .   1   *   1   .
+        .   .   .   .   .   .
+          .   .   a   .   .
+            .   .   .   .
+              .   A   .
+
+  # Fortress
+
+  - id: iron_ring
+    spot: u
+    title: The Iron Ring
+    intro: >
+      Six old walls ring a still pool in the hills. Make four of them truly
+      strong — and keep them, with a Vanguard raider testing every one.
+    objective: {type: fortify, tiles: 3, defense: 5, rounds: 14}
+    spotlight: [neutral_fortified_post, fortress_slow_advance]
+    bots:
+      - {archetype: vanguard, difficulty: medium, name: Raider}
+    hints:
+      - The walls have defense 3. Mountaineer hits neutral land with power 4; Barricade adds 2 for good.
+      - A Barricade's bonus is lost when the tile changes hands. Iron Wall keeps a tile from being claimed this round.
+      - Farmland (defense 1) closes off your valley.
+    cards: {pack: first_clash}
+    map:
+      name: The Iron Ring
+      layout: |2
+            .   B   .
+          .   b   .   .
+        .   .   .   .   .
+          .   *   .   .
+        #   .   .   .   #
+          .   3   3   .
+        .   3   ~   3   .
+          .   3   3   .
+        .   .   .   .   .
+          ~   .   .   ~
+        .   .   *   .   .
+          1   1   1   1
+        #   1   .   1   #
+          .   .   .   .
+        .   .   .   .   .
+          .   a   .   .
+            .   A   .
+
+  - id: toll_road
+    spot: v
+    title: The Toll Road
+    intro: >
+      An old road winds through two mountain passes, a town at every turn.
+      Whoever holds the road grows rich; whoever grows rich wins. A Vanguard
+      warlord means it to be them.
+    objective: {type: vp, vp: 15, bot_vp: 17}
+    debt: false
+    spotlight: [fortress_toll_road]
+    bots:
+      - {archetype: vanguard, difficulty: medium, name: Warlord}
+    hints:
+      - Tax Collector pays 3 for each connected town; Toll Road draws 2 cards for each.
+      - Warden is worth a VP for every 10 tiles you've held since you took them. Don't lose ground.
+      - Each pass is a single tile. Hold the passes and the road behind them is yours.
+    cards:
+      pack: deep_roots
+      shared: [neutral_recruit, neutral_war_bonds, neutral_tax_collector, neutral_land_grant, neutral_reduce]
+      fortress: [fortress_toll_road, fortress_warden, fortress_slow_advance, fortress_garrison, fortress_iron_wall]
+    map:
+      name: The Toll Road
+      layout: |2
+            .   .   .   .
+          .   .   B   .   .
+        .   .   b   b   .   .
+          1   1   1   1   1
+        1   1   1   1   1   1
+          .   .   .   .   .
+        #   .   *   *   .   #
+          #   .   .   .   #
+        .   .   .   .   .   .
+          *   .   @   .   *
+        .   .   .   .   .   .
+          #   .   .   .   #
+        #   .   *   *   .   #
+          .   .   .   .   .
+        1   1   1   1   1   1
+          1   1   1   1   1
+        .   .   .   .   .   .
+          .   .   a   .   .
+            .   .   .   .
+              .   A   .
+
+  - id: long_winter
+    spot: w
+    title: The Long Winter
+    intro: >
+      Snow on the high plateau, a frozen lake ringed by old walls, and two
+      rivals who want it too. Build the ring into a fortress — seven walls
+      at once, each strong enough to hold.
+    objective: {type: fortify, tiles: 7, defense: 5, bot_vp: 12}
+    debt: false
+    spotlight: [neutral_fortified_post, fortress_garrison]
+    bots:
+      - {archetype: swarm, difficulty: hard, name: Thaw}
+      - {archetype: vanguard, difficulty: medium, name: Reaver}
+    hints:
+      - The walls have defense 3; Barricade adds 2 for good, until the tile changes hands.
+      - Garrison defends a tile of yours with power 6. Iron Wall makes one unclaimable for a round.
+      - Six walls ring the lake; four more stand out on the plateau. You need seven.
+    cards:
+      pack: first_clash
+      shared: [neutral_fortified_post, neutral_watchtower, neutral_recruit, neutral_conscription, neutral_war_bonds]
+      fortress: [fortress_iron_wall, fortress_garrison, fortress_slow_advance, fortress_supply_line, fortress_iron_discipline]
+    map:
+      name: The Long Winter
+      layout: |2
+        .   .   %   .   .   .
+          B   .   %   .   C
+        b   .   %   .   .   c
+          .   3   .   3   .
+        .   .   .   .   .   .
+          #   3   ~   3   #
+        .   3   ~   ~   3   .
+          #   3   ~   3   #
+        .   .   .   .   .   .
+          3   .   *   .   3
+        #   .   .   .   .   #
+          .   .   .   .   .
+        .   1   1   1   1   .
+          1   .   .   .   1
+        .   .   .   .   .   .
+          .   .   a   .   .
+            .   .   .   .
+              .   A   .
+
+  - id: siegebreaker
+    spot: x
+    title: Siegebreaker
+    intro: >
+      A river splits the north between a Vanguard warlord and a Swarm, and
+      both have grown fat on it. Your keep sits in a mountain basin below
+      them, two gates out. Break both their castles before either outgrows
+      you — they hold twice your land, but no better cards.
+    objective: {type: raid, bot_vp: 15}
+    debt: false
+    spotlight: [fortress_overwhelming_force, fortress_siege_engine, neutral_rally_cry]
+    bots:
+      - {archetype: vanguard, difficulty: hard, name: Warlord}
+      - {archetype: swarm, difficulty: hard, name: Brood Mother}
+    hints:
+      - Raid both castles, once each. They have defense 3, plus whatever their owners play on them.
+      - Juggernauts stack. Siege Engine hits a defended tile harder. Rally Cry makes the whole hand stack.
+      - The river has one ford, defense 2. Each gate out of your basin leads to one side.
+    cards:
+      pack: border_war
+      shared: [neutral_recruit, neutral_rally_cry, neutral_siege_tower, neutral_fortified_post, neutral_conscription]
+      fortress: [fortress_siege_engine, fortress_overwhelming_force, fortress_garrison, fortress_iron_wall, fortress_supply_line]
+    map:
+      name: Siegebreaker
+      layout: |2
+        b   b   .   .   c   c
+          b   B   ~   C   c
+        b   b   .   .   c   c
+          .   b   ~   c   .
+        .   .   *   *   .   .
+          .   .   ~   .   .
+        %   .   .   .   .   %
+          %   .   2   .   %
+        .   .   .   .   .   .
+          .   *   ~   *   .
+        .   .   .   .   .   .
+          #   1   #   1   #
+        #   #   #   #   #   #
+          .   .   a   .   .
+            .   .   .   .
+              .   A   .

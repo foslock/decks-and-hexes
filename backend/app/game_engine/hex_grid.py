@@ -66,6 +66,9 @@ class HexTile:
     # the ruins of a burnt town.
     is_scorched: bool = False
     scorched_vp: int = 0
+    # Water (solo maps): a lake or inlet nobody can claim (also is_blocked);
+    # the board draws it as sea, with beaches on the land around it.
+    is_water: bool = False
 
     @property
     def s(self) -> int:
@@ -261,6 +264,7 @@ def _tile_to_dict(tile: HexTile) -> dict[str, Any]:
         "base_owner": tile.base_owner,
         "is_scorched": tile.is_scorched,
         "scorched_vp": tile.scorched_vp,
+        "is_water": tile.is_water,
     }
 
 

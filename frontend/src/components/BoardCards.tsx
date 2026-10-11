@@ -586,8 +586,29 @@ export function EngineQueue({ entries, onOpen, containerRef, title = 'Played', s
   );
 }
 
+/** The detail overlay shows cards half again their size. */
+const DETAIL_SCALE = 1.5;
+const DETAIL_GAP = 20;
+const DETAIL_PAD = 24;
+
+/** How big the overlay's cards can be, and how many to a row: the largest
+ *  scale up to DETAIL_SCALE at which they all fit the screen, never below
+ *  their normal size. `reserve` is the height taken by everything else. */
+export function detailLayout(count: number, vw: number, vh: number, reserve: number): { scale: number; cols: number } {
+  let best = { scale: 0, cols: 1 };
+  for (let cols = 1; cols <= Math.min(Math.max(count, 1), 4); cols++) {
+    const rows = Math.ceil(count / cols);
+    const sw = (vw - 2 * DETAIL_PAD - (cols - 1) * DETAIL_GAP) / (cols * CARD_W);
+    const sh = (vh - 2 * DETAIL_PAD - reserve - (rows - 1) * DETAIL_GAP) / (rows * CARD_H);
+    const scale = Math.min(DETAIL_SCALE, sw, sh);
+    if (scale > best.scale + 1e-6) best = { scale, cols };
+  }
+  return { scale: Math.max(1, best.scale), cols: best.cols };
+}
+
 /** Full-size view of several cards at once (a tile's stack, the queue, a
- *  player's revealed plays). Click anywhere or press Escape to close. */
+ *  player's revealed plays), half again their size where the screen has
+ *  room — keyword hints included. Click anywhere or press Escape to close. */
 export function CardDetailOverlay({ entries, onClose, onReplay }: {
   entries: { card: Card; subtitleParts?: SubtitlePart[]; playerId?: string; playerName?: string }[];
   onClose: () => void;
@@ -595,11 +616,21 @@ export function CardDetailOverlay({ entries, onClose, onReplay }: {
    *  tile's resolve again. */
   onReplay?: () => void;
 }) {
+  const [viewport, setViewport] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
+    };
   }, [onClose]);
+  // Below the cards: the close hint, the Replay button, player names.
+  const named = entries.some(e => e.playerName && e.playerId);
+  const reserve = 32 + (onReplay ? 64 : 0) + (named ? 22 * Math.ceil(entries.length / 4) : 0);
+  const { scale, cols } = detailLayout(entries.length, viewport.w, viewport.h, reserve);
   return createPortal(
     <div
       onClick={onClose}
@@ -609,10 +640,18 @@ export function CardDetailOverlay({ entries, onClose, onReplay }: {
         animation: 'cc-fade-in 0.18s ease-out both',
       }}
     >
-      <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: 20, maxWidth: 4 * (CARD_W + 20) + 20, padding: 24 }}>
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: DETAIL_GAP, padding: DETAIL_PAD, boxSizing: 'border-box',
+        maxWidth: cols * CARD_W * scale + (cols - 1) * DETAIL_GAP + 2 * DETAIL_PAD,
+      }}>
         {entries.map((entry, i) => (
           <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-            <CardFull card={entry.card} subtitleParts={entry.subtitleParts} showKeywordHints={entries.length === 1} />
+            {/* Scaled as a whole, so the keyword hints grow with the card. */}
+            <div style={{ position: 'relative', width: CARD_W * scale, height: CARD_H * scale }}>
+              <div style={{ position: 'absolute', left: 0, top: 0, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+                <CardFull card={entry.card} subtitleParts={entry.subtitleParts} showKeywordHints={entries.length === 1} />
+              </div>
+            </div>
             {entry.playerName && entry.playerId && (
               <div style={{ fontSize: 12, fontWeight: 'bold', color: playerColor(entry.playerId) }}>{entry.playerName}</div>
             )}

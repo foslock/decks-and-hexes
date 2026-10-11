@@ -34,12 +34,174 @@ seeded, seats rotated, archetypes randomized) and reports win rates. Agents:
 the "strike rush" that used to beat Hard), `greedy`, `raider`, `<tier>@base`
 (the tier from `cpu_player.py` at git HEAD, for before/after comparisons), and
 profile overrides like `hard~threat_modeling=0,noise=0.1`.
-- Standard suite: `cd backend && uv run python scripts/difficulty_benchmark.py --suite --games 300 --grid small,medium`
+- Standard suite: `cd backend && uv run python scripts/difficulty_benchmark.py --suite --games 300 --grid small,medium` (add `--pack first_clash,border_war,deep_roots,far_reaches` to play inside the real packs; the default is Everything)
 - Specific matchups: `uv run python scripts/difficulty_benchmark.py hard:rush medium:hard@base --games 400`
 - Archetype balance (Hard mirror): `uv run python scripts/difficulty_benchmark.py hard:hard --games 900 --grid small,medium` (add `--players 3`)
 Re-run the suite after changing CPU logic **or** card balance — card changes shift
 the tiers too. CPU buy/upgrade valuation lives in `backend/app/game_engine/cpu_valuation.py`;
 per-tier feature flags and weights are the `DifficultyProfile`s in `cpu_player.py`.
+
+### Card Packs & Balance
+A game is played with one card pack (`backend/app/game_engine/card_packs.py`,
+listed in lobby order): **5 shared cards + 5 cards per archetype**, so each
+player has the same 10 cards to buy all game. First Clash (default, for
+learning), Border War, Deep Roots, Far Reaches; Everything (`testing_only`) is
+every card at once, listed last. Packs draw on the **Core set** (`set: core` in
+the YAML → `Card.card_set`; `tests/test_card_packs.py` checks Core equals the
+union of the packs and that no player gets two cards in a `NEAR_DUPLICATES`
+group); other cards are `set: set_aside` for future sets.
+- Supply: private archetype piles of `ARCHETYPE_PILE_SIZE` = 3 copies per card
+  per player; the market shows the top of each pile (`archetype_supply`), so
+  re-roll is refused; buy one of each card per round. Shared piles hold
+  `shared_pile_size(n)` = 4 + 2n copies.
+- Upgrades change **only numbers** (`tests/test_upgrades.py` normalizes the
+  text and checks it); drawbacks stay. Exceptions: Diplomat, Plague.
+- Balance harness: `cd backend && uv run python scripts/pack_balance.py --games 400 --tables 2:small,3:medium,4:medium`
+  (Hard CPUs inside each pack; `--detail` per card, `--inject` / `--force`
+  paired card tests, `TUNE_SWAPS` / `TUNE_SET` to try changes without editing
+  data). Targets: archetype win rate 40–60% at 2p, 23–43% at 3p, 15–35% at 4p.
+- Playtests for every reworked card: `tests/test_changed_cards.py` (the
+  `Table` harness plays a card through play → reveal → next round).
+
+### Builds & the Pack Acceptance Test
+Packs should offer several strategies, measured the way Dominion measures
+against Big Money. **Fast Claim** is Card Clash's Big Money and the yardstick
+for every CPU tier: buy the Claim with the highest *typical* power you can
+afford (`cpu_builds.typical_claim_power`: bonuses its usual play meets —
+Strike Team's +2 in full, Overwhelm +2, Mountaineer's neutral bonus — less
+1.5 per Debt or extra action), never save; it plays with Medium tactics
+(`cpu_builds.FastClaimCPU`; the benchmark's `fastclaim` agent; `rush` is the
+same buying with Hard play). A **build** is a named buy plan —
+`(card id, copies)` in priority order — listed per pack in
+`backend/app/game_engine/pack_builds.py` (never sent to players: finding
+strategies is the game). A CPU buys its build's cards first, then as its
+tier always would.
+- Tiers (`DifficultyProfile.follow_builds`, on for all three;
+  `cpu_builds.choose_build`, seeded by game + player so a CPU keeps its build):
+  Easy plays Fast Claim or one of the weaker half of its builds, Medium a
+  random build rated ≥55%, Hard the best-rated one. A pack with no builds
+  (Everything) buys as before. Targets vs Fast Claim (2p, suggested map):
+  Easy 25–40%, Medium ≥50%, Hard ≥70% — First Clash: 31 / 66 / 77.
+- Find builds: `cd backend && uv run python scripts/build_search.py --pack first_clash`
+  (hill-climbs buy plans per archetype for Hard play vs Fast Claim, finalists
+  re-scored on fresh seeds; `--plans "card:n,card:n|..."` scores given
+  builds; `TUNE_SWAPS="pack:arch:old=new"` tries a pack change).
+- Acceptance test: `uv run python scripts/pack_builds.py` (each build, with
+  Medium play like Fast Claim's, vs Fast Claim and a round-robin of builds;
+  2p Large + Medium). A pack passes when ≥3 builds beat Fast Claim (≥55%,
+  one per archetype), no build beats every other build, every card is in a
+  winning build, and Fast Claim beats the Easy CPU. `--vp-plus N` lengthens
+  games; `--tiers` adds Medium/Hard vs Fast Claim. `--write-ratings` stores
+  each build's win rate vs Fast Claim in `data/build_ratings.json` — the
+  Large-map rating is the one every game uses (`RATING_GRID`). Re-run it after
+  changing a pack, a build or card balance.
+- Card lesson from tuning: Fast Claim buys only Claims, so buffing non-Claim
+  cards (engine, defense, synergy — Swarm Tactics, Drone Wave, Iron
+  Discipline) strengthens strategies without strengthening the baseline;
+  buffing Claims strengthens both.
+
+### Solo Campaigns
+Three campaigns of pre-made levels, one per archetype like StarCraft's races
+(Home → **Solo** → pick Vanguard, Swarm or Fortress → that campaign's
+overworld). You always play a campaign's levels as its archetype; to switch,
+go back to the campaign choice. Levels are data: `data/solo_levels.yaml` (its
+header documents the format), loaded and checked by
+`backend/app/game_engine/solo.py` — any mistake raises `LevelError` and fails
+`tests/test_solo.py`.
+- **Campaigns** (`campaigns.<archetype>`: title, blurb, `levels` in order,
+  `soon` spots): each starts from its own castle (`V` / `S` / `F` on the
+  shared overworld), builds its own road from spot to spot, and leans on the
+  archetype's strengths (Vanguard raids and takes, Swarm spreads, Fortress
+  holds). All three run **ten levels on the same curve**
+  (`test_every_campaign_runs_the_same_curve`): 1–3 easy and rival-free, 4–7
+  medium, 8–10 hard with **no time limit** and showcase maps, and 10 the
+  finale — two hard rivals with a head start on the map (more `b`/`c`
+  starting land), not on their decks. Measured with `play --focus` (`play`
+  for a VP race): easy ≈ 85%+, medium ≈ 55–80%, hard ≈ 25–50%.
+- **A level** sits on one `spot` (an overworld letter) and has a title,
+  intro, `objective`, `map`, `cards`, optional `bots` (archetype, difficulty,
+  name), `market`, `debt`, `hints` and `spotlight` (the cards it introduces —
+  design it so it's near impossible without them; `--without` checks). A
+  level in two campaigns is a **shared level**: the same spot, map and tile,
+  reached by each campaign's road and played from the other side —
+  `variants.<archetype>` changes its title, intro, objective, bots, cards,
+  hints, spotlight or `seat` (`seat: B` puts you on B's base; bots take the
+  other bases in letter order, unused bases become land). `load_campaign`
+  returns one `SoloLevel` per campaign it's in (`shared_with` names the
+  others).
+- **Maps** are hex art, one character per tile, two characters per column,
+  each column half a row below the one to its left (a tile touches the tiles
+  two lines up/down in its column and one line up/down beside it — a wall
+  across the map takes two lines); draw your base `A` at the bottom (the
+  game turns it there) and write `layout: |2`. Legend: `.` land, `#`
+  mountain, `*`/`@` 1/2-VP hex, `1`–`9` defended land, `~` water (a lake or
+  inlet: blocked, drawn as sea with beaches round it — the board engine
+  leaves water out of its tiles and `BoardLayout.beach` slopes the land
+  down to sand), `%` scorched earth (blocked, burnt), `&` a burnt town's
+  ruins, `A`–`F` bases and `a`–`f` their starting land; a level's `legend`
+  adds more (`X: {vp: 1, defense: 5}`, `{water: true}`). A space is sea.
+  Or `preset: small`. `overrides` change single tiles by "q,r".
+- **Objectives** (`Objective` in solo.py), judged at the end of every round
+  up to `rounds`: `vp`, `territory` (tiles or a `share` of the land),
+  `vp_hexes` (all at once, optionally `connected`), `raid` (every rival's
+  base), `capture` (take N tiles from rivals), `fortify` (N tiles at
+  permanent defense D), `survive` (hold out to round R; lost when your base
+  is raided more than `raids_allowed` times or you lose more than
+  `tiles_lost_max` tiles; optionally still hold `tiles`). Raids and captures
+  are tallied from each round's `player_effects` / `resolution_steps`
+  (`_round_tally`). With bots, one reaching `bot_vp` first loses the level.
+  **No `rounds`: no time limit** — lost only when a rival reaches `bot_vp`
+  (so it needs bots and one, and can't be a survive); set `debt: false`, or
+  Debt keeps the leaders from ever getting there; `UNTIMED_ROUND_GUARD` (50)
+  ends a stalemate as a loss. Bots only raid bases at Hard. Add a type in
+  `Objective.from_data` / `goal` / `headline`, `objective_progress`, `_judge`
+  and the frontend `SoloObjectiveType`.
+- **No level falls to the starting deck.** Explore only takes open land
+  next to yours, so the most Explore and Gather can ever hold is your start
+  plus the open land joined to it (`starter_ceiling` in solo.py; `list`
+  prints it). `test_no_level_falls_to_the_starting_deck` fails if that could
+  meet an objective: ring each start with defended land the level's cards
+  break through, keep VP hexes defended, and give every `survive` a `tiles`
+  count above the ceiling (otherwise sitting tight with Gathers wins — Hard
+  bots rarely get through a base's defense 3). `play --starters` (buys only
+  upgrade credits: Explore+/Gather+) and `--starters turtle` (only Gathers)
+  should clear nothing.
+- **Engine**: a level plays as an ordinary game with `GameState.solo` set
+  (`create_solo_game`): `create_game(grid=, pack=)` takes the level's board
+  and cards (`game_pack(game)` reads the pool), `check_solo_objective` in
+  `execute_end_of_turn` decides the game instead of the VP target and round
+  limit (`solo.result` / `solo.reason`; `to_dict` adds live `solo.progress`;
+  a reveal that wins the level skips that round's buy phase —
+  `won_this_round` in `_transition_to_buy`), and Debt never goes to a player
+  alone (nor with `debt: false`).
+- **API** (`app/api/solo.py`): `GET /api/solo/levels` (overworld + each
+  campaign's castle, roads and levels), `GET /api/solo/levels/{id}/map?archetype=`
+  (the board as that side starts it — the briefing's **Preview map**),
+  `POST /api/solo/levels/{id}/start` `{archetype}` — registers a private,
+  already-started lobby for the game, so the frontend plays it like any
+  lobby game (WebSocket, tokens, CPU buys).
+- **Frontend** (`components/solo/`): `SoloCampaignSelect`, `SoloOverworld`
+  (reuses GameBoard: one campaign's castle and spots as towns — drawn with
+  crowns, `vpGlyph="crown"` — turned so its castle sits at the bottom like a
+  game's base; your territory covers its road up to the next level and grows
+  when you clear one; the overworld layout takes `~` water and `%` scorched
+  land too), `SoloLevelPanel` (briefing) + `SoloMapPreview`,
+  `SoloObjectiveHud` ("No time limit" for an untimed level; `roundLimit()`
+  in GameScreen). Progress is per browser and per campaign in localStorage
+  (`cardclash_solo_progress`, every access guarded); a level unlocks once
+  every level before it in its campaign is cleared. `?preview=solo-maps`
+  (`&level=<id>&campaign=<arch>`) shows any level's map, locked or not.
+- **Tuning**: `cd backend && uv run python scripts/solo_levels.py` lists the
+  campaigns; `... map <level>` prints a map with "q,r" keys; `... play
+  [levels] [--campaign swarm] --games 20` puts a CPU of each tier in your
+  seat; `--curve` (with `--rounds N` to look past the limit) prints progress
+  by round and the leading rival's VP — rivals sharing a map level off, so
+  pick an untimed level's `bot_vp` from it; `--focus` makes your seat play
+  for the objective (buys spotlight cards and, out of spare resources,
+  upgrades for them; claims objective tiles, seeds islands with Proliferate,
+  stacks on bases, fortifies) — the CPUs otherwise play for VP and ignore
+  other objectives; `--without card,...` checks a spotlight really matters.
+  Keep runs small.
 
 ### Card Art
 Card art lives in `frontend/public/cards/<definition_id>.png` (source). The app
@@ -94,9 +256,10 @@ narration in `tutorialScenes.tsx` still describes them.
   (`is_scorched` → the `scorched` biome: char ground, dead trees, ruins of a
   burnt town via `scorched_vp`, smoldering `embers` spots). The engine burns
   a tile in place (`scorchTiles`: terrain patch + per-tile decor ranges), not
-  with a full rebuild. Claims that ignore temporary defense (Siege Engine,
-  Conqueror) skip it for their own player only — every other claim faces it in
-  full (a claim must beat the defense it faces; the strongest that gets
+  with a full rebuild. Claims that ignore temporary defense (the engine's
+  `IGNORE_DEFENSE` effect — no card uses it now; Siege Engine and Conqueror
+  get +2 power against a defense bonus instead) skip it for their own player
+  only — every other claim faces it in full (a claim must beat the defense it faces; the strongest that gets
   through wins). Steps carry `defense_ignored` / `ignored_by`; those claims
   attack last and the badge cracks down for them just before they land.
   What card effects do at the reveal is recorded server-side on the tile it
@@ -212,22 +375,23 @@ since `vp_value` defaults to 1 for every tile.
 - `rules/05_card_anatomy_and_timing.md` — Card types, timing rules, resource rules
 
 ## Data Files (game content — balance will change frequently)
-- `data/cards_vanguard.yaml` — 14 Vanguard archetype cards + upgrades
-- `data/cards_swarm.yaml` — 14 Swarm archetype cards + upgrades
-- `data/cards_fortress.yaml` — 14 Fortress archetype cards + upgrades
-- `data/cards_neutral.yaml` — Starter cards (Explore, Gather) + 12 market cards
+- `data/cards_vanguard.yaml` — 30 Vanguard archetype cards + upgrades (12 Core)
+- `data/cards_swarm.yaml` — 30 Swarm archetype cards + upgrades (12 Core)
+- `data/cards_fortress.yaml` — 30 Fortress archetype cards + upgrades (10 Core)
+- `data/cards_neutral.yaml` — Starter cards (Explore, Gather), Debt/Rubble/Spoils, and the shared market cards
 - `data/objectives.yaml` — 28 objectives (Vanguard, Swarm, Fortress, Wildcard pools)
 - `data/passives.yaml` — 37 passive abilities
+- `data/solo_levels.yaml` — the solo campaigns: overworld, campaigns and levels (see Solo Campaigns)
 
 ---
 
 ## Key Design Rules (critical to get right in implementation)
 
 ### Turn Structure (5 phases)
-1. **Start of Turn** — Distribute Debt card to VP leader (round 5+), draw hand, reveal archetype market (random cards from player's archetype deck). VP is derived from the board at any moment, not scored here
+1. **Start of Turn** — Distribute Debt card to VP leader (round 5+), draw hand, show the archetype market (the top of each of the player's 5 archetype piles). VP is derived from the board at any moment, not scored here
 2. **Play Phase** (simultaneous) — Players simultaneously place cards face-down on target tiles. Immediate effects (action gains, "draw immediately" card draws) resolve AS EACH CARD IS PLAYED, enabling chaining.
 3. **Reveal & Resolve** — Flip all cards. Resolve Claims (highest power wins tile, ties to defender). Post-resolution effects fire. Delayed draws noted.
-4. **Buy Phase** (concurrent in the digital game) — Each player buys and signals when done. Spend resources to re-roll the archetype market (1 resource; there is no Retain action). Purchase archetype cards, shared market cards (max 1 copy of each shared card per round), or upgrade credits (5 resources). Purchases are visible to all players.
+4. **Buy Phase** (concurrent in the digital game) — Each player buys and signals when done. Purchase archetype cards and shared market cards (max 1 copy of each card per round), or upgrade credits (5 resources). Purchases are visible to all players.
 5. **End of Turn** — Discard hand. Check the VP target (see VP Scoring). Rotate first player token clockwise.
 
 ### Action Slot System
@@ -238,7 +402,8 @@ since `vp_value` defaults to 1 for every tile.
 - Immediate effects (action gains, card draws) resolve during Play Phase as cards are played
 
 ### Claiming Tiles
-- All board interaction uses unified Claim cards — most neutral tiles have defense 0; VP hexes have intrinsic defense (standard 2, premium 3; premium neighbours 1), and a tie against a neutral tile's intrinsic defense goes to the attacker
+- All board interaction uses unified Claim cards — most neutral tiles have defense 0; VP hexes have intrinsic defense (standard 2, premium 3; premium neighbours 1), and a tie against a neutral tile's intrinsic defense goes to the attacker ("match a neutral tile's defense to take it; beat a rival to take theirs")
+- A Claim's conditional power is settled at the reveal (`settle_claim_powers`: after abandons and Defense cards, before any tile changes hands); only hand-counting power (Strength in Numbers) is fixed at play time
 - Claims must target tiles adjacent to one the player already owns, unless card says otherwise
 - One Claim per tile per round — except stacking exception cards (Coordinated Push, Dog Pile, Juggernaut)
 - Ties go to current owner (defender wins)
@@ -256,8 +421,8 @@ since `vp_value` defaults to 1 for every tile.
 - Bases have defense 3 (all archetypes). A successful base raid gives the defender 1 Rubble (capped at 1 per raid; Rubble is worth 0 VP) and the attacker 1 Spoils (+1 VP)
 
 ### Markets
-- **Archetype market:** random cards drawn from player's private archetype deck each turn (`archetype_market_size`). Private per player. Re-roll (1 resource) during Buy Phase; Retain is not implemented.
-- **Shared market:** Shared stacks with N×2 copies per card (N = player count). When exhausted, gone for the game.
+- **Archetype market:** with a pack, private piles of 3 copies of each of the player's 5 archetype pack cards, all on show every round (no re-roll). Everything pack only: random cards drawn from the private archetype deck each turn (`archetype_market_size`), re-roll 1 resource. Retain is not implemented.
+- **Shared market:** the pack's 5 shared cards, 4 + 2N copies each (N = player count). When exhausted, gone for the game.
 - **Upgrade credits:** Tokens, 5 resources each. Spent during the Play phase to upgrade a card in hand (one credit per card; several per turn allowed). Permanent.
 
 ### Forced Discards
@@ -273,7 +438,7 @@ since `vp_value` defaults to 1 for every tile.
 | Fortress | 5 | 5 | 10 | 5 | 5 |
 
 ### Explore & Gather (starter cards — NOT purchasable from market)
-- **Explore:** Claim: Power 0 on an adjacent unoccupied tile
+- **Explore:** Claim 1 defenseless, unoccupied tile next to your land (`defenseless_only` — never an owned tile or one with defense; any rival claim beats it). Explore+: up to 2 such tiles
 - **Gather:** Gain 2 resources
 
 ### Objectives
@@ -295,13 +460,20 @@ recipe laid out around the bases — features on each base's line to the center
 (axis) and on the midline between neighboring bases (gaps) — so every seat
 sees the same map.
 
-| Size | Tiles | Map | VP Hexes (premium + standard) | Mountains | Players |
+| Size | Tiles | Map | VP Hexes (premium + standard) | Mountains | Suggested for |
 |---|---|---|---|---|---|
-| Small | 61 | Crown | 1 + 6 | 6 | 2–3 |
-| Medium | 91 | Frontiers | 1 + 6 | 6 | 3–4 |
-| Large | 127 | Rings | 1 + 12 | 12 | 4–6 |
-| Mega | 169 | Six Crowns | 6 + 7 | 12 | 5–6 |
-| Ultra | 217 | Twin Rings | 7 + 6 | 18 | 6 |
+| Small | 61 | Crown | 1 + 6 | 6 | — (2–3 players finish in ~7 rounds) |
+| Medium | 91 | Frontiers | 1 + 6 | 6 | 4 players |
+| Large | 127 | Rings | 1 + 12 | 12 | 2, 3, 5, 6 players |
+| Mega | 169 | Six Crowns | 6 + 7 | 12 | — |
+| Ultra | 217 | Twin Rings | 7 + 6 | 18 | — |
+
+- The suggested size (`suggested_grid_size` / `SUGGESTED_GRID` in game_state.py)
+  is the smallest map where games run 11+ rounds — long enough for an early
+  investment to pay off (Hard CPUs, First Clash: 2p Large 12.1 rounds, 3p
+  Large 12.9, 4p Medium 15.5, 5–6p Large 19+). The lobby follows it as players
+  join and leave (`LobbyConfig.grid_size_auto`) until the host picks a size;
+  "Use suggested" goes back.
 
 - Bases are 2-tile clusters. 2, 3, 4 and 6 players start on corners (four take
   two opposite pairs, so nobody is squeezed between rivals); corner maps are

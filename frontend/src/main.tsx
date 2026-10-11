@@ -7,6 +7,7 @@ import './styles/overlays.css'
 import './styles/game.css'
 import './styles/cards.css'
 import './styles/tutorial.css'
+import './styles/solo.css'
 import { installCursors } from './utils/cursors'
 
 installCursors()
