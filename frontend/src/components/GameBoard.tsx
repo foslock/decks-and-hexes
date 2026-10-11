@@ -31,6 +31,13 @@ export type { GridTransform } from '../utils/hexGeometry';
  *  the tile) with this many rows. */
 interface Perch { lift: number; rows: number }
 
+/** A cinematic arrival (BoardEngine.arrive): from `zoom` and `tilt` (turned
+ *  back by `turn`) to the resting view at `endTilt`, over `seconds`, through
+ *  cloud layers passed at `passAt` seconds. */
+export interface ArrivalOptions {
+  turn?: number; tilt?: number; endTilt?: number; zoom?: number; seconds?: number; passAt?: number[];
+}
+
 export interface BoardControls {
   rotate(dir: 1 | -1): void;
   toggleTilt(): void;
@@ -42,7 +49,7 @@ export interface BoardControls {
   getView(current?: boolean): CameraView | null;
   setView(view: CameraView, seconds?: number): void;
   /** A cinematic arrival on the resting view (see BoardEngine.arrive). */
-  arrive(opts?: { turn?: number; tilt?: number; endTilt?: number; zoom?: number; seconds?: number; passAt?: number[] }): void;
+  arrive(opts?: ArrivalOptions): void;
   /** Cover the island in cloud (1) or clear it (0) over `seconds`. */
   setCloudCover(amount: number, seconds?: number): void;
   /** Close in on a tile, keeping the board's orbit. */
@@ -106,6 +113,10 @@ interface GameBoardProps {
   buildProgress?: number;
   /** Seat-relative board rotation in radians (the user can orbit on top). */
   gridRotation?: number;
+  /** Open on a cinematic arrival under cloud cover (see BoardEngine.arrive),
+   *  set up before the engine's first frame — so the island never shows at
+   *  rest first. */
+  arrival?: ArrivalOptions;
   /** Stop rendering while a full-screen overlay covers the board. */
   paused?: boolean;
   /** Called when a tile is long-pressed (~500ms hold) — used for undo */
@@ -245,7 +256,7 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   const {
     tiles, highlightTiles, weakHighlightTiles, multiTileTargets, multiTileMax, playerInfo, transformRef, activePlayerId,
     plannedActions, previewCard, previewValidTiles, previewClaimBuffBonus, claimPowerOn, claimChevrons, vpPaths,
-    connectedVpTiles, vpGlyph = 'star', disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation,
+    connectedVpTiles, vpGlyph = 'star', disableHover, suppressTileTooltips, reviewPulseTiles, buildProgress, gridRotation, arrival,
     paused, undoableTiles, fxRef, controlsRef, showCameraControls, cameraLocked = false, dragHoverPosition,
     tileCardKeys, renderTileCards, extendBelow = 0, viewInsetBottom = 0, raisedTileKey, focusTileKey, hideDefenseLabelKey,
   } = props;
@@ -394,6 +405,17 @@ function GameBoardView(props: GameBoardProps & { lowQuality: boolean }) {
   useEffect(() => { engineRef.current?.setChevrons(claimChevrons); }, [claimChevrons]);
   useEffect(() => { engineRef.current?.setPaths(vpPaths); }, [vpPaths]);
   useEffect(() => { engineRef.current?.setRotation(gridRotation ?? 0); }, [gridRotation]);
+  // After the board and its rotation are in (effects run in order), before
+  // any frame: once per engine (StrictMode makes a second one in dev).
+  const arrivedEngine = useRef<BoardEngine | null>(null);
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine || !arrival || arrivedEngine.current === engine || !Object.keys(tiles).length) return;
+    arrivedEngine.current = engine;
+    engine.setCloudCover(1);
+    engine.arrive(arrival);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, tiles]);
   useEffect(() => { engineRef.current?.setBuildProgress(buildProgress); }, [buildProgress]);
   useEffect(() => { engineRef.current?.setPaused(!!paused); }, [paused]);
   useEffect(() => { engineRef.current?.setSpeed(animSpeed); }, [animSpeed]);

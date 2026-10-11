@@ -112,9 +112,13 @@ export class CameraRig {
 
   /** Glide from the current view to the targets over `seconds` (wall-clock
    *  time, so it lands on schedule even if frames drop). `ease: 'out'` starts
-   *  at full speed and slows to a stop (an arrival) instead of easing both ends. */
-  beginFlight(seconds: number, arc = 0, ease: 'inOut' | 'out' = 'inOut'): void {
-    this.flight = { from: { ...this.cur }, start: performance.now() / 1000, dur: Math.max(0.05, seconds), arc, ease };
+   *  at full speed and slows to a stop (an arrival) instead of easing both ends.
+   *  `fromFirstFrame`: the clock starts at the next frame drawn, not now — for
+   *  a flight set up before a new board has drawn anything (building it can
+   *  hold the page a while). */
+  beginFlight(seconds: number, arc = 0, ease: 'inOut' | 'out' = 'inOut', fromFirstFrame = false): void {
+    const start = fromFirstFrame ? -1 : performance.now() / 1000;
+    this.flight = { from: { ...this.cur }, start, dur: Math.max(0.05, seconds), arc, ease };
   }
 
   /** Put the camera at a view right now (the targets stay where they are). */
@@ -210,6 +214,7 @@ export class CameraRig {
     const before = c.rotation + c.tilt + c.zoom + c.panX + c.panZ;
     const fl = this.flight;
     if (fl) {
+      if (fl.start < 0) fl.start = performance.now() / 1000;
       const u = Math.min(1, (performance.now() / 1000 - fl.start) / fl.dur);
       const e = flightEase(u, fl.ease);
       const f = fl.from;

@@ -49,7 +49,10 @@
 .cc-solo-board { position: relative; flex: 1; min-height: 0; }
 /* The arrival: the island fades in under its clouds; labels, plaques and
    the level list come in once the camera has settled. */
-.cc-solo-board-fade { position: absolute; inset: 0; animation: cc-fade-in 1.2s ease both; }
+/* Faded out while the board builds (the loader shows); it fades in once it
+   has drawn its first frame. */
+.cc-solo-board-fade { position: absolute; inset: 0; opacity: 0; }
+.cc-solo-board-fade.is-up { animation: cc-fade-in 1.2s ease both; }
 .cc-solo-board .cc-board-labels,
 .cc-solo-board .cc-board-tilecards,
 .cc-solo-board .cc-cam-controls,
@@ -68,7 +71,10 @@
   place-items: center;
   padding: 16px;
   pointer-events: none;
+  transition: opacity 400ms ease;
 }
+.cc-solo-loading.is-leaving { opacity: 0; }
+.cc-solo-loading.is-leaving .cc-solo-loading-card { pointer-events: none; }
 .cc-solo-loading-card {
   pointer-events: auto;
   display: flex;
@@ -287,7 +293,7 @@
   transform: scale(var(--z, 1));
   transform-origin: 50% 100%;
   cursor: var(--cc-cursor-pointer);
-  transition: border-color 150ms ease, box-shadow 150ms ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms var(--cc-ease-out);
 }
 .cc-solo-badge.is-locked, .cc-solo-badge.is-soon { cursor: var(--cc-cursor-arrow); color: var(--cc-text-faint); }
 .cc-solo-badge.is-soon { font-style: italic; opacity: 0.75; }
@@ -297,6 +303,16 @@
   animation: cc-solo-pulse 2.2s ease-in-out infinite;
 }
 .cc-solo-badge:hover:not(.is-locked):not(.is-soon) { border-color: var(--cc-gold-bright); }
+/* Its level hovered in the list: the plaque lights up and stands forward. */
+.cc-solo-badge.is-hovered {
+  border-color: var(--cc-gold-bright);
+  color: #fff6e2;
+  background: rgba(38, 32, 18, 0.95);
+  box-shadow: 0 0 0 2px rgba(255, 216, 119, 0.55), 0 0 22px rgba(255, 216, 119, 0.65);
+  transform: scale(calc(var(--z, 1) * 1.12));
+  animation: none;
+}
+.cc-solo-badge.is-hovered.is-locked { color: var(--cc-text); }
 .cc-solo-badge-num {
   width: 20px;
   height: 20px;
@@ -558,4 +574,14 @@
   .cc-solo-preview-long { display: none; }
   .cc-solo-preview-short { display: inline; }
   .cc-solo-start { min-width: 96px; }
+}
+
+/* Leaving a game for the solo map: the overworld's backdrop, over the game
+   while it's torn down (App's goToSoloMap). */
+.cc-screen-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: radial-gradient(ellipse at 50% 40%, #1d1d40, var(--cc-bg-deep) 75%);
+  pointer-events: none;
 }
