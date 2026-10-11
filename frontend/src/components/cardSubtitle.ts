@@ -52,7 +52,7 @@ export interface CardSubtitleContext {
  * One token of a subtitle part:
  *  - `icon` — a glyph from the Card Clash icon set (optionally slashed = "no X")
  *  - `num`  — a numeric value ("3", "+2", "2/4", "≤3", "×5", or a lone sign)
- *  - `text` — anything else (punctuation, separators, words like "Immune")
+ *  - `text` — anything else (punctuation, separators)
  */
 export type SubtitleToken =
   | { kind: 'icon'; name: IconName; slash?: boolean }
@@ -168,24 +168,25 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
     const hasImmunity = card.effects?.some(e => e.type === 'tile_immunity');
     const dtc = card.defense_target_count || 1;
     const tileSuffix = dtc >= 2 ? ` · ${dtc}{tile}` : '';
+    // The shield says which kind of defense, so no "+" or words beside it:
+    // {immune} immunity, {fortify} a permanent increase, {defense} this round.
     if (hasImmunity) {
-      parts.push(p('{immune}Immune'));
+      parts.push(p(`{immune}${tileSuffix}`));
     } else if (hasPerAdj) {
-      // Nest: +X defense per adjacent owned tile — scaling is unknown at
-      // preview time, so just show "+" to signal "gains defense".
-      parts.push(p(`{defense}+${tileSuffix}`));
+      // Nest: N defense for each owned tile next to the target.
+      const adj = card.effects?.find(e => e.type === 'defense_per_adjacent');
+      const perTile = adj ? (isUpgraded && adj.upgraded_value != null ? adj.upgraded_value : adj.value) : 1;
+      parts.push(p(`{defense}${perTile}/{tile}${tileSuffix}`));
     } else if (hasPermanent) {
-      // Permanent defense (Entrench, Twin Cities) — the fortify glyph signals the
-      // bonus persists across rounds.
+      // Permanent defense (Barricade, Entrench, Twin Cities).
       const mod = card.effects?.find(e => e.type === 'permanent_defense');
       const permVal = mod
         ? (isUpgraded ? ((mod.metadata?.upgraded_value as number) ?? mod.value) : mod.value)
         : defBase;
       parts.push(p(`{fortify}${permVal}${tileSuffix}`));
     } else if (defBase > 0) {
-      // Round-only defense bonus (Fortify, Bulwark, Barricade, etc.) —
-      // + marker signals "this round only".
-      parts.push(p(`{defense}+${defBase}${tileSuffix}`));
+      // Round-only defense bonus (Watchtower, Bulwark, Rearguard, etc.).
+      parts.push(p(`{defense}${defBase}${tileSuffix}`));
     }
   } else if (card.defenseless_only) {
     // Explore has no power: it takes N open, undefended tiles.
