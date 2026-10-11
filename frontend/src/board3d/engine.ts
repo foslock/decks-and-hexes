@@ -452,7 +452,9 @@ export class BoardEngine {
       });
       this.clouds.setPassage(far.target, back, distances, rig.fov, rig.width / rig.viewHeight);
     }
-    rig.beginFlight(seconds, 0);
+    // From the first frame drawn: an arrival is set up as a board goes in,
+    // before its first (slow) frame.
+    rig.beginFlight(seconds, 0, 'inOut', true);
     this.kick(seconds + 0.5);
   }
 

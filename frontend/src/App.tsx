@@ -3,6 +3,7 @@ import type { GameState, LobbyState } from './types/game';
 import { SettingsProvider } from './components/SettingsContext';
 import SetupScreen from './components/SetupScreen';
 import { signalAppReady } from './utils/appReady';
+import { afterPaint } from './utils/afterPaint';
 import GameScreen from './components/GameScreen';
 import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
@@ -127,6 +128,22 @@ function AppInner() {
     if (screen.type === 'lobby' || screen.type === 'game') preloadCatalogArt();
   }, [screen.type]);
   const [multiplayerGameState, setMultiplayerGameState] = useState<GameState | null>(null);
+  const screenRef = useRef(screen);
+  screenRef.current = screen;
+  // Leaving a game for the solo map: veil the game, then switch screens two
+  // frames on (once the veil has painted). Tearing the game down holds the
+  // page for a moment, and the last thing painted — the game's island —
+  // would otherwise stay up until the overworld's clouds arrive.
+  const [leavingForMap, setLeavingForMap] = useState(false);
+  const goToSoloMap = useCallback((campaign?: string) => {
+    setLeavingForMap(true);
+    afterPaint(() => {
+      setLeavingForMap(false);
+      setScreen({ type: 'solo', campaign });
+      setMultiplayerGameState(null);
+      api.setAuthToken(null);
+    });
+  }, []);
   // Track if this player was removed from lobby (e.g. kicked by host while viewing game over)
   const [removedFromLobby, setRemovedFromLobby] = useState(false);
   // Track if this session was restored from storage (skip intro on reconnect)
@@ -176,8 +193,11 @@ function AppInner() {
         return;
       }
       console.log('[App] game_ended → going home');
-      setScreen(screen.solo ? { type: 'solo', campaign: screen.solo.archetype } : { type: 'home' });
-      setMultiplayerGameState(null);
+      if (screen.solo) goToSoloMap(screen.solo.archetype);
+      else {
+        setScreen({ type: 'home' });
+        setMultiplayerGameState(null);
+      }
       setRemovedFromLobby(false);
       saveSession(null);
     } else if (gameWsMessage.type === 'removed_from_lobby') {
@@ -303,10 +323,15 @@ function AppInner() {
   const handleLeaveGame = useCallback(() => {
     console.log('[App] handleLeaveGame → going home');
     // A solo level goes back to the overworld.
-    setScreen(prev => (prev.type === 'game' && prev.solo ? { type: 'solo', campaign: prev.solo.archetype } : { type: 'home' }));
+    const current = screenRef.current;
+    if (current.type === 'game' && current.solo) {
+      goToSoloMap(current.solo.archetype);
+      return;
+    }
+    setScreen({ type: 'home' });
     setMultiplayerGameState(null);
     api.setAuthToken(null);
-  }, []);
+  }, [goToSoloMap]);
 
   // ── Solo campaign ────────────────────────────────────────
 
@@ -332,10 +357,8 @@ function AppInner() {
 
   const soloGame = screen.type === 'game' ? screen.solo : undefined;
   const handleSoloBackToMap = useCallback(() => {
-    setScreen({ type: 'solo', campaign: soloGame?.archetype });
-    setMultiplayerGameState(null);
-    api.setAuthToken(null);
-  }, [soloGame]);
+    goToSoloMap(soloGame?.archetype);
+  }, [soloGame, goToSoloMap]);
 
   const handleSoloRetry = useCallback(async () => {
     if (!soloGame) return;
@@ -450,6 +473,7 @@ function AppInner() {
     }
     return (
       <SettingsProvider>
+        {leavingForMap && <div className="cc-screen-veil" aria-hidden="true" />}
         <GameScreen
           gameState={multiplayerGameState}
           onStateUpdate={handleMultiplayerStateUpdate}

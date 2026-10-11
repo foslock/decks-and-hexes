@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SoloCampaigns, SoloLevel } from '../../types/game';
-import GameBoard, { PLAYER_COLORS, cssHexToNumber, type BoardControls, type VpPath } from '../GameBoard';
+import GameBoard, { PLAYER_COLORS, cssHexToNumber, type ArrivalOptions, type BoardControls, type VpPath } from '../GameBoard';
 import type { PlayerInfo } from '../../board3d/boardTypes';
 import { useAnimationSpeed } from '../SettingsContext';
 import LocalSettingsMenu from '../LocalSettingsMenu';
@@ -9,6 +9,7 @@ import * as api from '../../api/client';
 import SoloLevelPanel, { SOLO_ARCHETYPES } from './SoloLevelPanel';
 import SoloLoading from './SoloLoading';
 import { baseRotation } from './SoloMapPreview';
+import { afterPaint } from '../../utils/afterPaint';
 import {
   SOLO_PLAYER_ID, campaignProgress, frontier, loadProgress, markShown, overworldTiles, roadChain, roadPoints,
   spotState, type LevelState,
@@ -77,34 +78,47 @@ export default function SoloOverworld({ archetype, onBack, onStart }: SoloOverwo
   // grows. (Animations off: no arrival.)
   const ready = !!(camp && ow);
   const [arrived, setArrived] = useState(speed === 0);
+  const k = Math.max(0.6, speed);
+  // The board fades in (1.2 s) on the first layer; then the camera flies
+  // through one layer after another before the island opens up. GameBoard
+  // sets it up before its engine draws a frame.
+  const arrival = useMemo<ArrivalOptions | undefined>(() => (speed === 0 ? undefined : {
+    tilt: ARRIVAL_TILT, endTilt: ARRIVAL_TILT, zoom: 0.3, seconds: 4.6 * k,
+    passAt: [1.35, 1.75, 2.15, 2.55, 2.95].map(t => t * k),
+  // Fixed for this opening.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+  // The board only goes in once this screen has painted. Building it (the
+  // island, its shaders) holds the page for a moment — from a click, before
+  // the next paint — and the last screen, a game's island and all, would
+  // stay up meanwhile.
+  const [boardOn, setBoardOn] = useState(false);
+  useEffect(() => (ready ? afterPaint(() => setBoardOn(true)) : undefined), [ready]);
+  // The loader stays up through that build, until the board has drawn its
+  // first frame (the clouds); then it fades as the board fades in.
+  const [boardUp, setBoardUp] = useState(false);
+  const [loaderGone, setLoaderGone] = useState(false);
+  useEffect(() => (boardOn ? afterPaint(() => setBoardUp(true)) : undefined), [boardOn]);
   useEffect(() => {
-    if (!ready) return;
-    if (speed === 0) {
+    if (!boardUp) return;
+    const t = window.setTimeout(() => setLoaderGone(true), 450);
+    return () => window.clearTimeout(t);
+  }, [boardUp]);
+  useEffect(() => {
+    if (!boardUp) return;
+    if (!arrival) {
       setArrived(true);
       return;
     }
-    const k = Math.max(0.6, speed);
-    const timers: number[] = [];
-    // Next frame: the board's engine is in place by then (StrictMode remounts
-    // it after this effect's first run). The board is still faded out.
-    const raf = requestAnimationFrame(() => {
-      const c = controlsRef.current;
-      if (!c) { setArrived(true); return; }
-      c.setCloudCover(1);
-      // The board fades in (1.2 s) on the first layer; then the camera
-      // flies through one layer after another before the island opens up.
-      c.arrive({
-        tilt: ARRIVAL_TILT, endTilt: ARRIVAL_TILT, zoom: 0.3, seconds: 4.6 * k,
-        passAt: [1.35, 1.75, 2.15, 2.55, 2.95].map(t => t * k),
-      });
-      // Whatever cloud is left at the edges fades as the camera settles.
-      timers.push(window.setTimeout(() => c.setCloudCover(0, 1.0 * k), 3100 * k));
-      timers.push(window.setTimeout(() => setArrived(true), 3900 * k));
-    });
-    return () => { cancelAnimationFrame(raf); timers.forEach(t => window.clearTimeout(t)); };
+    // Whatever cloud is left at the edges fades as the camera settles.
+    const timers = [
+      window.setTimeout(() => controlsRef.current?.setCloudCover(0, 1.0 * k), 3100 * k),
+      window.setTimeout(() => setArrived(true), 3900 * k),
+    ];
+    return () => timers.forEach(t => window.clearTimeout(t));
   // Once per opening (the campaign is fixed for this screen).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  }, [boardUp]);
 
   useEffect(() => {
     if (!camp) return;
@@ -194,6 +208,8 @@ export default function SoloOverworld({ archetype, onBack, onStart }: SoloOverwo
     return () => window.removeEventListener('keydown', onKey);
   }, [onBack, selected]);
 
+  // The level hovered (or focused) in the list: its plaque on the map lights up.
+  const [listHover, setListHover] = useState<number | null>(null);
   const renderBadge = (key: string, zoom: number) => {
     if (!camp) return null;
     const i = stops.indexOf(key);
@@ -203,7 +219,7 @@ export default function SoloOverworld({ archetype, onBack, onStart }: SoloOverwo
     return (
       <button
         type="button"
-        className={`cc-solo-badge is-${state}`}
+        className={`cc-solo-badge is-${state}${i === listHover ? ' is-hovered' : ''}`}
         style={{ ['--z' as string]: Math.max(0.75, Math.min(1.25, zoom)) }}
         onClick={clickable ? () => select(i) : undefined}
         tabIndex={clickable ? 0 : -1}
@@ -243,8 +259,8 @@ export default function SoloOverworld({ archetype, onBack, onStart }: SoloOverwo
       </header>
 
       <div className="cc-solo-board">
-        {camp && ow ? (
-          <div className="cc-solo-board-fade">
+        {camp && ow && boardOn ? (
+          <div className={`cc-solo-board-fade${boardUp ? ' is-up' : ''}`}>
           <GameBoard
             tiles={tiles}
             onTileClick={onTileClick}
@@ -253,11 +269,13 @@ export default function SoloOverworld({ archetype, onBack, onStart }: SoloOverwo
             connectedVpTiles={connected}
             vpGlyph="crown"
             gridRotation={rotation}
+            arrival={arrival}
             highlightTiles={arrived ? openSpots : undefined}
             disableHover={!arrived}
             activePlayerId={SOLO_PLAYER_ID}
             tileCardKeys={stops}
             renderTileCards={renderBadge}
+            raisedTileKey={listHover !== null ? stops[listHover] : null}
             controlsRef={controlsRef}
             paused={selected !== null}
             // The board's tile tooltips describe game rules (VP, defense,
@@ -269,8 +287,9 @@ export default function SoloOverworld({ archetype, onBack, onStart }: SoloOverwo
           </div>
         ) : null}
       </div>
-      {!(camp && ow) && (
+      {!loaderGone && (
         <SoloLoading
+          leaving={boardUp}
           message="Charting the island"
           error={error ?? (data && !camp ? 'There is no such campaign.' : null)}
           onRetry={error ? () => setAttempt(n => n + 1) : undefined}
@@ -289,13 +308,20 @@ export default function SoloOverworld({ archetype, onBack, onStart }: SoloOverwo
               const state = states[i];
               const best = progress.cleared[level.id];
               return (
-                <li key={level.id} className={i === current ? 'is-current' : undefined}>
+                <li
+                  key={level.id}
+                  className={i === current ? 'is-current' : undefined}
+                  onMouseEnter={() => setListHover(i)}
+                  onMouseLeave={() => setListHover(h => (h === i ? null : h))}
+                >
                   <div className="cc-solo-list-fold">
                     <button
                       type="button"
                       className={`cc-solo-list-item is-${state}`}
                       disabled={state === 'locked'}
                       onClick={() => select(i)}
+                      onFocus={() => setListHover(i)}
+                      onBlur={() => setListHover(h => (h === i ? null : h))}
                     >
                       <span className="cc-solo-list-num">
                         {state === 'cleared' ? <Icon name="check" size={11} decorative /> : state === 'locked' ? <LockGlyph /> : i + 1}
