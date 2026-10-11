@@ -56,7 +56,7 @@ class TestBrowse:
         entry = open_[0]
         assert entry["code"] == lob["code"]
         assert entry["host_name"] == "Hosty"
-        assert entry["grid_size"] == "medium"
+        assert entry["grid_size"] == "large"  # suggested for 2 players
         assert entry["card_pack_name"]
         assert (entry["players"], entry["humans"], entry["cpus"]) == (2, 1, 1)
         assert entry["full"] is False

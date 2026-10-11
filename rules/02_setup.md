@@ -44,15 +44,18 @@ All archetypes start with the same 10-card deck:
 |---|---|---|---|---|
 | 5 | 5 | 10 | 5 | 5 |
 
-Explore (Claim: Power 0 on an adjacent unoccupied tile) and Gather (Gain 2 resources) are shared starter cards present in every archetype's starting deck. They establish a common baseline before archetype identity takes over via market purchases. The deck is sized at exactly 2 × hand size so it cycles once before any purchased card can appear.
+Explore (claim 1 defenseless, unoccupied tile next to your land) and Gather (Gain 2 resources) are shared starter cards present in every archetype's starting deck. They establish a common baseline before archetype identity takes over via market purchases. The deck is sized at exactly 2 × hand size so it cycles once before any purchased card can appear.
 
 ## Step 6: Prepare the Markets
 
+### Card Pack
+A game is played with one **card pack**, like a Dominion kingdom: **5 shared cards** plus **5 cards from each archetype**, so every player has the same 10 cards to buy all game. The packs are First Clash (the default, built for learning), Border War, Deep Roots and Far Reaches; they draw on the **Core set** (cards marked `set: core`), and no pack gives a player two cards that do the same job. The other cards are set aside for future sets. **Everything** puts every card on the table and is for testing only.
+
 ### Archetype Market
-Each archetype pool is shuffled separately. These are private per player — each player draws from their own archetype deck only.
+Each player gets a private pile of **3 copies** of each of their archetype's 5 pack cards (`ARCHETYPE_PILE_SIZE`). These are private per player — nobody else can buy from them. (In the Everything pack the archetype pool is shuffled into one deck and a few random cards are drawn each turn instead.)
 
 ### Shared Market
-Lay out all shared cards in separate face-up stacks with their copy counts visible. These are shared by all players.
+Lay out the pack's 5 shared cards in face-up piles of **4 + 2 × players** copies each (8 for 2 players, 12 for 4, 16 for 6 — `shared_pile_size`). These are shared by all players; a pile that runs out is gone for the game.
 
 ### Upgrade Credits
 Upgrade credits are bought during the Buy Phase for 5 resources each (no supply limit in the digital game).

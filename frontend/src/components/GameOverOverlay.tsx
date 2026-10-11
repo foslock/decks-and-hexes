@@ -26,6 +26,8 @@ interface GameOverOverlayProps {
   onExitGame: () => void;
   isMultiplayer?: boolean;
   removedFromLobby?: boolean;
+  /** A solo level: back to the overworld, or play it again. */
+  solo?: { onBackToMap: () => void; onRetry: () => Promise<void> };
 }
 
 export default function GameOverOverlay({
@@ -36,6 +38,7 @@ export default function GameOverOverlay({
   onExitGame,
   isMultiplayer,
   removedFromLobby,
+  solo,
 }: GameOverOverlayProps) {
   const [bannerVisible, setBannerVisible] = useState(false);
   const [rowsVisible, setRowsVisible] = useState(0);
@@ -46,6 +49,8 @@ export default function GameOverOverlay({
   const sound = useSound();
 
   const [returnedToLobby, setReturnedToLobby] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const soloInfo = solo ? gameState.solo : null;
   const [downloadingLog, setDownloadingLog] = useState(false);
   const [showRoundBreakdown, setShowRoundBreakdown] = useState(false);
 
@@ -135,7 +140,9 @@ export default function GameOverOverlay({
     return () => timers.forEach(clearTimeout);
   }, [bannerVisible, leaderboard.length]);
 
-  const bannerText = isVictory ? 'Victory' : 'Defeat';
+  const bannerText = soloInfo
+    ? (isVictory ? 'Level Cleared' : 'Level Failed')
+    : isVictory ? 'Victory' : 'Defeat';
 
   // Winner(s) for the ribbon under the banner, in their player colors.
   const winnerEntries = leaderboard.filter(e => e.isWinner);
@@ -213,9 +220,11 @@ export default function GameOverOverlay({
       {/* Victory / Defeat banner */}
       <div className={`cc-ov-go-banner${bannerVisible ? ' is-in' : ''}`}>
         {isVictory && <div className="cc-ov-go-rays" aria-hidden="true" />}
-        <div className="cc-ov-go-word">{bannerText}</div>
+        <div className={`cc-ov-go-word${soloInfo ? ' is-long' : ''}`}>{bannerText}</div>
         <div className="cc-ov-go-sub">
-          {winnerEntries.length > 0 ? (
+          {soloInfo ? (
+            <span>{soloInfo.reason ?? soloInfo.objective.text}</span>
+          ) : winnerEntries.length > 0 ? (
             <span>
               {winnerEntries.map((w, i) => (
                 <span key={w.playerId}>
@@ -265,7 +274,7 @@ export default function GameOverOverlay({
               {/* Crown / rank */}
               <div>
                 <div className={`cc-ov-rank${i < 3 ? ` r${i + 1}` : ''}`}>
-                  {isFirst ? (
+                  {isFirst && (!soloInfo || entry.isWinner) ? (
                     <svg viewBox="0 0 24 24" fill="currentColor" aria-label="1st">
                       <path d="M3 8.5l4.2 3.3L12 5l4.8 6.8L21 8.5l-1.8 9.5H4.8L3 8.5z" />
                       <rect x="4.8" y="19" width="14.4" height="1.8" rx="0.6" />
@@ -317,7 +326,25 @@ export default function GameOverOverlay({
         transform: buttonsVisible ? 'translateY(0)' : 'translateY(10px)',
         transition: 'opacity 0.4s ease, transform 0.4s var(--cc-ease-out)',
       }}>
-        {isMultiplayer && (() => {
+        {soloInfo && solo && (
+          <>
+            <button className="cc-btn-primary" onClick={solo.onBackToMap}>
+              Back to Map
+            </button>
+            <button
+              className="cc-btn-secondary"
+              disabled={retrying}
+              onClick={async () => {
+                if (retrying) return;
+                setRetrying(true);
+                try { await solo.onRetry(); } catch { setRetrying(false); }
+              }}
+            >
+              {retrying ? 'Starting…' : 'Retry'}
+            </button>
+          </>
+        )}
+        {isMultiplayer && !soloInfo && (() => {
           const disabled = returnedToLobby || removedFromLobby;
           const label = removedFromLobby
             ? 'Removed from Lobby'
@@ -361,12 +388,14 @@ export default function GameOverOverlay({
         >
           {downloadingLog ? 'Preparing…' : 'Download Game Log'}
         </button>
-        <button
-          className={isMultiplayer ? 'cc-btn-secondary' : 'cc-btn-primary'}
-          onClick={onExitGame}
-        >
-          Exit Game
-        </button>
+        {!soloInfo && (
+          <button
+            className={isMultiplayer ? 'cc-btn-secondary' : 'cc-btn-primary'}
+            onClick={onExitGame}
+          >
+            Exit Game
+          </button>
+        )}
       </div>
 
       {/* Hint to view map */}

@@ -13,6 +13,7 @@ cards:
 
   - id: fortress_warden
     name: Warden
+    set: core
     name_upgraded: Warden+
     type: Passive
     buy_cost: 4
@@ -22,56 +23,60 @@ cards:
     unique: true
     vp_formula: uncaptured_tiles_8
     buy_debt: 1
-    effect: "+1 VP for every 8 non-base tiles you own that have never changed hands since you claimed them. Gain a Debt when you buy this."
-    effect_upgraded: "+1 VP for every 6 non-base tiles you own that have never changed hands since you claimed them. Gain a Debt when you buy this."
+    effect: "+1 VP for every 10 non-base tiles you own that have never changed hands since you claimed them. Gain a Debt when you buy this."
+    effect_upgraded: "+1 VP for every 8 non-base tiles you own that have never changed hands since you claimed them. Gain a Debt when you buy this."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards holding ground permanently. A tile counts while you've held it continuously since you first claimed it, including tiles you took from an opponent. Tiles you lost (or abandoned) and later retook don't count. Takes up a hand slot when drawn."
 
     effects:
       - type: vp_from_uncaptured_tiles
-        value: 8
-        upgraded_value: 6
+        value: 10
+        upgraded_value: 8
         timing: on_resolution
-        metadata: {divisor: 8, upgraded_divisor: 6}
+        metadata: {divisor: 10, upgraded_divisor: 8}
 
   - id: fortress_fortify
     name: Fortify
+    set: set_aside
     name_upgraded: Fortify+
     type: Defense
+    draw_cards: 0
+    reversible: false
     buy_cost: 2
     action_return: 1
-    upgraded_action_return: 2
     power: 0
     defense_bonus: 3
     defense_target_count: 1
     upgraded_defense_target_count: 2
     effect: "One tile you own gains +3 defense this round. Gain 1 action."
-    effect_upgraded: "Two tiles you own each gain +3 defense this round. Gain 2 actions."
+    effect_upgraded: "Two tiles you own each gain +3 defense this round. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
 
   - id: fortress_bulwark
     name: Bulwark
+    set: set_aside
     name_upgraded: Bulwark+
     type: Defense
     buy_cost: 3
     action_return: 0
     reversible: true
+    draw_cards: 0
     power: 0
     defense_bonus: 2
     defense_target_count: 2
     upgraded_defense_target_count: 3
-    upgraded_draw_cards: 1
     effect: "Two tiles you own each gain +2 defense this round."
-    effect_upgraded: "Three tiles you own each gain +2 defense this round. Draw 1 card."
+    effect_upgraded: "Three tiles you own each gain +2 defense this round."
     secondary_effect: null
     secondary_timing: null
 
 
   - id: fortress_siege_engine
     name: Siege Engine
+    set: core
     name_upgraded: Siege Engine+
     type: Claim
     buy_cost: 4
@@ -79,27 +84,31 @@ cards:
     reversible: true
     power: 3
     upgraded_power: 4
-    effect: "Claim: Power 3. Ignores temporary defense bonuses on targeted tile."
-    effect_upgraded: "Claim: Power 4. Ignores temporary defense bonuses on targeted tile."
+    effect: "Claim: Power 3. +2 power if the target tile has a defense bonus (from Defense cards or permanent defense)."
+    effect_upgraded: "Claim: Power 4. +2 power if the target tile has a defense bonus (from Defense cards or permanent defense)."
     secondary_effect: null
     secondary_timing: null
 
     effects:
-      - type: ignore_defense
+      - type: power_modifier
+        value: 2
         timing: on_resolution
+        condition: if_target_has_defense
 
   - id: fortress_iron_wall
     name: Iron Wall
+    set: core
     name_upgraded: Iron Wall+
     type: Defense
     buy_cost: 3
-    action_return: 0
-    reversible: true
+    action_return: 1
+    reversible: false
+    draw_cards: 1
     power: 0
     defense_target_count: 1
     upgraded_defense_target_count: 2
-    effect: "One tile you own cannot be claimed this round."
-    effect_upgraded: "Two tiles you own cannot be claimed this round."
+    effect: "One tile you own cannot be claimed this round. Draw 1 card. Gain 1 action."
+    effect_upgraded: "Two tiles you own cannot be claimed this round. Draw 1 card. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
 
@@ -110,14 +119,15 @@ cards:
 
   - id: fortress_garrison
     name: Garrison
+    set: core
     name_upgraded: Garrison+
     type: Claim
-    buy_cost: 5
+    buy_cost: 4
     action_return: 0
     reversible: true
     power: 4
     effect: "Claim: Power 4. If defending an owned tile, power is 6 instead. Gain a Debt."
-    effect_upgraded: "Claim: Power 5. If defending an owned tile, power is 8 instead. If this claim wins, gain 2 resources. Gain a Debt."
+    effect_upgraded: "Claim: Power 5. If defending an owned tile, power is 8 instead. Gain a Debt."
     secondary_effect: null
     secondary_timing: null
 
@@ -127,45 +137,41 @@ cards:
         upgraded_value: 3
         timing: on_resolution
         condition: if_defending_owned
-      - type: gain_resources
-        value: 0
-        upgraded_value: 2
-        timing: on_resolution
-        condition: if_successful
       - type: gain_debt
         value: 1
         timing: on_resolution
 
   - id: fortress_slow_advance
     name: Mountaineer
+    set: core
     name_upgraded: Mountaineer+
     type: Claim
     buy_cost: 4
     action_return: 0
     reversible: true
     power: 2
-    upgraded_power: 4
+    upgraded_power: 3
     effect: "Claim: Power 2. If the targeted tile is neutral, Power 4."
-    effect_upgraded: "Claim: Power 4."
+    effect_upgraded: "Claim: Power 3. If the targeted tile is neutral, Power 5."
     secondary_effect: null
     secondary_timing: null
 
     effects:
       - type: power_modifier
         value: 2
-        upgraded_value: 0
         timing: on_resolution
         condition: if_target_neutral
 
   - id: fortress_supply_line
     name: Supply Line
+    set: core
     name_upgraded: Supply Line+
     type: Engine
     buy_cost: 2
     action_return: 1
     power: 0
-    effect: "Gain 2 resources. Gain 1 action. Your next purchase this round costs 1 less."
-    effect_upgraded: "Gain 3 resources. Gain 1 action. Your next purchase this round costs 1 less."
+    effect: "Gain 3 resources. Gain 1 action. Your next purchase this round costs 1 less."
+    effect_upgraded: "Gain 4 resources. Gain 1 action. Your next purchase this round costs 1 less."
     secondary_effect: null
     secondary_timing: null
 
@@ -177,8 +183,10 @@ cards:
 
   - id: fortress_entrench
     name: Entrench
+    set: set_aside
     name_upgraded: Entrench+
     type: Defense
+    draw_cards: 0
     buy_cost: 1
     action_return: 1
     reversible: false
@@ -199,6 +207,7 @@ cards:
 
   - id: fortress_war_of_attrition
     name: Attrition
+    set: core
     name_upgraded: Attrition+
     type: Claim
     buy_cost: 3
@@ -218,8 +227,10 @@ cards:
 
   - id: fortress_stronghold
     name: Stronghold
+    set: set_aside
     name_upgraded: Stronghold+
     type: Defense
+    draw_cards: 0
     buy_cost: 6
     action_return: 0
     reversible: true
@@ -238,6 +249,7 @@ cards:
 
   - id: fortress_overwhelming_force
     name: Juggernaut
+    set: core
     name_upgraded: Juggernaut+
     type: Claim
     buy_cost: 4
@@ -261,13 +273,14 @@ cards:
 
   - id: fortress_consolidate
     name: Consolidate
+    set: set_aside
     name_upgraded: Consolidate+
     type: Engine
     buy_cost: 4
     action_return: 0
     power: 0
-    effect: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) and draw 1 card."
-    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down) +2 and draw 1 card."
+    effect: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down), plus 1, and draw 1 card."
+    effect_upgraded: "Trash 1 card from your hand. If you did, gain resources equal to half that card's buy cost (rounded down), plus 3, and draw 1 card."
     secondary_effect: null
     secondary_timing: null
 
@@ -276,10 +289,11 @@ cards:
         value: 1
         timing: immediate
         requires_choice: true
-        metadata: {optional: true, upgrade_bonus: 2, gates_draw: true}
+        metadata: {optional: true, bonus: 1, upgraded_bonus: 3, gates_draw: true}
 
   - id: fortress_battering_ram
     name: Battering Ram
+    set: set_aside
     name_upgraded: Battering Ram+
     type: Claim
     buy_cost: 6
@@ -301,6 +315,7 @@ cards:
 
   - id: fortress_citadel
     name: Twin Cities
+    set: set_aside
     name_upgraded: Twin Cities+
     type: Defense
     buy_cost: 7
@@ -322,6 +337,7 @@ cards:
 
   - id: fortress_war_council
     name: Grand Strategy
+    set: set_aside
     name_upgraded: Grand Strategy+
     type: Engine
     buy_cost: 3
@@ -340,18 +356,19 @@ cards:
 
   - id: fortress_iron_discipline
     name: Iron Discipline
+    set: core
     name_upgraded: Iron Discipline+
     type: Engine
-    buy_cost: 4
+    buy_cost: 5
     action_return: 1
     upgraded_action_return: 2
     power: 0
-    resource_gain: 2
-    upgraded_resource_gain: 3
+    resource_gain: 1
+    upgraded_resource_gain: 2
     draw_cards: 1
     upgraded_draw_cards: 2
-    effect: "Gain 2 resources. Draw 1 card. Gain 1 action. Draw 1 card next round."
-    effect_upgraded: "Gain 3 resources. Draw 2 cards. Gain 2 actions. Draw 1 card next round."
+    effect: "Gain 1 resource. Draw 1 card. Gain 1 action. Draw 1 card next round."
+    effect_upgraded: "Gain 2 resources. Draw 2 cards. Gain 2 actions. Draw 1 card next round."
     secondary_effect: null
     secondary_timing: null
 
@@ -363,6 +380,7 @@ cards:
 
   - id: fortress_fortified_position
     name: Ironclad
+    set: set_aside
     name_upgraded: Ironclad+
     type: Passive
     buy_cost: 3
@@ -379,6 +397,7 @@ cards:
 
   - id: fortress_toll_road
     name: Toll Road
+    set: core
     name_upgraded: Toll Road+
     type: Engine
     buy_cost: 5
@@ -398,6 +417,7 @@ cards:
 
   - id: fortress_catch_up
     name: Resilience
+    set: set_aside
     name_upgraded: Resilience+
     type: Engine
     buy_cost: 2
@@ -418,13 +438,14 @@ cards:
 
   - id: fortress_mulligan
     name: Mulligan
+    set: set_aside
     name_upgraded: Mulligan+
     type: Engine
     buy_cost: 3
     action_return: 1
     power: 0
-    effect: "Discard your entire hand. Draw that many cards. Gain 1 action."
-    effect_upgraded: "Discard your entire hand. Draw that many cards +1. Gain 1 action."
+    effect: "Discard your entire hand. Draw that many cards plus 1. Gain 1 action."
+    effect_upgraded: "Discard your entire hand. Draw that many cards plus 2. Gain 1 action."
     secondary_effect: null
     secondary_timing: null
     note: "Full hand reset. Lets Fortress throw back a bad draw and try again. The action refund means it doesn't cost tempo."
@@ -432,9 +453,11 @@ cards:
     effects:
       - type: mulligan
         timing: immediate
+        metadata: {extra: 1, upgraded_extra: 2}
 
   - id: fortress_robin_hood
     name: Robin Hood
+    set: set_aside
     name_upgraded: Robin Hood+
     type: Engine
     buy_cost: 3
@@ -454,6 +477,7 @@ cards:
 
   - id: fortress_scorched_retreat
     name: Scorched Retreat
+    set: core
     name_upgraded: Scorched Retreat+
     type: Engine
     buy_cost: 4
@@ -475,13 +499,14 @@ cards:
 
   - id: fortress_snowy_holiday
     name: Snowy Holiday
+    set: set_aside
     name_upgraded: Snowy Holiday+
     type: Engine
     buy_cost: 5
     action_return: 0
     power: 0
     trash_on_use: true
-    effect: "Next round, no player can play Claim cards. Trash this card."
+    effect: "Next round, no player can play Claim cards. Draw 1 card. Trash this card."
     effect_upgraded: "Next round, no player can play Claim cards. Draw 2 cards. Trash this card."
     secondary_effect: null
     secondary_timing: null
@@ -491,11 +516,14 @@ cards:
       - type: global_claim_ban
         timing: on_resolution
         duration: 1
+        metadata: {draw: 1, upgraded_draw: 2}
 
   - id: fortress_aegis
     name: Aegis
+    set: set_aside
     name_upgraded: Aegis+
     type: Defense
+    draw_cards: 0
     buy_cost: 10
     action_return: 0
     action_cost: 3
@@ -516,6 +544,7 @@ cards:
 
   - id: fortress_stockroom
     name: Stockroom
+    set: set_aside
     name_upgraded: Stockroom+
     type: Engine
     buy_cost: 4
@@ -540,6 +569,7 @@ cards:
 
   - id: fortress_reserve_forces
     name: Reserve Forces
+    set: set_aside
     name_upgraded: Reserve Forces+
     type: Engine
     buy_cost: 5
@@ -568,14 +598,14 @@ cards:
 
   - id: fortress_quartermaster
     name: Quartermaster
+    set: set_aside
     name_upgraded: Quartermaster+
     type: Engine
     buy_cost: 3
     action_return: 1
-    upgraded_action_return: 2
     power: 0
     effect: "Gain 2 resources per Defense card in your hand (max 3 Defense counted). Gain 1 action."
-    effect_upgraded: "Gain 3 resources per Defense card in your hand (max 6 Defense counted). Draw 1 card. Gain 2 actions."
+    effect_upgraded: "Gain 3 resources per Defense card in your hand (max 3 Defense counted). Gain 1 action."
     secondary_effect: null
     secondary_timing: null
     note: "Rewards Fortress for clogging hand with Defense cards. Pays for the next big fortification push."
@@ -585,18 +615,18 @@ cards:
         value: 2
         upgraded_value: 3
         timing: immediate
-        metadata: {filter: defense, max_counted: 3, upgraded_max_counted: 6}
+        metadata: {filter: defense, max_counted: 3, upgraded_max_counted: 3}
 
   - id: fortress_watchful_keep
     name: Watchful Keep
+    set: set_aside
     name_upgraded: Watchful Keep+
     type: Engine
     buy_cost: 5
     action_return: 0
-    upgraded_action_return: 2
     power: 0
     effect: "Draw 1 card for every tile you own with any defense bonus above its intrinsic defense (max 3). Next round, draw 1 additional card."
-    effect_upgraded: "Draw 1 card for every tile you own with any defense bonus above its intrinsic defense (max 4). Next round, draw 2 additional cards. Gain 2 actions."
+    effect_upgraded: "Draw 1 card for every tile you own with any defense bonus above its intrinsic defense (max 4). Next round, draw 2 additional cards."
     secondary_effect: null
     secondary_timing: null
     note: "Turns Entrench/Iron Wall investment into sustained card draw. Watchtower with depth."
@@ -614,6 +644,7 @@ cards:
 
   - id: fortress_master_engineer
     name: Master Engineer
+    set: set_aside
     name_upgraded: Master Engineer+
     type: Engine
     buy_cost: 7

@@ -6,7 +6,7 @@ import type { HexTile } from '../types/game';
 import { HEX_DIRS, HEX_SIZE, type GridTransform } from '../utils/hexGeometry';
 import { AmbientLayer } from './ambient';
 import { CloudLayer } from './clouds';
-import { CameraRig, DEFAULT_TILT, MAX_TILT, MAX_ZOOM } from './camera';
+import { CameraRig, DEFAULT_TILT, MAX_TILT, MAX_ZOOM, flightEase } from './camera';
 import { PLAYER_COLORS, type ClaimChevron, type PlayerInfo, type VpPath } from './boardTypes';
 import { FxLayer } from './fx';
 import { BoardLayout, axialToWorld, hexCorner, structureSignature, tileSignature, worldToTileKey } from './layout';
@@ -159,6 +159,8 @@ export class BoardEngine {
   /** Each tile's run of vertices in the decor mesh ([start, end)). */
   private decorRanges = new Map<string, [number, number]>();
   private tiles: Record<string, HexTile> = {};
+  /** Water tiles (left out of `tiles`): beaches go round them. */
+  private water = new Set<string>();
   private prevOwner = new Map<string, string | null>();
   private playerInfo: Record<string, PlayerInfo> = {};
   private connected = new Set<string>();
@@ -405,6 +407,55 @@ export class BoardEngine {
     this.kick(1.5);
   }
 
+  /** Show (1) or fade out (0) the arrival's passage clouds over `seconds`
+   *  (see arrive). Without a call there are none. */
+  setCloudCover(amount: number, seconds = 0): void {
+    this.pendingCover = { amount, seconds };
+    this.clouds?.setCover(amount, seconds);
+    this.kick(seconds + 0.5);
+  }
+
+  private pendingCover: { amount: number; seconds: number } | null = null;
+
+  /** A cinematic arrival: the camera starts far off at `tilt` (turned by
+   *  `turn`, default none) and glides in over `seconds`, easing out of the
+   *  start and into the rest, onto the whole island, centred, at `endTilt`
+   *  (default: the board's resting tilt). Layers of cloud stand across the
+   *  way in (shown by setCloudCover): the camera flies through one at each
+   *  of `passAt` (seconds into the flight). */
+  arrive(opts: {
+    turn?: number; tilt?: number; endTilt?: number; zoom?: number; seconds?: number; passAt?: number[];
+  } = {}): void {
+    const rig = this.rig;
+    this.userRotation = 0;
+    rig.rotation = this.baseRotation;
+    rig.tilt = Math.max(0, Math.min(MAX_TILT, opts.endTilt ?? DEFAULT_TILT));
+    this.swayTilt = rig.tilt;
+    rig.zoom = 1;
+    rig.pan.set(0, 0);
+    const start = {
+      rotation: rig.rotation - (opts.turn ?? 0), tilt: Math.min(MAX_TILT, opts.tilt ?? rig.tilt),
+      zoom: opts.zoom ?? 0.45, panX: 0, panZ: 0,
+    };
+    rig.jumpTo(start);
+    const seconds = opts.seconds ?? 4.5;
+    if (this.clouds && opts.passAt?.length) {
+      // Where the camera will be (its distance from the island) at each
+      // pass time: zoom eases from the start's to 1, and distance ∝ 1/zoom.
+      const end = rig.viewFrom(rig.rotation, rig.tilt, 1);
+      const far = rig.viewFrom(start.rotation, start.tilt, start.zoom);
+      const back = far.position.clone().sub(far.target).normalize();
+      const fitDist = end.position.distanceTo(end.target);
+      const distances = opts.passAt.map(t => {
+        const e = flightEase(Math.min(1, Math.max(0, t / seconds)));
+        return fitDist / (start.zoom + (1 - start.zoom) * e);
+      });
+      this.clouds.setPassage(far.target, back, distances, rig.fov, rig.width / rig.viewHeight);
+    }
+    rig.beginFlight(seconds, 0);
+    this.kick(seconds + 0.5);
+  }
+
   /** Base rotation from the game (seat-relative); user orbit adds on top. */
   /** Restart the camera swoop-in (used when an intro begins after a delay). */
   playIntro(): void {
@@ -545,10 +596,16 @@ export class BoardEngine {
   /** Sync game tiles (ownership, defense, structure). */
   setBoard(tiles: Record<string, HexTile>, playerInfo: Record<string, PlayerInfo> | undefined, connected: Set<string> | undefined): void {
     if (!this.ok) return;
+    // Water tiles are sea to the board (coast, foam, edges); the layout
+    // keeps them only to lay beaches round them.
+    const water = new Set<string>();
+    for (const [k, t] of Object.entries(tiles)) if (t.is_water) water.add(k);
+    if (water.size) tiles = Object.fromEntries(Object.entries(tiles).filter(([k]) => !water.has(k)));
     this.tiles = tiles;
+    this.water = water;
     this.playerInfo = playerInfo ?? {};
     this.connected = connected ?? new Set();
-    const sig = structureSignature(tiles);
+    const sig = structureSignature(tiles) + (water.size ? `|w:${[...water].sort().join(';')}` : '');
     if (sig !== this.layoutSig) {
       const first = !this.layout;
       this.layoutSig = sig;
@@ -829,7 +886,7 @@ export class BoardEngine {
   /** Burn tiles in place: re-sample the ground around them, hide their old
    *  scenery and add the burnt one. Everything else stays as it is. */
   private scorchTiles(keys: string[]): void {
-    const layout = new BoardLayout(this.tiles);
+    const layout = new BoardLayout(this.tiles, this.water);
     this.layout = layout;
     const burnt = new Set(keys);
     const centers = keys.map(k => layout.byKey.get(k)).filter((tl): tl is NonNullable<typeof tl> => !!tl);
@@ -888,7 +945,7 @@ export class BoardEngine {
 
   private rebuildLayout(first: boolean): void {
     // Keep fx/markers/ambient objects across structural changes when possible.
-    const layout = new BoardLayout(this.tiles);
+    const layout = new BoardLayout(this.tiles, this.water);
     this.layout = layout;
 
     const disposeMesh = (m: Mesh | null) => { if (m) { m.parent?.remove(m); m.geometry.dispose(); } };
@@ -989,6 +1046,7 @@ export class BoardEngine {
     if (!this.clouds) {
       this.clouds = new CloudLayer(layout, this.shared.uTime, this.quality === 'low' ? 0.6 : 1);
       this.world.add(this.clouds.group);
+      if (this.pendingCover) this.clouds.setCover(this.pendingCover.amount, this.pendingCover.seconds);
     } else {
       this.clouds.setLayout(layout);
     }
@@ -1782,6 +1840,7 @@ export class BoardEngine {
     if (this.clouds) {
       this.sunDir.copy(this.sun.position).sub(this.sun.target.position).normalize();
       this.clouds.update(dt, t, this.build, this.rig.camera, this.sunDir, this.rig.currentZoom);
+      if (this.clouds.coverBusy) this.kick(0.15);
     }
     const fxBusy = this.fxLayer?.update(dt, t) ?? false;
     this.markers?.update(dt, t);

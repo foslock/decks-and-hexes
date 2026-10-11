@@ -1,10 +1,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { plainCardName } from './CardName';
 import CompactCardFace from './CompactCardFace';
-import type { Card, MarketStack, CursorPosition, SharedPurchaseEvent } from '../types/game';
+import type { ArchetypeSupplyEntry, Card, MarketStack, CursorPosition, SharedPurchaseEvent } from '../types/game';
 import Tooltip, { IrreversibleButton } from './Tooltip';
 import { useAnimationMode } from './SettingsContext';
-import CardFull from './CardFull';
+import CardFull, { CARD_FULL_HEIGHT, CARD_FULL_WIDTH } from './CardFull';
 import { useShiftKey } from '../hooks/useShiftKey';
 import { getUpgradedPreview, hasUpgradePreview } from '../hooks/upgradePreview';
 import Icon from '../icons/Icon';
@@ -14,6 +14,8 @@ import { cursor } from '../utils/cursors';
 
 interface ShopOverlayProps {
   archetypeMarket: Card[];
+  /** Pack games: every archetype pile in pack order (the market is fixed, no re-roll). */
+  archetypeSupply?: ArchetypeSupplyEntry[];
   sharedMarket: MarketStack[];
   playerResources: number;
   playerArchetype: string;
@@ -123,6 +125,64 @@ function CursorBadges({ cursors, cursorClicks }: { cursors: CursorPosition[]; cu
 
 /** Compact card width — matches CardHand CARD_WIDTH */
 const COMPACT_CARD_WIDTH = 154;
+/** Gap between shop cards (matches .cc-ov-shop-grid). */
+const SHOP_GAP = 12;
+
+/** Desktop shops show full cards, art and all, big enough to read; phones
+ *  (and short windows) keep the compact tiles. Full cards shrink a little on
+ *  narrower desktops so a row of 5 still fits. */
+function useFullCardShop(): { full: boolean; scale: number } {
+  const measure = () => {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const touch = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches ?? false;
+    const full = w >= 900 && h >= 600 && !touch;
+    const body = Math.min(w * 0.94, 1240) - 40;
+    const scale = Math.max(0.7, Math.min(1, (body - 4 * SHOP_GAP) / (5 * CARD_FULL_WIDTH)));
+    return { full, scale };
+  };
+  const [state, setState] = useState(measure);
+  useEffect(() => {
+    const onResize = () => setState(measure());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return state;
+}
+
+/** A card-sized stand-in for a pile that can't be bought right now: an
+ *  empty slot in the card's shape, a gold seal and the label centred on it. */
+function SlotPlaceholder({ card, label, note, soldOut, full, scale, pop }: {
+  card: Card; label: string; note?: string; soldOut?: boolean; full: boolean; scale: number; pop?: boolean;
+}) {
+  const w = full ? CARD_FULL_WIDTH * scale : COMPACT_CARD_WIDTH;
+  return (
+    <div data-card-id={card.id} style={{ width: w, display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ position: 'relative', width: w }}>
+        <div style={{ visibility: 'hidden' }}>
+          {full
+            ? <div style={{ width: w, height: CARD_FULL_HEIGHT * scale }} />
+            : <CompactCardFace card={card} width={w} />}
+        </div>
+        <div
+          className={`cc-ov-purchased${full ? ' is-full' : ''}${soldOut ? ' is-sold-out' : ''}${pop ? ' cc-ov-anim' : ''}`}
+          // The card's own corners (CardFull's 14px, CompactCardFace's 8px).
+          style={{ borderRadius: full ? 14 * scale : 8 }}
+        >
+          <span className="cc-ov-purchased-seal" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d={soldOut ? 'M7.5 7.5l9 9M16.5 7.5l-9 9' : 'M5 12.5l4.5 4.5L19 7.5'} />
+            </svg>
+          </span>
+          <span className="cc-ov-purchased-title">{label}</span>
+          {note && <span className="cc-ov-purchased-rule" aria-hidden="true"><i /></span>}
+          {note && <span className="cc-ov-purchased-note">{note}</span>}
+        </div>
+      </div>
+      <button disabled className="cc-ov-buy" style={{ opacity: 0.55 }}>Buy</button>
+    </div>
+  );
+}
 
 function CompactShopCard({
   card,
@@ -144,6 +204,9 @@ function CompactShopCard({
   animate,
   animIndex = 0,
   justBought,
+  full = false,
+  scale = 1,
+  displayCard,
 }: {
   card: Card;
   remaining: number | null;
@@ -174,6 +237,12 @@ function CompactShopCard({
   animIndex?: number;
   /** This card was just bought — play the purchase pop. */
   justBought?: boolean;
+  /** Show the full card (desktop) instead of the compact face. */
+  full?: boolean;
+  /** Full card scale. */
+  scale?: number;
+  /** Shown in place of the card (Shift: the upgraded version). */
+  displayCard?: Card;
 }) {
   const { showZoom } = useCardZoom();
   const displayCost = effectiveCost ?? card.buy_cost;
@@ -218,13 +287,21 @@ function CompactShopCard({
         <CursorBadges cursors={cursors} cursorClicks={cursorClicks} />
       )}
       {/* The card itself */}
-      <CompactCardFace
-        className="cc-ov-shop-card"
-        card={card}
-        width={COMPACT_CARD_WIDTH}
-        cost={displayCost}
-        costState={isDiscounted ? 'discount' : !canAfford && !isTrulySoldOut ? 'short' : 'normal'}
-      />
+      {full ? (
+        <div className="cc-ov-shop-card" style={{ width: CARD_FULL_WIDTH * scale, height: CARD_FULL_HEIGHT * scale }}>
+          <div style={{ width: CARD_FULL_WIDTH, transform: `scale(${scale})`, transformOrigin: 'top left' }}>
+            <CardFull card={displayCard ?? card} effectiveCost={displayCard ? undefined : displayCost} />
+          </div>
+        </div>
+      ) : (
+        <CompactCardFace
+          className="cc-ov-shop-card"
+          card={card}
+          width={COMPACT_CARD_WIDTH}
+          cost={displayCost}
+          costState={isDiscounted ? 'discount' : !canAfford && !isTrulySoldOut ? 'short' : 'normal'}
+        />
+      )}
       {/* Selling Out ribbon */}
       {sellingOut && (
         <div className="cc-ov-ribbon">Selling Out</div>
@@ -298,6 +375,7 @@ export function PurchaseFlyAnimation({ event, onDone }: { event: SharedPurchaseE
 
 export default function ShopOverlay({
   archetypeMarket,
+  archetypeSupply,
   sharedMarket,
   playerResources,
   playerArchetype,
@@ -328,6 +406,10 @@ export default function ShopOverlay({
   const animMode = useAnimationMode();
   const shiftHeld = useShiftKey();
   const sound = useSound();
+  const { full, scale } = useFullCardShop();
+  /** Full cards preview the upgrade in place while Shift is held. */
+  const upgradeView = (card: Card): Card | undefined =>
+    full && shiftHeld && hoverState?.card.id === card.id && hasUpgradePreview(card) ? getUpgradedPreview(card) : undefined;
 
   // Track archetype market slots so purchased cards show a placeholder instead of disappearing
   const [archetypeSlots, setArchetypeSlots] = useState<Array<{ card: Card; purchased: boolean }>>([]);
@@ -561,7 +643,7 @@ export default function ShopOverlay({
         transition: animate ? `opacity ${0.25 * speed}s ease` : 'none',
       }}>
         <div
-          className="cc-ov-modal cc-ov-shop"
+          className={`cc-ov-modal cc-ov-shop${full ? ' is-full' : ''}`}
           onClick={(e) => e.stopPropagation()}
           style={{
           ['--cc-ov-speed' as string]: speed,
@@ -594,12 +676,67 @@ export default function ShopOverlay({
             <section>
               <div className="cc-ov-section-head">
                 <div className="cc-ov-section-title">
-                  <Tooltip content="These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.">
+                  <Tooltip content={archetypeSupply
+                    ? 'Your archetype\'s cards for this game. Only you can buy them, one of each per round, from a pile of a few copies.'
+                    : 'These cards are unique to your archetype, randomly drawn from your deck pack pool and only available this round.'}>
                     <span style={{ cursor: cursor('inspect') }}>{playerArchetype.charAt(0).toUpperCase() + playerArchetype.slice(1)} Market</span>
                   </Tooltip>
                 </div>
-                <div className="cc-ov-section-sub">New card options every round</div>
+                <div className="cc-ov-section-sub">{archetypeSupply ? 'Limit 1 copy of each card per round' : 'New card options every round'}</div>
               </div>
+              {archetypeSupply ? (
+                <div className="cc-ov-shop-grid">
+                  {[...archetypeSupply]
+                    .sort((x, y) => (x.card.buy_cost ?? 0) - (y.card.buy_cost ?? 0))
+                    .map((entry, idx) => {
+                      const onSale = entry.available
+                        ? archetypeMarket.find(c => c.definition_id === entry.card.definition_id)
+                        : undefined;
+                      if (!onSale) {
+                        return (
+                          <SlotPlaceholder
+                            key={entry.card.definition_id}
+                            card={entry.card}
+                            label={entry.remaining > 0 ? 'Bought' : 'Sold out'}
+                            note={entry.remaining > 0 ? 'Back next round' : undefined}
+                            soldOut={entry.remaining === 0}
+                            full={full}
+                            scale={scale}
+                            pop={animate && recentBuy === entry.card.id}
+                          />
+                        );
+                      }
+                      const effCost = effectiveBuyCosts?.[onSale.id] ?? onSale.buy_cost;
+                      const canAfford = effCost !== null && playerResources >= (effCost ?? 0);
+                      const alreadyOwnsUnique = !!onSale.unique && !!ownedUniqueCardNames?.has(onSale.name);
+                      return (
+                        <CompactShopCard
+                          key={entry.card.definition_id}
+                          card={onSale}
+                          remaining={entry.remaining}
+                          canAfford={canAfford}
+                          effectiveCost={effCost}
+                          onBuy={() => buyArchetypeWithSound(onSale.id)}
+                          onHover={handleCardHover}
+                          onLeave={handleCardLeave}
+                          disabled={disabled || !!buyLocked || alreadyOwnsUnique}
+                          disabledTooltip={
+                            buyLocked ? 'Cannot buy — Grand Strategy was played this round.'
+                            : alreadyOwnsUnique ? 'You already own a copy of this Unique card.'
+                            : undefined
+                          }
+                          viewOnly={disabled}
+                          animate={animate}
+                          animIndex={idx}
+                          justBought={animate && recentBuy === onSale.id}
+                          full={full}
+                          scale={scale}
+                          displayCard={upgradeView(onSale)}
+                        />
+                      );
+                    })}
+                </div>
+              ) : (<>
               {/* Archetype cards — full-width wrap row, centered */}
               <div className="cc-ov-shop-grid">
                   {archetypeSlots.length === 0 && (
@@ -607,31 +744,15 @@ export default function ShopOverlay({
                   )}
                   {sortedArchetypeSlots.map(({ card, purchased }, idx) => {
                     if (purchased) {
-                      // Render the real card invisibly to preserve exact dimensions,
-                      // with a "Purchased!" overlay on top
-                      const cardW = COMPACT_CARD_WIDTH;
                       return (
-                        <div key={card.id} data-card-id={card.id} style={{
-                          width: cardW,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 5,
-                        }}>
-                          <div style={{ position: 'relative', width: cardW }}>
-                            {/* Invisible card — preserves height */}
-                            <div style={{ visibility: 'hidden' }}>
-                              <CompactCardFace card={card} width={cardW} />
-                            </div>
-                            {/* Overlay — exact same size */}
-                            <div className={`cc-ov-purchased${animate && recentBuy === card.id ? ' cc-ov-anim' : ''}`}>
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-                              <span>Purchased!</span>
-                            </div>
-                          </div>
-                          <button disabled className="cc-ov-buy" style={{ opacity: 0.55 }}>
-                            Buy
-                          </button>
-                        </div>
+                        <SlotPlaceholder
+                          key={card.id}
+                          card={card}
+                          label="Purchased!"
+                          full={full}
+                          scale={scale}
+                          pop={animate && recentBuy === card.id}
+                        />
                       );
                     }
                     const effCost = effectiveBuyCosts?.[card.id] ?? card.buy_cost;
@@ -657,6 +778,9 @@ export default function ShopOverlay({
                         animate={animate}
                         animIndex={idx}
                         justBought={animate && recentBuy === card.id}
+                        full={full}
+                        scale={scale}
+                        displayCard={upgradeView(card)}
                       />
                     );
                   })}
@@ -707,6 +831,7 @@ export default function ShopOverlay({
                   Cards given from a re-roll are guaranteed to be different from existing cards.
                 </span>
               </div>
+              </>)}
             </section>
 
             {/* Shared Market */}
@@ -762,6 +887,9 @@ export default function ShopOverlay({
                       animate={animate}
                       animIndex={sortedArchetypeSlots.length + idx}
                       justBought={animate && recentBuy === stack.card.id}
+                      full={full}
+                      scale={scale}
+                      displayCard={upgradeView(stack.card)}
                     />
                   );
                 })}
@@ -832,7 +960,7 @@ export default function ShopOverlay({
       </div>
 
       {/* Floating hover preview (fixed, viewport-relative) */}
-      {displayedHover && previewStyle && (
+      {!full && displayedHover && previewStyle && (
         <div style={{
           ...previewStyle,
           opacity: hoverVisible ? 1 : 0,

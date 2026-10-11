@@ -141,6 +141,8 @@ interface CardBrowserProps {
   onClose: () => void;
   /** Neutral card IDs to include; null/undefined = all */
   packSharedIds?: string[] | null;
+  /** Home-screen catalog: only the Core set (set-aside cards wait for future sets). */
+  coreOnly?: boolean;
   /** Per-archetype card IDs to include; null/undefined = all */
   packArchetypeIds?: Record<string, string[]> | null;
   /** Pack name shown in the header */
@@ -161,7 +163,7 @@ interface CardBrowserProps {
   hideNonPurchasable?: boolean;
 }
 
-export default function CardBrowser({ onClose, packSharedIds, packArchetypeIds, packName, onShiftClickCard, playerArchetype, collapseArchetypes, hideNonPurchasable }: CardBrowserProps) {
+export default function CardBrowser({ onClose, packSharedIds, packArchetypeIds, packName, onShiftClickCard, playerArchetype, collapseArchetypes, hideNonPurchasable, coreOnly }: CardBrowserProps) {
   const [cards, setCards] = useState<Card[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fullView, setFullViewRaw] = useState(() => browserViewMemory);
@@ -227,6 +229,7 @@ export default function CardBrowser({ onClose, packSharedIds, packArchetypeIds, 
     if (!cards) return [];
     return cards.filter(c => {
       if (hideNonPurchasable && c.buy_cost == null) return false;
+      if (coreOnly && c.card_set === 'set_aside') return false;
       // Filter neutral cards by pack
       if (c.archetype === 'shared' && packSharedIds != null) {
         return packSharedIds.includes(c.id);
@@ -240,7 +243,7 @@ export default function CardBrowser({ onClose, packSharedIds, packArchetypeIds, 
       }
       return true;
     });
-  }, [cards, packSharedIds, packArchetypeIds, hideNonPurchasable]);
+  }, [cards, packSharedIds, packArchetypeIds, hideNonPurchasable, coreOnly]);
 
   // Filter cards by search query (partial match on name or description)
   const filteredCards = useMemo(() => {

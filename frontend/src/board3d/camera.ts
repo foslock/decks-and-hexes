@@ -7,6 +7,14 @@ export const MAX_TILT = 1.0;
 export const MAX_ZOOM = 3.2;
 const FOV = 30;
 
+/** A scripted flight's progress (0–1) at time fraction `u`: ease both ends,
+ *  or (`out`) start at full speed and slow to a stop. */
+export function flightEase(u: number, ease: 'inOut' | 'out' = 'inOut'): number {
+  return ease === 'out'
+    ? 1 - Math.pow(1 - u, 4)
+    : u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+}
+
 const _v = new Vector3();
 const _right = new Vector3();
 const _up = new Vector3();
@@ -50,7 +58,10 @@ export class CameraRig {
   /** A scripted glide (tutorial): eases from where the camera was to the
    *  targets over a fixed time instead of damping, optionally pulling back
    *  mid-flight (`arc`) for a swoop. */
-  private flight: { from: { rotation: number; tilt: number; zoom: number; panX: number; panZ: number }; start: number; dur: number; arc: number } | null = null;
+  private flight: {
+    from: { rotation: number; tilt: number; zoom: number; panX: number; panZ: number };
+    start: number; dur: number; arc: number; ease: 'inOut' | 'out';
+  } | null = null;
 
   constructor() {
     this.camera = new PerspectiveCamera(FOV, 1, 0.1, 200);
@@ -100,9 +111,15 @@ export class CameraRig {
   }
 
   /** Glide from the current view to the targets over `seconds` (wall-clock
-   *  time, so it lands on schedule even if frames drop). */
-  beginFlight(seconds: number, arc = 0): void {
-    this.flight = { from: { ...this.cur }, start: performance.now() / 1000, dur: Math.max(0.05, seconds), arc };
+   *  time, so it lands on schedule even if frames drop). `ease: 'out'` starts
+   *  at full speed and slows to a stop (an arrival) instead of easing both ends. */
+  beginFlight(seconds: number, arc = 0, ease: 'inOut' | 'out' = 'inOut'): void {
+    this.flight = { from: { ...this.cur }, start: performance.now() / 1000, dur: Math.max(0.05, seconds), arc, ease };
+  }
+
+  /** Put the camera at a view right now (the targets stay where they are). */
+  jumpTo(view: { rotation: number; tilt: number; zoom: number; panX: number; panZ: number }): void {
+    Object.assign(this.cur, view);
   }
 
   /** Point the target view at a ground point (it lands mid-frame). Set the
@@ -194,7 +211,7 @@ export class CameraRig {
     const fl = this.flight;
     if (fl) {
       const u = Math.min(1, (performance.now() / 1000 - fl.start) / fl.dur);
-      const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+      const e = flightEase(u, fl.ease);
       const f = fl.from;
       c.rotation = f.rotation + (this.rotation - f.rotation) * e;
       c.tilt = f.tilt + (this.tilt - f.tilt) * e;
@@ -232,6 +249,18 @@ export class CameraRig {
     this.camera.updateMatrixWorld();
     return this.moving;
   }
+
+  /** Where the camera would be (and what it would look at) for a view —
+   *  without moving it. */
+  viewFrom(rotation: number, tilt: number, zoom: number, panX = 0, panZ = 0): { position: Vector3; target: Vector3 } {
+    const f = this.fit(rotation, tilt);
+    this.basis(rotation, tilt);
+    const target = new Vector3(f.cx + panX, 0, f.cz + panZ);
+    const view = _fwd.clone().multiplyScalar(Math.sin(tilt)).add(new Vector3(0, -Math.cos(tilt), 0)).normalize();
+    return { position: target.clone().addScaledVector(view, -f.dist / zoom), target };
+  }
+
+  get fov(): number { return FOV; }
 
   private place(rotation: number, tilt: number, zoom: number, panX: number, panZ: number): void {
     const f = this.fit(rotation, tilt);

@@ -4,7 +4,7 @@ Provides heuristic-based decision-making for each game phase.
 A `noise` parameter (0.0–1.0) controls randomness: 0.0 = always pick
 the highest-scored option, 1.0 = pick uniformly among reasonable options.
 
-Difficulty levels: easy=0.25, medium=0.10, hard=0.05 noise.
+Difficulty levels: easy=0.25, medium=0.18, hard=0.05 noise.
 
 Strategic features:
 - VP denial: prioritizes contesting opponent VP hexes about to score
@@ -702,7 +702,7 @@ HARD = "hard"
 # Difficulty is the canonical setting; noise is derived from it.
 NOISE_FOR_DIFFICULTY: dict[str, float] = {
     EASY: 0.25,
-    MEDIUM: 0.10,
+    MEDIUM: 0.18,  # with Hard's play tactics; keeps it a step behind Hard
     HARD: 0.05,
 }
 
@@ -855,12 +855,23 @@ class DifficultyProfile:
     # buy the VP card that wins on the spot, and go all-in on denial when an
     # opponent can close the game this round.
     endgame_awareness: bool = True
+    # Buy the cards of one of the pack's builds (pack_builds.py) first, then
+    # value the rest as usual: Easy follows Fast Claim or a weaker build,
+    # Medium one that beats Fast Claim, Hard the best-rated
+    # (cpu_builds.choose_build). Packs without builds buy as before.
+    follow_builds: bool = True
+    # Count the reveal bonus a Claim gets from Claims still in hand (Strike
+    # Team's +2 for another Claim this round): power is settled at the
+    # reveal, but while planning only the Claims already placed show.
+    claim_bonus_lookahead: bool = True
     # Valuation weights (see cpu_valuation.ValuationTuning).
     val_claim_mult: float = 1.4
     val_defense_mult: float = 1.0
     val_engine_mult: float = 1.0
     val_draw_mult: float = 1.0
-    val_vp_re: float = 7.5
+    # Hard prices a VP above Land Grant's sticker rate (7.5): it plays to the
+    # VP race, so VP cards (Land Grant, Arsenal, Warden) come in earlier.
+    val_vp_re: float = 10.0
     val_upgrade_mult: float = 1.0
 
 
@@ -943,6 +954,7 @@ _EASY_PROFILE = DifficultyProfile(
     threat_modeling=False,
     connectivity_cuts=False,
     endgame_awareness=False,
+    claim_bonus_lookahead=False,
 )
 
 # Normal: ~60% of flags on (11/18). Core heuristics + sound fundamentals,
@@ -951,7 +963,7 @@ _MEDIUM_PROFILE = DifficultyProfile(
     # Play-phase — full play-phase awareness
     tier_priority_ordering=True,
     never_idle_fallback=True,
-    combined_stack_scoring=False,      # advanced: stackable combo reasoning
+    combined_stack_scoring=True,       # shared play baseline (see threat_modeling)
     base_raid_priority=False,          # advanced: pushes rubble into enemy deck
     vp_denial_contest=True,
     card_power_preference=True,
@@ -996,17 +1008,28 @@ _MEDIUM_PROFILE = DifficultyProfile(
     consolidation_progress=0.5,
     vp_connectivity_enforcement=True,
     # Deck-aware economy: Medium values cards on the static curve only,
-    # over-weights economy relative to claim power (the classic intermediate
-    # habit — benchmarked at ~35–40% vs Hard), never saves up for a big buy,
-    # and doesn't model opponents' simultaneous claims, bridges or endgame.
+    # under-weights claim power relative to Hard (the classic intermediate
+    # habit), never saves up for a big buy and ignores the endgame.
+    # Defense is discounted too: blind to the board, Medium would otherwise
+    # read Core defense cards (which draw and give back their action) as
+    # free engine cards and buy walls instead of claims.
     value_purchasing=True,
     purchase_value_floor=1.0,
     board_aware_valuation=False,
     purchase_saving=False,
-    threat_modeling=False,
-    connectivity_cuts=False,
+    # Play: Hard's tactics (rivals' simultaneous claims, stacks, bridges,
+    # Strike Team's bonus). Medium is measured against Fast Claim (the
+    # `rush` bot: Hard's play, big-Claim buys), and without these it lost on
+    # small maps whatever it bought (Border War 32%, First Clash 44%,
+    # Far Reaches 46%; with them 49 / 56 / 56%). The tiers now differ
+    # mostly in what they buy.
+    threat_modeling=True,
+    connectivity_cuts=True,
     endgame_awareness=False,
-    val_claim_mult=0.7,
+    claim_bonus_lookahead=True,
+    val_claim_mult=1.2,
+    val_defense_mult=0.6,
+    val_vp_re=7.5,
 )
 
 # Hard: every flag on, all tunings at their strongest.
@@ -1421,6 +1444,7 @@ class CPUPlayer:
         floor, we fall back to a marginal frontier claim rather than idle
         an available action.
         """
+        self._planning_game = game
         player = game.players[self.player_id]
         playable = [c for c in player.hand if not (skip_card_ids and c.id in skip_card_ids)]
         if not playable:
@@ -1459,11 +1483,36 @@ class CPUPlayer:
         net = card.action_cost - card.effective_action_return
         return net > 0 and player.actions_available - player.actions_used < card.action_cost
 
-    @staticmethod
-    def _planned_power(a: Any) -> int:
-        """A planned claim's power as snapshotted when it was played (Strength
-        in Numbers, Garrison on its own tile, …), else its printed power."""
-        return int(a.effective_power if a.effective_power is not None else a.card.effective_power)
+    # Power a rival might bring to a tile next to their land, when judging
+    # whether our planned claims there already take it.
+    _STACK_RIVAL_MARGIN = 2
+
+    def _stack_is_redundant(self, game: Any, tile: HexTile, prior_power: float) -> bool:
+        """Our claims already planned on *tile* take it on their own: another
+        card stacked there would be wasted. (A rival next to the tile could
+        contest it, so then we want a margin. Our own tiles are left to the
+        defensive-stack logic.)"""
+        if prior_power <= 0 or tile.owner == self.player_id or game.grid is None:
+            return False
+        need = tile.defense_power if tile.owner is None else tile.defense_power + 1
+        rival_near = any(
+            n.owner is not None and n.owner != self.player_id
+            for n in game.grid.get_adjacent(tile.q, tile.r)
+        ) or tile.owner is not None
+        return prior_power >= need + (self._STACK_RIVAL_MARGIN if rival_near else 0)
+
+    def _planned_power(self, a: Any) -> int:
+        """One of our planned claims' power: settled (hand-counting power is
+        fixed when played), else worked out on the current board like the
+        reveal will (Militia, Garrison on its own tile, War Banner, …)."""
+        if a.effective_power is not None:
+            return int(a.effective_power)
+        game = getattr(self, "_planning_game", None)
+        if game is None:
+            return int(a.card.effective_power)
+        return int(calculate_effective_power(
+            game, game.players[self.player_id], a.card, a, include_stacking_bonus=False,
+        ))
 
     @staticmethod
     def _claim_locks(a: Any, q: int, r: int) -> bool:
@@ -1742,7 +1791,7 @@ class CPUPlayer:
                 if tile.is_blocked:
                     continue
                 # Respect unoccupied_only.
-                if card.effective_unoccupied_only and tile.owner is not None:
+                if (card.effective_unoccupied_only and tile.owner is not None) or (card.defenseless_only and tile.defense_power > 0):
                     continue
                 # Must be reachable from one of our tiles within claim_range.
                 if card.adjacency_required:
@@ -1756,6 +1805,8 @@ class CPUPlayer:
                 combined_prior = sum(
                     self._planned_power(a) for a in planned_on_tile.get(key, [])
                 )
+                if self._stack_is_redundant(game, tile, combined_prior):
+                    continue
                 est_power = self._estimate_effective_power(game, player, tile, card)
                 total_power = est_power + combined_prior
                 if tile.owner is None:
@@ -2006,7 +2057,7 @@ class CPUPlayer:
                                 continue
                             if pt.distance_to(adj) > card.claim_range:
                                 continue
-                            if card.effective_unoccupied_only and adj.owner is not None:
+                            if (card.effective_unoccupied_only and adj.owner is not None) or (card.defenseless_only and adj.defense_power > 0):
                                 continue
                             if require_winning:
                                 est = self._estimate_effective_power(game, player, adj, card)
@@ -2043,7 +2094,7 @@ class CPUPlayer:
                 for tile in grid.tiles.values():
                     if tile.is_blocked or tile.owner == self.player_id:
                         continue
-                    if card.effective_unoccupied_only and tile.owner is not None:
+                    if (card.effective_unoccupied_only and tile.owner is not None) or (card.defenseless_only and tile.defense_power > 0):
                         continue
                     if require_winning:
                         est = self._estimate_effective_power(game, player, tile, card)
@@ -2132,6 +2183,10 @@ class CPUPlayer:
             # claims. Non-stackable new cards are blocked only if any prior
             # claim on the tile is also non-stackable.
             if not card.stackable and any(not a.card.stackable for a in existing_claims):
+                continue
+            if existing_claims and self._stack_is_redundant(
+                game, tile, sum(self._planned_power(a) for a in existing_claims),
+            ):
                 continue
 
             score = self._score_tile_for_claim(game, player, tile, card, weights)
@@ -2226,7 +2281,7 @@ class CPUPlayer:
                     if tile.key in seen or tile.is_blocked:
                         continue
                     if pt.distance_to(tile) <= card.claim_range:
-                        if card.effective_unoccupied_only and tile.owner is not None:
+                        if (card.effective_unoccupied_only and tile.owner is not None) or (card.defenseless_only and tile.defense_power > 0):
                             continue
                         if tile.owner == self.player_id and not _keep_own(tile):
                             continue
@@ -2240,7 +2295,7 @@ class CPUPlayer:
             for tile in game.grid.tiles.values():
                 if tile.is_blocked:
                     continue
-                if card.effective_unoccupied_only and tile.owner is not None:
+                if (card.effective_unoccupied_only and tile.owner is not None) or (card.defenseless_only and tile.defense_power > 0):
                     continue
                 if tile.owner == self.player_id and not _keep_own(tile):
                     continue
@@ -2257,7 +2312,30 @@ class CPUPlayer:
         plus stacking bonuses from claims already planned there (Dog Pile)."""
         from .game_state import PlannedAction
         probe = PlannedAction(card=card, target_q=tile.q, target_r=tile.r)
-        return int(calculate_effective_power(game, player, card, probe))
+        power = int(calculate_effective_power(game, player, card, probe))
+        if self.profile.claim_bonus_lookahead:
+            power += self._pending_claim_bonus(player, card)
+        return power
+
+    @staticmethod
+    def _pending_claim_bonus(player: Any, card: Card) -> int:
+        """Power *card* will gain at the reveal from a Claim we have yet to
+        play this round (Strike Team: +2 if you played another Claim) — the
+        engine counts every Claim played by then, but while planning only
+        those already placed."""
+        bonus = 0
+        for e in card.effects:
+            if e.type != EffectType.POWER_MODIFIER or e.condition != ConditionType.IF_PLAYED_CLAIM_THIS_TURN:
+                continue
+            if any(a.card.card_type == CardType.CLAIM and a.card.id != card.id
+                   for a in player.planned_actions):
+                continue  # already counted
+            spare = (player.actions_available - player.actions_used
+                     - card.action_cost + card.effective_action_return)
+            if any(c is not card and c.card_type == CardType.CLAIM and not c.unplayable
+                   and c.action_cost <= spare for c in player.hand):
+                bonus += e.effective_value(card.is_upgraded)
+        return bonus
 
     def _reach_power(self, game: Any, player: Any, tile: HexTile, card: Card) -> int:
         """Power this card plus our claims already planned on *tile* would have."""
@@ -2825,7 +2903,7 @@ class CPUPlayer:
         for tile in adj_tiles:
             if tile.is_blocked:
                 continue
-            if card.effective_unoccupied_only and tile.owner is not None:
+            if (card.effective_unoccupied_only and tile.owner is not None) or (card.defenseless_only and tile.defense_power > 0):
                 continue
             if tile.q == primary_tile.q and tile.r == primary_tile.r:
                 continue
@@ -3962,6 +4040,23 @@ class CPUPlayer:
         if player.turn_modifiers.buy_locked or player.resources <= 0:
             return None
 
+        if self.profile.follow_builds:
+            # The build's key cards first; then buy as this tier always would
+            # (a tier that drew plain Fast Claim buys exactly like it).
+            from .cpu_builds import choose_build, fast_claim_purchase, plan_purchase
+            from .pack_builds import FAST_CLAIM
+            build = choose_build(game, self.player_id, self.difficulty)
+            if build is FAST_CLAIM:
+                return fast_claim_purchase(game, player)
+            pick = plan_purchase(game, player, build) if build is not None else None
+            if build is not None and pick is not None:
+                pick["cpu_reasoning"] = {
+                    "flags": ["follow_builds"],
+                    "context": [f"ctx:build={build.id}", f"ctx:source={pick['source']}"],
+                    "score": 0.0,
+                }
+                return pick
+
         weights = self._get_weights(player, game)
         return self._pick_best_purchase(game, player, weights)
 
@@ -3976,6 +4071,7 @@ class CPUPlayer:
             draw_mult=p.val_draw_mult,
             vp_re=p.val_vp_re,
             upgrade_mult=p.val_upgrade_mult,
+            stack_aware=p.combined_stack_scoring,
         )
         return build_context(
             game, self.player_id, board_aware=p.board_aware_valuation, tuning=tuning,
@@ -4069,15 +4165,18 @@ class CPUPlayer:
             return None
         best_pv = max(pv for pv, _ in viable)
 
-        # Save for a clearly better shared-market card that next turn's
-        # income should cover (the archetype market re-rolls, so only shared
-        # stacks are dependable savings targets).
+        # Save for a clearly better card that next turn's income should cover.
+        # Shared stacks stay put; so do a pack game's archetype piles, but the
+        # Everything pack's archetype market re-rolls.
         if self.profile.purchase_saving and ctx.rounds_left > 2:
+            from .game_state import archetype_market_fixed
+            fixed_market = archetype_market_fixed(game)
             reach = player.resources + max(2.0, ctx.income_per_hand)
             for pv, cost, action, _card in options:
                 if cost <= player.resources or cost > reach:
                     continue
-                if action["source"] != "shared":
+                if action["source"] == "upgrade" or (
+                        action["source"] == "archetype" and not fixed_market):
                     continue
                 if pv > best_pv * 1.6 + 2.0:
                     return None
@@ -4410,6 +4509,9 @@ class CPUPlayer:
         elif card.card_type == CardType.ENGINE:
             score += card.effective_resource_gain * 1.5 * weights.resource_value
             score += card.effective_draw_cards * 2.0 * weights.card_draw_value
+            # Prospector: every play adds a Debt (3 resources and a hand slot
+            # to clear) — scored as pure income, Easy filled its deck with them.
+            score -= debts_taken(card) * 4.5 * weights.resource_value
             # Trash-for-value (Consolidate) — deck thinning + resources
             for effect in card.effects:
                 if effect.type == EffectType.TRASH_GAIN_BUY_COST:
@@ -4733,7 +4835,9 @@ class CPUPlayer:
 
     def should_reroll_market(self, game: Any) -> bool:
         """Decide whether to reroll the archetype market."""
-        from .game_state import REROLL_COST, calculate_dynamic_buy_cost
+        from .game_state import REROLL_COST, archetype_market_fixed, calculate_dynamic_buy_cost
+        if archetype_market_fixed(game):
+            return False  # a pack game shows the whole supply already
         player = game.players[self.player_id]
         free_reroll = player.turn_modifiers.free_rerolls > 0  # Surveyor
 

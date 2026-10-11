@@ -4,13 +4,28 @@
     {
       "name": "frontend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "source /Users/jfl/.nvm/nvm.sh && cd /Users/jfl/github-dot-com/decks-and-hexes/frontend && npm install && npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "source /Users/jfl/.nvm/nvm.sh && cd /Users/jfl/github-dot-com/decks-and-hexes/frontend && npm install && npm run dev"
+      ],
       "port": 5173
+    },
+    {
+      "name": "frontend-alt",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "source /Users/jfl/.nvm/nvm.sh && cd /Users/jfl/github-dot-com/decks-and-hexes/frontend && npm install && npm run dev -- --port 5180 --strictPort"
+      ],
+      "port": 5180
     },
     {
       "name": "backend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd /Users/jfl/github-dot-com/decks-and-hexes/backend && /Users/jfl/github-dot-com/decks-and-hexes/backend/.venv/bin/uvicorn app.main:app --port 8000 --reload"],
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/jfl/github-dot-com/decks-and-hexes/backend && /Users/jfl/github-dot-com/decks-and-hexes/backend/.venv/bin/uvicorn app.main:app --port 8000 --reload"
+      ],
       "port": 8000
     }
   ],

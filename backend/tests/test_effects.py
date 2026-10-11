@@ -358,8 +358,8 @@ class TestSelfTrash:
         success, msg = play_card(game2, "f0", 0, trash_card_indices=[0])
         assert success, msg
 
-        # Should have gained 2 resources (half of 5, rounded down)
-        assert player.resources == initial_resources + 2
+        # Half of 5 (rounded down) plus 1
+        assert player.resources == initial_resources + 3
 
 
 # ── VP Gain Tests ─────────────────────────────────────────────────
@@ -496,14 +496,14 @@ class TestConditionalPower:
                 break
         assert q2 is not None
 
-        # Play strike team — should get +2 power (base 3 + 2 = 5)
+        # Play strike team — should get +2 power (base 2 + 2 = 4)
         success, msg = play_card(game, "p0", 0, target_q=q2, target_r=r2)
         assert success, msg
 
         # Verify power calculation
         st_action = player.planned_actions[-1]
         effective = calculate_effective_power(game, player, st_action.card, st_action)
-        assert effective == 5  # 3 base + 2 bonus
+        assert effective == 4  # 2 base + 2 bonus
 
     def test_garrison_defending_power(self, card_registry):
         """Garrison: power 5 when defending an owned tile."""
@@ -597,8 +597,8 @@ class TestConditionalPower:
 
         action = PlannedAction(card=numbers, target_q=0, target_r=0)
         effective = calculate_effective_power(game, player, numbers, action)
-        # Hand has 4 cards; power = 3 (other cards, not including this card)
-        assert effective == 3
+        # Hand has 4 cards; power = 1 + 3 other cards
+        assert effective == 4
 
 
 # ── On-Resolution Effect Tests ────────────────────────────────────
@@ -756,8 +756,9 @@ class TestGrantActions:
 
 
 class TestIgnoreDefense:
-    def test_siege_engine_flags_ignore_defense(self, card_registry):
-        """Siege Engine: sets ignore_defense flag on turn modifiers."""
+    def test_siege_engine_gets_bonus_against_defense(self, card_registry):
+        """Siege Engine: +2 power against a tile with a defense bonus (no
+        card ignores defense any more)."""
         game = create_game(
             GridSize.SMALL,
             [
@@ -784,9 +785,11 @@ class TestIgnoreDefense:
         success, msg = play_card(game, "a0", 0, target_q=target.q, target_r=target.r)
         assert success, msg
 
-        # Note: ignore_defense is on_resolution timing, so it won't be set during play_card
-        # It's set during execute_reveal. But we can test that the effect exists
-        assert any(e.type == EffectType.IGNORE_DEFENSE for e in siege.effects)
+        assert not any(e.type == EffectType.IGNORE_DEFENSE for e in siege.effects)
+        target.permanent_defense_bonus = 1
+        target.defense_power += 1
+        action = attacker.planned_actions[-1]
+        assert calculate_effective_power(game, attacker, siege, action) == siege.power + 2
 
 
 # ── Breakthrough Auto-Claim Tests ─────────────────────────────────

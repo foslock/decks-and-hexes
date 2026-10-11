@@ -14,6 +14,8 @@ import { appHasBooted, signalAppReady, waitForFonts } from '../utils/appReady';
 interface SetupScreenProps {
   onCreateLobby: () => void;
   onJoinLobby: (code: string) => Promise<void>;
+  /** Open the solo campaign's overworld. */
+  onSolo?: () => void;
 }
 
 /** Ambient embers drifting up behind the title screen (fixed layout so the
@@ -44,7 +46,7 @@ function HomeEmbers() {
   );
 }
 
-export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenProps) {
+export default function SetupScreen({ onCreateLobby, onJoinLobby, onSolo }: SetupScreenProps) {
   const [showCardBrowser, setShowCardBrowser] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -113,8 +115,8 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
 
       {/* Bottom buttons — pinned to bottom */}
       <div className="cc-scr-home-actions">
-        {/* Create / Join Lobby */}
-        <div className="cc-scr-home-row">
+        {/* Create / Join Lobby, Solo campaign */}
+        <div className={`cc-scr-home-row${onSolo ? ' is-three' : ''}`}>
           <button
             className="cc-btn-primary cc-scr-btn-xl"
             onClick={() => onCreateLobby()}
@@ -127,6 +129,15 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
           >
             Join
           </button>
+          {onSolo && (
+            <button
+              className="cc-btn-secondary cc-scr-btn-xl"
+              onClick={onSolo}
+              title="A campaign of levels to play alone"
+            >
+              Solo
+            </button>
+          )}
         </div>
 
         {/* How to Play / Card Browser */}
@@ -172,7 +183,7 @@ export default function SetupScreen({ onCreateLobby, onJoinLobby }: SetupScreenP
         <HowToPlay onClose={() => setShowHowToPlay(false)} />
       )}
       {showCardBrowser && (
-        <CardBrowser onClose={() => setShowCardBrowser(false)} />
+        <CardBrowser onClose={() => setShowCardBrowser(false)} coreOnly />
       )}
       {showBrowser && (
         <LobbyBrowser onJoin={onJoinLobby} onCreate={onCreateLobby} onClose={() => setShowBrowser(false)} />

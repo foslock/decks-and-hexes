@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, Component, type ReactNode } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, Component, type ReactNode } from 'react';
 import type { GameState, LobbyState } from './types/game';
 import { SettingsProvider } from './components/SettingsContext';
 import SetupScreen from './components/SetupScreen';
@@ -8,6 +8,7 @@ import LobbyScreen from './components/LobbyScreen';
 import VpPathPreview from './components/VpPathPreview';
 import ResolveAnimationPreview from './components/ResolveAnimationPreview';
 import TerritoryPreview from './components/TerritoryPreview';
+import SoloMapsPreview from './components/solo/SoloMapsPreview';
 import SoundPreview from './audio/SoundPreview';
 import IconPreview from './icons/IconPreview';
 import CardsPreview, { HandPreview } from './components/CardsPreview';
@@ -17,6 +18,10 @@ import { CardZoomProvider } from './components/CardZoomContext';
 import { getSavedPlayerName } from './utils/playerName';
 import { preloadCatalogArt } from './cardCatalog';
 import { preloadCardImages, STARTER_CARD_IDS } from './utils/cardImagePreload';
+import SoloOverworld from './components/solo/SoloOverworld';
+import SoloCampaignSelect from './components/solo/SoloCampaignSelect';
+import { chooseCampaign, recordClear } from './components/solo/soloProgress';
+import type { SoloLevel } from './types/game';
 
 // Starter art (Explore / Gather) is in every opening hand — fetch it at boot.
 preloadCardImages(STARTER_CARD_IDS, 'high');
@@ -58,15 +63,21 @@ const SS_LOBBY = 'cardclash_lobby';
 
 type AppScreen =
   | { type: 'home' }
+  /** Solo: the campaign choice, or (`campaign`) that campaign's overworld. */
+  | { type: 'solo'; campaign?: string }
   | { type: 'lobby'; code: string; playerId: string; token: string; isHost: boolean; lobby: LobbyState }
-  | { type: 'game'; gameId: string; playerId: string; token: string; isMultiplayer: boolean; lobbyCode?: string; isHost?: boolean };
+  | {
+    type: 'game'; gameId: string; playerId: string; token: string; isMultiplayer: boolean; lobbyCode?: string; isHost?: boolean;
+    /** A solo campaign level (its game ends back on its campaign's overworld). */
+    solo?: { levelId: string; archetype: string };
+  };
 
 function loadSession(): AppScreen | null {
   try {
     const raw = sessionStorage.getItem(SS_LOBBY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (data.type === 'lobby' || data.type === 'game') return data;
+    if (data.type === 'lobby' || data.type === 'game' || data.type === 'solo') return data;
   } catch { /* ignore */ }
   return null;
 }
@@ -151,7 +162,11 @@ function AppInner() {
     console.log('[App] game WS effect:', gameWsMessage.type, 'screen:', screen.type, 'gameId:', screen.gameId);
 
     if (gameWsMessage.type === 'game_state') {
-      setMultiplayerGameState(gameWsMessage.state as unknown as GameState);
+      const state = gameWsMessage.state as unknown as GameState;
+      // The last message is re-read whenever the screen changes: after a
+      // solo Retry it's still the old game's.
+      if (state?.id && state.id !== screen.gameId) return;
+      setMultiplayerGameState(state);
     } else if (gameWsMessage.type === 'game_ended') {
       // Verify this game_ended is for our current game by checking the game_id if present,
       // or at minimum that we're still in a game screen (guard against stale WS messages)
@@ -161,7 +176,7 @@ function AppInner() {
         return;
       }
       console.log('[App] game_ended → going home');
-      setScreen({ type: 'home' });
+      setScreen(screen.solo ? { type: 'solo', campaign: screen.solo.archetype } : { type: 'home' });
       setMultiplayerGameState(null);
       setRemovedFromLobby(false);
       saveSession(null);
@@ -287,11 +302,70 @@ function AppInner() {
 
   const handleLeaveGame = useCallback(() => {
     console.log('[App] handleLeaveGame → going home');
-    setScreen({ type: 'home' });
+    // A solo level goes back to the overworld.
+    setScreen(prev => (prev.type === 'game' && prev.solo ? { type: 'solo', campaign: prev.solo.archetype } : { type: 'home' }));
     setMultiplayerGameState(null);
     api.setAuthToken(null);
-    saveSession(null);
   }, []);
+
+  // ── Solo campaign ────────────────────────────────────────
+
+  const handleStartSolo = useCallback(async (level: SoloLevel) => {
+    // You play a level as its campaign's archetype.
+    const archetype = level.archetype;
+    const result = await api.startSoloLevel(level.id, archetype, getSavedPlayerName() ?? undefined);
+    api.setAuthToken(result.token);
+    setMultiplayerGameState(result.state);
+    setRemovedFromLobby(false);
+    setIsReconnect(false);
+    setScreen({
+      type: 'game',
+      gameId: result.game_id,
+      playerId: result.player_id,
+      token: result.token,
+      isMultiplayer: true,
+      lobbyCode: result.lobby_code,
+      isHost: true,
+      solo: { levelId: level.id, archetype },
+    });
+  }, []);
+
+  const soloGame = screen.type === 'game' ? screen.solo : undefined;
+  const handleSoloBackToMap = useCallback(() => {
+    setScreen({ type: 'solo', campaign: soloGame?.archetype });
+    setMultiplayerGameState(null);
+    api.setAuthToken(null);
+  }, [soloGame]);
+
+  const handleSoloRetry = useCallback(async () => {
+    if (!soloGame) return;
+    const result = await api.startSoloLevel(soloGame.levelId, soloGame.archetype, getSavedPlayerName() ?? undefined);
+    api.setAuthToken(result.token);
+    setMultiplayerGameState(result.state);
+    setIsReconnect(false);
+    setScreen({
+      type: 'game',
+      gameId: result.game_id,
+      playerId: result.player_id,
+      token: result.token,
+      isMultiplayer: true,
+      lobbyCode: result.lobby_code,
+      isHost: true,
+      solo: soloGame,
+    });
+  }, [soloGame]);
+  const soloProps = useMemo(
+    () => (soloGame ? { onBackToMap: handleSoloBackToMap, onRetry: handleSoloRetry } : undefined),
+    [soloGame, handleSoloBackToMap, handleSoloRetry],
+  );
+
+  // A cleared level is saved as soon as the game says so.
+  const soloResult = multiplayerGameState?.solo?.result;
+  useEffect(() => {
+    const info = multiplayerGameState?.solo;
+    if (!soloGame || !info || info.result !== 'won' || info.level_id !== soloGame.levelId) return;
+    recordClear(soloGame.archetype, soloGame.levelId, info.round ?? multiplayerGameState.current_round);
+  }, [soloResult, soloGame]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMultiplayerStateUpdate = useCallback((state: GameState) => {
     setMultiplayerGameState(state);
@@ -316,6 +390,13 @@ function AppInner() {
     return (
       <SettingsProvider>
         <TerritoryPreview />
+      </SettingsProvider>
+    );
+  }
+  if (previewMode === 'solo-maps') {
+    return (
+      <SettingsProvider>
+        <SoloMapsPreview />
       </SettingsProvider>
     );
   }
@@ -383,7 +464,29 @@ function AppInner() {
           removedFromLobby={removedFromLobby}
           wsSend={gameWsSend}
           wsMessage={gameWsMessage}
+          solo={soloProps}
         />
+      </SettingsProvider>
+    );
+  }
+
+  // Solo: choose a campaign, then its overworld
+  if (screen.type === 'solo') {
+    return (
+      <SettingsProvider>
+        {screen.campaign ? (
+          <SoloOverworld
+            key={screen.campaign}
+            archetype={screen.campaign}
+            onBack={() => setScreen({ type: 'solo' })}
+            onStart={handleStartSolo}
+          />
+        ) : (
+          <SoloCampaignSelect
+            onBack={() => setScreen({ type: 'home' })}
+            onChoose={(campaign) => { chooseCampaign(campaign); setScreen({ type: 'solo', campaign }); }}
+          />
+        )}
       </SettingsProvider>
     );
   }
@@ -395,6 +498,7 @@ function AppInner() {
         <SetupScreen
           onCreateLobby={handleCreateLobby}
           onJoinLobby={handleJoinLobby}
+          onSolo={() => setScreen({ type: 'solo' })}
         />
         {error && (
           <div style={{ textAlign: 'center', color: '#ff4a4a', padding: 12 }}>{error}</div>

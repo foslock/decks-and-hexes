@@ -7,12 +7,15 @@ Every card in Card Clash is one of three types:
 ### Claim
 Asserts power on a target tile. All board interaction — both expanding to neutral tiles and attacking opponent-owned tiles — uses Claim cards. The target tile must be adjacent to a tile the player already owns, unless the card states otherwise.
 
-- Most neutral tiles have defense **0**, so any Claim (even Explore's power 0) takes them if nobody else claims them. VP hexes have intrinsic defense (standard 2, premium 3) and tiles next to a premium hex have 1; a claim that **ties** a neutral tile's intrinsic defense still takes it.
+- Most neutral tiles have defense **0**, so any Claim takes them if nobody else claims them. VP hexes have intrinsic defense (standard 2, premium 3) and tiles next to a premium hex have 1; a claim that **ties** a neutral tile's intrinsic defense still takes it. In short: **match a neutral tile's defense to take it; beat a rival to take theirs.**
+- **Explore** only claims a **defenseless, unoccupied** tile: nobody owns it and its defense is 0. It can't be played on any owned tile or any tile with defense (VP hexes, tiles next to the premium hex). It has no power of its own, so any rival Claim on the same tile beats it; two Explores on one tile cancel out. Explore+ claims up to 2 such tiles (they needn't touch each other).
 - Owned tiles defend with their intrinsic defense (bases 3, VP hexes 2/3) plus any permanent bonuses (Entrench, Barricade, Twin Cities), the Defense cards played on them that round, and any Claims their owner stacks on them.
 - The player with the highest total Claim power on a tile wins it. Ties go to the current owner.
 
 ### Defense
 Adds power to a tile the player already owns, increasing its resistance to Claim cards this round (or permanently, in some cases).
+
+Because a Claim played on your own tile also defends it, a pure Defense card has to earn its slot some other way: most Core defense cards also draw a card and give back their action (Watchtower, Barricade, Iron Wall, Phalanx) or pay resources (Rearguard). Balance runs keep a defense card only if it wins as often as the Claims it competes with.
 
 ### Engine
 Generates resources, draws cards, or grants action slots. Does not directly interact with the board.
@@ -58,10 +61,11 @@ Conditional effects that depend on whether a Claim succeeded or failed. These re
 For a **Defense** card, "if an opponent's claim on this tile fails" (Counterattack) is checked after Claims resolve: it fires when at least one opponent claimed the tile and you still own it.
 
 ### When conditional Claim power is decided
-A Claim's power is worked out when you play it. If a conditional bonus already applies then, that power is locked in. If it doesn't apply yet, the condition is checked again when Claims resolve. So:
+Every Claim's conditions are judged **at the reveal** — after abandons and Defense cards, before any tile changes hands — so every Claim sees the same board, whatever order the tiles resolve in. (While you plan, the game previews the power each Claim would have now.) So:
 - **Strike Team** gets its +2 if you play any other Claim this round, before or after it (Explore counts).
-- **Battering Ram** sees Defense cards the owner plays on its target this round (Defense resolves before Claims).
-- **Road Builder** is the exception: whether the tile bridges your territory is judged only when you play it.
+- **Siege Engine** and **Battering Ram** see Defense cards the owner plays on their target this round (Defense resolves before Claims).
+- **Road Builder** checks whether the tile bridges your territory on the board as it stands before any tile changes hands.
+- The exception is power counted from your hand (**Strength in Numbers**): it's fixed when you play the card, since your hand only exists while you play.
 
 ### Next Turn (Delayed)
 Effects that carry forward to the start of the following round. Purchased cards entering the discard pile also fall into this category — they can only appear in hand next turn or later (after a shuffle).

@@ -116,6 +116,7 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
   });
 
   const vpTiles = Object.values(gameState.grid.tiles).filter(t => t.is_vp).length;
+  const solo = gameState.solo;
   const tilesPerVp = 3;
   // Head-to-head games get a "VS" between the two cards
   const showVs = playerCount === 2;
@@ -128,13 +129,13 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
     }}>
       {/* VP Target — top area */}
       <div className="cc-scr-intro-vp" style={slideStyle(vpVisible)}>
-        <div className="cc-scr-eyebrow" style={{ marginBottom: 10 }}>The battle begins</div>
+        <div className="cc-scr-eyebrow" style={{ marginBottom: 10 }}>{solo ? solo.level_title : 'The battle begins'}</div>
         <div className="cc-title cc-scr-intro-title">
-          Collect {gameState.vp_target} VP
+          {solo ? (solo.objective.headline ?? solo.objective.goal) : `Collect ${gameState.vp_target} VP`}
         </div>
         <div className="cc-scr-ornament" aria-hidden="true"><i /></div>
         <div className="cc-scr-intro-sub">
-          First player to reach the target wins
+          {solo ? solo.objective.text : 'First player to reach the target wins'}
         </div>
       </div>
 
@@ -185,8 +186,12 @@ export default function GameIntroOverlay({ gameState, onReady }: GameIntroOverla
           Game Settings
         </div>
         <div className="cc-scr-chips">
-          <span className="cc-scr-chip">{GRID_SIZE_LABELS[gameState.grid.size] || gameState.grid.size}</span>
-          <span className="cc-scr-chip"><b>{gameState.max_rounds}</b> Rounds</span>
+          <span className="cc-scr-chip">
+            {solo ? <><b>{Object.keys(gameState.grid.tiles).length}</b> tiles</> : GRID_SIZE_LABELS[gameState.grid.size] || gameState.grid.size}
+          </span>
+          <span className="cc-scr-chip">
+            {solo && solo.objective.rounds === null ? <>No time limit</> : <><b>{solo?.objective.rounds ?? gameState.max_rounds}</b> Rounds</>}
+          </span>
           <span className="cc-scr-chip"><b>{vpTiles}</b> Bonus VP tiles</span>
           <span className="cc-scr-chip"><b>{tilesPerVp}</b> tiles per VP</span>
         </div>

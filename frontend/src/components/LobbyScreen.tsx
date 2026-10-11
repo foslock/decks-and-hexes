@@ -18,14 +18,8 @@ interface CardPackDef {
   description?: string;
   shared_card_ids: string[] | null;
   archetype_card_ids: Record<string, string[]> | null;
-}
-
-function getDailyPackId(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `daily_${y}${m}${d}`;
+  /** Everything: every card at once, for testing only. */
+  testing_only?: boolean;
 }
 
 const PLAYER_COLOR_OPTIONS = [
@@ -40,11 +34,11 @@ const ARCHETYPES = [
 ];
 
 const GRID_SIZES = [
-  { id: 'small', name: 'Small', short: 'S', players: '2-3', tiles: 61, radius: 4 },
-  { id: 'medium', name: 'Medium', short: 'M', players: '3-4', tiles: 91, radius: 5 },
-  { id: 'large', name: 'Large', short: 'L', players: '4-6', tiles: 127, radius: 6 },
-  { id: 'mega', name: 'Mega', short: 'Mg', players: '5-6', tiles: 169, radius: 7 },
-  { id: 'ultra', name: 'Ultra', short: 'U', players: '6', tiles: 217, radius: 8 },
+  { id: 'small', name: 'Small', short: 'S', tiles: 61, radius: 4 },
+  { id: 'medium', name: 'Medium', short: 'M', tiles: 91, radius: 5 },
+  { id: 'large', name: 'Large', short: 'L', tiles: 127, radius: 6 },
+  { id: 'mega', name: 'Mega', short: 'Mg', tiles: 169, radius: 7 },
+  { id: 'ultra', name: 'Ultra', short: 'U', tiles: 217, radius: 8 },
 ];
 
 // Base VP targets for 2 players; subtract 1 VP per extra player
@@ -142,10 +136,8 @@ export default function LobbyScreen({
   const [starting, setStarting] = useState(false);
   const [showCopied, setShowCopied] = useState(false);
   const [cardPacks, setCardPacks] = useState<CardPackDef[]>([]);
-  const selectedPackId = lobby.config.card_pack || 'everything';
-  const selectedPackDescription = cardPacks.find(p =>
-    p.id === selectedPackId || (p.id.startsWith('daily_') && selectedPackId.startsWith('daily_')),
-  )?.description;
+  const selectedPackId = lobby.config.card_pack || 'first_clash';
+  const selectedPackDescription = cardPacks.find(p => p.id === selectedPackId)?.description;
   const [showPackBrowser, setShowPackBrowser] = useState(false);
   const [showMapPreview, setShowMapPreview] = useState(false);
   const [showSeedHistory, setShowSeedHistory] = useState(false);
@@ -200,13 +192,6 @@ export default function LobbyScreen({
       .then(res => res.json())
       .then((data: { packs: CardPackDef[] }) => {
         setCardPacks(data.packs);
-        // Auto-select today's daily pack for host if currently on default
-        if (isHost && lobby.config.card_pack === 'everything') {
-          const dailyId = getDailyPackId();
-          if (data.packs.some(p => p.id.startsWith('daily_'))) {
-            handleConfigChange('card_pack', dailyId);
-          }
-        }
       })
       .catch(() => {});
   }, []);
@@ -443,9 +428,7 @@ export default function LobbyScreen({
   // ── Render ───────────────────────────────────────────────
 
   const statusClass = status === 'connected' ? 'is-connected' : status === 'connecting' ? 'is-connecting' : 'is-disconnected';
-  const cardPackLabel = (lobby.config.card_pack || '').startsWith('daily_')
-    ? "This pack changes every day — a fresh selection of 10 shared market cards generated from today's date."
-    : "Decides which cards will be available in the game.";
+  const cardPackLabel = 'Decides which cards you can buy: 5 shared cards and 5 from each archetype, the same all game.';
 
   return (
     <div className="cc-scr-backdrop cc-scr-lobby">
@@ -740,23 +723,18 @@ export default function LobbyScreen({
                 {isHost && cardPacks.length > 0 ? (
                   <select
                     className="cc-scr-select"
-                    value={(lobby.config.card_pack || 'everything').startsWith('daily_') ? 'daily' : (lobby.config.card_pack || 'everything')}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      handleConfigChange('card_pack', val === 'daily' ? getDailyPackId() : val);
-                    }}
+                    value={selectedPackId}
+                    onChange={(e) => handleConfigChange('card_pack', e.target.value)}
                   >
-                    {cardPacks.map(p => {
-                      // Collapse all daily_* packs into a single "daily" option
-                      if (p.id.startsWith('daily_')) {
-                        return <option key="daily" value="daily" title={p.description}>{p.name}</option>;
-                      }
-                      return <option key={p.id} value={p.id} title={p.description}>{p.name}</option>;
-                    })}
+                    {cardPacks.map(p => (
+                      <option key={p.id} value={p.id} title={p.description}>
+                        {p.testing_only ? `${p.name} (testing)` : p.name}
+                      </option>
+                    ))}
                   </select>
                 ) : (
                   <strong className="cc-scr-row-value">
-                    {cardPacks.find(p => p.id === (lobby.config.card_pack || 'everything') || (p.id.startsWith('daily_') && (lobby.config.card_pack || '').startsWith('daily_')))?.name || lobby.config.card_pack || 'Everything'}
+                    {cardPacks.find(p => p.id === selectedPackId)?.name || selectedPackId}
                   </strong>
                 )}
                 <button
@@ -778,16 +756,28 @@ export default function LobbyScreen({
               <div className="cc-scr-pack-desc">{selectedPackDescription}</div>
             )}
 
-            {/* Map Size */}
+            {/* Map Size — follows the player count until the host picks one */}
             <div className="cc-scr-row">
               <div>
-                <Tooltip content="The size of the hex grid.">
+                <Tooltip content="The size of the hex grid. It follows the number of players (the size where games last 11+ rounds) until you pick one.">
                   <span className="cc-scr-row-label" style={{ display: 'block' }}>Map Size</span>
                 </Tooltip>
+                {lobby.config.grid_size_auto ? (
+                  <span className="cc-scr-row-hint" style={{ display: 'block' }}>suggested for {players.length < 2 ? 2 : players.length} players</span>
+                ) : isHost && lobby.config.suggested_grid_size && lobby.config.suggested_grid_size !== lobby.config.grid_size ? (
+                  <button
+                    onClick={() => handleConfigChange('grid_size_auto', true)}
+                    className="cc-scr-row-hint"
+                    style={{ display: 'block', background: 'none', border: 'none', padding: 0, textDecoration: 'underline' }}
+                  >
+                    Use suggested ({GRID_SIZES.find(s => s.id === lobby.config.suggested_grid_size)?.name})
+                  </button>
+                ) : null}
               </div>
               <div className={`cc-scr-seg${isHost ? '' : ' is-readonly'}`} style={{ display: 'flex', flex: 1 }}>
                 {GRID_SIZES.map((size) => (
-                  <Tooltip key={size.id} content={`${size.name}: ${size.tiles} tiles, ${size.players} players`}
+                  <Tooltip key={size.id}
+                    content={`${size.name}: ${size.tiles} tiles${lobby.config.suggested_grid_size === size.id ? ' — suggested for this many players' : ''}`}
                     wrapperStyle={{ display: 'flex', flex: '1 1 0', minWidth: 0 }}>
                     <button
                       onClick={() => isHost && handleConfigChange('grid_size', size.id)}
@@ -1037,7 +1027,9 @@ export default function LobbyScreen({
               )}
             </div>
 
-            {/* Archetype Market Size */}
+            {/* Archetype Market Size — only the Everything pack draws a random
+                market; real packs show their whole archetype supply. */}
+            {cardPacks.find(p => p.id === selectedPackId)?.testing_only && (
             <div className="cc-scr-row">
               <div>
                 <Tooltip content="The number of archetype cards available to buy each round.">
@@ -1074,6 +1066,7 @@ export default function LobbyScreen({
                 </strong>
               )}
             </div>
+            )}
 
             {/* Test Mode (host only) */}
             {isHost && (
@@ -1164,9 +1157,7 @@ export default function LobbyScreen({
         />
       )}
       {showPackBrowser && (() => {
-        const packId = lobby.config.card_pack || 'everything';
-        const pack = cardPacks.find(p => p.id === packId)
-          || (packId.startsWith('daily_') ? cardPacks.find(p => p.id.startsWith('daily_')) : undefined);
+        const pack = cardPacks.find(p => p.id === selectedPackId);
         return (
           <CardBrowser
             onClose={() => setShowPackBrowser(false)}

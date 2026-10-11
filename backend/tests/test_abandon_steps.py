@@ -3,7 +3,8 @@ the tile being given up (and burnt to a permanent wasteland)."""
 
 from __future__ import annotations
 
-from app.game_engine.cards import Card, _copy_card
+from app.game_engine.cards import Card, Timing, _copy_card
+from app.game_engine.effects import Effect, EffectType
 from app.game_engine.game_state import GameState, play_card, submit_play
 from app.storage.serializer import _deserialize_tile, _serialize_tile
 from tests.test_card_resolution import _make_2p_game, _make_3p_game
@@ -66,12 +67,22 @@ def _tile_next_to(game: GameState, pid: str):  # type: ignore[no-untyped-def]
     raise AssertionError("no free neighbour")
 
 
+def _ignorer(card_registry: dict[str, Card], card_id: str, instance: str) -> Card:
+    """A copy of *card_id*; the Siege Engine slot becomes a claim that ignores
+    temporary defense. No card ships with that today (Siege Engine now gets
+    +2 against defended tiles), but the engine keeps the rule for future sets."""
+    card = _copy_card(card_registry[card_id], instance)
+    if card_id == "fortress_siege_engine":
+        card.effects = [Effect(type=EffectType.IGNORE_DEFENSE, timing=Timing.ON_RESOLUTION)]
+    return card
+
+
 def _siege_vs_temp_defense(card_registry: dict[str, Card], card_id: str):  # type: ignore[no-untyped-def]
     game = _make_2p_game(card_registry)
     tile = _tile_next_to(game, "p0")
     # A rival tile with 3 temporary defense (e.g. a Defense card played this round).
     tile.owner, tile.base_defense, tile.permanent_defense_bonus, tile.defense_power = "p1", 0, 0, 3
-    card = _copy_card(card_registry[card_id], "x")
+    card = _ignorer(card_registry, card_id, "x")
     card.power = 3
     player = game.players["p0"]
     player.hand = [card] + player.hand[1:]
@@ -83,10 +94,26 @@ def _siege_vs_temp_defense(card_registry: dict[str, Card], card_id: str):  # typ
     return tile, step
 
 
-def test_siege_engine_ignores_temporary_defense(card_registry: dict[str, Card]) -> None:
+def test_ignore_defense_skips_temporary_defense(card_registry: dict[str, Card]) -> None:
     tile, step = _siege_vs_temp_defense(card_registry, "fortress_siege_engine")
     assert tile.owner == "p0" and step["outcome"] == "claimed"
     assert step["defense_ignored"] == 3 and step["ignored_by"] == ["p0"]
+
+
+def test_siege_engine_gets_two_more_power_against_defense(card_registry: dict[str, Card]) -> None:
+    # Power 3 + 2 against the tile's 3 temporary defense: 5 beats 3.
+    game = _make_2p_game(card_registry)
+    tile = _tile_next_to(game, "p0")
+    tile.owner, tile.base_defense, tile.permanent_defense_bonus, tile.defense_power = "p1", 0, 0, 3
+    player = game.players["p0"]
+    player.hand = [_copy_card(card_registry["fortress_siege_engine"], "se")] + player.hand[1:]
+    ok, msg = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
+    assert ok, msg
+    submit_play(game, "p0")
+    submit_play(game, "p1")
+    step = next(s for s in game.resolution_steps if s["tile_key"] == tile.key)
+    assert tile.owner == "p0" and "defense_ignored" not in step
+    assert step["claimants"][0]["power"] == 5
 
 
 def test_a_plain_claim_faces_the_temporary_defense(card_registry: dict[str, Card]) -> None:
@@ -104,7 +131,7 @@ def _siege_and_rival(card_registry: dict[str, Card], siege_power: int, rival_pow
     staging.owner = "p2"  # p2 can reach the tile too
     tile.owner, tile.base_defense, tile.permanent_defense_bonus, tile.defense_power = "p1", 0, 0, 3
     for pid, card_id, power in (("p0", "fortress_siege_engine", siege_power), ("p2", "neutral_militia", rival_power)):
-        card = _copy_card(card_registry[card_id], f"{pid}x")
+        card = _ignorer(card_registry, card_id, f"{pid}x")
         card.power = power
         player = game.players[pid]
         player.hand = [card] + player.hand[1:]
@@ -116,7 +143,7 @@ def _siege_and_rival(card_registry: dict[str, Card], siege_power: int, rival_pow
     return tile, step
 
 
-def test_siege_engine_strips_defense_only_for_its_own_claim(card_registry: dict[str, Card]) -> None:
+def test_ignore_defense_strips_defense_only_for_its_own_claim(card_registry: dict[str, Card]) -> None:
     # The rival's 3 can't beat the 3 defense (ties go to the owner); the
     # Siege Engine's 2 faces 0 and gets through, so it takes the tile.
     tile, step = _siege_and_rival(card_registry, siege_power=2, rival_power=3)
@@ -146,7 +173,8 @@ def _neutral_neighbours(game: GameState, pid: str, n: int) -> list[tuple[int, in
     return out[:n]
 
 
-def test_surge_plus_grants_an_action_per_tile_taken_once(card_registry: dict[str, Card]) -> None:
+def test_surge_plus_only_reaches_further(card_registry: dict[str, Card]) -> None:
+    """Surge+ claims one more tile; it grants nothing next round (number-only upgrade)."""
     game = _make_2p_game(card_registry, arch0="swarm")
     surge = _copy_card(card_registry["swarm_surge"], "s")
     surge.is_upgraded = True
@@ -160,8 +188,8 @@ def test_surge_plus_grants_an_action_per_tile_taken_once(card_registry: dict[str
     assert ok, msg
     submit_play(game, "p0")
     submit_play(game, "p1")
-    # Two tiles taken → two actions next round (not counted again per tile).
-    assert player.turn_modifiers.extra_actions_next_turn == 2
+    assert surge.effective_multi_target_count == 2
+    assert player.turn_modifiers.extra_actions_next_turn == 0
 
 
 def test_consecrate_on_a_lost_tile_leaves_no_step(card_registry: dict[str, Card]) -> None:

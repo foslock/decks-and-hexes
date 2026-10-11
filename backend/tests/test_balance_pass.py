@@ -59,6 +59,14 @@ def _game(reg: dict[str, Any], a0: str = "vanguard", a1: str = "swarm", seed: in
 _uid = [0]
 
 
+def _settled_power(game: GameState, pid: str) -> int:
+    """The power the reveal settles on for *pid*'s last planned Claim, on the
+    current board (no stacking bonus)."""
+    action = game.players[pid].planned_actions[-1]
+    return calculate_effective_power(game, game.players[pid], action.card, action,
+                                     include_stacking_bonus=False)
+
+
 def _give(game: GameState, reg: dict[str, Any], pid: str, card_id: str, upgraded: bool = False):
     """Put a fresh copy of *card_id* at the front of *pid*'s hand."""
     _uid[0] += 1
@@ -266,7 +274,7 @@ class TestB4Counterattack:
 # ── B5 / B6: no double draws from card text ────────────────────────
 
 
-def test_b5_dividends_upgraded_draws_exactly_one(card_registry):
+def test_b5_dividends_upgraded_raises_the_minimum(card_registry):
     game = _game(card_registry)
     p0 = game.players["p0"]
     _give(game, card_registry, "p0", "neutral_dividends", upgraded=True)
@@ -274,11 +282,11 @@ def test_b5_dividends_upgraded_draws_exactly_one(card_registry):
     hand_before = len(p0.hand)
     ok, _ = play_card(game, "p0", 0)
     assert ok
-    assert len(p0.hand) == hand_before  # played 1, drew 1
-    assert p0.resources == 4 + 2  # 1 per 2 held
+    assert len(p0.hand) == hand_before - 1  # no draw
+    assert p0.resources == 4 + 3  # 1 per 2 held = 2, but at least 3
 
 
-def test_b6_war_tithe_upgraded_draws_next_round_only(card_registry):
+def test_b6_war_tithe_upgraded_pays_double(card_registry):
     game = _game(card_registry)
     p0 = game.players["p0"]
     p0.claims_won_last_round = 2
@@ -289,8 +297,7 @@ def test_b6_war_tithe_upgraded_draws_next_round_only(card_registry):
     assert ok
     assert len(p0.hand) == hand_before - 1  # no immediate draw
     assert p0.resources == res_before + 4
-    assert p0.turn_modifiers.extra_draws_next_turn == 1
-    assert "next round" in card_registry["vanguard_war_tithe"].upgrade_description
+    assert p0.turn_modifiers.extra_draws_next_turn == 0
 
 
 # ── B7: Ambush is power 4 against opponent-owned tiles (text matches) ─
@@ -310,19 +317,15 @@ def test_b7_ambush_vs_enemy_tile(card_registry):
 
 
 class TestB8RallyCry:
-    def test_upgraded_buffs_next_claims(self, card_registry):
+    def test_upgraded_draws_two(self, card_registry):
         game = _game(card_registry)
         p0 = game.players["p0"]
         _give(game, card_registry, "p0", "neutral_rally_cry", upgraded=True)
+        hand_before = len(p0.hand)
         ok, _ = play_card(game, "p0", 0)
         assert ok
-        blitz = _give(game, card_registry, "p0", "vanguard_blitz")
-        tile = _neutral_adjacent(game, "p0")
-        ok, _ = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
-        assert ok
-        action = p0.planned_actions[-1]
-        assert action.card is blitz
-        assert action.effective_power == blitz.power + 1
+        assert len(p0.hand) == hand_before - 1 + 2
+        assert p0.turn_modifiers.claim_buffs == []
 
     def test_base_has_no_power_buff(self, card_registry):
         game = _game(card_registry)
@@ -466,7 +469,7 @@ def test_b12_arms_dealer_uses_printed_power(card_registry):
     game = _game(card_registry)
     p0 = game.players["p0"]
     # Another Claim is planned, so Strike Team's conditional +2 would be live —
-    # Arms Dealer still pays only its printed power 3.
+    # Arms Dealer still pays only its printed power.
     _give(game, card_registry, "p0", "vanguard_blitz")
     tile = _neutral_adjacent(game, "p0")
     ok, _ = play_card(game, "p0", 0, target_q=tile.q, target_r=tile.r)
@@ -476,7 +479,7 @@ def test_b12_arms_dealer_uses_printed_power(card_registry):
     res, actions = p0.resources, p0.actions_available
     ok, msg = play_card(game, "p0", 0, trash_card_indices=[0])
     assert ok, msg
-    assert p0.resources == res + 3
+    assert p0.resources == res + card_registry["vanguard_strike_team"].power
     assert p0.actions_available == actions + 1
     assert any(c.definition_id == "vanguard_strike_team" for c in p0.trash)
 
@@ -554,7 +557,7 @@ class TestB14Warden:
         for t in game.grid.tiles.values():
             if t.owner == "p0" and not t.is_base:
                 t.owner = None
-        mine = [t for t in game.grid.tiles.values() if t.owner is None and not t.is_blocked][:8]
+        mine = [t for t in game.grid.tiles.values() if t.owner is None and not t.is_blocked][:10]
         for t in mine:
             t.owner = "p0"
         mine[0].lost_by = ["p1"]  # taken from an opponent: still counts
@@ -614,7 +617,7 @@ class TestReworkedCards:
         tile = _neutral_adjacent(game, "p1")
         ok, _ = play_card(game, "p1", 0, target_q=tile.q, target_r=tile.r)
         assert ok
-        assert p1.planned_actions[-1].effective_power == surge.power + 1
+        assert _settled_power(game, "p1") == surge.power + 2
 
     def test_road_builder_power_on_bridge_and_off(self, card_registry):
         game = _game(card_registry)
@@ -635,8 +638,8 @@ class TestReworkedCards:
         assert rb.power == 1
         ok, msg = play_card(game, "p0", 0, target_q=gap.q, target_r=gap.r)
         assert ok, msg
-        assert p0.planned_actions[-1].effective_power == 5
-        # A non-bridging tile: power 2, frozen at play time
+        assert _settled_power(game, "p0") == 5
+        # A non-bridging tile: printed power
         rb2 = _give(game, card_registry, "p0", "neutral_road_builder")
         other = next(
             a for a in game.grid.get_adjacent(far.q, far.r)
@@ -647,7 +650,7 @@ class TestReworkedCards:
         ok, msg = play_card(game, "p0", 0, target_q=other.q, target_r=other.r)
         assert ok, msg
         assert p0.planned_actions[-1].card is rb2
-        assert p0.planned_actions[-1].effective_power == 1
+        assert _settled_power(game, "p0") == 1
 
     def test_surveyor_rerolls_last_this_round_only(self, card_registry):
         game = _game(card_registry)

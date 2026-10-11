@@ -54,9 +54,9 @@ def _bases(tiles: dict[str, Any]) -> dict[str, str]:
 def test_preview_has_a_base_per_player_in_seat_order(client: TestClient) -> None:
     lob = _lobby_with_cpus(client, 2)
     data = _preview(client, lob)
-    assert data["grid_size"] == "medium"
-    assert data["map_name"] == "Frontiers"
-    assert len(data["tiles"]) == 91
+    assert data["grid_size"] == "large"  # suggested for 3 players
+    assert data["map_name"] == "Rings"
+    assert len(data["tiles"]) == 127
     assert data["seats"][0] == lob["player_id"]
     assert sorted(_bases(data["tiles"]).values()) == sorted(data["seats"])
 

@@ -7,9 +7,11 @@ exploit bots that mimic strategies human playtesters have used to beat the
 CPU, so difficulty tuning can be checked against them:
 
   easy / medium / hard   shipped CPUPlayer difficulty tiers
-  rush                   "strike rush": Hard play logic, but buys only the
-                         highest-power Claim it can afford (saving otherwise)
-                         and rerolls hunting for big Claims
+  fastclaim              the baseline: Fast Claim buying (the strongest Claim
+                         it can afford, else save) with Medium play — Easy
+                         should lose to it, Medium match it, Hard beat it
+  rush                   Fast Claim buying with Hard play logic (the
+                         "strike rush"); rerolls hunting for big Claims
   greedy                 buys the most expensive affordable card every turn
                          (a naive "big money" human)
   raider                 Hard economy with hyper-aggressive targeting of the
@@ -43,12 +45,12 @@ sys.path.insert(0, _backend_dir)
 
 from app.data_loader.loader import load_all_cards  # noqa: E402
 from app.game_engine.cards import Archetype, CardType  # noqa: E402
+from app.game_engine.cpu_builds import FastClaimCPU, fast_claim_purchase  # noqa: E402
 from app.game_engine.cpu_player import (  # noqa: E402
     EASY,
     HARD,
     MEDIUM,
     CPUPlayer,
-    _is_limited_use_claim,
 )
 from app.game_engine.effects import EffectType  # noqa: E402
 from app.game_engine.game_state import (  # noqa: E402
@@ -85,9 +87,8 @@ def _claim_power_estimate(cpu: CPUPlayer, game: Any, card: Any) -> float:
 
 
 class StrikeRushCPU(CPUPlayer):
-    """Plays like Hard, but buys only big Claims (the 'strike card' rush)."""
-
-    MIN_POWER = 3
+    """Plays like Hard, but buys only big Claims (the 'strike card' rush) —
+    the Fast Claim build, Card Clash's Big Money."""
 
     def _market_options(self, game: Any, player: Any) -> list[tuple[Any, int, dict[str, Any]]]:
         opts: list[tuple[Any, int, dict[str, Any]]] = []
@@ -111,19 +112,9 @@ class StrikeRushCPU(CPUPlayer):
         return opts
 
     def _pick_best_purchase(self, game: Any, player: Any, weights: Any) -> Optional[dict[str, Any]]:
-        best: Optional[tuple[float, dict[str, Any]]] = None
-        for card, cost, action in self._market_options(game, player):
-            if cost > player.resources or card.card_type != CardType.CLAIM:
-                continue
-            if _is_limited_use_claim(card) or card.trash_on_use:
-                continue
-            power = _claim_power_estimate(self, game, card)
-            if power < self.MIN_POWER:
-                continue
-            score = power * 10 - cost
-            if best is None or score > best[0]:
-                best = (score, action)
-        return best[1] if best else None
+        # The in-app Fast Claim build (app/game_engine/cpu_builds.py) — the
+        # baseline packs are measured against.
+        return fast_claim_purchase(game, player)
 
     def should_reroll_market(self, game: Any) -> bool:
         player = game.players[self.player_id]
@@ -222,6 +213,8 @@ def make_agent(kind: str, pid: str, rng: random.Random) -> CPUPlayer:
         return _baseline_cpu_class()(pid, difficulty=kind.split("@")[0], rng=rng)
     if kind in (EASY, MEDIUM, HARD):
         return CPUPlayer(pid, difficulty=kind, rng=rng)
+    if kind == "fastclaim":
+        return FastClaimCPU(pid, rng=rng)
     if kind == "rush":
         return StrikeRushCPU(pid, difficulty=HARD, rng=rng)
     if kind == "greedy":
@@ -368,6 +361,7 @@ def format_row(kind_a: str, kind_b: str, grid: str, players: int, s: dict[str, A
 
 SUITE = [
     ("hard", "easy"), ("hard", "medium"), ("medium", "easy"),
+    ("hard", "fastclaim"), ("medium", "fastclaim"), ("easy", "fastclaim"),
     ("hard", "rush"), ("medium", "rush"), ("easy", "rush"),
     ("hard", "greedy"), ("medium", "greedy"),
     ("hard", "raider"), ("medium", "raider"),

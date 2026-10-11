@@ -108,6 +108,13 @@ const LUSH = linear(0x4a6a28);
 const ROCK = linear(0x6c6862);
 const CHAR = linear(0x15110e);
 const ASH = linear(0x6f6a63);
+const SAND = linear(0xc9b68a);
+const WET_SAND = linear(0x8f7d5a);
+
+/** How far a beach runs inland from a water tile's edge (world units). */
+const BEACH_WIDTH = 0.62;
+/** A beach meets the water here — just above it (terrain.ts WATER_Y). */
+const BEACH_EDGE_Y = -0.285;
 
 /** What about a tile shapes the terrain and decor (a town's VP value
  *  doesn't — its structure updates on its own). */
@@ -130,7 +137,11 @@ export class BoardLayout {
   readonly radius: number;
   readonly maxRing: number;
 
-  constructor(gameTiles: Record<string, HexTile>) {
+  /** Water tiles (not in `tiles`): the land round them slopes to a beach. */
+  private readonly water: Set<string>;
+
+  constructor(gameTiles: Record<string, HexTile>, water: Set<string> = new Set()) {
+    this.water = water;
     // Map seed from the fixed features so different maps look different.
     // A scorched tile counts as what it was (a plain tile, or a VP town), so
     // burning one never reshuffles the rest of the island's scenery.
@@ -221,6 +232,30 @@ export class BoardLayout {
 
   private scratch: { tile: TileLayout; w: number }[] = [];
 
+  isWater(key: string): boolean {
+    return this.water.has(key);
+  }
+
+  /** 0 inland … 1 at a water tile's edge: how far down a beach a point is. */
+  beach(x: number, z: number): number {
+    if (!this.water.size) return 0;
+    const key = worldToTileKey(x, z);
+    const [q, r] = key.split(',').map(Number);
+    let d = Infinity;
+    // A beach is narrower than a hex, so only the point's own hex and its
+    // neighbours can be the water it runs down to.
+    for (let k = -1; k < 6; k++) {
+      const wq = k < 0 ? q : q + HEX_DIRS[k][0];
+      const wr = k < 0 ? r : r + HEX_DIRS[k][1];
+      if (!this.water.has(`${wq},${wr}`)) continue;
+      const c = axialToWorld(wq, wr);
+      d = Math.min(d, Math.max(0, hexSdf(x - c.x, z - c.z)));
+    }
+    if (d === Infinity) return 0;
+    const rag = (fbm2(x * 2.6, z * 2.6, 97, 2) - 0.5) * 0.22;
+    return 1 - smoothstep(0, BEACH_WIDTH, d + rag * Math.min(1, d * 6));
+  }
+
   /** Terrain surface height at a world position. */
   heightAt(x: number, z: number): number {
     const ws = this.scratch;
@@ -237,7 +272,12 @@ export class BoardLayout {
     }
     const n = fbm2(x * 0.9, z * 0.9, 5, 3) - 0.5;
     const detail = valueNoise2(x * 3.1, z * 3.1, 9) - 0.5;
-    return h + n * 0.06 + detail * (0.012 + rough * 0.05);
+    const ground = h + n * 0.06 + detail * (0.012 + rough * 0.05);
+    const k = this.beach(x, z);
+    if (k <= 0) return ground;
+    // Down a gentle beach to the waterline at the water tile's edge.
+    const s = k * k * (3 - 2 * k);
+    return ground + (BEACH_EDGE_Y - ground) * s;
   }
 
   /** Linear-space ground color at a world position. */
@@ -278,6 +318,16 @@ export class BoardLayout {
     r += (ROCK[0] - r) * rocky * 0.5;
     g += (ROCK[1] - g) * rocky * 0.5;
     b += (ROCK[2] - b) * rocky * 0.5;
+    const shore = this.beach(x, z);
+    if (shore > 0) {
+      // Sand, darker and wet toward the waterline.
+      const sand = smoothstep(0.12, 0.5, shore);
+      const wet = smoothstep(0.72, 0.97, shore);
+      const sr = SAND[0] + (WET_SAND[0] - SAND[0]) * wet;
+      const sg = SAND[1] + (WET_SAND[1] - SAND[1]) * wet;
+      const sb = SAND[2] + (WET_SAND[2] - SAND[2]) * wet;
+      r += (sr - r) * sand; g += (sg - g) * sand; b += (sb - b) * sand;
+    }
     if (burnt > 0) {
       // Burnt ground: black char drifted with grey ash, the grass gone.
       const k = burnt;

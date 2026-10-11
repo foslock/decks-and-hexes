@@ -22,7 +22,8 @@ const SEA_SPEED = 0.06;
 const SKY_SPEED = 0.2;
 /** Thin wisps over the board: at most this many at once. */
 const MAX_WISPS = 2;
-const MAX_PUFFS = 140;
+// Sea clouds and wisps use ~60; the arrival's passage clouds ~170 more.
+const MAX_PUFFS = 320;
 
 const PUFF_VERT = /* glsl */ `
 attribute vec3 iCenter;
@@ -138,6 +139,15 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+/** A cloud on the camera's way in (setPassage): layers of them stand
+ *  across its path, each thinning away as the camera reaches it. */
+interface PassageCloud {
+  x: number;
+  y: number;
+  z: number;
+  puffs: Puff[];
+}
+
 export class CloudLayer {
   readonly group = new Group();
   private puffGeo = new InstancedBufferGeometry();
@@ -154,6 +164,10 @@ export class CloudLayer {
   private rand = rng(9371);
   private order: { i: number; depth: number }[] = [];
   private seaCount: number;
+  private cover: PassageCloud[] = [];
+  /** How much of the passage shows (1 = all, 0 = none). */
+  private coverAmount = 0;
+  private coverAnim: { from: number; to: number; t: number; dur: number } | null = null;
   private readonly sunView = new Vector3();
   private readonly tmp = new Vector3();
 
@@ -217,7 +231,75 @@ export class CloudLayer {
     // changing on the same island leaves them drifting where they are.
     const reshaped = Math.abs(layout.radius - this.layout.radius) > 1e-6 || layout.tiles.length !== this.layout.tiles.length;
     this.layout = layout;
-    if (reshaped) this.sea = this.sea.map(() => this.spawnSea(true));
+    if (reshaped) {
+      this.sea = this.sea.map(() => this.spawnSea(true));
+      this.cover = [];  // a passage belongs to one island's arrival
+    }
+  }
+
+  /** Show the passage clouds (1) or fade them out (0), over `seconds`
+   *  (0: at once). */
+  setCover(amount: number, seconds = 0): void {
+    const to = Math.max(0, Math.min(1, amount));
+    if (seconds <= 0) {
+      this.coverAmount = to;
+      this.coverAnim = null;
+    } else {
+      this.coverAnim = { from: this.coverAmount, to, t: 0, dur: seconds };
+    }
+  }
+
+  /** True while the cover is fading (the engine keeps drawing). */
+  get coverBusy(): boolean { return this.coverAnim !== null; }
+
+  /** Layers of cloud across the camera's straight way in to `look`: one
+   *  standing `distances[i]` back from it toward the camera (`back`, a unit
+   *  vector) — at several heights, since the way in slopes. The first layer
+   *  (the farthest back, met first) fills the view; the ones after it are
+   *  broken, thinning toward the last, which only frames the island, so each
+   *  altitude shows through the gaps of the one before. */
+  setPassage(look: Vector3, back: Vector3, distances: number[], fovDeg: number, aspect: number): void {
+    const r = this.rand;
+    const dir = back.clone().negate();
+    // Two axes across the view: screen-right (level) and screen-up.
+    const right = new Vector3().crossVectors(dir, new Vector3(0, 1, 0)).normalize();
+    const up = new Vector3().crossVectors(right, dir).normalize();
+    const tan = Math.tan((fovDeg * Math.PI) / 360);
+    const out: PassageCloud[] = [];
+    const layers = [...distances].sort((a, b) => b - a);
+    layers.forEach((along, k) => {
+      const first = k === 0;
+      // 0 for the first layer met, 1 for the last.
+      const late = layers.length > 1 ? k / (layers.length - 1) : 0;
+      const cols = first ? 5 : 6, rows = first ? 3 : 4;
+      const c = look.clone().addScaledVector(back, along);
+      // Half the view's height there, padded so the edges stay covered.
+      const h = along * tan * 1.3;
+      const w = h * Math.max(1, aspect);
+      const size = ((h * 2) / rows) * (first ? 1.2 : 1.05);
+      for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < rows; j++) {
+          const u = (i + 0.5) / cols * 2 - 1;
+          const v = (j + 0.5) / rows * 2 - 1;
+          if (!first) {
+            // Broken cloud, clearing from the middle out as the layers go by.
+            const edge = Math.max(Math.abs(u), Math.abs(v));
+            const keep = (0.7 - 0.25 * late) * (1 - late * 0.85 * (1 - edge));
+            if (r() > keep) continue;
+          }
+          const sx = u * w + (r() - 0.5) * (w / cols) * 0.5;
+          const sy = v * h + (r() - 0.5) * (h / rows) * 0.5;
+          const depth = (r() - 0.5) * size * 0.5;
+          out.push({
+            x: c.x + right.x * sx + up.x * sy + dir.x * depth,
+            y: c.y + right.y * sx + up.y * sy + dir.y * depth,
+            z: c.z + right.z * sx + up.z * sy + dir.z * depth,
+            puffs: this.puffs(3, size * 0.32, size * 0.1, size * (0.8 + r() * 0.3)),
+          });
+        }
+      }
+    });
+    this.cover = out;
   }
 
   private puffs(n: number, spread: number, height: number, size: number): Puff[] {
@@ -305,6 +387,14 @@ export class CloudLayer {
       if (this.wisps.length < MAX_WISPS) this.wisps.push(this.spawnWisp());
       this.nextWisp = 22 + this.rand() * 30;
     }
+    if (this.coverAnim) {
+      const a = this.coverAnim;
+      a.t += dt;
+      const u = Math.min(1, a.t / a.dur);
+      this.coverAmount = a.from + (a.to - a.from) * u * u * (3 - 2 * u);
+      if (u >= 1) this.coverAnim = null;
+    }
+
     // Close-ups get a clear view: wisps all but vanish as the camera zooms in.
     const zoomFade = 1 - 0.8 * smooth(1.25, 2.3, zoom);
 
@@ -321,6 +411,7 @@ export class CloudLayer {
       data[n * 4] = size; data[n * 4 + 1] = alpha; data[n * 4 + 2] = seed; data[n * 4 + 3] = wisp;
       n++;
     };
+    const push3 = (x: number, y: number, z: number, size: number, alpha: number, seed: number) => push(x, y, z, size, alpha, seed, 0);
 
     for (const c of this.sea) {
       // Thin out near the cliffs (never over the board) and far out to sea.
@@ -345,6 +436,22 @@ export class CloudLayer {
         this.shadowData[s * 4 + 2] = alpha * 0.45;
         this.shadowData[s * 4 + 3] = Math.atan2(WIND.z, WIND.x);
         s++;
+      }
+    }
+
+    // The passage: each puff thins as the camera nears it (flying through
+    // it) and with the cover as a whole.
+    if (this.coverAmount > 0.001 && this.cover.length) {
+      const cam = camera.position;
+      for (const c of this.cover) {
+        for (const p of c.puffs) {
+          const x = c.x + p.dx, y = c.y + p.dy, z = c.z + p.dz;
+          const d = Math.hypot(x - cam.x, y - cam.y, z - cam.z);
+          const near = smooth(p.size * 0.35, p.size * 1.25, d);
+          const alpha = 0.92 * this.coverAmount * near;
+          if (alpha <= 0.002) continue;
+          push3(x, y + Math.sin(time * 0.3 + p.seed * 6) * p.size * 0.02, z, p.size, alpha, p.seed);
+        }
       }
     }
 

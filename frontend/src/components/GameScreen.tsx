@@ -19,6 +19,7 @@ import type { CameraView } from '../board3d/engine';
 import PlayerEffectPopups from './PlayerEffectPopups';
 import GameIntroOverlay from './GameIntroOverlay';
 import GameOverOverlay from './GameOverOverlay';
+import SoloObjectiveHud from './solo/SoloObjectiveHud';
 import { useAnimated, useAnimationMode, useAnimationOff, useAnimationSpeed, useResolveSpeed } from './SettingsContext';
 import Tooltip, { IrreversibleButton, ConfirmButton, type ConfirmButtonHandle } from './Tooltip';
 import * as api from '../api/client';
@@ -144,6 +145,8 @@ interface GameScreenProps {
   removedFromLobby?: boolean;  // player was kicked from lobby while viewing game over
   wsSend?: (data: object) => void;  // WebSocket send for cursor broadcasting
   wsMessage?: { type: string; [key: string]: unknown } | null;  // WS messages for cursor/purchase events
+  /** A solo campaign level: the game-over screen offers these instead of the lobby. */
+  solo?: { onBackToMap: () => void; onRetry: () => Promise<void> };
 }
 
 /** A played card on the board during the reveal (every player's), until it
@@ -475,6 +478,20 @@ function PhaseIndicatorPill({ phase }: { phase: string }) {
 const DEBT_START_ROUND = 5;
 
 /** Parse the game log to find who received a Debt card this round. */
+/** Whether the VP leader gets a Debt each round from DEBT_START_ROUND: not a
+ *  player alone, nor in a solo level that turns it off. */
+function debtApplies(gameState: GameState): boolean {
+  const active = gameState.player_order.filter(pid => !gameState.players[pid]?.has_left).length;
+  return active >= 2 && (gameState.solo ? gameState.solo.debt : true);
+}
+
+/** The last round, if the game has one: a solo level's own (none for one
+ *  with no time limit), else the game's round limit. */
+export function roundLimit(gameState: GameState): number | null {
+  if (gameState.solo) return gameState.solo.objective.rounds;
+  return gameState.max_rounds ?? null;
+}
+
 function findDebtRecipientFromLog(gameState: GameState): { id: string; name: string } | null {
   const log = gameState.log;
   for (let i = log.length - 1; i >= 0; i--) {
@@ -800,7 +817,7 @@ const GAME_BACKDROP = [
   'linear-gradient(180deg, #121230 0%, #0c0c20 100%)',
 ].join(', ');
 
-export default function GameScreen({ gameState: latestState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby, wsSend, wsMessage }: GameScreenProps) {
+export default function GameScreen({ gameState: latestState, onStateUpdate, playerId: mpPlayerId, token: mpToken, isMultiplayer, isHost: mpIsHost, onLeaveGame, skipIntro: skipIntroProp, removedFromLobby, wsSend, wsMessage, solo }: GameScreenProps) {
   const animated = useAnimated();
   const animationMode = useAnimationMode();
   const animationOff = useAnimationOff();
@@ -1538,14 +1555,16 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     return () => document.removeEventListener('mousedown', handleClick);
   }, [settingsExpanded]);
 
-  // Show game over overlay when winner is set
+  // Show game over overlay when winner is set (or a solo level is decided:
+  // running out of rounds has no winner)
+  const soloResult = gameState.solo?.result;
   useEffect(() => {
-    if (gameState.winner && !showGameOver) {
+    if ((gameState.winner || soloResult) && !showGameOver) {
       // Small delay so the final state update renders first
       const t = setTimeout(() => setShowGameOver(true), 500);
       return () => clearTimeout(t);
     }
-  }, [gameState.winner, showGameOver]);
+  }, [gameState.winner, soloResult, showGameOver]);
 
   // Replay restart: when game ID changes (new game), reset overlays and show intro
   const prevGameIdRef = useRef(gameState.id);
@@ -1724,9 +1743,13 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
     if (bannerPhases.includes(phase)) {
       // Set subtitle per phase
       if (phase === 'upkeep') {
-        const maxRounds = gameState.max_rounds ?? 20;
-        setBannerLabelOverride(`Round ${gameState.current_round} of ${maxRounds}`);
-        if (gameState.current_round < DEBT_START_ROUND) {
+        const limit = roundLimit(gameState);
+        setBannerLabelOverride(limit ? `Round ${gameState.current_round} of ${limit}` : `Round ${gameState.current_round}`);
+        if (!debtApplies(gameState)) {
+          // No Debt (a solo level): the banner restates the level's goal.
+          setBannerSubtitle(gameState.solo ? gameState.solo.objective.goal : null);
+          setBannerHoldUntilRelease(false);
+        } else if (gameState.current_round < DEBT_START_ROUND) {
           const roundsUntil = DEBT_START_ROUND - gameState.current_round;
           setBannerSubtitle(`${roundsUntil} round${roundsUntil > 1 ? 's' : ''} until Debt is given to leader`);
           setBannerHoldUntilRelease(false);
@@ -2368,6 +2391,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         setError(`${plainCardName(card.name)} can only target unoccupied tiles`);
         return;
       }
+      if (card.defenseless_only && tile.defense_power > 0) {
+        setError(`${plainCardName(card.name)} can only claim a tile with no defense`);
+        return;
+      }
       // Stacking: a stackable new card may always land on a tile with
       // prior claims. A non-stackable new card is blocked only if some
       // prior planned claim on the tile (primary or extra) is also
@@ -2531,6 +2558,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       const tile = gameState.grid?.tiles[tileKey];
       if (tile && tile.owner && card.unoccupied_only) {
         setError(`${plainCardName(card.name)} can only target unoccupied tiles`);
+        return;
+      }
+      if (tile && card.defenseless_only && tile.defense_power > 0) {
+        setError(`${plainCardName(card.name)} can only claim a tile with no defense`);
         return;
       }
     }
@@ -2756,6 +2787,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         if (!card.target_own_tile) {
           if (tile && tile.owner && card.unoccupied_only) {
             setError(`${plainCardName(card.name)} can only target unoccupied tiles`);
+            return;
+          }
+          if (tile && card.defenseless_only && tile.defense_power > 0) {
+            setError(`${plainCardName(card.name)} can only claim a tile with no defense`);
             return;
           }
         }
@@ -4331,6 +4366,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
       if (tile.immune) continue;
       // Exclude occupied tiles for unoccupied_only cards
       if (tile.owner && card.unoccupied_only) continue;
+      // Explore: no defense at all
+      if (card.defenseless_only && tile.defense_power > 0) continue;
       // Exclude tiles already claimed this turn (no stacking)
       if (alreadyClaimed.has(key)) continue;
       // Adjacency bridge: tile must connect 2+ disconnected territory groups
@@ -5735,6 +5772,14 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                 ...(multiTilePrimaryTarget ? [multiTilePrimaryTarget] : []),
                 ...multiTileTargets,
               ] : undefined}
+              multiTileMax={(() => {
+                if (multiTileCardIndex === null) return undefined;
+                const c = activePlayer?.hand[multiTileCardIndex];
+                if (!c) return undefined;
+                return c.card_type === 'defense' && (c.defense_target_count ?? 1) > 1
+                  ? (c.defense_target_count ?? 1)
+                  : 1 + (c.multi_target_count ?? 0);
+              })()}
               borderTiles={phase === 'play' ? adjacentTiles : undefined}
               playerInfo={playerInfo}
               transformRef={gridTransformRef}
@@ -5822,16 +5867,17 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2, whiteSpace: 'nowrap' }}>
                 <span style={{
                   fontSize: 16, fontWeight: 900, fontFamily: 'var(--cc-font-display)', letterSpacing: 0.8,
-                  ...(gameState.max_rounds && gameState.current_round >= gameState.max_rounds
+                  ...((roundLimit(gameState) ?? Infinity) <= gameState.current_round
                     ? { color: '#ffe14d', animation: 'finalRoundGlow 2s ease-in-out infinite' }
                     : { color: '#fff' }),
                 }}>
-                  {gameState.max_rounds && gameState.current_round >= gameState.max_rounds
+                  {(roundLimit(gameState) ?? Infinity) <= gameState.current_round
                     ? 'Final Round'
                     : `Round ${gameState.current_round}`}
                 </span>
                 <PhaseIndicatorPill phase={phase} />
               </div>
+              {gameState.solo ? <SoloObjectiveHud gameState={gameState} /> : (
               <div style={{ fontSize: 12, color: 'var(--cc-text-dim)', display: 'flex', alignItems: 'center', gap: 4 }}>
                 <IconValue icon="vp" value={gameState.vp_target} size={12} color="var(--cc-gold)" title="Victory points" />
                 <span>VP to win</span>
@@ -5843,7 +5889,8 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
                   </Tooltip>
                 )}
               </div>
-              {gameState.winner && (
+              )}
+              {gameState.winner && !gameState.solo && (
                 <div style={{
                   marginTop: 4, padding: '4px 8px', background: '#4a9eff33', borderRadius: 6, fontWeight: 'bold',
                   fontSize: 13,
@@ -6235,6 +6282,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           {showShopOverlay && activePlayer && (
             <ShopOverlay
               archetypeMarket={activePlayer.archetype_market}
+              archetypeSupply={activePlayer.archetype_market_fixed ? activePlayer.archetype_supply : undefined}
               sharedMarket={gameState.shared_market}
               playerResources={activePlayer.resources}
               playerArchetype={activePlayer.archetype}
@@ -6837,7 +6885,10 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
         />
       )}
       {showCardBrowser && (() => {
-        const pack = cardPackDefs.find(p => p.id === (gameState.card_pack || 'everything'));
+        // A solo level brings its own cards.
+        const pack = gameState.solo
+          ? { name: gameState.solo.level_title, shared_card_ids: gameState.solo.pack.shared_card_ids, archetype_card_ids: gameState.solo.pack.archetype_card_ids }
+          : cardPackDefs.find(p => p.id === (gameState.card_pack || 'everything'));
         return (
           <CardBrowser
             onClose={() => setShowCardBrowser(false)}
@@ -7053,6 +7104,7 @@ export default function GameScreen({ gameState: latestState, onStateUpdate, play
           onExitGame={handleExitGame}
           isMultiplayer={isMultiplayer}
           removedFromLobby={removedFromLobby}
+          solo={solo}
         />
       )}
 

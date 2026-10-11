@@ -187,6 +187,9 @@ export function buildCardSubtitle(card: Card, ctx?: CardSubtitleContext): Subtit
       // + marker signals "this round only".
       parts.push(p(`{defense}+${defBase}${tileSuffix}`));
     }
+  } else if (card.defenseless_only) {
+    // Explore has no power: it takes N open, undefended tiles.
+    parts.push(p(`${1 + (card.multi_target_count || 0)}{tile}`));
   } else if (card.power > 0 || card.card_type === 'claim') {
     // Claim / power cards
     const powerMods = card.effects?.filter(e => e.type === 'power_modifier') ?? [];

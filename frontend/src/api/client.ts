@@ -1,4 +1,4 @@
-import type { BrowseGame, BrowseLobby, GameState, HexTile, LobbyState, SearchSelection } from '../types/game';
+import type { BrowseGame, BrowseLobby, GameState, HexTile, LobbyState, SearchSelection, SoloCampaigns } from '../types/game';
 
 const BACKEND_HOST = import.meta.env.VITE_BACKEND_HOST;
 export const BASE = BACKEND_HOST ? `${window.location.protocol}//${BACKEND_HOST}/api` : '/api';
@@ -252,7 +252,7 @@ export async function getMapPreview(code: string, playerId: string, token: strin
 export async function updateLobbyConfig(
   code: string,
   token: string,
-  config: { grid_size?: string; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null; granted_actions?: number | null; card_pack?: string; map_seed?: string; open_to_public?: boolean },
+  config: { grid_size?: string; grid_size_auto?: boolean; speed?: string; max_players?: number; test_mode?: boolean; vp_target?: number | null; granted_actions?: number | null; card_pack?: string; map_seed?: string; open_to_public?: boolean },
 ): Promise<{ lobby: LobbyState }> {
   return request(`/lobby/${code}/config`, {
     method: 'PATCH',
@@ -345,6 +345,43 @@ export async function endGame(
   return request(`/games/${gameId}/end`, {
     method: 'POST',
     body: JSON.stringify({ player_id: playerId, token }),
+  });
+}
+
+// ── Solo campaign ────────────────────────────────────────
+
+export async function getSoloCampaigns(): Promise<SoloCampaigns> {
+  return request('/solo/levels');
+}
+
+export interface SoloLevelMap {
+  map_name: string;
+  /** Player ids in seat order: you, then the bots. */
+  seats: string[];
+  players: { id: string; name: string; archetype: string; color: string }[];
+  tiles: Record<string, HexTile>;
+}
+
+/** The level's board as `archetype`'s campaign starts it (shared levels seat
+ *  each side differently). */
+export async function getSoloLevelMap(levelId: string, archetype: string): Promise<SoloLevelMap> {
+  return request(`/solo/levels/${encodeURIComponent(levelId)}/map?archetype=${encodeURIComponent(archetype)}`);
+}
+
+export interface SoloStart {
+  game_id: string;
+  player_id: string;
+  token: string;
+  lobby_code: string;
+  level_id: string;
+  state: GameState;
+}
+
+/** Start a level of `archetype`'s campaign (you play it as that archetype). */
+export async function startSoloLevel(levelId: string, archetype: string, name?: string): Promise<SoloStart> {
+  return request(`/solo/levels/${encodeURIComponent(levelId)}/start`, {
+    method: 'POST',
+    body: JSON.stringify({ archetype, name }),
   });
 }
 

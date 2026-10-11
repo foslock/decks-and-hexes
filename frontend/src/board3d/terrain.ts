@@ -134,7 +134,9 @@ export function buildSlabGeometry(layout: BoardLayout, gameTiles: Record<string,
     const build = tile.ring / maxRing;
     for (let k = 0; k < 6; k++) {
       const [dq, dr] = HEX_DIRS[k];
-      if (gameTiles[`${tile.q + dq},${tile.r + dr}`]) continue;
+      const key = `${tile.q + dq},${tile.r + dr}`;
+      // No cliff where the land runs down a beach into a water tile.
+      if (gameTiles[key] || layout.isWater(key)) continue;
       const a = hexCorner(tile.x, tile.z, k);
       const b = hexCorner(tile.x, tile.z, k + 1);
       const na = (Math.PI / 3) * k + Math.PI / 6;

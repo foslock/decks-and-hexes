@@ -47,13 +47,15 @@ Each archetype is defined by two of three traits: **Fast**, **Cheap**, **Strong*
 
 ## Grid Sizes
 
-| Size | Hex Count | Map | VP Hexes | Recommended Players | Target Length |
+| Size | Hex Count | Map | VP Hexes | Suggested For | Target Length |
 |---|---|---|---|---|---|
-| Small | 61 | Crown | 7 | 2–3 | 20–30 min |
-| Medium | 91 | Frontiers | 7 | 3–4 | 30–45 min |
-| Large | 127 | Rings | 13 | 4–6 | 45–60 min |
-| Mega | 169 | Six Crowns | 13 | 5–6 | 60–90 min |
-| Ultra | 217 | Twin Rings | 13 | 6 | 90–120 min |
+| Small | 61 | Crown | 7 | quick games (2–3 players finish in ~7 rounds) | 20–30 min |
+| Medium | 91 | Frontiers | 7 | 4 players | 30–45 min |
+| Large | 127 | Rings | 13 | 2, 3, 5 or 6 players | 45–60 min |
+| Mega | 169 | Six Crowns | 13 | larger 5–6 player games | 60–90 min |
+| Ultra | 217 | Twin Rings | 13 | the longest 6 player games | 90–120 min |
+
+A game defaults to the size suggested for its player count: the smallest map where games last 11 or more rounds, so an early investment in economy has time to pay off. Players can pick any size.
 
 Each size has one fixed map, built so every seat sees the same board: a premium (2-star) VP hex in the center — on Mega, several spread evenly between the bases instead — and standard VP hexes at the same distance from every base. Every tile next to a base is open (no mountain, VP hex or defense), so nobody starts slow. With five players the bases spread evenly round the coast instead of sitting on five of the six corners, and the map is laid out around them.
 
