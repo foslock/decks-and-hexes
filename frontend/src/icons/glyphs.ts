@@ -39,8 +39,10 @@ export interface GlyphDef {
 
 /** Heater shield silhouette (flat top). */
 const SHIELD = 'M2.2 1.6 H13.8 V7.2 C13.8 10.7 11.4 13.5 8 15.2 C4.6 13.5 2.2 10.7 2.2 7.2 Z';
-/** Inner right half of the shield (heraldic "per pale" split). */
-const SHIELD_PALE = 'M8 3.3 H12.1 V7.2 C12.1 9.8 10.4 12 8 13.3 Z';
+/** Shield knockouts (≈1.9 units thick, centred on the shield's body). */
+const SHIELD_PLUS = 'M7.05 4.4 H8.95 V6.85 H11.4 V8.75 H8.95 V11.2 H7.05 V8.75 H4.6 V6.85 H7.05 Z';
+const SHIELD_CHEVRON = 'M8 4.9 L11.9 8.8 L10.55 10.15 L8 7.6 L5.45 10.15 L4.1 8.8 Z';
+const SHIELD_DIAMOND = 'M8 4.1 L11.2 7.8 L8 11.5 L4.8 7.8 Z';
 /** Flat-top hexagon — same orientation as the board. */
 const HEX = 'M15.4 8 L11.7 14.41 L4.3 14.41 L0.6 8 L4.3 1.59 L11.7 1.59 Z';
 const HEX_INNER = 'M12.7 8 L10.35 12.07 L5.65 12.07 L3.3 8 L5.65 3.93 L10.35 3.93 Z';
@@ -79,26 +81,20 @@ export const GLYPHS = {
     label: 'Power', group: 'stat',
     layers: [{ d: SWORD }, { d: SWORD_POMMEL }],
   },
+  // The three defense shields share one silhouette; a bold knockout says
+  // which kind: a plus for this round only, an up-chevron for a permanent
+  // increase, a diamond for immunity (always this round only).
   defense: {
     label: 'Defense (this round)', group: 'stat',
-    layers: [
-      { d: SHIELD_PALE, accent: true },
-      { d: `${SHIELD} ${SHIELD_PALE}`, evenOdd: true },
-    ],
+    layers: [{ d: `${SHIELD} ${SHIELD_PLUS}`, evenOdd: true }],
   },
   fortify: {
     label: 'Permanent defense', group: 'stat',
-    layers: [
-      { d: 'M8 4.7 H12.1 V7.2 C12.1 9.8 10.4 12 8 13.3 Z', accent: true },
-      {
-        d: 'M2.2 7.2 V1.2 H4.9 V3.1 H6.8 V1.2 H9.2 V3.1 H11.1 V1.2 H13.8 V7.2 C13.8 10.7 11.4 13.5 8 15.2 C4.6 13.5 2.2 10.7 2.2 7.2 Z M8 4.7 H12.1 V7.2 C12.1 9.8 10.4 12 8 13.3 Z',
-        evenOdd: true,
-      },
-    ],
+    layers: [{ d: `${SHIELD} ${SHIELD_CHEVRON}`, evenOdd: true }],
   },
   immune: {
     label: 'Immune', group: 'stat',
-    layers: [{ d: `${SHIELD} M8 3.9 L8.95 6.75 L11.8 7.7 L8.95 8.65 L8 11.5 L7.05 8.65 L4.2 7.7 L7.05 6.75 Z`, evenOdd: true }],
+    layers: [{ d: `${SHIELD} ${SHIELD_DIAMOND}`, evenOdd: true }],
   },
   resource: {
     label: 'Resources', group: 'stat',
